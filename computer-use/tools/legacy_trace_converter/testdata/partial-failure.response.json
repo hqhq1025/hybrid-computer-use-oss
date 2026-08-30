@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "error": "fixture input emission failed",
+  "failureCode": "input_emission_failed",
+  "failurePhase": "emission",
+  "input_events_emitted": true,
+  "partial_input_possible": true,
+  "failureFactsComplete": true,
+  "actionEvidence": {
+    "route": "coordinate_synthesis",
+    "geometry_sampled": true,
+    "focus_verified": true,
+    "readback_sampled": false,
+    "input_emitted": true
+  }
+}

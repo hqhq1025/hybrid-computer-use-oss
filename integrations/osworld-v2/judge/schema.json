@@ -1,0 +1,227 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "judge_type",
+    "instruction_verdict",
+    "answer_mode",
+    "infeasibility_assessment",
+    "summary",
+    "user_goal",
+    "requirements",
+    "persistence_check",
+    "failure_reasons",
+    "inspection_actions",
+    "artifacts_inspected",
+    "final_state_evidence"
+  ],
+  "properties": {
+    "judge_type": {
+      "type": "string",
+      "enum": ["interactive_outcome"]
+    },
+    "instruction_verdict": {
+      "type": "string",
+      "enum": ["PASS", "FAIL"]
+    },
+    "answer_mode": {
+      "type": "string",
+      "enum": ["OUTCOME", "INFEASIBLE"]
+    },
+    "infeasibility_assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claimed_by_agent",
+        "genuinely_infeasible",
+        "evidence",
+        "rationale"
+      ],
+      "properties": {
+        "claimed_by_agent": {
+          "type": "boolean"
+        },
+        "genuinely_infeasible": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "summary": {
+      "type": "string"
+    },
+    "user_goal": {
+      "type": "string"
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "requirement",
+          "status",
+          "coverage_mode",
+          "expected_count",
+          "inspected_count",
+          "expected",
+          "observed",
+          "evidence",
+          "rationale"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["MET", "NOT_MET"]
+          },
+          "coverage_mode": {
+            "type": "string",
+            "enum": [
+              "exact_single",
+              "exhaustive_set",
+              "representative_sample",
+              "not_applicable"
+            ]
+          },
+          "expected_count": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "inspected_count": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "expected": {
+            "type": "string"
+          },
+          "observed": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "rationale": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "persistence_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["performed", "result", "evidence"],
+      "properties": {
+        "performed": {
+          "type": "boolean"
+        },
+        "result": {
+          "type": "string",
+          "enum": ["PASSED", "FAILED", "NOT_APPLICABLE"]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "failure_reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "severity",
+          "requirement_id",
+          "expected",
+          "observed",
+          "evidence",
+          "explanation"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "RESULT_MISSING",
+              "WRONG_OBJECT",
+              "WRONG_CONTENT",
+              "WRONG_VALUE",
+              "INCOMPLETE",
+              "NOT_PERSISTED",
+              "NOT_VISIBLE",
+              "UNUSABLE",
+              "EXTERNAL_FACT_WRONG",
+              "INSPECTION_BLOCKED",
+              "SETUP_BLOCKED",
+              "INCORRECT_INFEASIBILITY"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["CRITICAL", "MAJOR", "MINOR"]
+          },
+          "requirement_id": {
+            "type": "string"
+          },
+          "expected": {
+            "type": "string"
+          },
+          "observed": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "explanation": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "inspection_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifacts_inspected": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "final_state_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

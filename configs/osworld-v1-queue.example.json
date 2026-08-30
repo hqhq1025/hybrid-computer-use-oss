@@ -1,0 +1,38 @@
+{
+  "run_id": "v014-osworld-v1-example",
+  "benchmark_version": "v1",
+  "tasks": [
+    {
+      "id": "01b269ae-2111-4a07-81fd-3fcd711993b0",
+      "task_domain": "libreoffice_calc",
+      "volume_size": 64,
+      "ram_size": "4G"
+    }
+  ],
+  "sides": ["hybrid"],
+  "agent": "codex",
+  "model": "gpt-5.5",
+  "effort": "xhigh",
+  "tool_version": "v0.14",
+  "guest_image": "${OSWORLD_V1_GUEST_IMAGE}",
+  "expected_guest_image_sha256": "${OSWORLD_V1_GUEST_IMAGE_SHA256}",
+  "artifact_dir": "${HCU_ARTIFACT_DIR}",
+  "skill_file": "${HYBRID_COMPUTER_USE_ROOT}/skills/hybrid/SKILL.md",
+  "expected_skill_sha256": "61777e8101103cba07be3eacf26fc745a6c5bc94cbd1707ca194050f1f993d16",
+  "base_instructions_file": "${HYBRID_COMPUTER_USE_ROOT}/skills/base/CODEX_BASE_INSTRUCTIONS.md",
+  "expected_base_instructions_sha256": "2db42251f92d78881226342d36eb7a269f58cc63442915e2fa224dcbe14346af",
+  "release_manifest": "${HCU_ARTIFACT_DIR}/releases/v0.14/release.json",
+  "expected_release_manifest_sha256": "bb83e49ca8c23047e8fc5458d8afb5f2859c9f52f3a6d0988facaf07fdf2e4c0",
+  "gateway_base": "${HCU_OPENAI_GATEWAY}",
+  "client_password": "password",
+  "judge_model": "gpt-5.4",
+  "judge_effort": "xhigh",
+  "judge_timeout": 600,
+  "judge_tool_limit": 30,
+  "judge_retry_tool_limit": 15,
+  "token_log": "${HCU_RESULTS_DIR}/osworld-v1/v014-osworld-v1-example.tokens.jsonl",
+  "max_model_calls": 200,
+  "timeout_seconds": 0,
+  "max_active_sides": 1,
+  "retain_containers": false
+}

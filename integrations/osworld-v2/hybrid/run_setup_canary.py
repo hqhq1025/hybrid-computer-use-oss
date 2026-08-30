@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+import time
+
+
+INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(
+    os.environ.get(
+        "HYBRID_COMPUTER_USE_ROOT",
+        Path(__file__).resolve().parents[3],
+    )
+).expanduser().resolve()
+ROOT = Path(
+    os.environ.get("OSWORLD_V2_ROOT", REPO_ROOT / "external" / "OSWorld-V2")
+).expanduser().resolve()
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(INTEGRATION_ROOT))
+os.chdir(ROOT)
+
+from desktop_env.cache import run_scoped_cache_dir  # noqa: E402
+from desktop_env.desktop_env import DesktopEnv  # noqa: E402
+from desktop_env.providers.volume import (  # noqa: E402
+    validate_guest_image_capacity,
+)
+from hybrid.runtime_preflight import (  # noqa: E402
+    validate_dedicated_docker_runtime,
+    validate_official_asset_runtime,
+)
+from task_loader import load_task_config  # noqa: E402
+
+
+def evaluate_channels(*, task_id, evaluate):
+    result = evaluate()
+    payload = dict(result) if isinstance(result, dict) else {"score": float(result)}
+    return {
+        "official": {
+            "status": "completed",
+            "result": payload,
+            "error": None,
+            "traceback": None,
+        },
+        "audited": None,
+        "override_installation": {
+            "installed": False,
+            "task_id": task_id,
+            "reason": "not_packaged_in_oss",
+            "modules": [],
+        },
+        "official_score": float(payload.get("score", 0.0)),
+        "audited_score": None,
+        "official_score_replaced": False,
+    }
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def task_value(task, key: str, default=None):
+    if hasattr(task, "get"):
+        return task.get(key, default)
+    return getattr(task, key, default)
+
+
+def parse_evaluator_fixture(value: str) -> tuple[Path, str]:
+    local_value, separator, guest_path = value.partition("=")
+    if not separator:
+        raise argparse.ArgumentTypeError(
+            "Evaluator fixture must use LOCAL_PATH=GUEST_PATH."
+        )
+    local_path = Path(local_value).expanduser().resolve()
+    if not local_path.is_file():
+        raise argparse.ArgumentTypeError(
+            f"Evaluator fixture file does not exist: {local_path}"
+        )
+    if not guest_path.startswith("/"):
+        raise argparse.ArgumentTypeError(
+            f"Evaluator fixture guest path must be absolute: {guest_path}"
+        )
+    return local_path, guest_path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task-id", required=True)
+    parser.add_argument(
+        "--benchmark-version",
+        choices=("v1", "v2"),
+        default="v2",
+        help="Task/evaluator generation used to resolve the task definition.",
+    )
+    parser.add_argument(
+        "--task-domain",
+        help="Optional V1 task domain; UUID lookup is automatic when unique.",
+    )
+    parser.add_argument("--guest-image", type=Path, required=True)
+    parser.add_argument("--expected-guest-image-sha256", required=True)
+    parser.add_argument(
+        "--precomputed-guest-image-sha256",
+        help=(
+            "Trusted digest computed by a parent queue for the same image. "
+            "When set, the child avoids hashing the multi-gigabyte image again."
+        ),
+    )
+    parser.add_argument("--result-dir", type=Path, required=True)
+    parser.add_argument("--health-url", action="append", default=[])
+    parser.add_argument(
+        "--run-evaluator",
+        action="store_true",
+        help="Run the task evaluator after setup without starting an agent.",
+    )
+    parser.add_argument(
+        "--evaluator-fixture",
+        action="append",
+        default=[],
+        type=parse_evaluator_fixture,
+        metavar="LOCAL_PATH=GUEST_PATH",
+        help=(
+            "Verifier-only file upload performed after setup and before the "
+            "evaluator. Requires --run-evaluator."
+        ),
+    )
+    parser.add_argument(
+        "--audited-evaluator-overrides",
+        action="store_true",
+        help=(
+            "Seal the official evaluator result or exception, then run a "
+            "registered verifier-only copied evaluator in a separate channel."
+        ),
+    )
+    parser.add_argument("--volume-size", type=int, default=40)
+    parser.add_argument("--ram-size", default="4G")
+    parser.add_argument(
+        "--retain-container",
+        action="store_true",
+        help=(
+            "Stop but do not remove the task container after setup, preserving "
+            "its filesystem for later inspection."
+        ),
+    )
+    parser.add_argument(
+        "--client-password",
+        default="osworld-public-evaluation",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    if args.evaluator_fixture and not args.run_evaluator:
+        raise ValueError("--evaluator-fixture requires --run-evaluator")
+    docker_runtime = validate_dedicated_docker_runtime()
+    asset_runtime = validate_official_asset_runtime()
+    image = args.guest_image.resolve()
+    result_dir = args.result_dir.resolve()
+    actual_image_sha256 = (
+        args.precomputed_guest_image_sha256.lower()
+        if args.precomputed_guest_image_sha256
+        else sha256_file(image)
+    )
+    if actual_image_sha256 != args.expected_guest_image_sha256.lower():
+        raise ValueError(
+            "Guest image SHA-256 mismatch: "
+            f"expected {args.expected_guest_image_sha256}, "
+            f"got {actual_image_sha256}"
+        )
+
+    task = load_task_config(
+        None,
+        task_id=args.task_id,
+        base_dir=str(ROOT / "evaluation_examples"),
+        domain=args.task_domain,
+        eval_version=args.benchmark_version,
+    )
+    task_volume_size = task_value(task, "volume_size")
+    volume_size = args.volume_size
+    if task_volume_size is not None:
+        volume_size = max(volume_size, int(task_volume_size))
+    image_virtual_size_gib = validate_guest_image_capacity(
+        image,
+        volume_size,
+    )
+    result_dir.mkdir(parents=True, exist_ok=False)
+
+    started = time.monotonic()
+    env = None
+    os.environ["OSWORLD_DOCKER_RAM_SIZE"] = args.ram_size
+    report = {
+        "task_id": args.task_id,
+        "benchmark_version": args.benchmark_version,
+        "task_domain": args.task_domain,
+        "guest_image": str(image),
+        "guest_image_sha256": actual_image_sha256,
+        "guest_image_virtual_size_gib": image_virtual_size_gib,
+        "volume_size_gb": volume_size,
+        "ram_size": args.ram_size,
+        "health_urls": args.health_url,
+        "run_evaluator": args.run_evaluator,
+        "audited_evaluator_overrides": bool(
+            args.audited_evaluator_overrides
+        ),
+        "evaluator_fixtures": [
+            {
+                "local_path": str(local_path),
+                "guest_path": guest_path,
+                "sha256": sha256_file(local_path),
+            }
+            for local_path, guest_path in args.evaluator_fixture
+        ],
+        "docker_runtime": docker_runtime,
+        "asset_runtime": asset_runtime,
+        "status": "initializing",
+    }
+    try:
+        env = DesktopEnv(
+            provider_name="docker",
+            path_to_vm=str(image),
+            action_space="pyautogui",
+            cache_dir=run_scoped_cache_dir(
+                result_dir,
+                "desktop-env",
+            ),
+            headless=True,
+            require_a11y_tree=False,
+            os_type="Ubuntu",
+            client_password=args.client_password,
+            volume_size=volume_size,
+            force_disable_vnc=True,
+            force_disable_recording=True,
+        )
+        report["container_name"] = env.provider.container.name
+        report["vm_startup_attempts"] = getattr(
+            env.provider,
+            "startup_attempts",
+            [],
+        )
+        report["vm_runtime_environment"] = dict(
+            getattr(env.provider, "environment", {})
+        )
+        report["status"] = "setup"
+        (result_dir / "report.json").write_text(
+            json.dumps(report, indent=2),
+            encoding="utf-8",
+        )
+
+        env.reset(task_config=task)
+        report["setup_attempts"] = list(
+            getattr(env, "setup_attempts", [])
+        )
+        report["container_name"] = env.provider.container.name
+        report["vm_startup_attempts"] = getattr(
+            env.provider,
+            "startup_attempts",
+            [],
+        )
+        env.setup_controller.assert_root_writable()
+        report["guest_root_health_after_setup"] = "writable"
+        for url in args.health_url:
+            env.setup_controller.wait_for_http(url, timeout=60)
+
+        if args.run_evaluator:
+            if args.evaluator_fixture:
+                env.setup_controller._upload_file_setup([
+                    {
+                        "local_path": str(local_path),
+                        "path": guest_path,
+                    }
+                    for local_path, guest_path in args.evaluator_fixture
+                ])
+            evaluator_started = time.monotonic()
+            if args.audited_evaluator_overrides:
+                channels = evaluate_channels(
+                    task_id=args.task_id,
+                    evaluate=lambda: task.evaluate(env),
+                )
+                report["evaluator_channels"] = json.loads(
+                    json.dumps(channels, default=str)
+                )
+                official_ok = channels["official"]["status"] == "completed"
+                audited_ok = (
+                    channels["audited"] is not None
+                    and channels["audited"]["status"] == "completed"
+                )
+                if not official_ok and not audited_ok:
+                    raise RuntimeError(
+                        "Both official and audited evaluator channels failed"
+                    )
+            else:
+                evaluator_result = task.evaluate(env)
+                report["evaluator_result"] = json.loads(
+                    json.dumps(evaluator_result, default=str)
+                )
+            report["evaluator_duration_sec"] = round(
+                time.monotonic() - evaluator_started,
+                1,
+            )
+
+        screenshot = env.controller.get_screenshot()
+        if screenshot:
+            (result_dir / "final.png").write_bytes(screenshot)
+        report["status"] = "passed"
+        report["duration_sec"] = round(time.monotonic() - started, 1)
+        (result_dir / "report.json").write_text(
+            json.dumps(report, indent=2),
+            encoding="utf-8",
+        )
+        print(json.dumps(report))
+        return 0
+    except Exception as exc:
+        report["status"] = "failed"
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        report["duration_sec"] = round(time.monotonic() - started, 1)
+        (result_dir / "report.json").write_text(
+            json.dumps(report, indent=2),
+            encoding="utf-8",
+        )
+        raise
+    finally:
+        if env is not None:
+            if args.retain_container:
+                container = env.provider.container
+                try:
+                    container.stop(timeout=30)
+                    retained_status = "stopped"
+                    retained_error = None
+                except Exception as exc:
+                    retained_status = "stop_failed"
+                    retained_error = f"{type(exc).__name__}: {exc}"
+                report["container_retained"] = True
+                report["container_name"] = container.name
+                report["retained_container_status"] = retained_status
+                report["retained_container_stop_error"] = retained_error
+                (result_dir / "report.json").write_text(
+                    json.dumps(report, indent=2),
+                    encoding="utf-8",
+                )
+            else:
+                env.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,9 @@
+.git
+.venv
+external
+runs
+**/__pycache__
+**/*.pyc
+artifacts/*
+!artifacts/codex
+!artifacts/claude-code

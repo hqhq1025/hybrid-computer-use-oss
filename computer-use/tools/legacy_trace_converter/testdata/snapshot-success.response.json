@@ -1,0 +1,73 @@
+{
+  "ok": true,
+  "notes": [
+    "fixture note"
+  ],
+  "snapshot": {
+    "app": {
+      "name": "Editor",
+      "bundleIdentifier": "editor",
+      "pid": 42,
+      "inputCapable": false
+    },
+    "windowTitle": "Document",
+    "windowHandle": "w2:fixture",
+    "snapshotId": "snapshot-fixture",
+    "sampledAt": "2026-08-20T00:00:00Z",
+    "windowBounds": {
+      "x": 10,
+      "y": 20,
+      "width": 800,
+      "height": 600
+    },
+    "treeLines": [
+      "0 frame \"Document\"",
+      "\t7 button \"Save\" [enabled] [click]"
+    ],
+    "elements": [
+      {
+        "index": 0,
+        "runtimeId": [
+          0
+        ],
+        "name": "Document",
+        "controlType": "frame",
+        "states": " [enabled showing visible]"
+      },
+      {
+        "index": 7,
+        "runtimeId": [
+          0,
+          1
+        ],
+        "providerBusName": ":1.42",
+        "providerObjectPath": "/org/a11y/atspi/accessible/42",
+        "processGeneration": "99123",
+        "name": "Save",
+        "controlType": "button",
+        "frame": {
+          "x": 20,
+          "y": 30,
+          "width": 80,
+          "height": 24
+        },
+        "actions": [
+          "click"
+        ],
+        "states": " [enabled showing visible]"
+      }
+    ],
+    "refs": {
+      "0": {
+        "index": 0,
+        "role": "frame",
+        "name": "Document"
+      },
+      "0.1": {
+        "index": 7,
+        "role": "button",
+        "name": "Save"
+      }
+    }
+  }
+}

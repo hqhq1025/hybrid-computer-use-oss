@@ -1,0 +1,40 @@
+{
+  "ok": false,
+  "error": "STALE GUI FRAME: the desktop layout changed since the most recent GUI screenshot; no input was emitted.",
+  "failureCode": "stale_gui_frame",
+  "failurePhase": "precondition",
+  "failureFactsComplete": true,
+  "snapshot": {
+    "app": {
+      "name": "",
+      "pid": 0,
+      "inputCapable": false
+    },
+    "sampledAt": "2026-08-20T00:00:01Z",
+    "screenshotPngBase64": "aW1hZ2U=",
+    "screenshotMimeType": "image/png",
+    "screenshotEncoding": "png",
+    "coordinateSpace": "screen_image_px",
+    "frameId": "layout-v1-fresh",
+    "desktopLayout": {
+      "desktop": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "activeWindow": "0x43",
+      "windows": [
+        {
+          "id": "0x43",
+          "x": 20,
+          "y": 20,
+          "width": 900,
+          "height": 700
+        }
+      ]
+    },
+    "width": 1920,
+    "height": 1080
+  }
+}

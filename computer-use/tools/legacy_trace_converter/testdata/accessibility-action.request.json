@@ -1,0 +1,31 @@
+{
+  "tool": "click",
+  "app": "Editor",
+  "settle_ms": 0,
+  "semanticTarget": {
+    "selector": "button \"Save\"",
+    "windowHandle": "w2:fixture",
+    "providerBusName": ":1.42",
+    "providerObjectPath": "/org/a11y/atspi/accessible/42",
+    "processGeneration": "99123",
+    "providerWindowBusName": ":1.42",
+    "providerWindowObjectPath": "/org/a11y/atspi/accessible/window/1",
+    "providerWindowProcessGeneration": "99123",
+    "providerWindowRole": "frame",
+    "providerWindowName": "Document",
+    "role": "button",
+    "name": "Save",
+    "hasName": true,
+    "predicates": [
+      {
+        "kind": "state",
+        "value": "enabled"
+      }
+    ]
+  },
+  "click_count": 1,
+  "mouse_button": "left",
+  "click_method": "auto",
+  "includeScreenshot": false,
+  "observe": "diff"
+}

@@ -1,0 +1,13 @@
+/artifacts/*
+!/artifacts/.gitkeep
+/runs/
+/external/
+/.venv/
+/.pytest_cache/
+**/__pycache__/
+*.pyc
+*.log
+*.qcow2
+*.qcow2.sha256
+/guest-images/**/cache/
+.env

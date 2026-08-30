@@ -1,0 +1,1224 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+func sameCanonicalAddress(first, second elementRecord) bool {
+	if first.ControlType != second.ControlType ||
+		first.LocalizedControlType != second.LocalizedControlType ||
+		first.Name != second.Name ||
+		first.NameHash != second.NameHash ||
+		first.AutomationID != second.AutomationID ||
+		len(first.RuntimeID) != len(second.RuntimeID) {
+		return false
+	}
+	for index := range first.RuntimeID {
+		if first.RuntimeID[index] != second.RuntimeID[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *service) hiddenCanonicalAddressChangeNote(
+	before,
+	after *appSnapshot,
+) string {
+	if before == nil || after == nil {
+		return ""
+	}
+	key := deliveredSnapshotKey(before)
+	exposed := s.exposedHiddenRefs[key]
+	if len(exposed) == 0 {
+		return ""
+	}
+	afterRecords := map[int]elementRecord{}
+	for _, record := range after.Elements {
+		afterRecords[record.Index] = record
+	}
+	changed := []int{}
+	rootChanged := before.WindowHandle != "" &&
+		after.WindowHandle != "" &&
+		before.WindowHandle != after.WindowHandle
+	for index, first := range exposed {
+		second, hadSecond := afterRecords[index]
+		if !rootChanged && hadSecond && sameCanonicalAddress(first, second) {
+			continue
+		}
+		changed = append(changed, index)
+		delete(exposed, index)
+	}
+	if len(changed) == 0 {
+		return ""
+	}
+	if len(exposed) == 0 {
+		delete(s.exposedHiddenRefs, key)
+	}
+	return fmt.Sprintf(
+		"[canonical-address] %d serializer-hidden ref(s) previously returned by find "+
+			"were removed or rebound across this action. These refs are stale; call "+
+			"find again before acting.",
+		len(changed),
+	)
+}
+
+// condenseLinePair 把"同一个节点、只有内容变了"的一对行压成一行变更摘要。
+//
+// 修的是行级差分的一个结构性缺陷：差分粒度是**行**，而一个控件完全可以把
+// 几千字符装进单个节点的 value 里（终端、日志视图、大 value 文本域都是这样）。
+// 那时任意一次内容变化都表现为"1 行消失 + 1 行新增"，于是旧版和新版被**同时**
+// 原样输出，增量的输出量反而是全量的两倍——本该省钱的机制在这里加倍收费。
+//
+// 解法是把粒度下沉到节点内容里：掐掉公共前后缀，只报真正变化的那一段，
+// 并保留足够的上下文让调用方知道它落在哪里。行首那段公共前缀天然包含
+// `<index> <role> "<name>"`，所以摘要仍然自带元素身份，下标不会因此丢失。
+//
+// 什么时候不压：短行压了没意义（元数据比内容还长），
+// 以及"整行都变了"——那时没有可复用的前后缀，原样给 -旧 +新 更诚实。
+func observablyChanged(before, after *appSnapshot) bool {
+	if before == nil || after == nil {
+		return true
+	}
+	if before.WindowTitle != after.WindowTitle ||
+		before.FocusedSummary != after.FocusedSummary ||
+		before.SelectedText != after.SelectedText {
+		return true
+	}
+	if len(before.TreeLines) != len(after.TreeLines) {
+		return true
+	}
+	for i := range before.TreeLines {
+		if before.TreeLines[i] != after.TreeLines[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// looseKey 把应用名压成"只剩字母数字"，用于缓存查找的宽松比对。
+// 与 runtime.py 里 loose() 同一套规则——两处规则不一致，
+// 就会出现"解析得到但缓存查不到"这种没人能猜到的状态。
+func looseKey(text string) string {
+	var out strings.Builder
+	for _, r := range strings.ToLower(text) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+func (s *service) currentSnapshot(app string) *appSnapshot {
+	if snapshot, ok := s.snapshots[strings.ToLower(app)]; ok {
+		return snapshot
+	}
+	// 精确键找不到时**按同样的宽松规则再找一遍**。
+	//
+	// 实测踩到过，而且是我自己引入的：get_app_state 允许不传 app 之后，
+	// 快照按解析出的真名（"Google Chrome"）缓存，而 agent 下一步动作写的是
+	// "chrome"——于是它刚刚成功取过状态，紧接着就被告知
+	// "No app state is available for chrome. Run get_app_state before action tools."
+	//
+	// 对 agent 来说这是最迷惑的一类回答：它照做了，工具却说它没做。
+	// 应用名解析已经是宽松的，缓存查找也必须一样宽松，否则两套规则之间
+	// 会漏出这种没人猜得到的缝。
+	needle := looseKey(app)
+	if needle == "" {
+		return nil
+	}
+	var matched *appSnapshot
+	for key, snapshot := range s.snapshots {
+		tight := looseKey(key)
+		if tight == "" {
+			continue
+		}
+		if tight == needle || strings.Contains(tight, needle) || strings.Contains(needle, tight) {
+			if matched == nil {
+				matched = snapshot
+				continue
+			}
+			if matched != snapshot {
+				// Go map iteration order is deliberately unstable. Returning the
+				// first of multiple snapshots would route an action nondeterministically.
+				return nil
+			}
+		}
+	}
+	return matched
+}
+
+func (s *service) currentOrFreshSnapshot(
+	app string,
+) (*appSnapshot, toolCallResult) {
+	if snapshot := s.currentSnapshot(app); snapshot != nil {
+		return snapshot, toolCallResult{}
+	}
+	noScreenshot := false
+	_, _, result := s.refreshProjectedSnapshot(app, axServiceRequest{
+		Operation:         axServiceObserve,
+		App:               app,
+		IncludeScreenshot: &noScreenshot,
+		Scope:             a11yScopeWindow,
+	})
+	if result.IsError {
+		result = result.withEvidenceScope("error_only")
+		if result.StructuredContent == nil {
+			result.StructuredContent = map[string]any{}
+		}
+		result.StructuredContent["fresh_focus_read_attempted"] = true
+		result.StructuredContent["input_events_emitted"] = false
+		return nil, result
+	}
+	snapshot := s.currentSnapshot(app)
+	if snapshot == nil {
+		return nil, textResult(
+			"AX fresh focus read completed but did not produce one current app state; no input was emitted",
+			true,
+		).withEvidenceScope("error_only")
+	}
+	return snapshot, toolCallResult{}
+}
+
+// readSnapshot 取一份快照但**不写缓存槽位**。
+//
+// 拆出来是为了让只读工具真的只读。快照槽位是 element_index 的唯一依据，
+// 写它就是副作用——见 takeSnapshot 的说明。
+func (s *service) readSnapshot(app string, request axServiceRequest) (*appSnapshot, []string, toolCallResult) {
+	if err := s.bindRuntimeAppIdentity(&request); err != nil {
+		return nil, nil, textResult(
+			"AX application target: "+err.Error(),
+			true,
+		).withEvidenceScope("error_only")
+	}
+	previous := s.currentSnapshot(app)
+	diagnosticSnapshot := previous
+	if diagnosticSnapshot == nil && strings.TrimSpace(app) == "" {
+		diagnosticSnapshot = s.latestSnapshot()
+	}
+	if previous != nil && len(previous.Refs) > 0 {
+		request.KnownRefs = previous.Refs
+	}
+	if expanded, err := s.expandObservationRootShortRef(
+		app,
+		request.ObservationRoot,
+	); err != nil {
+		return nil, nil, textResult(
+			"AX observation root: "+err.Error(),
+			true,
+		).withEvidenceScope("error_only")
+	} else {
+		request.ObservationRoot = expanded
+	}
+	response, err := s.callProviderAccessibilityOperation(request)
+	if err != nil {
+		return nil, nil, s.runtimeFailureResult(request, diagnosticSnapshot, err)
+	}
+	if response.LeaseState != "" {
+		s.guiLeaseState = response.LeaseState
+	}
+	if !response.OK {
+		return nil, nil, s.runtimeReportedFailure(app, request, *response)
+	}
+	if isShortAXRef(request.SourceRef) && response.ResolvedElement != nil {
+		allowProviderRebind := request.SemanticTarget != nil &&
+			request.SemanticTarget.AllowProviderRebind
+		s.refRegistry.RefreshProviderBinding(
+			request.SourceRef,
+			response.ResolvedElement,
+			allowProviderRebind,
+		)
+	}
+	if response.Snapshot == nil && response.ObservationSkipped &&
+		accessibilityOperationCanMutate(request) {
+		return &appSnapshot{
+			sourceApp:                 app,
+			actionExecution:           response.ActionEvidence,
+			externalDesktopTransition: response.ExternalDesktopTransition,
+			deliveryOnly:              true,
+		}, response.Notes, toolCallResult{}
+	}
+	if response.Snapshot == nil {
+		return nil, nil, s.missingRuntimeSnapshotResult(app, request, response)
+	}
+	// Tree paths are only stable inside one top-level window instance. If the
+	// selected root changed, rerun once without old refs so a structurally
+	// similar control in the new window cannot inherit an index from the old one.
+	if !accessibilityOperationCanMutate(request) &&
+		previous != nil && len(request.KnownRefs) > 0 &&
+		previous.WindowHandle != "" && response.Snapshot.WindowHandle != "" &&
+		previous.WindowHandle != response.Snapshot.WindowHandle {
+		request.KnownRefs = nil
+		response, err = s.callProviderAccessibilityOperation(request)
+		if err != nil {
+			return nil, nil, s.runtimeFailureResult(request, diagnosticSnapshot, err)
+		}
+		if response.LeaseState != "" {
+			s.guiLeaseState = response.LeaseState
+		}
+		if !response.OK {
+			return nil, nil, s.runtimeReportedFailure(app, request, *response)
+		}
+		if response.Snapshot == nil {
+			return nil, nil, s.missingRuntimeSnapshotResult(app, request, response)
+		}
+	}
+	response.Snapshot.rawTreeLines = append(
+		[]string(nil),
+		response.Snapshot.TreeLines...,
+	)
+	if err := applyA11yScope(response.Snapshot, request.Scope); err != nil {
+		return nil, nil, textResult(err.Error(), true).
+			withEvidenceScope("error_only")
+	}
+	if err := applyObservationRoot(
+		response.Snapshot,
+		request.ObservationRoot,
+	); err != nil {
+		return nil, nil, textResult(err.Error(), true).
+			withEvidenceScope("error_only")
+	}
+	baselineProjection := *response.Snapshot
+	baselineProjection.TreeLines = append(
+		[]string(nil),
+		response.Snapshot.rawTreeLines...,
+	)
+	baselineProjection.rawTreeLines = nil
+	// The baseline text projection is comparison evidence only. Apply its best-effort
+	// scope on the clone, but never let missing provider text reject a typed
+	// scope/root that resolved from canonical records.
+	baselineRoot := response.Snapshot.scopeRoot
+	if response.Snapshot.observationRoot != nil {
+		baselineRoot = response.Snapshot.observationRoot
+	}
+	if baselineRoot != nil {
+		if lines, _, baselineErr := scopedTreeLines(
+			&baselineProjection, baselineRoot,
+		); baselineErr == nil {
+			baselineProjection.TreeLines = lines
+		}
+	}
+	applyWorkingTreeProjection(&baselineProjection, request.TreeView)
+	response.Snapshot.baselineProjectionLines = append(
+		[]string(nil),
+		baselineProjection.TreeLines...,
+	)
+	response.Snapshot.serializerOmitted =
+		baselineProjection.serializerOmitted
+	response.Snapshot.serializerBranches =
+		baselineProjection.serializerBranches
+	if err := s.buildAndRenderAXSnapshotV1(
+		response.Snapshot,
+		request.TreeView,
+	); err != nil {
+		return nil, nil, textResult(
+			"AXSnapshotV1 pipeline failed: "+err.Error(),
+			true,
+		).withEvidenceScope("error_only")
+	}
+	response.Snapshot.actionExecution = response.ActionEvidence
+	response.Snapshot.externalDesktopTransition =
+		response.ExternalDesktopTransition
+	return response.Snapshot, response.Notes, toolCallResult{}
+}
+
+func (s *service) missingRuntimeSnapshotResult(
+	app string,
+	request axServiceRequest,
+	response *ProviderAccessibilityResult,
+) toolCallResult {
+	if response == nil {
+		return textResult("Linux runtime did not return an app snapshot.", true).
+			withEvidenceScope("error_only")
+	}
+	emitted := response.InputEventsEmitted ||
+		response.PartialInputPossible ||
+		response.DesktopStateMutated ||
+		response.MutationUnknown
+	if !emitted {
+		return textResult("Linux runtime did not return an app snapshot.", true).
+			withEvidenceScope("error_only")
+	}
+	response.OK = false
+	response.Error = "post_action_observation_failed; the action outcome is unknown " +
+		"because the Linux runtime returned no final app snapshot; inspect fresh state " +
+		"before retrying."
+	response.Failure = &ProviderFailure{
+		Code:           "effect_unknown",
+		UnderlyingCode: "missing_post_action_snapshot",
+		Phase:          "post_action_observation",
+		FactsComplete:  false,
+		Subject:        "element",
+	}
+	if isShortAXWindowRef(request.SourceRef) {
+		response.Failure.Subject = "window"
+	}
+	if response.Mutation == nil {
+		response.Mutation = &ProviderMutationFacts{}
+	}
+	response.Mutation.InputEventsEmitted = response.InputEventsEmitted
+	response.Mutation.PartialInputPossible = response.PartialInputPossible
+	response.Mutation.DesktopStateMutated = response.DesktopStateMutated
+	response.Mutation.MutationUnknown = true
+	response.prepareForService()
+	return s.runtimeReportedFailure(app, request, *response)
+}
+
+func (s *service) expandObservationRootShortRef(
+	app string,
+	root map[string]any,
+) (map[string]any, error) {
+	if len(root) == 0 {
+		return root, nil
+	}
+	raw, present := root["ref"]
+	if !present {
+		return root, nil
+	}
+	ref, ok := raw.(string)
+	if !ok || !isShortAXRef(ref) {
+		return root, nil
+	}
+	entry, err := s.resolveShortAXRef(app, ref)
+	if err != nil {
+		return nil, err
+	}
+	if entry.LocatorKind == AXLocatorProviderBound &&
+		strings.TrimSpace(entry.ProviderBusName) != "" &&
+		strings.TrimSpace(entry.ProviderObjectPath) != "" &&
+		strings.TrimSpace(entry.ProcessGeneration) != "" {
+		// Locator kind is authoritative. Provider-bound refs may retain a
+		// semantic label for diagnostics, but it must never replace their exact
+		// identity during rooted observation.
+		return map[string]any{"_resolved_ref_entry": entry}, nil
+	}
+	expanded := assertionTargetFromRefEntry(entry)
+	if strings.TrimSpace(expanded) != "" {
+		return map[string]any{"ref": expanded}, nil
+	}
+	return nil, fmt.Errorf(
+		"short AX ref %q has no stable observation target",
+		ref,
+	)
+}
+
+func (s *service) runtimeReportedFailure(
+	app string,
+	request axServiceRequest,
+	response ProviderAccessibilityResult,
+) toolCallResult {
+	response.prepareForService()
+	subject := strings.TrimSpace(strings.ToLower(response.FailureSubject))
+	if s != nil && isShortAXAppRef(request.App) && subject == "app" {
+		switch {
+		case response.FailureCode == "observation_incomplete" ||
+			response.FailureCode == "ax_app_inventory_incomplete":
+			s.markAppIdentityLifecycle(
+				request.App, AXRefNeedsRevalidation, response.FailureCode,
+			)
+		case response.FailureCode == "stale_app_ref":
+			lifecycle := AXRefStale
+			if !response.FailureFactsComplete {
+				lifecycle = AXRefNeedsRevalidation
+			}
+			s.markAppIdentityLifecycle(request.App, lifecycle, response.FailureCode)
+		}
+	}
+	var sourceEntry *AXRefEntry
+	if s != nil && isShortAXRef(request.SourceRef) {
+		sourceEntry, _ = s.refRegistry.Resolve(request.SourceRef, "")
+	}
+	var sourceWindowEntry *AXWindowRefEntry
+	if s != nil && isShortAXWindowRef(request.SourceRef) {
+		sourceWindowEntry, _ = s.windowRefRegistry.Resolve(request.SourceRef, "")
+	}
+	if s != nil && request.SourceRef != "" {
+		switch {
+		case isShortAXRef(request.SourceRef):
+			if subject == "element" &&
+				(response.FailureCode == "observation_incomplete" ||
+					response.FailureCode == "semantic_target_scan_incomplete") {
+				s.refRegistry.MarkNeedsRevalidation(
+					request.SourceRef, response.FailureCode,
+				)
+			} else if subject == "element" &&
+				request.SemanticTarget != nil &&
+				request.SemanticTarget.LocatorKind == AXLocatorSemantic &&
+				(response.FailureCode == "stale_element_ref" ||
+					response.FailureCode == "stale_target") {
+				s.refRegistry.MarkNeedsRevalidation(
+					request.SourceRef, response.FailureCode,
+				)
+			} else if request.SemanticTarget != nil &&
+				request.SemanticTarget.LocatorKind == AXLocatorProviderBound &&
+				(response.FailureCode == "stale_element_ref" ||
+					response.FailureCode == "stale_target") {
+				if response.FailureFactsComplete {
+					s.refRegistry.MarkStale(request.SourceRef, response.FailureCode)
+				} else {
+					s.refRegistry.MarkNeedsRevalidation(
+						request.SourceRef, response.FailureCode,
+					)
+				}
+			}
+		case isShortAXWindowRef(request.SourceRef):
+			if subject == "window" &&
+				(response.FailureCode == "observation_incomplete" ||
+					response.FailureCode == "semantic_target_scan_incomplete") {
+				s.windowRefRegistry.MarkLifecycle(
+					request.SourceRef, AXRefNeedsRevalidation,
+					response.FailureCode,
+				)
+			} else if response.FailureCode == "stale_window_ref" ||
+				response.FailureCode == "stale_window" ||
+				response.FailureCode == "stale_target" {
+				lifecycle := AXRefStale
+				if !response.FailureFactsComplete {
+					lifecycle = AXRefNeedsRevalidation
+				}
+				s.windowRefRegistry.MarkLifecycle(
+					request.SourceRef, lifecycle, response.FailureCode,
+				)
+			}
+		}
+	}
+	result := textResult(publicRuntimeFailureText(response), true)
+	if response.FailureCode == "" {
+		return result
+	}
+	result.StructuredContent = map[string]any{
+		"failure_code":           response.FailureCode,
+		"failure_phase":          response.FailurePhase,
+		"input_events_emitted":   response.InputEventsEmitted,
+		"partial_input_possible": response.PartialInputPossible,
+		"mutation_unknown":       response.MutationUnknown,
+		"failure_facts_complete": response.FailureFactsComplete,
+	}
+	if response.UnderlyingFailureCode != "" {
+		result.StructuredContent["underlying_failure_code"] =
+			response.UnderlyingFailureCode
+	}
+	if subject != "" {
+		result.StructuredContent["failure_subject"] = subject
+	}
+	continuation := map[string]any{
+		"state":              "observe_required",
+		"retry_same_request": false,
+		"route":              "AX",
+	}
+	if response.FailureCode == "effect_unknown" {
+		continuation["state"] = "verify_only"
+	}
+	result.StructuredContent["continuation"] = continuation
+	s.attachRuntimeRecoveryContext(
+		&result,
+		request,
+		sourceEntry,
+		sourceWindowEntry,
+		response.Recovery,
+		continuation,
+	)
+	if s != nil && sourceEntry != nil && response.ReplacementWindow != nil &&
+		replacementWindowContinuesSource(sourceEntry, response.ReplacementWindow) {
+		replacement := response.ReplacementWindow
+		windowRef := s.windowRefRegistry.Acquire(
+			sourceEntry.AppIdentity,
+			replacement.WindowHandle,
+			"window",
+			"",
+			replacement.ProviderBusName,
+			replacement.ProviderObjectPath,
+			replacement.ProcessGeneration,
+			replacement.Role,
+			replacement.Title,
+			sourceEntry.AppRef,
+		)
+		if windowRef != "" {
+			result.StructuredContent["replacement_window_ref"] = windowRef
+			result.StructuredContent["recovery"] = "find"
+			continuation["state"] = "ready"
+			continuation["fresh_window_ref"] = windowRef
+			continuation["next_mode"] = "find"
+			result.Content[0].Text += fmt.Sprintf(
+				"\nreplacement_window_ref=%s recovery=find",
+				windowRef,
+			)
+		}
+	}
+	if response.ActionEvidence != nil {
+		result.StructuredContent["runtime_action_evidence"] =
+			*response.ActionEvidence
+	}
+	if s != nil && len(response.Candidates) > 0 {
+		snapshot := s.currentSnapshot(app)
+		publicCandidates := make([]map[string]any, 0, len(response.Candidates))
+		lines := []string{"Candidates:"}
+		for _, candidate := range response.Candidates {
+			if snapshot == nil {
+				break
+			}
+			windowHandle := strings.TrimSpace(candidate.WindowHandle)
+			if !validInternalWindowHandle(windowHandle) {
+				continue
+			}
+			windowRef := ""
+			for _, window := range snapshot.Windows {
+				if window.Handle == windowHandle {
+					windowRef = window.publicRef
+					break
+				}
+			}
+			if windowRef == "" {
+				windowRef = s.windowRefRegistry.Acquire(
+					appIdentityForSnapshot(snapshot),
+					windowHandle,
+					"window",
+					snapshot.SnapshotID,
+					"", "", "", "window", "",
+					snapshot.publicAppRef,
+				)
+			}
+			if windowRef == "" {
+				continue
+			}
+			role := canonicalRoleDescriptor(candidate.Role, nil).ModelRole
+			name := firstNonEmpty(candidate.Name, candidate.Description)
+			selector := selectorHead(string(role), name)
+			ref := s.refRegistry.AcquireTyped(
+				AXLocatorProviderBound,
+				appIdentityForSnapshot(snapshot),
+				windowHandle,
+				selector,
+				role,
+				name,
+				snapshot.SnapshotID,
+				candidate.ProviderBusName,
+				candidate.ProviderObjectPath,
+				candidate.ProcessGeneration,
+				"", "", "", "", "",
+				snapshot.publicAppRef,
+				windowRef,
+			)
+			if ref == "" {
+				continue
+			}
+			entry := map[string]any{
+				"ref":        ref,
+				"window_ref": windowRef,
+				"path":       publicCandidatePath(candidate.Path),
+			}
+			publicCandidates = append(publicCandidates, entry)
+			lines = append(lines, fmt.Sprintf(
+				"- %s %s [window_ref=%s] path=%s",
+				ref,
+				selector,
+				windowRef,
+				publicCandidatePath(candidate.Path),
+			))
+		}
+		if len(publicCandidates) > 0 {
+			result.StructuredContent["candidates"] = publicCandidates
+			result.StructuredContent["candidate_count"] = response.CandidateCount
+			result.StructuredContent["candidates_truncated"] =
+				response.CandidatesTruncated
+			result.Content[0].Text += "\n" + strings.Join(lines, "\n") +
+				"\nrecovery=choose_ref|find"
+		}
+	}
+	return result
+}
+
+func (s *service) attachRuntimeRecoveryContext(
+	result *toolCallResult,
+	request axServiceRequest,
+	sourceEntry *AXRefEntry,
+	sourceWindowEntry *AXWindowRefEntry,
+	recovery *ProviderRecoveryContext,
+	continuation map[string]any,
+) {
+	if s == nil || result == nil || result.StructuredContent == nil ||
+		recovery == nil {
+		return
+	}
+	appStatus := strings.TrimSpace(strings.ToLower(recovery.SourceAppStatus))
+	windowStatus := strings.TrimSpace(strings.ToLower(recovery.SourceWindowStatus))
+	if appStatus != "" {
+		result.StructuredContent["source_app_status"] = appStatus
+	}
+	if windowStatus != "" {
+		result.StructuredContent["source_window_status"] = windowStatus
+	}
+	result.StructuredContent["recovery_inventory_complete"] =
+		recovery.InventoryComplete
+
+	appRef := ""
+	appIdentity := ""
+	windowRef := ""
+	if sourceEntry != nil {
+		appRef = sourceEntry.AppRef
+		appIdentity = sourceEntry.AppIdentity
+		windowRef = sourceEntry.LogicalWindowRef
+	} else if sourceWindowEntry != nil {
+		appRef = sourceWindowEntry.AppRef
+		appIdentity = sourceWindowEntry.AppIdentity
+		windowRef = sourceWindowEntry.Ref
+	} else if isShortAXWindowRef(request.SourceRef) {
+		if entry, err := s.windowRefRegistry.Resolve(request.SourceRef, ""); err == nil {
+			appRef = entry.AppRef
+			appIdentity = entry.AppIdentity
+			windowRef = entry.Ref
+		}
+	}
+
+	if recovery.InventoryComplete && appStatus == "exited" {
+		if appRef != "" {
+			s.markAppIdentityLifecycle(
+				appRef,
+				AXRefStale,
+				"source_app_exited_after_input",
+			)
+		}
+		result.StructuredContent["recovery"] = "observe_apps"
+		continuation["state"] = "source_app_absent"
+		continuation["next_mode"] = "observe"
+		result.Content[0].Text +=
+			"\nsource_app_status=exited source_window_status=gone recovery=observe_apps"
+		return
+	}
+
+	if recovery.InventoryComplete && windowStatus == "gone" && windowRef != "" {
+		s.windowRefRegistry.MarkLifecycle(
+			windowRef,
+			AXRefStale,
+			"source_window_gone_after_input",
+		)
+		s.refRegistry.MarkByWindow(
+			windowRef,
+			AXRefStale,
+			"source_window_gone_after_input",
+		)
+	}
+
+	currentRef := ""
+	currentOwnerMatches := false
+	if appEntry, err := s.appRefRegistry.Resolve(appRef); err == nil &&
+		recovery.CurrentWindow != nil {
+		currentOwnerMatches =
+			strings.TrimSpace(appEntry.ProviderBusName) ==
+				strings.TrimSpace(recovery.CurrentWindow.ProviderBusName) &&
+				strings.TrimSpace(appEntry.ProcessGeneration) ==
+					strings.TrimSpace(recovery.CurrentWindow.ProcessGeneration)
+	}
+	if current := recovery.CurrentWindow; recovery.InventoryComplete &&
+		current != nil && appRef != "" && appIdentity != "" &&
+		validInternalWindowHandle(current.WindowHandle) &&
+		currentOwnerMatches {
+		currentRef = s.windowRefRegistry.Acquire(
+			appIdentity,
+			current.WindowHandle,
+			selectorHead(
+				string(canonicalRoleDescriptor(current.Role, nil).ModelRole),
+				current.Title,
+			),
+			"",
+			current.ProviderBusName,
+			current.ProviderObjectPath,
+			current.ProcessGeneration,
+			current.Role,
+			current.Title,
+			appRef,
+		)
+	}
+	if currentRef == "" && windowStatus == "present" && windowRef != "" {
+		if _, err := s.windowRefRegistry.Resolve(windowRef, ""); err == nil {
+			currentRef = windowRef
+		}
+	}
+	if currentRef != "" {
+		result.StructuredContent["current_window_ref"] = currentRef
+		result.StructuredContent["recovery"] = "find"
+		continuation["state"] = "ready"
+		continuation["fresh_window_ref"] = currentRef
+		continuation["next_mode"] = "find"
+		result.Content[0].Text += fmt.Sprintf(
+			"\nsource_app_status=%s source_window_status=%s "+
+				"current_window_ref=%s recovery=find",
+			appStatus,
+			windowStatus,
+			currentRef,
+		)
+	}
+}
+
+func publicCandidatePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	for _, pattern := range privateProviderIdentityPatterns {
+		if pattern.MatchString(path) {
+			return "semantic path unavailable"
+		}
+	}
+	return path
+}
+
+func (s *service) markAppIdentityLifecycle(
+	appRef string,
+	lifecycle AXRefLifecycle,
+	reason string,
+) {
+	if s == nil || strings.TrimSpace(appRef) == "" {
+		return
+	}
+	s.appRefRegistry.MarkLifecycle(appRef, lifecycle, reason)
+	s.windowRefRegistry.MarkByApp(appRef, lifecycle, reason)
+	s.refRegistry.MarkByApp(appRef, lifecycle, reason)
+}
+
+var privateProviderIdentityPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(?:provider_identity_ambiguous|provider[^\s]*path)[^\n]*`),
+	regexp.MustCompile(`/org/a11y/[^\s'",]+`),
+	regexp.MustCompile(`(?i)\b(?:pid|process_generation)\s*[=:]\s*[^\s,;]+`),
+	regexp.MustCompile(`\b:[0-9]+\.[0-9]+\b`),
+	regexp.MustCompile(`\b(?:s[12]|w2):[A-Za-z0-9+/=_-]+\b`),
+}
+
+func publicRuntimeFailureText(response ProviderAccessibilityResult) string {
+	text := strings.TrimSpace(response.Error)
+	if strings.Contains(strings.ToLower(text), "provider_identity_ambiguous") {
+		return "ambiguous_target: multiple accessibility projections matched; " +
+			"choose one public candidate ref or observe again"
+	}
+	for _, pattern := range privateProviderIdentityPatterns {
+		text = pattern.ReplaceAllString(
+			text,
+			"internal accessibility identity unavailable",
+		)
+	}
+	for internal, public := range map[string]string{
+		"provider_window_disappeared":   "target_window_changed",
+		"provider_identity_disappeared": "target_identity_changed",
+		"provider_identity_replaced":    "target_identity_changed",
+		"provider_identity_changed":     "target_identity_changed",
+	} {
+		text = strings.ReplaceAll(text, internal, public)
+	}
+	return text
+}
+
+func replacementWindowContinuesSource(
+	source *AXRefEntry,
+	replacement *ProviderReplacementWindow,
+) bool {
+	if source == nil || replacement == nil {
+		return false
+	}
+	return strings.TrimSpace(source.WindowHandle) != "" &&
+		source.WindowHandle == strings.TrimSpace(replacement.WindowHandle) &&
+		strings.TrimSpace(source.ProviderWindowBusName) != "" &&
+		source.ProviderWindowBusName ==
+			strings.TrimSpace(replacement.ProviderBusName) &&
+		strings.TrimSpace(source.ProviderWindowProcessGeneration) != "" &&
+		source.ProviderWindowProcessGeneration ==
+			strings.TrimSpace(replacement.ProcessGeneration) &&
+		windowRoleFamily(source.ProviderWindowRole) ==
+			windowRoleFamily(replacement.Role)
+}
+
+func windowRoleFamily(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "frame", "window":
+		return "window"
+	case "alert", "dialog":
+		return "dialog"
+	default:
+		return strings.ToLower(strings.TrimSpace(role))
+	}
+}
+
+func runtimeReportedFailure(response ProviderAccessibilityResult) toolCallResult {
+	return (*service)(nil).runtimeReportedFailure("", axServiceRequest{}, response)
+}
+
+func (s *service) latestSnapshot() *appSnapshot {
+	var latest *appSnapshot
+	for _, snapshot := range s.snapshots {
+		if snapshot == nil {
+			continue
+		}
+		if latest == nil || snapshot.capturedAt.After(latest.capturedAt) {
+			latest = snapshot
+		}
+	}
+	return latest
+}
+
+func (s *service) runtimeFailureResult(
+	request axServiceRequest,
+	diagnosticSnapshot *appSnapshot,
+	err error,
+) toolCallResult {
+	var timeout *runtimeTimeoutError
+	var transport *runtimeTransportError
+	if !errors.As(err, &timeout) && !errors.As(err, &transport) {
+		return textResult(err.Error(), true)
+	}
+	phase := ""
+	if timeout != nil {
+		phase = strings.TrimSpace(timeout.phase)
+	} else {
+		phase = strings.TrimSpace(transport.phase)
+	}
+	if phase == "" {
+		phase = "runtime"
+	}
+	if request.Operation == axServiceObserve {
+		failureCode := "runtime_timeout"
+		failureMarker := "runtime_timeout=true "
+		if transport != nil {
+			failureCode = "runtime_transport_failure"
+			failureMarker = "runtime_transport_failure=true "
+		}
+		result := textResult(
+			err.Error()+"\n"+failureMarker+"mutation_unknown=false "+
+				s.runtimeTimeoutDiagnostic(diagnosticSnapshot), true)
+		result.StructuredContent = map[string]any{
+			"failure_code":         failureCode,
+			"failure_phase":        phase,
+			"input_events_emitted": false,
+			"mutation_unknown":     false,
+			"observation_required": true,
+		}
+		return result
+	}
+	mutationUnknown := timeout != nil ||
+		(transport != nil && transport.requestSent)
+	failureCode := "runtime_timeout"
+	failureMarker := "runtime_timeout=true "
+	if transport != nil {
+		failureCode = "runtime_transport_failure"
+		failureMarker = "runtime_transport_failure=true "
+	}
+	result := textResult(
+		err.Error()+"\n"+failureMarker+
+			fmt.Sprintf("mutation_unknown=%t ", mutationUnknown)+
+			"a11y_responsive=unknown. This action runtime includes input, window, "+
+			"pixel capture, settle, and A11Y work. Inspect fresh GUI state before "+
+			"retrying whenever mutation_unknown=true.", true)
+	result.StructuredContent = map[string]any{
+		"failure_code":         failureCode,
+		"failure_phase":        phase,
+		"mutation_unknown":     mutationUnknown,
+		"observation_required": true,
+		"retry_same_request":   false,
+	}
+	return result
+}
+
+// readProjectedSnapshot samples live state without replacing the action cache.
+//
+// find and verify are read-only tools, but their queries still need the same
+// projection as the cached action snapshot. Otherwise a default pruned read can
+// silently replace or disagree with a preceding prune=false address space.
+func (s *service) readProjectedSnapshot(app string, request axServiceRequest) (*appSnapshot, []string, toolCallResult) {
+	if previous := s.currentSnapshot(app); previous != nil {
+		applyProjection(&request, previous.projection)
+	}
+	return s.readSnapshot(app, request)
+}
+
+// refreshProjectedSnapshot samples live state in the existing address-space
+// projection, then updates the action cache. find uses this path because every
+// element_index it returns must be directly usable by the next action.
+func (s *service) refreshProjectedSnapshot(app string, request axServiceRequest) (*appSnapshot, []string, toolCallResult) {
+	if previous := s.currentSnapshot(app); previous != nil {
+		applyProjection(&request, previous.projection)
+	}
+	return s.refreshSnapshot(app, request)
+}
+
+// continuityNotes 把这一份快照和上一份的关系说清楚，并**就地填好**新快照上
+// 那几个只有持有历史的一侧才答得出的字段。
+//
+// 它回答的是两个此前无法区分的问题：
+//
+//  1. 「什么都没变」到底是异步操作还没做完，还是信息被裁掉了——前者在树上
+//     和后者长得一模一样，调用方只能猜，猜错就是一轮无效重试。
+//  2. 快照的根窗口换了没有。同一应用开出第二个同标题窗口时，根会静默切换、
+//     全部 element_index 平移，而返回文本上一个字都不变。
+func continuityNotes(previous, current *appSnapshot) []string {
+	if current == nil {
+		return nil
+	}
+	current.comparedToPrevious = false
+	current.identicalToPrevious = false
+	current.previousSnapshotID = ""
+	current.previousHandle = ""
+	if previous == nil {
+		return nil
+	}
+	if providerCoverageSummary(
+		current.Annotations,
+	).AcquisitionIncomplete > 0 {
+		return nil
+	}
+	current.previousSnapshotID = previous.SnapshotID
+	notes := []string{}
+	if previous.WindowHandle != "" && current.WindowHandle != "" &&
+		previous.WindowHandle != current.WindowHandle {
+		current.previousHandle = previous.WindowHandle
+		notes = append(notes, fmt.Sprintf(
+			"ROOT WINDOW CHANGED: this snapshot is rooted at a different top-level "+
+				"window than the previous model-visible snapshot for this app "+
+				"(was titled %q; now titled %q). Window titles alone may not show "+
+				"this — two windows of one app can carry the same title. Refs owned by "+
+				"the previous window are stale; use the current rN/wN refs listed below.",
+			previous.WindowTitle, current.WindowTitle))
+		return notes
+	}
+	if previous.SnapshotID == "" || current.SnapshotID == "" {
+		return notes
+	}
+	if normalizedA11yScope(current.projection.Scope) == a11yScopeContent &&
+		previous.contentRevision != "" && current.contentRevision != "" {
+		current.comparedToPrevious = true
+		current.identicalToPrevious =
+			previous.contentRevision == current.contentRevision
+		if !current.identicalToPrevious {
+			return notes
+		}
+		gap := ""
+		if !previous.capturedAt.IsZero() {
+			gap = fmt.Sprintf(
+				" %.1fs apart.",
+				time.Since(previous.capturedAt).Seconds(),
+			)
+		}
+		notes = append(notes, fmt.Sprintf(
+			"CONTENT SCOPE UNCHANGED: the current content is identical to the previous "+
+				"model-visible content for this window — same scoped "+
+				"semantic tree and selected text.%s Browser/application chrome "+
+				"outside this scope may have changed. This is not proof that a "+
+				"visual, network, file, document, or application effect failed.",
+			gap,
+		))
+		return notes
+	}
+	current.comparedToPrevious = true
+	current.identicalToPrevious = previous.SnapshotID == current.SnapshotID
+	if !current.identicalToPrevious {
+		return notes
+	}
+	gap := ""
+	if !previous.capturedAt.IsZero() {
+		gap = fmt.Sprintf(" %.1fs apart.", time.Since(previous.capturedAt).Seconds())
+	}
+	// 分两档说，因为**证据强度不同**：应用自报在忙是一条正面证据，可以据此
+	// 说"再等等"；没有这条证据时只能说"我不知道"，不能反过来断言操作失败。
+	if current.Busy.busy() {
+		notes = append(notes, fmt.Sprintf(
+			"SNAPSHOT UNCHANGED, APP REPORTS BUSY: the current state is identical to the "+
+				"previous model-visible state for this app "+
+				"(same window, tree, focus and selection).%s "+
+				"But the app is still working: the window carries an accessibility BUSY state "+
+				"or exposes %d progress indicator(s). This is 'not finished yet', not "+
+				"'nothing happened' and not 'information was trimmed away'. Wait and "+
+				"call AX mode=observe again rather than repeating the action — repeating "+
+				"it may apply it twice.",
+			gap,
+			current.Busy.ProgressElements))
+		return notes
+	}
+	notes = append(notes, fmt.Sprintf(
+		"SNAPSHOT UNCHANGED: the current state is identical to the previous one for this "+
+			"app that was actually delivered to the model — same "+
+			"window instance, same tree, same focus, same selection.%s "+
+			"Nothing in the tree reports work in progress, but that is not proof your "+
+			"last action failed: effects that never reach the accessibility tree are "+
+			"common (measured right-align and save operations changed application state "+
+			"while the tree stayed byte-identical). Check the screenshot, or "+
+			"assert the specific element with AX mode=assert_ax before deciding to retry. "+
+			"Note also what this line rules OUT: the content is not missing because a "+
+			"budget trimmed it — this tree is the same one you already have.",
+		gap))
+	return notes
+}
+
+func (s *service) refreshSnapshot(app string, request axServiceRequest) (*appSnapshot, []string, toolCallResult) {
+	// 先扣住上一份快照：continuity 的全部信息量都来自「这次和上次的关系」。
+	// 它只挂在刷新路径上——只读的 readSnapshot 不写缓存，也就不该讲连续性，
+	// 否则独立 GUI 观察会凭空产生一段关于它自己没有参与的 A11Y 历史叙述。
+	internalPrevious := s.currentSnapshot(app)
+	if internalPrevious != nil && request.Operation != axServiceObserve {
+		applyProjection(&request, internalPrevious.projection)
+	}
+	snapshot, notes, result := s.readSnapshot(app, request)
+	if result.IsError {
+		return nil, nil, result
+	}
+	snapshot.projection = projectionFromRequest(request)
+	visiblePrevious := s.deliveredSnapshotFor(snapshot)
+	notes = append(continuityNotes(visiblePrevious, snapshot), notes...)
+	notes = s.dedupeDiagnosticNotes(app, notes)
+	if !snapshot.deliveryOnly {
+		s.rememberSnapshot(app, snapshot)
+	}
+	return snapshot, notes, toolCallResult{}
+}
+
+func observationPhaseAndPayload(note string) (string, string) {
+	if !strings.HasPrefix(note, "[observation phase=") {
+		return "", note
+	}
+	end := strings.Index(note, "] ")
+	if end < 0 {
+		return "", note
+	}
+	header := note[:end]
+	phase := ""
+	for _, field := range strings.Fields(strings.TrimPrefix(header, "[")) {
+		if value, ok := strings.CutPrefix(field, "phase="); ok {
+			phase = value
+			break
+		}
+	}
+	return phase, note[end+2:]
+}
+
+func diagnosticCategory(note string) string {
+	_, note = observationPhaseAndPayload(note)
+	for _, item := range []struct {
+		prefix string
+		key    string
+	}{
+		{"ROOT WINDOW CHANGED:", "root_window_changed"},
+		{"CONTENT SCOPE UNCHANGED:", "content_scope_unchanged"},
+		{"SNAPSHOT UNCHANGED, APP REPORTS BUSY:", "snapshot_busy"},
+		{"SNAPSHOT UNCHANGED:", "snapshot_unchanged"},
+		{"MODAL DIALOG:", "modal_dialog"},
+		{"DIALOG IN FRONT:", "dialog_in_front"},
+		{"CONTENT PLANE UNCERTAIN:", "content_plane_uncertain"},
+		{"ACCESSIBILITY CONTENT UNCERTAIN:", "accessibility_content_uncertain"},
+		{"ANOTHER APP IS IN FRONT:", "foreign_modal"},
+		{"ANOTHER WINDOW MAY BE IN FRONT:", "foreign_window"},
+	} {
+		if strings.HasPrefix(note, item.prefix) {
+			return item.key
+		}
+	}
+	return ""
+}
+
+func (s *service) dedupeDiagnosticNotes(app string, notes []string) []string {
+	key := strings.ToLower(strings.TrimSpace(app))
+	previous := s.lastDiagnostics[key]
+	current := map[string]string{}
+	out := make([]string, 0, len(notes))
+	for _, note := range notes {
+		category := diagnosticCategory(note)
+		if category == "" {
+			out = append(out, note)
+			continue
+		}
+		current[category] = note
+		repeated := previous != nil && previous[category] == note
+		if previous != nil &&
+			(category == "snapshot_unchanged" ||
+				category == "snapshot_busy" ||
+				category == "content_scope_unchanged") &&
+			previous[category] != "" {
+			// These notes include a changing elapsed-time sentence. The diagnostic
+			// state is still the same even when that duration changes.
+			repeated = true
+		}
+		if repeated {
+			out = append(out, fmt.Sprintf(
+				"[diagnostic %s] still present; full explanation unchanged from the "+
+					"previous response.", category))
+			continue
+		}
+		out = append(out, note)
+	}
+	if len(current) == 0 {
+		delete(s.lastDiagnostics, key)
+	} else {
+		s.lastDiagnostics[key] = current
+	}
+	return out
+}
+
+func (s *service) rememberSnapshot(query string, snapshot *appSnapshot) {
+	// Replace every alias that pointed at the exact previous address space used
+	// for this query. Otherwise `soffice` can refresh while an older title alias
+	// still wins an exact lookup and revives stale indices.
+	keys := []string{
+		query,
+		snapshot.publicAppRef,
+		snapshot.App.Name,
+		snapshot.App.BundleIdentifier,
+		strconv.Itoa(snapshot.App.PID),
+	}
+	var previous *appSnapshot
+	ambiguous := false
+	for _, key := range keys {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if key == "" {
+			continue
+		}
+		cached := s.snapshots[key]
+		if cached == nil {
+			continue
+		}
+		if previous == nil {
+			previous = cached
+		} else if previous != cached {
+			ambiguous = true
+			break
+		}
+	}
+	if !ambiguous && previous != nil && previous != snapshot {
+		for key, cached := range s.snapshots {
+			if cached == previous {
+				delete(s.snapshots, key)
+			}
+		}
+	}
+	snapshot.capturedAt = time.Now()
+	snapshot.sourceApp = query
+	for _, key := range keys {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if key != "" {
+			s.snapshots[key] = snapshot
+		}
+	}
+}
+
+// toolError 按 Playwright 的错误形态组装：**事实链在前，建议在后**。
+//
+// Playwright 的动作超时错误长这样（1.55.1，issue #37695）：
+//
+//	Error: locator.click: Test timeout of 30000ms exceeded.
+//	Call log:
+//	  - waiting for getByText('Get started')
+//	    - locator resolved to <a href="/docs/intro">Get started</a>
+//	  - attempting click action
+//	    - waiting for element to be visible, enabled and stable
+//
+// 它给的不是建议，是**事实链**：我在等什么、解析到了什么、检查到哪一步、
+// 失败在哪个状态。我全量查过它的源码，连 "Consider using force: true" 这种
+// 建议串都不存在。
+//
+// **唯一的例外恰好在它的 MCP 层**——因为消费者是 LLM 不是人：
+//
+//	Ref e3 not found in the current page snapshot. Try capturing new snapshot.
+//
+// 这条**点名了下一步该调哪个工具**。我们的消费者同样是 LLM，所以两者都要：
+// 事实链 + 明确的下一步，但**分开标注**，别把推测混进 call log。
+//
+// 替换掉的是 `unknown element_index "128"` 这种 27 个字符、零指引的报错。

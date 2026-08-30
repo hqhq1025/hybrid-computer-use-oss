@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "tool_version": "v0.14",
+  "released_at_utc": "2026-08-29T03:22:14Z",
+  "status": "current",
+  "product": "Computer Use",
+  "scope": "General-purpose Linux hybrid computer use with native 1920x1080 GUI delivery and AX and GUI public tools.",
+  "supersedes": "v0.13",
+  "promoted_from_candidate": "v013-gui-native-1080p-beta70",
+  "included_change_ids": [
+    "v013-gui-native-1080p-beta70"
+  ],
+  "implementation": {
+    "image": "osw-hybrid:v0.14",
+    "image_id": "sha256:46e10b8a87a91173f3436619c430d705ee1a35937a24e70a989b6de02a3b77ef",
+    "image_digest": "sha256:46e10b8a87a91173f3436619c430d705ee1a35937a24e70a989b6de02a3b77ef",
+    "image_size_bytes": 2076826756,
+    "tested_candidate_image": "osw-hybrid:beta-v013-gui-native-1080p-70",
+    "image_identity_note": "The release and rebuilt tested-candidate tags resolve to the same immutable containerd manifest ID; no runtime layer was rebuilt during promotion.",
+    "image_transport": {
+      "created_at_utc": "2026-08-29T03:20:43.962357403Z",
+      "rootfs_layers_json_sha256": "9a7059f0fba2de3b5cebc6a61e313ef9285f703485f3f9e8fa88169939bb53b3"
+    },
+    "base_environment": {
+      "release": "v0.13",
+      "image": "osw-hybrid:v0.13",
+      "recorded_image_id": "sha256:3def9f6aadc88ef5105f6818eafd755ea606469abb4be2746bb0d8c91cb6fbcf",
+      "release_manifest": "tool_releases/v0.13.json",
+      "release_manifest_sha256": "afeeb34e66241273187664891273c30d3c089cec869dff83cc25a66ef6dd075b",
+      "rebuild_note": "The original local tag was absent. The exact frozen beta59 source and Dockerfile were rebuilt before beta70; the reconstructed baseline source and MCP binary hashes match the v0.13 manifest. The current containerd exporter represents the rebuilt image with a different manifest identity."
+    },
+    "dockerfile": {
+      "path": "Dockerfile.v013-gui-native-1080p-beta70",
+      "sha256": "93c8e937c0ca7669ddb69ec622dba2e6deb4e4d65e7e424497f7361355a053a9"
+    },
+    "mcp_binary": {
+      "path": "/usr/local/bin/computer-use",
+      "command": "/usr/local/bin/computer-use",
+      "ax_telemetry_path": "/tmp/computer-use-ax-telemetry.jsonl",
+      "version": "0.70.0-beta.70+osw-v013-gui-native-1080p",
+      "sha256": "11adcefd856200eda37ec127b586d95105f1d9b52c64e6ee8ff5571c1f5bacf0"
+    },
+    "source": {
+      "path": "patches/v013-gui-native-1080p-beta70",
+      "active_path": "build/ucu-src",
+      "tree_sha256": "32325485886f2575c50261190a65722b291f234c33c23da1df0b90ede4eec9a7",
+      "active_tree_sha256": "32325485886f2575c50261190a65722b291f234c33c23da1df0b90ede4eec9a7",
+      "tree_hash_contract": "SHA-256 of sorted sha256sum output with ./ paths, excluding __pycache__ and *.pyc"
+    },
+    "benchmark_skill": {
+      "path": "skills/computer-use-desktop/SKILL.md",
+      "sha256": "d062c48073ebe3e10dbb0341eee71bb74f0cc1486d8191c0e353909f495eb923"
+    }
+  },
+  "candidate_evidence": {
+    "path": "tool_candidates/v013-gui-native-1080p-beta70.json",
+    "sha256": "5265254d2a8b917cfff9e69aed7e31830dc921cccfb76837f06619769879c1dd"
+  },
+  "contract": {
+    "public_tools": [
+      "AX",
+      "GUI"
+    ],
+    "public_schema_change_from_v0_13": false,
+    "benchmark_skill_change_from_v0_13": false,
+    "linux_gui_max_width": 1920,
+    "linux_gui_max_height": 1080,
+    "standard_osworld_delivery": "native 1920x1080",
+    "larger_desktop_policy": "aspect-ratio bounded to 1920x1080",
+    "coordinate_space": "pixels in the exact returned full-desktop image",
+    "stale_layout_policy": "unchanged fail-closed private layout binding",
+    "provider_wire": "osw-provider-v2",
+    "server_name": "computer-use"
+  },
+  "verification": {
+    "focused_release_tests": "4/4 passed",
+    "go_tests": "passed during image build",
+    "go_race": "passed",
+    "go_vet": "passed",
+    "linux_runtime": "453/453 passed in the release container",
+    "real_container_gui_1080p_smoke": "passed",
+    "native_desktop": "1920x1080",
+    "gui_response_metadata": "1920x1080",
+    "decoded_returned_png": "1920x1080",
+    "clean_desktop_png_base64_chars": 197184,
+    "release_image_identity": "osw-hybrid:v0.14 and osw-hybrid:beta-v013-gui-native-1080p-70 resolve to sha256:46e10b8a87a91173f3436619c430d705ee1a35937a24e70a989b6de02a3b77ef"
+  },
+  "promotion_evidence": {
+    "release_report": {
+      "path": "analysis/V014_RELEASE_REPORT.md",
+      "sha256": "0ffff8af4869848b6f6f12cfe8287d7be0c480c6b4b4d1bdfb10d52cdf3ff803"
+    },
+    "change_record": {
+      "path": "analysis/tool_changes/v013-gui-native-1080p-beta70.md",
+      "sha256": "c45f1b2240a7a46a69c1442aa7d2ded47daa9626c259b5aed51818e6cdc960bc"
+    },
+    "inherited_score_release": "v0.13",
+    "inherited_score_run": "v487-g55-xhigh-v012-beta59-no-input-stale-observation-full361-c40-j40-judge54",
+    "inherited_audited_instruction_result": {
+      "reviewed_tasks": 361,
+      "capability_denominator": 356,
+      "strict_pass_lower": 346,
+      "strict_pass_upper": 348,
+      "rate_lower_percent": 97.19,
+      "rate_upper_percent": 97.75
+    },
+    "new_full361": "not run",
+    "acceptance": "The user explicitly requested and accepted promotion to v0.14 on 2026-08-29 after the 1080p mechanism passed focused, complete runtime and real-container validation."
+  },
+  "accepted_tradeoffs": {
+    "score_claim": "No new benchmark score is claimed. v0.14 inherits the latest audited v0.13 result until an exact v0.14 formal run completes.",
+    "cost_claim": "Native 1080p delivery can improve visual legibility but may increase image-token cost and latency on screenshot-heavy tasks.",
+    "platform_claim": "The promoted 1080p behavior is validated for the Linux provider; Windows and macOS parity is not claimed."
+  },
+  "known_issues": [
+    "No independent v0.14 formal benchmark or cost comparison has completed.",
+    "High-entropy 1920x1080 screenshots may require JPEG fallback and can exceed the preferred 480000-character base64 budget at minimum quality.",
+    "The exact tested image retains candidate-era component labels; the v0.14 tag and this immutable manifest are authoritative.",
+    "Native Windows and macOS providers require separate screenshot-resolution validation."
+  ]
+}
