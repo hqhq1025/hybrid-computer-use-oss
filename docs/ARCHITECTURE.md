@@ -40,12 +40,13 @@ flowchart TB
     S --> AS[AX snapshots and canonical tree]
     S --> GL[GUI private layout lease]
     S --> E[Evidence normalization]
-    S --> B[Linux runtime backend]
-    B --> W[Persistent JSONL provider worker]
-    W --> AT[AT-SPI]
-    W --> WM[X11 window manager tools]
-    W --> PX[GDK/GdkPixbuf screenshots]
-    W --> IN[XTest/AT-SPI input]
+    S --> B{PlatformBackend}
+    B --> L[Linux persistent provider]
+    B --> M[macOS persistent provider]
+    B --> W[Windows persistent provider]
+    L --> AT[AT-SPI / X11 / GDK / XTest]
+    M --> MA[Accessibility / System Events / CoreGraphics]
+    W --> WI[UI Automation / Win32 / GDI]
 ```
 
 The main boundaries are:
@@ -55,10 +56,17 @@ The main boundaries are:
 3. `ax_*` implements canonical AX state, compact working projections, refs,
    action guards, postconditions, and evidence.
 4. `gui_service.go` implements batch validation and screenshot/layout binding.
-5. `runtime_backend*.go` and `provider_wire_v2.go` implement the private
-   provider protocol.
-6. `native/linux/provider_v1/` implements Linux AT-SPI, X11, screenshots, and
-   input.
+5. `runtime_backend*.go` and `provider_wire_v2.go` implement the private,
+   platform-neutral provider protocol.
+6. `native/linux/provider_v1/`, `native/macos/provider_v1/`, and
+   `native/windows/provider_v1/` implement the OS execution layers. Platform
+   names and native handles never enter the public MCP schema.
+
+The public contract is intentionally invariant across operating systems. A
+model trained to use `AX` and `GUI` does not choose an OS-specific tool. The Go
+service selects the backend at build time and normalizes native application,
+window, element, screenshot, mutation, and action-evidence facts through
+Provider V2.
 
 ## AX State Model
 

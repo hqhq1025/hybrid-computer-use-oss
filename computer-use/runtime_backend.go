@@ -8,10 +8,15 @@ import (
 type runtimeTimeoutError struct {
 	duration time.Duration
 	phase    string
+	platform string
 }
 
 func (e *runtimeTimeoutError) Error() string {
-	return fmt.Sprintf("Linux runtime timed out after %s", e.duration)
+	platform := e.platform
+	if platform == "" {
+		platform = "Linux"
+	}
+	return fmt.Sprintf("%s runtime timed out after %s", platform, e.duration)
 }
 
 var _ error = (*runtimeTimeoutError)(nil)
@@ -20,11 +25,17 @@ type runtimeTransportError struct {
 	operation   ProviderWireOperation
 	phase       string
 	requestSent bool
+	platform    string
 }
 
 func (e *runtimeTransportError) Error() string {
+	platform := e.platform
+	if platform == "" {
+		platform = "Linux"
+	}
 	return fmt.Sprintf(
-		"Linux provider transport failed during %s",
+		"%s provider transport failed during %s",
+		platform,
 		e.operation,
 	)
 }

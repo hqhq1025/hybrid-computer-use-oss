@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -497,7 +498,9 @@ func decodeProviderDesktopActions(
 		return nil, err
 	}
 	var actions []ProviderDesktopAction
-	if err := json.Unmarshal(data, &actions); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&actions); err != nil {
 		return nil, fmt.Errorf("decode provider desktop actions: %w", err)
 	}
 	return actions, nil

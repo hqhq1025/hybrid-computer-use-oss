@@ -1,8 +1,9 @@
 # Hybrid Computer Use OSS
 
-Hybrid Computer Use OSS packages the released Computer Use `v0.14` MCP
-implementation and reproducible integration code for running Codex or Claude
-Code inside OSWorld V1 and OSWorld V2 Linux desktops.
+Hybrid Computer Use OSS packages the Computer Use MCP and reproducible
+integration code for running Codex or Claude Code. The standalone MCP now uses
+one public contract on Linux, macOS, and Windows; the frozen OSWorld `v0.14`
+benchmark artifact and QEMU integration remain Linux-specific.
 
 The MCP exposes only two public tools:
 
@@ -18,8 +19,7 @@ the historical direct-container backend is retained only for fast diagnostics.
 
 ```mermaid
 flowchart LR
-    U[V1 or V2 OSWorld instruction] --> Q[Official Docker and QEMU guest]
-    Q --> A{Task agent}
+    U[Desktop task] --> A{Task agent}
     A -->|Codex| CX[Codex CLI]
     A -->|Claude Code| CC[Claude Code CLI]
     CX --> SH[Shell and file tools]
@@ -30,27 +30,37 @@ flowchart LR
     AD --> MCP
     MCP --> AX[AX service]
     MCP --> GUI[GUI service]
-    AX --> P[Persistent Linux provider]
+    AX --> P{Private Provider V2 backend}
     GUI --> P
-    P --> ATSPI[AT-SPI semantic tree]
-    P --> X11[X11/GDK capture and input]
-    ATSPI --> D[OSWorld desktop]
-    X11 --> D
+    P --> ATSPI[Linux: AT-SPI and X11]
+    P --> MAC[macOS: Accessibility and CoreGraphics]
+    P --> WIN[Windows: UI Automation and Win32]
+    ATSPI --> D[Desktop]
+    MAC --> D
+    WIN --> D
     CDP --> CH[Existing Chrome CDP endpoint]
     CH --> D
     SH --> FS[Guest files and CLI APIs]
     FS --> D
 ```
 
-The Go process owns the MCP protocol, schemas, batching, refs, evidence
-contracts, and state caches. It embeds and starts one persistent Python Linux
-provider. The provider owns AT-SPI discovery, X11 window identity, screenshots,
-and synthesized input. GUI coordinates are always pixels in the exact returned
-full-desktop image.
+The Go process owns the MCP protocol, unchanged `AX`/`GUI` schemas, batching,
+refs, evidence contracts, and state caches. It selects one persistent private
+provider for the host OS. Linux uses AT-SPI/X11, macOS uses Accessibility,
+System Events and CoreGraphics, and Windows uses UI Automation/Win32. GUI
+coordinates are always pixels in the exact returned full-desktop image.
 
 ## Quick Start
 
-Requirements: Linux, Docker, Go 1.22+, Python 3.10+, and an OSWorld V1 or V2
+For standalone MCP development, use Go 1.22+ and Python 3.10+ on Linux, macOS,
+or Windows. Build the current host or all supported developer targets with:
+
+```bash
+make build-host
+make build-all
+```
+
+The benchmark quick start still requires Linux, Docker, and an OSWorld V1 or V2
 checkout. OSWorld V2 additionally needs KVM and its official guest image/assets.
 
 ```bash
@@ -85,6 +95,8 @@ Then follow [OSWorld V1](docs/OSWORLD_V1.md) or
 
 For MCP build, startup, Codex/Claude configuration, public contracts and
 troubleshooting, see [Computer Use MCP](docs/MCP.md).
+For the native capability and validation matrix, see
+[Platform Support](docs/PLATFORM_SUPPORT.md).
 
 ## Repository Map
 

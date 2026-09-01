@@ -374,7 +374,7 @@ func helpText(command string) string {
 	case "call":
 		return "Usage:\n  computer-use call <AX|GUI> [--args '<json-object>']\n  computer-use call --calls '<json-array>'\n\nOnly the public AX and GUI tools are accepted.\n"
 	default:
-		return `Computer Use for Linux
+		return `Computer Use for Linux, macOS, and Windows
 
 Usage:
   computer-use [command] [options]

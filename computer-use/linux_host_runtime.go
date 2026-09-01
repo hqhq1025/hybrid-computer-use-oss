@@ -1,5 +1,3 @@
-//go:build linux
-
 package main
 
 import (
@@ -261,7 +259,7 @@ func truncateLinuxDiagnostic(text string, limit int) (string, bool) {
 }
 
 func linuxRuntimeEnvironment(base []string) []string {
-	uid := os.Getuid()
+	uid := currentProcessUID()
 	return linuxRuntimeEnvironmentFrom(base, uid, desktopProcessEnvironments(uid))
 }
 

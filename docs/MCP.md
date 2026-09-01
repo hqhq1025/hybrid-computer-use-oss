@@ -32,12 +32,14 @@ computer-use/
   runtime_backend*.go         private runtime boundary
   provider_wire_v2.go         typed Go/Python provider protocol
   native/linux/provider_v1/   persistent AT-SPI/X11 Python provider
+  native/macos/provider_v1/   Accessibility/CoreGraphics provider
+  native/windows/provider_v1/ UI Automation/Win32 provider
 ```
 
-One `computer-use mcp` process owns one desktop session. It starts one
-persistent Python provider and keeps AX snapshots, semantic refs and the GUI
-layout lease in process memory. Do not share one MCP process across benchmark
-tasks.
+One `computer-use mcp` process owns one desktop session. It starts the provider
+for the current OS and keeps AX snapshots, semantic refs and the GUI layout
+lease in process memory. The MCP `tools/list` result is identical on Linux,
+macOS, and Windows. Do not share one MCP process across isolated tasks.
 
 ## Build And Verify
 
@@ -60,10 +62,31 @@ For an unbound local development build:
 make build-local
 ```
 
+Build a native host binary or all standalone platform binaries with:
+
+```bash
+make build-host
+make build-all
+```
+
+These cross-platform binaries are development artifacts; they do not replace
+the immutable Linux v0.14 benchmark hash.
+
 Do not use a local development build in a formal run unless it has a recorded
 tool change ID, exact hashes and a new run ID.
 
 ## Desktop Runtime
+
+| Platform | Accessibility/window layer | Capture/input layer | Required runtime access |
+| --- | --- | --- | --- |
+| Linux | AT-SPI and X11 | GDK/GdkPixbuf and XTest | active D-Bus/AT-SPI/X11 session |
+| macOS | Accessibility through System Events | `screencapture` and CoreGraphics | Accessibility, Automation, and Screen Recording |
+| Windows | UI Automation | GDI desktop capture and Win32 `SendInput` | interactive user session; same integrity level as targets |
+
+All platforms require Python 3. The executable honors
+`COMPUTER_USE_PYTHON_BINARY` when the default interpreter is not suitable.
+
+### Linux
 
 Run the MCP as the signed-in desktop user with the desktop session environment:
 
@@ -88,6 +111,20 @@ packages. The V1 and V2 derived qcow2 profiles install these dependencies.
 
 The server communicates over stdin/stdout. Never write diagnostics to stdout
 from a wrapper because that corrupts the MCP stream; send logs to stderr.
+
+### macOS
+
+Run the MCP from the signed terminal or host application that owns the intended
+TCC grants. Allow Accessibility, Automation of System Events, and Screen
+Recording. A denied grant returns a typed pre-input failure; the provider does
+not report input emission when the OS rejected delivery.
+
+### Windows
+
+Run from the signed-in interactive desktop, not from Session 0. UI Automation
+cannot control a process at a higher integrity level unless the driver is
+started at a matching level. Multi-monitor screenshots use the Win32 virtual
+screen origin and GUI image coordinates are translated back before input.
 
 ## Local Calls
 

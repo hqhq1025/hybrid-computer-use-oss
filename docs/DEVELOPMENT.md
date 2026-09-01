@@ -9,6 +9,20 @@ make verify
 make smoke
 ```
 
+Cross-platform contract and compile checks:
+
+```bash
+make build-all
+cd computer-use
+python3 -m unittest -q runtime_tests.test_portable_protocol
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c -o /tmp/computer-use-linux.test .
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c -o /tmp/computer-use-windows.test.exe .
+```
+
+Native behavior still needs an interactive host/VM for each OS. Compile-only
+checks prove contract and build portability, not Accessibility/TCC grants,
+Windows desktop integrity, screenshot pixels, or real input delivery.
+
 `make build-local` is convenient during development, but its binary hash can
 differ across Go toolchain versions. `make build` uses the pinned Go 1.22 image
 from the v0.14 release build and is the reproducibility path.

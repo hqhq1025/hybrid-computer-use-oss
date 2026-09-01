@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -141,8 +142,12 @@ func (b *recordingPlatformBackend) ProcessState(int) string {
 
 func TestDefaultServiceUsesPlatformBackend(t *testing.T) {
 	service := newService()
-	if _, ok := service.backend.(linuxRuntimeBackend); !ok {
-		t.Fatalf("default backend = %T, want linuxRuntimeBackend", service.backend)
+	want := runtime.GOOS
+	if want != "linux" && want != "darwin" && want != "windows" {
+		want = "unsupported"
+	}
+	if got := service.backend.HostInfo().Platform; got != want {
+		t.Fatalf("default backend platform = %q, want %q (%T)", got, want, service.backend)
 	}
 }
 
@@ -1585,13 +1590,13 @@ func TestMCPStructuredContentIsExplicitOptIn(t *testing.T) {
 	}
 }
 
-func TestCLIHelpMentionsLinuxRuntime(t *testing.T) {
+func TestCLIHelpMentionsSupportedRuntimes(t *testing.T) {
 	var out bytes.Buffer
 	if err := runCLI([]string{"--help"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Computer Use for Linux") {
-		t.Fatalf("help text did not mention Linux runtime:\n%s", out.String())
+	if !strings.Contains(out.String(), "Linux, macOS, and Windows") {
+		t.Fatalf("help text did not mention supported runtimes:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "open-computer-use") {
 		t.Fatalf("help text leaked the retired upstream command:\n%s", out.String())
@@ -8806,7 +8811,9 @@ func TestErrorContextIsOnByDefaultAndDisableable(t *testing.T) {
 }
 
 func TestErrorContextNeedsAnAppAndNeverMasksTheOriginalError(t *testing.T) {
-	service := newService()
+	service := newServiceWithBackend(&recordingPlatformBackend{
+		err: errors.New("snapshot unavailable"),
+	})
 	t.Setenv("COMPUTER_USE_ERROR_CONTEXT", "")
 	// 没有 app 就没有现场可抓。这条同时防住 list_apps 这种无 app 的工具
 	// 在失败时去做一次毫无意义的快照。
