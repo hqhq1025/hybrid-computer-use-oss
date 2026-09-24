@@ -708,3 +708,14 @@ func TestProviderV2WireExcludesGoOwnedPolicyFields(t *testing.T) {
 		t.Fatalf("typed provider request lost private source index: %#v", action)
 	}
 }
+
+func DecodeProviderWireRequest(data []byte) (ProviderWireRequest, error) {
+	var request ProviderWireRequest
+	if err := decodeProviderWireJSON(data, &request); err != nil {
+		return ProviderWireRequest{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return ProviderWireRequest{}, err
+	}
+	return request, nil
+}

@@ -5,26 +5,6 @@ import (
 	"strings"
 )
 
-// withActionOutcome is a test seam that applies an outcome without request
-// facts. Production action paths call withActionOutcomeForRequest so typed
-// actionability evidence has the exact request and target-resolution facts.
-func withActionOutcome(
-	response toolCallResult,
-	plan settlePlan,
-	outcome settleOutcome,
-	immediateSnapshot *appSnapshot,
-	immediateNotes []string,
-) toolCallResult {
-	return withActionOutcomeForRequest(
-		response,
-		axServiceRequest{},
-		plan,
-		outcome,
-		immediateSnapshot,
-		immediateNotes,
-	)
-}
-
 func resultText(result toolCallResult) string {
 	var text strings.Builder
 	for _, item := range result.Content {

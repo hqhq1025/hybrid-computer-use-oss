@@ -162,20 +162,6 @@ func describeQuery(
 	return strings.Join(parts, " ")
 }
 
-func findProjectionDescription(snapshot *appSnapshot) (string, bool) {
-	scope := ""
-	if snapshot != nil &&
-		normalizedA11yScope(snapshot.scope) == a11yScopeContent {
-		scope = "content-scoped "
-	}
-	if snapshot != nil &&
-		snapshot.projection.Prune != nil &&
-		!*snapshot.projection.Prune {
-		return "current " + scope + "unpruned snapshot", false
-	}
-	return "current " + scope + "pruned snapshot", true
-}
-
 func (s *service) find(
 	app, role, name, text, state string,
 	limit int,

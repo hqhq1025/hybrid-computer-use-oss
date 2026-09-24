@@ -794,10 +794,6 @@ func windowRoleFamily(role string) string {
 	}
 }
 
-func runtimeReportedFailure(response ProviderAccessibilityResult) toolCallResult {
-	return (*service)(nil).runtimeReportedFailure("", axServiceRequest{}, response)
-}
-
 func (s *service) latestSnapshot() *appSnapshot {
 	var latest *appSnapshot
 	for _, snapshot := range s.snapshots {

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestLinuxRuntimeBundleIsCompleteAndOrdered(t *testing.T) {
+func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 	bundle := linuxRuntimeBundle()
 	wantPaths := []string{
 		"native/__init__.py",
@@ -54,15 +54,6 @@ func TestLinuxRuntimeBundleIsCompleteAndOrdered(t *testing.T) {
 	if strings.Join(gotPaths, "\n") != strings.Join(wantPaths, "\n") {
 		t.Fatalf("Linux runtime bundle paths differ:\ngot:\n%s\nwant:\n%s",
 			strings.Join(gotPaths, "\n"), strings.Join(wantPaths, "\n"))
-	}
-
-	var sourceParts []string
-	for _, path := range linuxProviderPaths {
-		sourceParts = append(sourceParts, bundle[path])
-	}
-	wantSource := strings.Join(sourceParts, "")
-	if linuxRuntimeScript != wantSource {
-		t.Fatal("effective Linux runtime source does not match ordered fragments")
 	}
 }
 
@@ -110,4 +101,20 @@ func TestLinuxBackendUsesProviderV2WireWithoutLegacyPlatformRoundTrip(
 			}
 		}
 	}
+}
+
+// linuxRuntimeScript is the concatenated provider source that source-contract
+// tests search.
+var linuxRuntimeScript = linuxProviderSource()
+
+func linuxProviderSource() string {
+	var source strings.Builder
+	for _, path := range linuxProviderPaths {
+		data, err := linuxRuntimeFS.ReadFile(path)
+		if err != nil {
+			panic(err)
+		}
+		source.Write(data)
+	}
+	return source.String()
 }

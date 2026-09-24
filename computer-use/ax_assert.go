@@ -598,27 +598,6 @@ func (s *service) exactRefRecordFromSnapshot(
 	return record, nil
 }
 
-func (s *service) verifyResolvedAXRefWithProbe(
-	app,
-	displayRef string,
-	target *semanticTarget,
-	goal verifyGoal,
-	timeoutMS,
-	stableMS int,
-	probe func(ProviderActionRequest) (*ProviderAccessibilityResult, error),
-) toolCallResult {
-	return s.verifyResolvedAXRefWithProbes(
-		app,
-		displayRef,
-		target,
-		goal,
-		timeoutMS,
-		stableMS,
-		probe,
-		nil,
-	)
-}
-
 type axAssertionSnapshotProof struct {
 	snapshot *appSnapshot
 	notes    []string

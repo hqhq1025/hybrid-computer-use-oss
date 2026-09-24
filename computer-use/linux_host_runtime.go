@@ -21,11 +21,6 @@ import (
 const linuxProviderDiagnosticLimit = 16 << 10
 const linuxProviderDiagnosticLabelLimit = 256
 
-func processPIDExists(pid int, procRoot string) bool {
-	state := processPIDState(pid, procRoot)
-	return state != "missing" && state != "zombie" && state != "exited"
-}
-
 func processPIDState(pid int, procRoot string) string {
 	if pid <= 0 {
 		return "missing"

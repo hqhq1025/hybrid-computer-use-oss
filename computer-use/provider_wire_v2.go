@@ -74,17 +74,6 @@ func decodeProviderWireJSON(data []byte, target any) error {
 	return nil
 }
 
-func DecodeProviderWireRequest(data []byte) (ProviderWireRequest, error) {
-	var request ProviderWireRequest
-	if err := decodeProviderWireJSON(data, &request); err != nil {
-		return ProviderWireRequest{}, err
-	}
-	if err := request.Validate(); err != nil {
-		return ProviderWireRequest{}, err
-	}
-	return request, nil
-}
-
 func DecodeProviderWireResponse(data []byte) (ProviderWireResponse, error) {
 	var response ProviderWireResponse
 	if err := decodeProviderWireJSON(data, &response); err != nil {

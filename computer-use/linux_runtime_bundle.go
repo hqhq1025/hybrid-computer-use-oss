@@ -2,10 +2,7 @@
 
 package main
 
-import (
-	"embed"
-	"strings"
-)
+import "embed"
 
 var linuxProviderPaths = []string{
 	"native/linux/provider/foundation.py",
@@ -41,23 +38,6 @@ var linuxProviderPaths = []string{
 
 //go:embed runtime.py native/__init__.py native/linux/__init__.py native/linux/provider/*.py
 var linuxRuntimeFS embed.FS
-
-// linuxRuntimeScript is the concatenated provider source that source-contract
-// tests search. Production execution materializes and imports the provider
-// package instead.
-var linuxRuntimeScript = linuxProviderSource()
-
-func linuxProviderSource() string {
-	var source strings.Builder
-	for _, path := range linuxProviderPaths {
-		data, err := linuxRuntimeFS.ReadFile(path)
-		if err != nil {
-			panic(err)
-		}
-		source.Write(data)
-	}
-	return source.String()
-}
 
 func linuxRuntimeBundle() map[string]string {
 	paths := append([]string{

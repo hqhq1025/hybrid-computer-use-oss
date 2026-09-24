@@ -637,3 +637,8 @@ type nopWriteCloser struct {
 func (nopWriteCloser) Close() error {
 	return nil
 }
+
+func processPIDExists(pid int, procRoot string) bool {
+	state := processPIDState(pid, procRoot)
+	return state != "missing" && state != "zombie" && state != "exited"
+}

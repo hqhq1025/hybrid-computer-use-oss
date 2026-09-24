@@ -962,14 +962,3 @@ func incrementalAXSnapshot(before, after *appSnapshot) ([]string, bool) {
 	}
 	return lines, true
 }
-
-func assertStableDiffIdentity(before, after *AXSnapshotV1) error {
-	changes := diffAXSnapshots(before, after)
-	for _, change := range changes {
-		if strings.Contains(change.Key, "/0:") ||
-			strings.Contains(change.Key, "/1:") {
-			return fmt.Errorf("positional diff identity leaked into key %q", change.Key)
-		}
-	}
-	return nil
-}

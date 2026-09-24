@@ -138,10 +138,6 @@ func a11ySelectorAddress(selector map[string]any) (string, error) {
 	)), nil
 }
 
-func optionalElementIndex(args map[string]any) string {
-	return elementIndexString(args["element_index"])
-}
-
 func elementIndexString(value any) string {
 	switch value := value.(type) {
 	case string:
@@ -289,15 +285,6 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func globalPointerFallbacksEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }
 
 // enabledChannels reads the channel capability switch, modeled on Playwright's

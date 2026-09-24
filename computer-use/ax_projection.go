@@ -381,31 +381,6 @@ func scopedTreeLines(
 	return out, count, nil
 }
 
-func contentRevisionForLines(lines []string, selectedText string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	var canonical strings.Builder
-	for _, line := range lines {
-		_, indent, isElement := renderedTreeElement(line)
-		if isElement {
-			trimmed := strings.TrimLeft(line, " \t")
-			if space := strings.IndexByte(trimmed, ' '); space >= 0 {
-				trimmed = trimmed[space+1:]
-			}
-			canonical.WriteString(strings.Repeat("\t", indent))
-			canonical.WriteString(trimmed)
-		} else {
-			canonical.WriteString(line)
-		}
-		canonical.WriteByte('\n')
-	}
-	canonical.WriteString("selected_text=")
-	canonical.WriteString(selectedText)
-	sum := sha256.Sum256([]byte(canonical.String()))
-	return fmt.Sprintf("c1:%x", sum[:12])
-}
-
 func recordsUnderRoot(
 	snapshot *appSnapshot,
 	root *elementRecord,

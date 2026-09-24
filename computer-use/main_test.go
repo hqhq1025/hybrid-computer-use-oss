@@ -1146,34 +1146,6 @@ func TestContentScopeHasIndependentCacheIdentityAndDoesNotPersist(t *testing.T) 
 	}
 }
 
-func TestContentRevisionIgnoresWindowWideElementIndices(t *testing.T) {
-	first := contentRevisionForLines([]string{
-		"\t3 document web \"Example\"",
-		"\t\t4 heading \"Welcome\" [focused]",
-	}, "selected")
-	second := contentRevisionForLines([]string{
-		"\t21 document web \"Example\"",
-		"\t\t42 heading \"Welcome\" [focused]",
-	}, "selected")
-	if first == "" || first != second || !validContentRevision(first) {
-		t.Fatalf("index-independent revisions differ: %q %q", first, second)
-	}
-	changed := contentRevisionForLines([]string{
-		"\t21 document web \"Example\"",
-		"\t\t42 heading \"Results\" [focused]",
-	}, "selected")
-	if changed == first {
-		t.Fatal("semantic content change must change the content revision")
-	}
-	selectionChanged := contentRevisionForLines([]string{
-		"\t21 document web \"Example\"",
-		"\t\t42 heading \"Welcome\" [focused]",
-	}, "different")
-	if selectionChanged == first {
-		t.Fatal("selected text change must change the content revision")
-	}
-}
-
 func TestContentRevisionDrivesContentTreeDeliveryIdentity(t *testing.T) {
 	first := &appSnapshot{
 		WindowHandle:    "0x1",
@@ -1400,14 +1372,9 @@ func TestLinuxClickMethodSafetyAndPlatformSupport(t *testing.T) {
 		t.Fatalf("click without target.ref must fail with an explicit error: %#v", result)
 	}
 
-	// Coordinate input is not gated by COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS,
-	// since the gate would leave the GUI channel disabled by default. GUI uses
-	// absolute coordinates of the full-desktop screenshot: they are sent
-	// unchanged, rejected when out of bounds, and never offset by a window
-	// origin or silently adjusted.
-	if strings.Contains(serverInstructions, "COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS") {
-		t.Fatal("instructions must not mention the removed pointer-fallback gate")
-	}
+	// GUI uses absolute coordinates of the full-desktop screenshot: they are
+	// sent unchanged, rejected when out of bounds, and never offset by a
+	// window origin or silently adjusted.
 	for _, fragment := range []string{
 		"def screen_absolute_point(",
 		"is outside the full desktop",
@@ -1416,11 +1383,6 @@ func TestLinuxClickMethodSafetyAndPlatformSupport(t *testing.T) {
 		if !strings.Contains(linuxRuntimeScript, fragment) {
 			t.Fatalf("GUI channel must validate and use absolute screen coordinates unchanged: missing %q", fragment)
 		}
-	}
-
-	t.Setenv("COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS", "yes")
-	if !globalPointerFallbacksEnabled() {
-		t.Fatal("global pointer authorization should accept yes")
 	}
 }
 
@@ -1462,13 +1424,13 @@ func TestElementIndexAcceptsStringAndJSONNumber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := optionalElementIndex(args); got != "0" {
+	if got := elementIndexString(args["element_index"]); got != "0" {
 		t.Fatalf("numeric element_index = %q, want 0", got)
 	}
-	if got := optionalElementIndex(map[string]any{"element_index": "14"}); got != "14" {
+	if got := elementIndexString("14"); got != "14" {
 		t.Fatalf("string element_index = %q, want 14", got)
 	}
-	if got := optionalElementIndex(map[string]any{"element_index": json.Number("1.5")}); got != "" {
+	if got := elementIndexString(json.Number("1.5")); got != "" {
 		t.Fatalf("fractional element_index = %q, want empty", got)
 	}
 }
@@ -5779,10 +5741,7 @@ func TestSpillFailureFallsBackToInlineText(t *testing.T) {
 	}
 }
 
-func TestFindFiltersAreAndedAndReuseTheRenderedLines(t *testing.T) {
-	// find output must reuse the tree's rendered lines verbatim instead of a
-	// second renderer in Go. Two implementations would drift apart, and the
-	// agent should only have to learn one format.
+func TestFindFiltersAreAnded(t *testing.T) {
 	snapshot := &appSnapshot{
 		WindowTitle: "Untitled 1",
 		Elements: []elementRecord{
@@ -5791,21 +5750,6 @@ func TestFindFiltersAreAndedAndReuseTheRenderedLines(t *testing.T) {
 			{Index: 5, ControlType: "toggle button", Name: "Bold", States: "enabled checked"},
 			{Index: 6, ControlType: "text", Placeholder: "Search files"},
 		},
-		TreeLines: []string{
-			"  3 push button \"Save\" [enabled focused]",
-			"  4 push button \"Save As…\" [enabled]",
-			"  5 toggle button \"Bold\" [enabled checked]",
-			"  6 text [placeholder=\"Search files\"]",
-			"  … 12 more nodes",
-		},
-	}
-
-	lines := linesByIndex(snapshot)
-	if len(lines) != 4 {
-		t.Fatalf("line index should skip truncation notices that do not start with a number, got %d lines", len(lines))
-	}
-	if lines[5] != "  5 toggle button \"Bold\" [enabled checked]" {
-		t.Fatalf("lines must be taken verbatim from the rendered tree, got %q", lines[5])
 	}
 
 	cases := []struct {
@@ -5872,111 +5816,6 @@ func TestVerifyReportsWhatItActuallySawNotJustFailure(t *testing.T) {
 	// return an actionable reason, not an empty failure.
 	if ok, observed := (verifyGoal{state: "checked"}).check(nil, nil); ok || observed == "" {
 		t.Fatalf("a missing element must fail with a reason, got ok=%v observed=%q", ok, observed)
-	}
-}
-
-func TestFindReportsTheProjectionItActuallySearched(t *testing.T) {
-	pruned := true
-	unpruned := false
-	for _, test := range []struct {
-		snapshot  *appSnapshot
-		wantLabel string
-		canExpand bool
-	}{
-		{nil, "current pruned snapshot", true},
-		{
-			&appSnapshot{projection: snapshotProjection{Prune: &pruned}},
-			"current pruned snapshot",
-			true,
-		},
-		{
-			&appSnapshot{projection: snapshotProjection{Prune: &unpruned}},
-			"current unpruned snapshot",
-			false,
-		},
-	} {
-		label, canExpand := findProjectionDescription(test.snapshot)
-		if label != test.wantLabel || canExpand != test.canExpand {
-			t.Fatalf(
-				"find projection = (%q, %t), want (%q, %t)",
-				label,
-				canExpand,
-				test.wantLabel,
-				test.canExpand,
-			)
-		}
-	}
-	if !strings.Contains(mainGoSource(t), "s.refreshProjectedSnapshot(app, request)") {
-		t.Fatal("find must preserve an explicit get_app_state address space")
-	}
-}
-
-func TestFindObservationBoundariesPreserveRealOmissionCauses(t *testing.T) {
-	snapshot := &appSnapshot{
-		rawTreeLines: []string{
-			"\t0 frame \"Editor\"",
-			"\t\t1 push button \"Save\"",
-			"(9 node(s) omitted — 4 subtree root(s) not traversed: " +
-				"max_tree_depth=3 was reached; 5 filtered)",
-			"(provider probe errors: child_count=1; affected nodes were " +
-				"retained when possible)",
-			"\t\t(hidden-items=12; open menu, then observe)",
-		},
-	}
-
-	boundaries := snapshotObservationBoundaries(snapshot)
-	text := strings.Join(boundaries, "\n")
-
-	if len(boundaries) != 3 {
-		t.Fatalf("unexpected boundaries: %#v", boundaries)
-	}
-	for _, expected := range []string{
-		"max_tree_depth=3 was reached",
-		"provider probe errors: child_count=1",
-		"hidden-items=12",
-	} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("missing omission cause %q in %q", expected, text)
-		}
-	}
-	if strings.Contains(text, `push button "Save"`) {
-		t.Fatalf("ordinary element lines are not observation boundaries: %q", text)
-	}
-	if strings.Contains(
-		mainGoSource(t),
-		"Observation boundaries from this same snapshot:",
-	) {
-		t.Fatal("find zero-match responses must not dump provider diagnostics")
-	}
-}
-
-func TestFindRecoveryAdviceIsCauseSpecific(t *testing.T) {
-	filtered := []string{
-		"(35 node(s) omitted — 35 filtered: not interactable)",
-	}
-	single := findRecoveryAdvice(1, filtered, true)
-	if strings.Contains(single, "Relax one filter") {
-		t.Fatalf("a single-filter query cannot relax one filter: %q", single)
-	}
-	if !strings.Contains(single, "broader synonym") ||
-		!strings.Contains(single, "rooted observation") {
-		t.Fatalf("filtered recovery is incomplete: %q", single)
-	}
-
-	depth := []string{
-		"(4 node(s) omitted — max_tree_depth=3 was reached)",
-	}
-	depthAdvice := findRecoveryAdvice(1, depth, true)
-	if strings.Contains(depthAdvice, "prune=false") {
-		t.Fatalf("depth omission must not expose removed prune controls: %q", depthAdvice)
-	}
-	if !strings.Contains(depthAdvice, "Observation boundaries") {
-		t.Fatalf("depth recovery must point to the cause ledger: %q", depthAdvice)
-	}
-
-	multiple := findRecoveryAdvice(2, nil, true)
-	if !strings.Contains(multiple, "Relax one filter") {
-		t.Fatalf("multi-filter queries should allow relaxing one filter: %q", multiple)
 	}
 }
 
@@ -7437,16 +7276,6 @@ func TestGUISuccessDoesNotAddStaticEvidencePrefix(t *testing.T) {
 	source := mainGoSource(t)
 	if !strings.Contains(source, `if internalName != "gui"`) {
 		t.Fatal("callTool still applies the generic evidence wrapper to GUI")
-	}
-}
-
-func TestLocalGUIErrorUsesStableSchema(t *testing.T) {
-	result := localGUIError("missing frame")
-	if !result.IsError {
-		t.Fatal("local GUI error must set isError")
-	}
-	if result.Content[0].Text != "missing frame" {
-		t.Fatalf("local GUI error leaked default telemetry: %q", result.Content[0].Text)
 	}
 }
 

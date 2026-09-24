@@ -8,31 +8,6 @@ import (
 	"testing"
 )
 
-func TestAXSnapshotV1SchemaIsRecursiveAndTyped(t *testing.T) {
-	schema := AXSnapshotV1JSONSchema()
-	defs, ok := schema["$defs"].(map[string]any)
-	if !ok {
-		t.Fatal("AXSnapshotV1 schema has no typed $defs")
-	}
-	for _, name := range []string{"node", "states", "capabilities", "properties"} {
-		if defs[name] == nil {
-			t.Fatalf("AXSnapshotV1 schema is missing %q", name)
-		}
-	}
-	capabilities := defs["capabilities"].(map[string]any)
-	capabilityProperties := capabilities["properties"].(map[string]any)
-	if capabilityProperties["providerActions"] == nil {
-		t.Fatal("AXSnapshotV1 schema omits raw provider actions")
-	}
-	node := defs["node"].(map[string]any)
-	properties := node["properties"].(map[string]any)
-	children := properties["children"].(map[string]any)
-	items := children["items"].(map[string]any)
-	if items["$ref"] != "#/$defs/node" {
-		t.Fatalf("node children are not recursive: %#v", children)
-	}
-}
-
 func TestRefRegistryIsMonotonicPersistentAndExplicitlyExpires(t *testing.T) {
 	registry := NewRefRegistry(2)
 	makeRef := func(name string) string {
@@ -85,34 +60,6 @@ func TestRoleOntologyAndTypedStatesDoNotInventFacts(t *testing.T) {
 	capabilities := typedAXCapabilities(record, descriptor.ModelRole)
 	if capabilities.Activate != ActivationSemantic || !capabilities.SetValue {
 		t.Fatalf("actions were not separated into capabilities: %#v", capabilities)
-	}
-}
-
-func TestAXSnapshotV1JSONRoundTripPreservesTypedModel(t *testing.T) {
-	root := &AXNode{
-		ID: "0", Role: "button", ProviderRole: "push button",
-		Name: "Save", Ref: "r1", SemanticFingerprint: "f1:save",
-		States:       AXStates{Active: TriTrue, Disabled: TriUnknown},
-		Capabilities: AXCapabilities{Activate: ActivationSemantic},
-	}
-	snapshot := &AXSnapshotV1{
-		SchemaVersion: "AXSnapshotV1",
-		AppIdentity:   "editor",
-		WindowHandle:  "window-1",
-		Revision:      "rev1",
-		Roots:         []*AXNode{root},
-	}
-	data, err := RenderAXSnapshotJSON(snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded AXSnapshotV1
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if decoded.Roots[0].Role != "button" ||
-		decoded.Roots[0].Capabilities.Activate != ActivationSemantic {
-		t.Fatalf("typed JSON round-trip drifted: %#v", decoded.Roots[0])
 	}
 }
 
@@ -1281,4 +1228,15 @@ func FuzzYAMLScalarRoundTripSurface(f *testing.F) {
 			t.Fatalf("unsafe scalar was not quoted: value=%q rendered=%q", value, rendered)
 		}
 	})
+}
+
+func assertStableDiffIdentity(before, after *AXSnapshotV1) error {
+	changes := diffAXSnapshots(before, after)
+	for _, change := range changes {
+		if strings.Contains(change.Key, "/0:") ||
+			strings.Contains(change.Key, "/1:") {
+			return fmt.Errorf("positional diff identity leaked into key %q", change.Key)
+		}
+	}
+	return nil
 }

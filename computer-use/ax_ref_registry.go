@@ -787,27 +787,6 @@ func refIdentityKey(
 	}, "\x00")
 }
 
-func (registry *RefRegistry) Acquire(
-	appIdentity,
-	windowHandle,
-	semanticTarget string,
-	role CanonicalRole,
-	name,
-	revision string,
-	providerIdentity ...string,
-) string {
-	return registry.AcquireTyped(
-		AXLocatorSemantic,
-		appIdentity,
-		windowHandle,
-		semanticTarget,
-		role,
-		name,
-		revision,
-		providerIdentity...,
-	)
-}
-
 func (registry *RefRegistry) AcquireTyped(
 	locatorKind AXLocatorKind,
 	appIdentity,

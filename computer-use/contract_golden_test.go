@@ -29,7 +29,6 @@ var contractEnvironment = []string{
 	"COMPUTER_USE_MAX_INLINE_CHARS",
 	"COMPUTER_USE_AX_TELEMETRY_LOG",
 	"COMPUTER_USE_TRACE_FILE",
-	"COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS",
 }
 
 // contractCalls are tool calls that are rejected before any desktop input.

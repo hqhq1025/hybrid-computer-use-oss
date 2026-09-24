@@ -447,18 +447,6 @@ func (s *service) bindRuntimeAppIdentity(request *axServiceRequest) error {
 	return nil
 }
 
-func (s *service) expandShortAXRef(app, address string) (string, error) {
-	address = strings.TrimSpace(address)
-	if !isShortAXRef(address) {
-		return address, nil
-	}
-	entry, err := s.resolveShortAXRef(app, address)
-	if err != nil {
-		return "", err
-	}
-	return entry.SemanticTarget, nil
-}
-
 func assertionTargetFromRefEntry(entry *AXRefEntry) string {
 	if entry == nil {
 		return ""

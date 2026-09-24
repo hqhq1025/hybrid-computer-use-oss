@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -265,16 +264,6 @@ func RenderAXSnapshotYAML(
 		}
 	}
 	return lines, nil
-}
-
-func RenderAXSnapshotJSON(snapshot *AXSnapshotV1) ([]byte, error) {
-	if snapshot == nil {
-		return nil, fmt.Errorf("cannot render nil AXSnapshotV1")
-	}
-	if err := snapshot.Validate(); err != nil {
-		return nil, err
-	}
-	return json.MarshalIndent(snapshot, "", "  ")
 }
 
 func axProjectedIndices(nodes []*AXNode) map[int]bool {

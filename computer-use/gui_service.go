@@ -119,10 +119,6 @@ func emptyGUIResult() map[string]any {
 	}
 }
 
-func localGUIError(message string) toolCallResult {
-	return textResult(message, true)
-}
-
 func guiBatchUsesFrameProvenance(actions any) bool {
 	items, ok := actions.([]any)
 	if !ok {
