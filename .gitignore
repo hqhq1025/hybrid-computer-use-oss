@@ -11,3 +11,4 @@
 *.qcow2.sha256
 /guest-images/**/cache/
 .env
+/computer-use/computer-use

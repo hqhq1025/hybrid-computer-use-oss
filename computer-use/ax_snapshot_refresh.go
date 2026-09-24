@@ -138,38 +138,6 @@ func (s *service) currentSnapshot(app string) *appSnapshot {
 	return matched
 }
 
-func (s *service) currentOrFreshSnapshot(
-	app string,
-) (*appSnapshot, toolCallResult) {
-	if snapshot := s.currentSnapshot(app); snapshot != nil {
-		return snapshot, toolCallResult{}
-	}
-	noScreenshot := false
-	_, _, result := s.refreshProjectedSnapshot(app, axServiceRequest{
-		Operation:         axServiceObserve,
-		App:               app,
-		IncludeScreenshot: &noScreenshot,
-		Scope:             a11yScopeWindow,
-	})
-	if result.IsError {
-		result = result.withEvidenceScope("error_only")
-		if result.StructuredContent == nil {
-			result.StructuredContent = map[string]any{}
-		}
-		result.StructuredContent["fresh_focus_read_attempted"] = true
-		result.StructuredContent["input_events_emitted"] = false
-		return nil, result
-	}
-	snapshot := s.currentSnapshot(app)
-	if snapshot == nil {
-		return nil, textResult(
-			"AX fresh focus read completed but did not produce one current app state; no input was emitted",
-			true,
-		).withEvidenceScope("error_only")
-	}
-	return snapshot, toolCallResult{}
-}
-
 // readSnapshot captures a snapshot without writing the snapshot cache, so that
 // read-only tools stay read-only. The cached snapshot is the address space for
 // later actions, and replacing it is a side effect.

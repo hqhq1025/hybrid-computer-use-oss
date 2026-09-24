@@ -309,25 +309,6 @@ func axProjectedParents(nodes []*AXNode) map[int]int {
 	return out
 }
 
-func (s *service) axFindNode(
-	snapshot *appSnapshot,
-	record *elementRecord,
-	_ bool,
-) *AXNode {
-	if snapshot == nil || snapshot.axSnapshot == nil || record == nil {
-		return nil
-	}
-	canonical := snapshot.axSnapshot.ByIndex[record.Index]
-	if canonical == nil {
-		return nil
-	}
-	clone := *canonical
-	clone.Parent = nil
-	clone.Children = nil
-	clone.Annotations = append([]axProviderAnnotation(nil), canonical.Annotations...)
-	return &clone
-}
-
 func (s *service) buildAndRenderAXSnapshotV1(
 	snapshot *appSnapshot,
 	view string,

@@ -20,8 +20,6 @@ type HostBackendInfo struct {
 type AccessibilityOperation string
 
 const (
-	AccessibilityObserveApps   AccessibilityOperation = "observe_apps"
-	AccessibilityObserve       AccessibilityOperation = "observe"
 	AccessibilityResolveTarget AccessibilityOperation = "resolve_target"
 	AccessibilityClick         AccessibilityOperation = "click"
 	AccessibilityScroll        AccessibilityOperation = "scroll"
@@ -32,9 +30,7 @@ const (
 
 type DesktopOperation string
 
-const (
-	DesktopExecuteBatch DesktopOperation = "gui"
-)
+const ()
 
 type WindowOperation string
 

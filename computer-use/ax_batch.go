@@ -1114,20 +1114,6 @@ func requiredA11yBatchString(
 	return text, nil
 }
 
-func validateOptionalA11yBatchString(
-	action map[string]any,
-	field string,
-) error {
-	value, present := action[field]
-	if !present {
-		return nil
-	}
-	if _, ok := value.(string); !ok {
-		return fmt.Errorf("%s must be a string", field)
-	}
-	return nil
-}
-
 func normalizedA11yBatchKey(action map[string]any) (string, error) {
 	rawKeys, hasKeys := action["keys"]
 	if !hasKeys {

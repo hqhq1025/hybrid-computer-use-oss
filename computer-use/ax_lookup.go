@@ -253,11 +253,6 @@ func isSemanticRef(value string) bool {
 		strings.HasPrefix(value, scopedSemanticRefPrefix)
 }
 
-func decodeSemanticRef(ref string) (string, error) {
-	selector, _, err := decodeSemanticRefScope(ref)
-	return selector, err
-}
-
 func decodeSemanticRefScope(ref string) (string, string, error) {
 	prefix := ""
 	switch {

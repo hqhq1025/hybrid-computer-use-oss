@@ -21,10 +21,6 @@ func optionalString(args map[string]any, key string) string {
 	return value
 }
 
-func requiredElementIndex(args map[string]any) string {
-	return strings.TrimSpace(optionalElementIndex(args))
-}
-
 func a11yTargetAddress(args map[string]any) (string, bool, error) {
 	raw, present := args["target"]
 	if !present {
@@ -146,18 +142,6 @@ func optionalElementIndex(args map[string]any) string {
 	return elementIndexString(args["element_index"])
 }
 
-func checkedOptionalElementIndex(args map[string]any) (string, error) {
-	value, provided := args["element_index"]
-	if !provided {
-		return "", nil
-	}
-	index := strings.TrimSpace(elementIndexString(value))
-	if index == "" {
-		return "", errors.New("must be an integer index or non-empty selector string")
-	}
-	return index, nil
-}
-
 func elementIndexString(value any) string {
 	switch value := value.(type) {
 	case string:
@@ -186,10 +170,6 @@ func integerElementIndexFloat(value float64) string {
 	return strconv.FormatInt(int64(value), 10)
 }
 
-func requiredFloat(args map[string]any, key string) *float64 {
-	return optionalFloat(args, key)
-}
-
 func optionalFloat(args map[string]any, key string) *float64 {
 	switch value := args[key].(type) {
 	case float64:
@@ -204,28 +184,6 @@ func optionalFloat(args map[string]any, key string) *float64 {
 		}
 	}
 	return nil
-}
-
-func optionalTextLimit(args map[string]any, key string) (*textLimit, error) {
-	value, ok := args[key]
-	if !ok {
-		return nil, nil
-	}
-	return textLimitFromValue(value, key)
-}
-
-func textLimitFromValue(value any, key string) (*textLimit, error) {
-	if stringValue, ok := value.(string); ok {
-		if strings.EqualFold(stringValue, "max") {
-			return &textLimit{max: true}, nil
-		}
-		return nil, fmt.Errorf("%s must be a positive integer or max", key)
-	}
-	integer, err := positiveIntFromValue(value, key)
-	if err != nil {
-		return nil, fmt.Errorf("%s must be a positive integer or max", key)
-	}
-	return &textLimit{count: *integer}, nil
 }
 
 func optionalPositiveInt(args map[string]any, key string) (*int, error) {
@@ -319,13 +277,6 @@ func maxInt() int {
 	return int(^uint(0) >> 1)
 }
 
-func intValue(value *float64, fallback int) int {
-	if value == nil {
-		return fallback
-	}
-	return int(*value)
-}
-
 func floatValue(value *float64, fallback float64) float64 {
 	if value == nil {
 		return fallback
@@ -338,19 +289,6 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func parseClickMethod(value string) (string, error) {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-	if normalized == "" {
-		return "auto", nil
-	}
-	for _, candidate := range clickMethodValues {
-		if normalized == candidate {
-			return normalized, nil
-		}
-	}
-	return "", fmt.Errorf("Invalid click_method %q. Expected one of: %s", value, strings.Join(clickMethodValues, ", "))
 }
 
 func globalPointerFallbacksEnabled() bool {
@@ -387,33 +325,6 @@ func enabledChannels() map[string]bool {
 	}
 	return enabled
 }
-
-// observeArgumentHelp documents the observation budget of action tools.
-// Post-action readback is the bulk of observation cost, so callers need a way
-// to say that they do not need to see a step. The default is "diff" rather
-// than "none" because returning no state would leave callers unfamiliar with
-// the tool operating blind.
-const observeArgumentHelp = "How much observation to return after the action. " +
-	"Defaults to \"diff\", which is exactly what this tool did before this " +
-	"parameter existed, so leaving it out changes nothing.\n" +
-	"  - \"none\": return only execution evidence, with no model-visible tree or " +
-	"screenshot. Intermediate batch actions still perform the internal continuity " +
-	"read required to re-resolve the next rN safely.\n" +
-	"  - \"diff\" (default): return only what changed relative to the previous " +
-	"tree state actually delivered to the model, falling back to the full tree when the change is too large for a " +
-	"delta to be cheaper. A byte-identical tree returns only a compact zero-change " +
-	"marker. No screenshot.\n" +
-	"  - \"tree\": always the full accessibility tree, no screenshot.\n" +
-	"  - \"screenshot\": the TARGET-WINDOW image plus the execution result, no tree. The right " +
-	"choice for effects the tree cannot show: formatting, canvas drawing, video " +
-	"position.\n" +
-	"  - \"full\": the full tree AND the TARGET-WINDOW screenshot.\n" +
-	"A11Y screenshots are visual evidence only. Their coordinates are window-relative " +
-	"and must never be passed to the full-desktop `GUI` tool."
-
-const getAppStateScreenshotHelp = "Whether get_app_state should also return the " +
-	"TARGET-WINDOW screenshot. Defaults to false. The image is window-relative visual " +
-	"evidence for the accessibility track and is never a coordinate source for gui."
 
 const (
 	observeNone       = "none"
@@ -475,191 +386,6 @@ func parseObservation(args map[string]any) (observation, error) {
 			"returns only what changed since the previous tree state delivered to the model.",
 		optionalString(args, "observe"), strings.Join(observeValues, ", "), observeDiff)
 }
-
-// expectArgumentHelp is the complete LLM-facing documentation of expect, so it
-// must itself cover every predicate, the target syntax and the difference
-// between predicate_verified and isError; callers have nowhere else to look.
-const expectArgumentHelp = "OPTIONAL. State what this action should CAUSE, and the " +
-	"server will act, wait for the UI to settle, re-read the tree and come back with a " +
-	"definite verdict instead of \"delivery was not verified\". Without it nothing " +
-	"changes: you get the same unverified notes as before.\n" +
-	"Predicates are phrased in toolkit-independent terms (role / name / value / state / focus); " +
-	"pass one, or several to require all of them:\n" +
-	"  • appears — the number of elements matching the full target increases after the action. " +
-	"This is a CHANGE assertion, compared against the snapshot taken before the action; role, " +
-	"name, and other specified target fields remain ANDed throughout the comparison. An " +
-	"unchanged count reports predicate_verified:false because \"it exists\" is not \"a new " +
-	"matching element appeared\". Use it for things the action creates — " +
-	"a dialog, a menu, an error label — not for scenery that was on screen all along. " +
-	"e.g. {\"appears\": \"role=dialog\"} or {\"appears\": \"role=push button,name=Save\"}\n" +
-	"  • disappears — the number of elements matching the full target decreases after the " +
-	"action, the way to wait for one of several matching controls to close. Symmetric with " +
-	"appears: something that was never there cannot disappear, and that case reports " +
-	"predicate_verified:false rather than a vacuous true. " +
-	"e.g. {\"disappears\": \"element_index=42\"}\n" +
-	"  • exists_after — a pure post-action presence assertion. Unlike appears, it does not " +
-	"claim the element is new and does not require a pre-action baseline. " +
-	"e.g. {\"exists_after\": \"role=dialog\"}\n" +
-	"  • value_becomes — an object {\"element_index\": <index|selector|target>, \"contains\": \"…\"} " +
-	"(substring, case-insensitive) or \"equals\": \"…\" (exact, whitespace-trimmed). This predicate " +
-	"reads only the element's accessibility value; a match in name, description, or placeholder " +
-	"does not satisfy it. The target must match exactly one observed element.\n" +
-	"  • state_becomes — an object {\"element_index\": <index|selector|target>, \"state\": \"checked\"}. " +
-	"The requested state must NOT hold in the pre-action snapshot and MUST hold after the action. " +
-	"Use this only for a transition caused by the action. Prefix ! to require a transition to " +
-	"absence. The target must match exactly one element in both snapshots.\n" +
-	"  • state_is_after — the same object shape as state_becomes, but a pure post-action state " +
-	"assertion. Use it when the state may already have held before the action.\n" +
-	"  • focus_moves_to — some element matching the target reports the focused state. " +
-	"e.g. {\"focus_moves_to\": \"role=entry\"}\n" +
-	"  • focus_within — the focused element is the target itself or an observed descendant, " +
-	"using the runtime's toolkit-independent accessibility path. " +
-	"e.g. {\"focus_within\": \"role=dialog\"}\n" +
-	"BASELINE. appears and disappears need a pre-action snapshot to compare against. The " +
-	"server keeps the last one per app, so calling get_app_state before acting (which the " +
-	"tools already ask you to do) is enough. Without one they report predicate_verified:false and say " +
-	"so — they will not fall back to a plain presence check, because that is exactly the " +
-	"false confirmation this design exists to avoid.\n" +
-	"TARGET SYNTAX. " + expectTargetHelp + "\n" +
-	"THE RESULT. A note tagged [expect] carries {\"predicate_verified\": true|false, " +
-	"\"evidence\": \"…\", \"settled_after_ms\": N}. predicate_verified:false is NOT an error — " +
-	"isError stays false because the predicate verdict is a fact about the observed tree, not " +
-	"a mistake in your call. It does not imply delivery; the action notes may establish only " +
-	"that input was requested or emitted. isError is still reserved for argument and addressing " +
-	"problems (unknown app, unresolvable element_index, a malformed expect). When " +
-	"predicate_verified is true, only the declared accessibility predicate held; it does not " +
-	"confirm the intended effect or remove the need for any broader verification. Read " +
-	"`evidence` before retrying: it reports what the tree actually shows."
-
-const settleArgumentHelp = "How long, in milliseconds, to keep waiting for `expect` to come " +
-	"true before giving up. Defaults to 800; ignored when expect is absent. This is a BUDGET, " +
-	"not a sleep: the server polls and returns the instant the expectation holds, and reports " +
-	"the real wait as settled_after_ms. The first check reuses the snapshot the action already " +
-	"built, so the common case (the dialog is up by the time the action returns) costs nothing " +
-	"extra and reports 0ms. Every later poll is a full accessibility-tree walk, so keep this " +
-	"tight. Maximum 3000. If the predicate is still false after 3 seconds, use the returned " +
-	"evidence and a fresh observation or assert_ax instead of extending or stacking waits."
-
-// expectProperty puts the predicates into the schema itself, not only into
-// the description.
-func expectProperty() map[string]any {
-	target := func(description string) map[string]any {
-		return map[string]any{"type": "string", "description": description}
-	}
-	return map[string]any{
-		"type":        "object",
-		"description": expectArgumentHelp,
-		"properties": map[string]any{
-			"appears": target("Target that must be present in the tree after the action AND " +
-				"have a higher matching count than in the snapshot taken before it — this asserts " +
-				"a CHANGE, not mere presence, and keeps all specified role/name fields ANDed. " +
-				"An unchanged count reports predicate_verified:false. " +
-				"e.g. \"role=dialog\" or \"push button \\\"Save\\\"\". " + expectTargetHelp),
-			"disappears": target("Target whose matching count must decrease from the pre-action " +
-				"snapshot to the post-action tree. All specified role/name fields remain ANDed. " +
-				"A target that never matched cannot disappear and reports predicate_verified:false. " +
-				"e.g. \"element_index=42\". " +
-				expectTargetHelp),
-			"exists_after": target("Target that must exist in the post-action tree. This is " +
-				"presence only, not a claim that the target newly appeared, and it needs no " +
-				"pre-action baseline. " + expectTargetHelp),
-			"focus_moves_to": target("Target that must report the focused state after the " +
-				"action, e.g. \"role=entry\". " + expectTargetHelp),
-			"focus_within": target("Target that must either hold focus itself or contain the " +
-				"focused element as an observed accessibility descendant. " + expectTargetHelp),
-			"value_becomes": map[string]any{
-				"type": "object",
-				"description": "Assert one unambiguous element's value. contains is a case-insensitive " +
-					"substring; equals is exact after trimming whitespace. Only the accessibility " +
-					"value is examined. Pass one of them, not both. A target matching multiple " +
-					"elements reports predicate_verified:false instead of choosing one.",
-				"properties": map[string]any{
-					"element_index": map[string]any{
-						"anyOf": []any{
-							map[string]any{"type": "string"},
-							map[string]any{"type": "integer"},
-						},
-						"description": "Which element to read: an index from the tree, a selector, " +
-							"or a target such as \"role=entry\". " + expectTargetHelp,
-					},
-					"contains": map[string]any{"type": "string", "description": "Expected substring of the value."},
-					"equals":   map[string]any{"type": "string", "description": "Expected exact value."},
-				},
-				"required":             []string{"element_index"},
-				"additionalProperties": false,
-			},
-			"state_becomes": map[string]any{
-				"type": "object",
-				"description": "Assert that one unambiguous target transitions into the requested " +
-					"accessibility state. The state must not already hold in the pre-action snapshot.",
-				"properties": map[string]any{
-					"element_index": map[string]any{
-						"anyOf": []any{
-							map[string]any{"type": "string"},
-							map[string]any{"type": "integer"},
-						},
-						"description": "Which element to inspect: an index, selector, or target. " + expectTargetHelp,
-					},
-					"state": map[string]any{
-						"type":        "string",
-						"description": "Expected state such as checked, focused, selected, or expanded. Prefix ! to require absence.",
-					},
-				},
-				"required":             []string{"element_index", "state"},
-				"additionalProperties": false,
-			},
-			"state_is_after": map[string]any{
-				"type": "object",
-				"description": "Assert one unambiguous target's reported accessibility state after " +
-					"the action without claiming the action caused a transition.",
-				"properties": map[string]any{
-					"element_index": map[string]any{
-						"anyOf": []any{
-							map[string]any{"type": "string"},
-							map[string]any{"type": "integer"},
-						},
-						"description": "Which element to inspect: an index, selector, or target. " + expectTargetHelp,
-					},
-					"state": map[string]any{
-						"type":        "string",
-						"description": "Expected state such as checked, focused, selected, or expanded. Prefix ! to require absence.",
-					},
-				},
-				"required":             []string{"element_index", "state"},
-				"additionalProperties": false,
-			},
-		},
-		"additionalProperties": false,
-	}
-}
-
-func settleProperty() map[string]any {
-	return map[string]any{
-		"type":        "integer",
-		"minimum":     0,
-		"maximum":     maxSettleMS,
-		"description": settleArgumentHelp,
-	}
-}
-
-// expectVerificationHelp is appended to the description of every action tool.
-// The caller is an LLM and the description is its whole documentation, so
-// text present on one tool only does not exist for the others. The last
-// sentences state the relation to observe: the two parameters are orthogonal,
-// one choosing what observation comes back and the other what is verified,
-// and they can be combined.
-const expectVerificationHelp = " VERIFICATION: this call is fire-and-forget by default and " +
-	"says so (\"delivery was not verified\"). Pass `expect` to close the loop instead — the " +
-	"server then acts, waits for the UI to settle (`settle_ms`, default 800), re-reads the " +
-	"tree and returns {\"predicate_verified\": true|false, \"evidence\": \"…\", " +
-	"\"settled_after_ms\": N}. predicate_verified describes only the declared accessibility " +
-	"predicate, not action delivery or the broader intended effect. A false verdict is not a " +
-	"call error, so isError stays false. Omitting `expect` leaves behaviour exactly as it was. " +
-	"`expect` and `observe` are ORTHOGONAL and combine freely: `observe` decides how much " +
-	"observation comes BACK (none/diff/tree/screenshot/full), `expect` decides what the server " +
-	"VERIFIES before answering. observe=\"none\" with an `expect` still returns the full " +
-	"{\"predicate_verified\", \"evidence\", \"settled_after_ms\"} verdict — the verdict is a conclusion, " +
-	"not observation, so it is never suppressed — it just comes without a tree or an image."
 
 // appArgumentHelp describes the app argument shared by every tool that accepts
 // one. Accessibility app names mix display names ("Google Chrome"), binary
@@ -1435,14 +1161,6 @@ func objectSchema(properties map[string]any, required []string) map[string]any {
 	return schema
 }
 
-func defaultAnnotations() map[string]any {
-	return map[string]any{"destructiveHint": false, "openWorldHint": false}
-}
-
-func readOnlyAnnotations() map[string]any {
-	return map[string]any{"destructiveHint": false, "idempotentHint": true, "openWorldHint": false, "readOnlyHint": true}
-}
-
 func stringProperty(description string) map[string]any {
 	return map[string]any{"type": "string", "description": description}
 }
@@ -1498,18 +1216,4 @@ func optionalBool(args map[string]any, key string) *bool {
 
 func booleanProperty(description string) map[string]any {
 	return map[string]any{"type": "boolean", "description": description}
-}
-
-func positiveIntegerProperty(description string) map[string]any {
-	return map[string]any{"type": "integer", "minimum": 1, "description": description}
-}
-
-func textLimitProperty(description string) map[string]any {
-	return map[string]any{
-		"anyOf": []any{
-			map[string]any{"type": "integer", "minimum": 1},
-			map[string]any{"type": "string", "enum": []string{"max"}},
-		},
-		"description": description,
-	}
 }

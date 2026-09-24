@@ -2645,35 +2645,6 @@ func findA11ySchemaBranch(
 	return nil
 }
 
-func findA11yActionSchemaBranch(
-	t *testing.T,
-	actionType string,
-) map[string]any {
-	t.Helper()
-	act := findA11ySchemaBranch(t, "act", "")
-	actionItems := act["properties"].(map[string]any)["actions"].(map[string]any)["items"].(map[string]any)
-	branches, ok := actionItems["oneOf"].([]any)
-	if !ok {
-		t.Fatalf("a11y actions must publish oneOf: %#v", actionItems)
-	}
-	for _, raw := range branches {
-		branch, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		properties, ok := branch["properties"].(map[string]any)
-		if !ok {
-			continue
-		}
-		action, ok := properties["type"].(map[string]any)
-		if ok && action["const"] == actionType {
-			return branch
-		}
-	}
-	t.Fatalf("a11y action schema branch %q not found", actionType)
-	return nil
-}
-
 func shortTempDir(t *testing.T) string {
 	t.Helper()
 	path, err := os.MkdirTemp("/tmp", "ocu-*")
@@ -7633,7 +7604,7 @@ func TestVerifyPreservesProjectionWithoutReplacingActionCache(t *testing.T) {
 
 	source := mainGoSource(t)
 	for _, marker := range []string{
-		"snapshot, _, result := s.readProjectedSnapshot(app, axServiceRequest{",
+		"snapshot, _, result := s.readProjectedSnapshot(app, request)",
 	} {
 		if !strings.Contains(source, marker) {
 			t.Fatalf("verify projection contract missing %q", marker)

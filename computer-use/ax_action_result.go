@@ -492,11 +492,6 @@ func (s *service) stabilizePostActionContent(
 	return refreshed, notes, true, true
 }
 
-// actionResult completes an action without an expect plan.
-func (s *service) actionResult(app string, request axServiceRequest) toolCallResult {
-	return s.actionResultSettling(app, request, settlePlan{})
-}
-
 func (s *service) actionResultSettling(app string, request axServiceRequest, plan settlePlan) toolCallResult {
 	// The pre-action state is already cached (actions require a prior
 	// observation, and every action refreshes the cache), so the before/after

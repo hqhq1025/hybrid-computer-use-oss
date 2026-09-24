@@ -20,8 +20,6 @@ const (
 	publicToolGUI = "GUI"
 )
 
-var clickMethodValues = []string{"auto", "accessibility", "app_post", "sky_click", "global"}
-
 const (
 	guiMaxActions       = 64
 	guiMaxScrollDelta   = 2000
@@ -151,10 +149,6 @@ type windowSelection struct {
 	Reason         string                     `json:"reason,omitempty"`
 	CandidateCount int                        `json:"candidateCount,omitempty"`
 	Candidates     []windowSelectionCandidate `json:"candidates,omitempty"`
-}
-
-func (f frame) renderedLocalFrame() string {
-	return fmt.Sprintf("{{x: %.0f, y: %.0f, width: %.0f, height: %.0f}}", f.X, f.Y, f.Width, f.Height)
 }
 
 type elementRecord struct {
@@ -329,7 +323,6 @@ type appSnapshot struct {
 	contentRoot               *elementRecord
 	contentCanonicalCount     int
 	contentRevision           string
-	shortRefs                 map[string]string
 	axSnapshot                *AXSnapshotV1
 	shadowAST                 AXShadowStats
 	actionExecution           *RuntimeActionEvidence
@@ -627,10 +620,6 @@ func spillToFile(kind, text string) string {
 		"response would otherwise have inlined. If you have no way to read files, "+
 		"ask the operator to unset COMPUTER_USE_OUTPUT_MODE.]",
 		head, kind, path, len(text), strings.Count(text, "\n")+1)
-}
-
-func (s *appSnapshot) result() toolCallResult {
-	return s.resultWithNotes(nil)
 }
 
 // resultWithTreeOverride renders the given lines in place of TreeLines, for
@@ -1257,16 +1246,6 @@ func compactTriState(value any) any {
 		return "unknown"
 	default:
 		return value
-	}
-}
-
-func boolEvidenceIfTrue(
-	target map[string]any,
-	source map[string]any,
-	key string,
-) {
-	if value, ok := source[key].(bool); ok && value {
-		target[key] = true
 	}
 }
 

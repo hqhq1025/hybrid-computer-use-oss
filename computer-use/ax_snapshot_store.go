@@ -84,17 +84,6 @@ func deliveredTreeKey(snapshot *appSnapshot) string {
 		snapshot.projection.Root
 }
 
-func deliveredTreeIdentity(snapshot *appSnapshot) string {
-	if snapshot == nil {
-		return ""
-	}
-	if normalizedA11yScope(snapshot.projection.Scope) == a11yScopeContent &&
-		snapshot.contentRevision != "" {
-		return snapshot.contentRevision
-	}
-	return snapshot.SnapshotID
-}
-
 func repeatedTreeReferenceLines(snapshot *appSnapshot) []string {
 	if snapshot == nil {
 		return nil

@@ -582,15 +582,6 @@ func restoreAmbiguityPlugin() DistillationPlugin {
 	}}
 }
 
-func collectionRole(role CanonicalRole) bool {
-	switch role {
-	case "list", "grid", "table", "tree", "treegrid", "document", "group":
-		return true
-	default:
-		return false
-	}
-}
-
 func collectionItemRoleV1(role CanonicalRole) bool {
 	switch role {
 	case "listitem", "gridcell", "treeitem", "article", "option":
