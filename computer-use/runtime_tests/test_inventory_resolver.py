@@ -953,8 +953,8 @@ class VisibleCellsIndexerTests(AtspiPatchedTestCase):
         import inspect
         params = inspect.signature(runtime.render_visible_cells).parameters
         self.assertIn("indexer", params,
-                      "render_visible_cells 必须显式接收 indexer，"
-                      "否则函数体里那个自由名字会在运行时炸")
+                      "render_visible_cells must accept indexer explicitly; "
+                      "otherwise the free name in its body fails at runtime")
 
     def test_call_site_passes_indexer(self):
         # The parameter alone is not enough: if the call site omits it, the
@@ -966,11 +966,11 @@ class VisibleCellsIndexerTests(AtspiPatchedTestCase):
         call = source[source.index("render_visible_cells("):]
         call = call[:call.index(")\n")]
         self.assertIn("indexer=indexer", call,
-                      "render_tree 调用 render_visible_cells 时必须把 indexer 传下去")
+                      "render_tree must pass indexer to render_visible_cells")
         self.assertIn(
             "annotations=annotations",
             call,
-            "自管理表格的采集缺口必须进入统一 completeness 账本",
+            "gaps in self-managed tables must reach the shared completeness record",
         )
 
     def test_visible_cell_range_failure_marks_acquisition_incomplete(self):

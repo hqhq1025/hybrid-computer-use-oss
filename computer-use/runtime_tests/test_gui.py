@@ -162,7 +162,7 @@ class PixelEvidenceTests(unittest.TestCase):
         blink_off = self._frame(10, size=size)  # caret hidden, as before
 
         change = runtime.persistent_pixel_change(before, blink_on, blink_off)
-        self.assertEqual(change["changed"], 0, "闪烁不该算作变化")
+        self.assertEqual(change["changed"], 0, "a flicker must not count as a change")
         self.assertIn(
             "sampled_pixel_change=none", runtime.pixel_change_note(change))
 

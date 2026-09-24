@@ -331,12 +331,12 @@ class RenderIndentationTests(AtspiPatchedTestCase):
         _, lines = runtime.render_tree(root, None, [0], prune=True)
 
         rendered = self._nodes(lines)
-        self.assertEqual(len(rendered), 2, "中间的 filler 应被裁掉：{}".format(rendered))
+        self.assertEqual(len(rendered), 2, "the intermediate filler must be pruned: {}".format(rendered))
         self.assertIn('frame "Doc"', rendered[0])
         self.assertIn('push button "Save"', rendered[1])
         self.assertEqual(
             self._indent(rendered[1]) - self._indent(rendered[0]), 1,
-            "被裁的 filler 不该在缩进上留下空档：{}".format(rendered),
+            "a pruned filler must not leave an indentation gap: {}".format(rendered),
         )
 
     def test_unpruned_tree_keeps_one_level_per_node(self):
@@ -590,7 +590,7 @@ class ClickableMarkerTests(AtspiPatchedTestCase):
             invocable = runtime.preferred_action_index(node) is not None
             self.assertEqual(
                 has_click, invocable,
-                "动作表 {!r}：标记说 {}，实际可调用 {}".format(
+                "action table {!r}: mark says {}, invocable is {}".format(
                     actions, has_click, invocable),
             )
             self.assertEqual(has_click, "has-click-action" in self.segment(node))
@@ -1480,7 +1480,7 @@ class EmptyCellOmissionTests(AtspiPatchedTestCase):
 
         skip = body.index("if not value:")
         build = body.index("record = record_for(")
-        self.assertLess(skip, build, "跳过判断必须在 record_for 之前")
+        self.assertLess(skip, build, "the skip decision must happen before record_for")
 
 class ElectronActionNamesTests(AtspiPatchedTestCase):
     """Chromium and Electron action names cause both missed and false click entries."""
@@ -1515,7 +1515,7 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
         self.assertTrue(has_click)
         self.assertIsNotNone(runtime.preferred_action_index(node))
         self.assertNotIn("doDefault", names,
-                         "它就是 click 本身，不该再列进 More actions")
+                         "it is the click itself and must not be listed in More actions")
 
     def test_click_ancestor_is_not_this_element_s_click(self):
         """`clickAncestor` contains "click" but clicks an ancestor element.
@@ -1549,7 +1549,7 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
                          "click_ancestor", "CLICKANCESTOR"):
             node = self.make([spelling])
             _, has_click = runtime.node_actions(node)
-            self.assertFalse(has_click, "{!r} 应当被判为非本元素动作".format(spelling))
+            self.assertFalse(has_click, "{!r} must not count as this element's action".format(spelling))
 
     def test_gecko_checkbox_state_named_actions_are_click_entries(self):
         """Gecko names checkbox actions after the resulting state.
@@ -1562,8 +1562,8 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
         for spelling in ("check", "uncheck"):
             node = self.make([spelling])
             names, has_click = runtime.node_actions(node)
-            self.assertTrue(has_click, "{!r} 应当算作点击入口".format(spelling))
-            self.assertNotIn(spelling, names, "它就是 click 本身，不该再列进 More actions")
+            self.assertTrue(has_click, "{!r} must count as a click entry point".format(spelling))
+            self.assertNotIn(spelling, names, "it is the click itself and must not be listed in More actions")
 
     def test_plain_click_still_works(self):
         node = self.make(["click", "showContextMenu"])
@@ -1577,7 +1577,7 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
         source = effective_runtime_source()
 
         self.assertEqual(source.count('"default.activate",'), 1,
-                         "CLICK_COVERED_ACTIONS 不应存在副本")
+                         "CLICK_COVERED_ACTIONS must not be duplicated")
 
 class ObjectReplacementTests(AtspiPatchedTestCase):
     def test_object_replacement_placeholder_is_stripped(self):
@@ -1713,7 +1713,7 @@ class PruneCostTests(AtspiPatchedTestCase):
         # Only the window and the surviving button pay for a full record.
         self.assertEqual(len(records), 2, [r["name"] for r in records])
         self.assertEqual(len(calls), 2,
-                         "被裁掉的节点不该走 record_for，实际调用了 {} 次".format(len(calls)))
+                         "pruned nodes must not reach record_for, but it ran {} times".format(len(calls)))
 
     def test_prune_decision_still_keeps_named_containers(self):
         """Named containers are still kept.
@@ -1968,7 +1968,7 @@ class DenseIndexTests(AtspiPatchedTestCase):
             window, None, [0], indexer=runtime.StableIndexer({}), prune=True)
         indices = sorted(r["index"] for r in records)
         self.assertEqual(indices, list(range(len(records))),
-                         "下标应当稠密，实际 {}".format(indices))
+                         "indices must be dense, got {}".format(indices))
 
 class TruncatedNameIdentityTests(AtspiPatchedTestCase):
     """Truncating a name with text_limit does not weaken element identity.
@@ -1987,7 +1987,7 @@ class TruncatedNameIdentityTests(AtspiPatchedTestCase):
             record = runtime.record_for(node, 7, [0, 1], None, text_limit=limit)
             self.assertTrue(
                 runtime.record_still_matches(node, record, None),
-                "text_limit={} 时同一个节点没认出来".format(limit))
+                "text_limit={} failed to recognize the same node".format(limit))
 
     def test_a_different_element_sharing_the_prefix_is_not_confused(self):
         """Two elements sharing a truncated prefix are not confused.
@@ -2004,7 +2004,7 @@ class TruncatedNameIdentityTests(AtspiPatchedTestCase):
             record = runtime.record_for(node, 7, [0, 1], None, text_limit=limit)
             self.assertFalse(
                 runtime.record_still_matches(sibling, record, None),
-                "text_limit={} 时前缀相同的另一个元素被误判成同一个".format(limit))
+                "text_limit={} confused a different element sharing the prefix".format(limit))
 
     def test_short_truncation_margins_always_carry_a_fingerprint(self):
         """The ellipsis adds 3 characters, so length alone cannot reveal truncation."""

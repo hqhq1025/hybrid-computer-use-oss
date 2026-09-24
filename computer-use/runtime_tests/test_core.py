@@ -136,7 +136,7 @@ class InsertTextTests(AtspiPatchedTestCase):
         window = self._window_with(liar)
 
         self.assertFalse(runtime.insert_text(window, "hello"))
-        self.assertEqual(liar.inserts, [(0, "hello")], "应确实尝试过写入")
+        self.assertEqual(liar.inserts, [(0, "hello")], "the write must actually be attempted")
 
     def test_accepts_buffer_that_actually_grows(self):
         iface = FakeTextIface()
@@ -163,7 +163,7 @@ class InsertTextTests(AtspiPatchedTestCase):
         window = self._window_with(iface)
 
         self.assertTrue(runtime.insert_text(window, ""))
-        self.assertEqual(iface.inserts, [], "空文本不该产生写入调用")
+        self.assertEqual(iface.inserts, [], "empty text must not produce a write call")
 
     def test_returns_false_when_no_editable_target_exists(self):
         window = FakeNode(children=(FakeNode(states=(STATE.VISIBLE,)),))
@@ -504,16 +504,16 @@ class ChannelTaggingTests(AtspiPatchedTestCase):
             {"intent": "scroll", "app": "x", "direction": "down", "pages": 1},
         ):
             notes = self._notes(op)
-            self.assertTrue(notes, "{} 没有产生 note".format(op["intent"]))
+            self.assertTrue(notes, "{} produced no note".format(op["intent"]))
             # Each note is tagged on two orthogonal axes, addressing channel
             # and execution path; the agent needs both to choose a check.
             self.assertTrue(
                 notes[0].startswith(("[a11y]", "[gui]", "[keyboard]")),
-                "{} 的 note 缺少寻址通道标签: {}".format(op["intent"], notes[0][:70]),
+                "{} note lacks the addressing-channel label: {}".format(op["intent"], notes[0][:70]),
             )
             self.assertTrue(
                 "[semantic] " in notes[0] or "[synthesis] " in notes[0],
-                "{} 的 note 缺少执行路径标签: {}".format(op["intent"], notes[0][:70]),
+                "{} note lacks the execution-path label: {}".format(op["intent"], notes[0][:70]),
             )
 
 class ActionNotesTests(AtspiPatchedTestCase):
@@ -943,7 +943,7 @@ class FocusWindowTests(AtspiPatchedTestCase):
         )
 
         self.assertTrue(runtime.focus_window(window))
-        self.assertEqual(component.grab_calls, 0, "已激活的窗口不该再抓焦点")
+        self.assertEqual(component.grab_calls, 0, "an already active window must not grab focus again")
 
     def test_grabs_focusable_child_to_activate_window(self):
         window = FakeNode()
@@ -1238,7 +1238,7 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
         with self.assertRaises(RuntimeError) as ctx:
             perform_provider_operation({"intent": "keypress", "app": "x", "key": "shft+s"})
         self.assertIn("Unsupported modifier", str(ctx.exception))
-        self.assertEqual(self.focus_calls, [], "参数非法时不该动用户的窗口")
+        self.assertEqual(self.focus_calls, [], "invalid arguments must not touch the user's windows")
         self.assertEqual(self.sent_keys, [])
 
     def test_type_text_requires_focus_before_synthesis_fallback(self):
@@ -1324,7 +1324,7 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
 
         with self.assertRaises(RuntimeError):
             perform_provider_operation({"intent": "keypress", "app": "x", "key": "a"})
-        self.assertEqual(self.sent_keys, [], "夺焦点失败后不得再合成任何按键")
+        self.assertEqual(self.sent_keys, [], "no key may be synthesized after focus acquisition fails")
 
     def test_stale_element_ref_fails_before_any_input(self):
         record = {
