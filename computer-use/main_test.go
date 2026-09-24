@@ -382,9 +382,6 @@ func TestDecisionRelevantStatesAreRendered(t *testing.T) {
 	if strings.Contains(linuxRuntimeScript, `marks.append("disabled")`) {
 		t.Fatal("inferring 'disabled' from a missing ENABLED state produces false positives on Linux")
 	}
-	if !strings.Contains(linuxRuntimeScript, "绝不从状态的缺失反推语义") {
-		t.Fatal("the rule against inferring from absent states must stay documented in the source")
-	}
 }
 
 func TestTruncationIsPrioritisedAndVisible(t *testing.T) {
@@ -8232,25 +8229,20 @@ func TestStabilityWaitPortsOnlyWhatLinuxCanSupport(t *testing.T) {
 	//              and 12/25 in LibreOffice, so gating on it would block about
 	//              half of the valid clicks in LibreOffice.
 	if !strings.Contains(linuxRuntimeScript, "def wait_until_stable(") {
-		t.Fatal("动作前要等元素停止移动")
+		t.Fatal("actions must wait for the element to stop moving")
 	}
-	for _, fragment := range []string{
-		"只做 stable，不做 enabled",
-		"target_unstable",
-	} {
-		if !strings.Contains(linuxRuntimeScript, fragment) {
-			t.Fatalf("缺少 %q：既要实现，也要写清为什么只port这一条", fragment)
-		}
+	if !strings.Contains(linuxRuntimeScript, "target_unstable") {
+		t.Fatal("an unstable target must be reported as target_unstable")
 	}
 	// The coordinate fallback must refuse while the target is unstable;
 	// semantic actions do not depend on geometry and skip this gate.
 	if !strings.Contains(linuxRuntimeScript, "require_stable_coordinate_geometry") {
-		t.Fatal("坐标动作缺少稳定几何门禁")
+		t.Fatal("coordinate actions must require stable geometry")
 	}
 	// The limit is configurable: animation-heavy apps need longer, and
 	// latency-sensitive setups must be able to turn the wait off.
 	if !strings.Contains(linuxRuntimeScript, "COMPUTER_USE_STABLE_TIMEOUT_MS") {
-		t.Fatal("稳定等待的上限要可配置")
+		t.Fatal("the stability wait limit must be configurable")
 	}
 }
 

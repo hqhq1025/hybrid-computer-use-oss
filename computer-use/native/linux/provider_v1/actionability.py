@@ -102,7 +102,7 @@ def wait_until_stable(element, window_bounds, first=None):
     Returns ``(final_frame, samples, settled)``. Pass ``first`` when the frame
     has already been sampled, to avoid a redundant read.
 
-    Only stability is checked, not enablement (只做 stable，不做 enabled).
+    Only stability is checked, not enablement.
     Playwright's actionability checks also wait for "enabled", but that signal
     is unreliable over AT-SPI: Nautilus file icons expose neither ENABLED nor
     SENSITIVE (only SHOWING, VISIBLE and FOCUSABLE) yet offer working "open"

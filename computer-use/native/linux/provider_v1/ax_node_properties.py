@@ -484,7 +484,7 @@ def state_segment(node, has_click_action=False, borrowed_name=False):
     """Render notable states as compact marks such as `[checked expanded]`.
 
     Report only states whose presence is meaningful, and never infer meaning
-    from an absent state (绝不从状态的缺失反推语义). In particular, a
+    from an absent state. In particular, a
     missing ENABLED state is not rendered as `[disabled]`: Nautilus file
     icons set neither ENABLED nor SENSITIVE (only SHOWING, VISIBLE and
     FOCUSABLE) yet expose working `open` and `menu` actions. Toolkits set
