@@ -31,10 +31,11 @@ from hcu.paths import (
 )
 from hcu.osworld.agent_loop import TurnSettings, run_agent_phase
 from hcu.osworld.agents import (
-    claude_gateway_endpoint,
     claude_mcp_config,
+    claude_system_prompt,
     codex_config,
     launcher_script,
+    task_gateway_base,
 )
 from hcu.osworld.diagnostics import collect_guest_infra_diagnostic
 from hcu.osworld.evaluation import run_official_evaluator
@@ -44,6 +45,7 @@ from hcu.osworld.guest import (
     GUEST_CLAUDE_MCP_ADAPTER,
     GUEST_CLAUDE_MCP_CONFIG,
     GUEST_CODEX,
+    GUEST_CODEX_HOME,
     GUEST_CONFIG,
     GUEST_LAUNCHER,
     GUEST_MCP,
@@ -474,17 +476,21 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
 def stage_local_files(run: TaskRun) -> None:
     """Write the agent configuration, prompt, skill and launcher locally."""
     args = run.args
+    affinity_prefix = f"osworld-{args.benchmark_version}-hybrid"
     if args.agent == "codex":
         write_local(
             run.config_path,
             codex_config(
                 model=args.model,
                 effort=args.effort,
-                gateway_base=args.gateway_base,
-                affinity_id=run.run_tag,
-                affinity_prefix=(
-                    f"osworld-{args.benchmark_version}-hybrid"
-                ),
+                base_url=task_gateway_base(
+                    args.gateway_base,
+                    run.run_tag,
+                    affinity_prefix=affinity_prefix,
+                ) + "/v1",
+                codex_home=GUEST_CODEX_HOME,
+                base_instructions=GUEST_BASE_INSTRUCTIONS,
+                mcp_command=GUEST_MCP,
             ),
         )
     else:
@@ -500,15 +506,15 @@ def stage_local_files(run: TaskRun) -> None:
     run.skill_copy.write_bytes(run.skill_file.read_bytes())
     base_instructions = run.base_instructions_file.read_text(encoding="utf-8")
     if args.agent == "claude-code":
-        base_instructions += (
-            "\n\n# Benchmark computer-use skill\n\n"
-            + run.skill_file.read_text(encoding="utf-8")
+        base_instructions = claude_system_prompt(
+            base_instructions,
+            run.skill_file.read_text(encoding="utf-8"),
         )
     write_local(run.base_instructions_copy, base_instructions)
-    run.claude_endpoint = claude_gateway_endpoint(
+    run.claude_endpoint = task_gateway_base(
         args.claude_gateway_base,
         run.run_tag,
-        affinity_prefix=f"osworld-{args.benchmark_version}-hybrid",
+        affinity_prefix=affinity_prefix,
     )
     write_local(
         run.launcher_path,

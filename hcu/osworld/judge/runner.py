@@ -17,7 +17,7 @@ import shutil
 import time
 from typing import TYPE_CHECKING
 
-from hcu.osworld.agents import codex_config
+from hcu.osworld.agents import codex_config, task_gateway_base
 from hcu.osworld.guest import (
     GUEST_CODEX,
     GUEST_JUDGE_BASE_INSTRUCTIONS,
@@ -33,6 +33,7 @@ from hcu.osworld.guest import (
     GUEST_JUDGE_STDERR,
     GUEST_JUDGE_TRACE,
     GUEST_JUDGE_WORK,
+    GUEST_MCP,
     GUEST_PRIOR_JUDGE_EVIDENCE,
     fetch_guest_file,
     guest_json_file,
@@ -286,11 +287,14 @@ def stage_judge_inputs(
         codex_config(
             model=settings.model,
             effort=settings.effort,
-            gateway_base=settings.gateway_base,
-            affinity_id=run_tag,
+            base_url=task_gateway_base(
+                settings.gateway_base,
+                run_tag,
+                affinity_prefix="osworld-v2-judge",
+            ) + "/v1",
             codex_home=GUEST_JUDGE_CODEX_HOME,
             base_instructions=GUEST_JUDGE_BASE_INSTRUCTIONS,
-            affinity_prefix="osworld-v2-judge",
+            mcp_command=GUEST_MCP,
         ),
         encoding="utf-8",
     )

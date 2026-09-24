@@ -42,22 +42,34 @@ CODEX_BUNDLED_SYSTEM_SKILLS = (
 )
 
 
+CODEX_PROVIDER_ID = "osworld_gateway"
+CODEX_PROVIDER_NAME = "OSWorld task-scoped model gateway"
+
+
+def task_gateway_base(
+    gateway_base: str,
+    affinity_id: str,
+    *,
+    affinity_prefix: str,
+) -> str:
+    """Gateway URL whose ``/t/<id>`` path carries the task affinity ID."""
+    return (
+        gateway_base.rstrip("/")
+        + "/t/"
+        + urllib.parse.quote(f"{affinity_prefix}-{affinity_id}", safe="")
+    )
+
+
 def codex_config(
     *,
     model: str,
     effort: str,
-    gateway_base: str,
-    affinity_id: str,
-    codex_home: str = GUEST_CODEX_HOME,
-    base_instructions: str = GUEST_BASE_INSTRUCTIONS,
-    affinity_prefix: str = "osworld-v2-hybrid",
+    base_url: str,
+    codex_home: str,
+    base_instructions: str,
+    mcp_command: str,
 ) -> str:
-    endpoint = (
-        gateway_base.rstrip("/")
-        + "/t/"
-        + urllib.parse.quote(f"{affinity_prefix}-{affinity_id}", safe="")
-        + "/v1"
-    )
+    """Codex ``config.toml`` with ambient features off and the MCP required."""
     disabled_system_skills = "\n\n".join(
         (
             "[[skills.config]]\n"
@@ -68,7 +80,7 @@ def codex_config(
     )
     return f"""\
 model = {json.dumps(model)}
-model_provider = "osworld_v2_gateway"
+model_provider = "{CODEX_PROVIDER_ID}"
 model_reasoning_effort = {json.dumps(effort)}
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
@@ -138,13 +150,13 @@ enabled = false
 
 {disabled_system_skills}
 
-[model_providers.osworld_v2_gateway]
-name = "OSWorld V2 task-scoped Azure gateway"
-base_url = {json.dumps(endpoint)}
+[model_providers.{CODEX_PROVIDER_ID}]
+name = {json.dumps(CODEX_PROVIDER_NAME)}
+base_url = {json.dumps(base_url)}
 wire_api = "responses"
 
 [mcp_servers.computer_use]
-command = {json.dumps(GUEST_MCP)}
+command = {json.dumps(mcp_command)}
 args = ["mcp"]
 required = true
 startup_timeout_sec = 60
@@ -152,18 +164,19 @@ tool_timeout_sec = 180
 """
 
 
-def claude_mcp_config() -> str:
+def claude_mcp_config(
+    *,
+    adapter: str = GUEST_CLAUDE_MCP_ADAPTER,
+    mcp_command: str = GUEST_MCP,
+) -> str:
+    """Claude Code MCP configuration that runs the MCP behind the adapter."""
     return json.dumps(
         {
             "mcpServers": {
                 "computer_use": {
                     "type": "stdio",
                     "command": "/usr/bin/python3",
-                    "args": [
-                        GUEST_CLAUDE_MCP_ADAPTER,
-                        GUEST_MCP,
-                        "mcp",
-                    ],
+                    "args": [adapter, mcp_command, "mcp"],
                 }
             }
         },
@@ -171,17 +184,13 @@ def claude_mcp_config() -> str:
     ) + "\n"
 
 
-def claude_gateway_endpoint(
-    gateway_base: str,
-    affinity_id: str,
-    *,
-    affinity_prefix: str = "osworld-v2-hybrid",
-) -> str:
-    return (
-        gateway_base.rstrip("/")
-        + "/t/"
-        + urllib.parse.quote(f"{affinity_prefix}-{affinity_id}", safe="")
-    )
+def claude_system_prompt(base_instructions: str, skill: str) -> str:
+    """Claude Code gets the skill in its replacement system prompt.
+
+    A ``CLAUDE.md`` file would also load ambient configuration, so the skill
+    is appended to the base instructions instead.
+    """
+    return base_instructions + "\n\n# Benchmark computer-use skill\n\n" + skill
 
 
 def claude_mcp_tools(public_tools=None) -> str:
