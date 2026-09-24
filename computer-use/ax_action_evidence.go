@@ -42,26 +42,9 @@ const (
 	pixelsChanged
 )
 
-// readTextAttributeChange 看运行时有没有报出格式属性的变化。
-//
-// 这是**最强**的一档证据：它直接说出"justification 从 left 变成 right"，
-// 而像素只能说"0.1% 变了"。有它在就不必再谈"树没变所以可能失败"。
-// textAttributeChanges 比对两份快照里同一元素的格式属性。
-//
-// 这条通道是查 Playwright 时反推出来的：它的 aria snapshot 只渲染一小撮语义属性
-// （[checked] [level=1]），"查任意样式属性"是 toHaveCSS 这类**断言**的事——
-// **快照是给 agent 看的摘要，断言是精确查询，两者不必是同一套字段。**
-//
-// 顺着这条思路回头查 AT-SPI，才发现 Atspi.Text.get_default_attributes() 一直
-// 能读到 justification / size / weight / fg-color。此前记进文档的
-// "改段落对齐后 a11y 树字节不变"**是错的**——树不变是因为我们没取这些字段，
-// 不是信息不存在。整场"像素噪声和光标闪烁同量级"的仗，本可以绕过去。
-//
-// 比对不花额外的 AT-SPI 调用：属性跟着 record 走，而动作前的快照 Go 侧本来
-// 就缓存着。按 element 身份配对（automationId 优先，其次 role+name），
-// 不按下标——下标每次快照都会重排。
-// systemFontFamilies 是这台桌面上的**回退字体**。名字出现在 family-name 的
-// 变化两端时，说明发生的是字体替换，而不是谁把文字改粗了。
+// systemFontFamilies are the desktop's fallback fonts. When one appears on
+// either side of a family-name change, the change is a font substitution
+// rather than an edit such as making text bold.
 var systemFontFamilies = map[string]bool{
 	"ubuntu": true, "cantarell": true, "dejavu sans": true, "dejavu serif": true,
 	"dejavu sans mono": true, "liberation sans": true, "liberation serif": true,
@@ -70,22 +53,24 @@ var systemFontFamilies = map[string]bool{
 	"monospace": true, "sans": true,
 }
 
-// withoutRepaintNoise 去掉**页面自己重绘**造成的属性变化，只留真正可能是
-// 动作后果的那些。
+// withoutRepaintNoise drops attribute changes caused by the page repainting
+// itself and keeps only those that may result from the action.
 //
-// 为什么必须做：旧 note 曾把属性变化写成动作效果的直接因果证据。
-// 在 nfl.com 上它捕到的是 `family-name: Ubuntu -> All-Pro Sans`、
-// `size: 18pt -> 22.5pt`——网页字体**异步加载完了**，把回退字体换掉而已。
-// 轨迹第 16 步 agent 只是按了个 ctrl+l，却被告知"动作生效了，证据是某个标题
-// 的字体变了"。工具在替一件没发生的事作证，这比不给证据更坏。
+// Attribute changes are otherwise easily misread as proof of an action's
+// effect. When a web font finishes loading asynchronously, for example, it
+// replaces the fallback font (`family-name: Ubuntu -> Open Sans`, `size: 18pt
+// -> 22.5pt`) during a keystroke that had nothing to do with it. Vouching for
+// an effect that did not happen is worse than giving no evidence.
 //
-// 两类噪声，判据都刻意保守：
+// Two kinds of noise are removed, both conservatively:
 //
-//	字体替换   family-name 的任一端是系统回退字体。此时 size/weight/style 是
-//	           新字体的度量带来的，一并丢掉——但**只在这个节点上**丢，别的
-//	           节点该报还报，所以 LibreOffice 里真的加粗一段文字照样能报出来。
-//	肉眼不可见 *-color 的每个通道都只差 ≤8/255。244,248,248 -> 246,249,249
-//	           这种是抗锯齿/合成的舍入，看都看不出来，更不可能是谁点了什么。
+//	font swap   family-name has a system fallback font on either side. The
+//	            size, weight and style changes follow the new font's metrics
+//	            and are dropped too, but only for this node, so a real bold
+//	            edit elsewhere is still reported.
+//	invisible   every *-color channel differs by at most 8/255, as in
+//	            244,248,248 -> 246,249,249: antialiasing or compositing
+//	            rounding that nobody can see, let alone cause by an action.
 func withoutRepaintNoise(diffs []string) []string {
 	fontSwap := false
 	for _, diff := range diffs {
@@ -117,7 +102,7 @@ func withoutRepaintNoise(diffs []string) []string {
 	return kept
 }
 
-// splitDiff 把 "size: 18pt -> 22.5pt" 拆回三段。
+// splitDiff splits "size: 18pt -> 22.5pt" back into its three parts.
 func splitDiff(diff string) (name, from, to string, ok bool) {
 	colon := strings.Index(diff, ": ")
 	arrow := strings.Index(diff, " -> ")
@@ -127,9 +112,10 @@ func splitDiff(diff string) (name, from, to string, ok bool) {
 	return diff[:colon], diff[colon+2 : arrow], diff[arrow+4:], true
 }
 
-// imperceptibleColorShift 判断两个 "r,g,b" 是否近到看不出来。
 const colorNoiseThreshold = 8
 
+// imperceptibleColorShift reports whether two "r,g,b" colors are too close to
+// tell apart.
 func imperceptibleColorShift(from, to string) bool {
 	a := strings.Split(from, ",")
 	b := strings.Split(to, ",")
@@ -149,6 +135,21 @@ func imperceptibleColorShift(from, to string) bool {
 	return true
 }
 
+// textAttributeChanges compares the formatting attributes of the same element
+// in two snapshots.
+//
+// The approach follows Playwright, whose aria snapshot renders only a few
+// semantic attributes ([checked], [level=1]) and leaves arbitrary style
+// queries to assertions such as toHaveCSS: a snapshot is a summary for the
+// agent and an assertion is a precise query, so they need not share fields.
+// Likewise, AT-SPI exposes justification, size, weight and fg-color through
+// Atspi.Text.get_default_attributes() even though the rendered tree omits
+// them, so a formatting change that leaves the tree text unchanged is still
+// observable without comparing pixels.
+//
+// The comparison costs no extra AT-SPI call: attributes travel with each
+// record and the pre-action snapshot is already cached. Records are paired by
+// tree path and identity, never by index; see the pairing note below.
 func textAttributeChanges(before, after *appSnapshot) []string {
 	if before == nil || after == nil {
 		return nil
@@ -169,13 +170,12 @@ func textAttributeChanges(before, after *appSnapshot) []string {
 			rolesByPath[key] = strings.ToLower(strings.TrimSpace(record.ControlType))
 		}
 	}
-	// 按 runtimeId（树里的路径）找到候选，再校验 role/name/automationId。
-	//
-	// 第一版用 role+name，实测当场翻车：LibreOffice 侧栏有四个无名 `text` 节点，
-	// key 全是 `text\x00""` 撞成一个，于是某个节点的悬停高亮（bg-color）
-	// 被张冠李戴到别人头上，连空操作都报出"格式变了"。
-	// 路径只有在树结构不变时才指向同一个元素；节点插入/删除后，同一路径可能
-	// 已经换成另一个控件，所以路径不能单独充当身份。
+	// Pair candidates by runtime ID (the tree path), then check role, name
+	// and automation id. role+name alone collides: several unnamed `text`
+	// nodes share one key, which would attribute one node's hover highlight
+	// to another and report a formatting change after a no-op. The path is
+	// not an identity on its own either, because an insertion or deletion can
+	// move another control onto the same path.
 	key := func(r elementRecord) string {
 		path := pathKey(r.RuntimeID)
 		if path == "" {
@@ -285,6 +285,11 @@ func plausibleTextAttribute(name, value string) bool {
 	return true
 }
 
+// readTextAttributeChange reports whether the notes contain a formatting
+// attribute change. That is the strongest evidence tier: it says that
+// justification changed from left to right, where pixels can only say that a
+// small fraction of the window changed, so an unchanged tree no longer
+// suggests that the action failed.
 func readTextAttributeChange(notes []string) bool {
 	for _, note := range notes {
 		if strings.HasPrefix(note, "[text-attrs]") {
@@ -294,7 +299,8 @@ func readTextAttributeChange(notes []string) bool {
 	return false
 }
 
-// readPixelVerdict 从运行时的 `[pixels]` Note 里读出屏幕到底变没变。
+// readPixelVerdict reads from the runtime's `[pixels]` note whether the window
+// pixels changed.
 func readPixelVerdict(notes []string) pixelVerdict {
 	for _, note := range notes {
 		if !strings.HasPrefix(note, "[pixels]") {

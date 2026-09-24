@@ -33,9 +33,10 @@ def list_apps_inventory():
         titles = [node_name(window) or "untitled" for _, window in windows]
         title = titles[0]
         name = node_name(app)
-        # 不能接收输入的条目要**当场标出来**，否则这张表就是一份陷阱清单：
-        # 桌面 / 面板 / 窗口管理器在表里和真应用长得一模一样，而对它们调用
-        # 动作工具会被 resolve_app 拒绝（见 infrastructure_app_error）。
+        # Flag entries that cannot receive input directly in the listing:
+        # desktop, panel and window-manager entries otherwise look like real
+        # applications, and resolve_app rejects actions against them (see
+        # infrastructure_app_error).
         input_capable = accepts_user_input(app)
         suffix = "" if input_capable else (
             ", NOT an input target: every window is untitled and has no "

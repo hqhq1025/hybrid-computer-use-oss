@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility entrypoint for the split Linux provider test suite."""
+"""Run every Linux provider test module as a single unittest suite."""
 
 import unittest
 

@@ -45,11 +45,12 @@ class VirtualTableCellResolutionTests(AtspiPatchedTestCase):
         self.assertIs(resolved, cell)
 
 class LabelledByTests(AtspiPatchedTestCase):
-    """无名控件从 LABELLED_BY 借名字。
+    """Unnamed controls borrow their name through LABELLED_BY.
 
-    判据来自实测：LibreOffice 7.3「位置和大小」对话框里 13 个 spin button
-    全部无名，13 个都能靠这条关系拿到名字（Position Y / Position X /
-    Width / Height / Angle / Radius）。定位方式因此从"数第几个"变成"按名字选"。
+    In the LibreOffice 7.3 Position and Size dialog all 13 spin buttons are
+    unnamed, and each gets a name through this relation (Position Y,
+    Position X, Width, Height, Angle, Radius), so they can be selected by
+    name instead of by position.
     """
 
     def _labelled(self, label_text, own_name=""):
@@ -63,41 +64,40 @@ class LabelledByTests(AtspiPatchedTestCase):
 
     def test_unnamed_control_borrows_the_label(self):
         node = self._labelled("Position Y:")
-        # 尾冒号要去掉：选择器里写冒号很别扭，而冒号不携带信息
+        # Drop the trailing colon: it adds nothing and is awkward in selectors.
         self.assertEqual(runtime.labelled_by_name(node), "Position Y")
         self.assertEqual(runtime.effective_name(node), "Position Y")
 
     def test_a_control_with_its_own_name_does_not_borrow(self):
-        # 增益全部落在无名节点上。一个已经叫 Save 的按钮再关联一个 Save 标签，
-        # 对 agent 没有新信息，却要付一次 DBus 往返（实测 1.037ms/节点）。
+        # Only unnamed nodes benefit. A label lookup for a button already
+        # named Save adds nothing but costs a D-Bus round trip (about 1 ms).
         node = self._labelled("Position Y:", own_name="Save")
         self.assertEqual(runtime.effective_name(node), "Save")
 
     def test_identity_comparison_uses_the_same_name_as_the_record(self):
-        """这是本条改动最容易复发的坑，必须钉死。
+        """Records and live nodes are compared through the same effective_name().
 
-        commit 5543a52 修过同型问题：record 里存一种名字、重解析时用另一种去比，
-        必然失配；而失配是**静默**的，身份判据会悄悄退到最弱的"role + 屏幕位置"，
-        元素一动就指向别人。
-
-        借名字会原样重现它：记录里写着 Position Y，而 node_name() 在同一个节点上
-        返回空串。所以两边必须走同一个 effective_name()。
+        If a record stores one name and re-resolution compares another, the
+        match fails silently and identity falls back to the weakest check,
+        role plus screen position, which points elsewhere once anything moves.
+        A borrowed name would do exactly that: the record says Position Y
+        while node_name() returns an empty string for the same node.
         """
         node = self._labelled("Position Y:")
         record = {"name": "Position Y"}
         self.assertTrue(runtime.record_name_matches(node, record))
-        # 反证：如果活节点侧改用自身名字（空串），这条断言就会失败
+        # This fails if the live side uses the node's own empty name.
         self.assertFalse(runtime.record_name_matches(node, {"name": "Something Else"}))
 
     def test_borrowed_names_are_marked_so_the_source_is_visible(self):
-        # 同一个「位置和大小」对话框里 Position Y 出现了**两次**（两个标签页各一个）。
-        # 调用方需要知道这个名字是借来的、因此可能不唯一。
+        # Position Y appears twice in the Position and Size dialog, once per
+        # tab, so callers must know the name is borrowed and may not be unique.
         marks = runtime.state_segment(FakeNode(), borrowed_name=True)
         self.assertIn("labelled", marks)
         self.assertNotIn("labelled", runtime.state_segment(FakeNode()))
 
 class ModalDiagnosticTests(AtspiPatchedTestCase):
-    """挡在前面的对话框要明说。分两档，因为证据强度不同。"""
+    """A dialog in front is reported at one of two levels of evidence."""
 
     def _window(self, name, role, states):
         return _NamedNode(name=name, role=role, states=states)
@@ -112,20 +112,19 @@ class ModalDiagnosticTests(AtspiPatchedTestCase):
         notes = runtime.modal_diagnostic(dialog, self._app(dialog, main))
         self.assertEqual(len(notes), 1)
         self.assertIn("MODAL DIALOG", notes[0])
-        # 有 MODAL 位才能断言"应用会忽略其它窗口的输入"
+        # Only the MODAL bit justifies saying other windows ignore input.
         self.assertIn("ignore input to every other window", notes[0])
-        # 要说清挡住了谁——agent 需要知道回哪儿去
+        # Naming the blocked window tells the agent where to return.
         self.assertIn("Doc - Impress", notes[0])
 
     def test_a_dialog_without_the_modal_bit_gets_the_weaker_claim(self):
-        """实测逼出来的一档。
+        """Some blocking dialogs never set MODAL.
 
-        LibreOffice 7.3 的「Tip of the Day」是 role=dialog、ACTIVE、SHOWING，
-        **却不设 MODAL**，而它确确实实挡在应用前面。MODAL 位在 Linux 上和
-        ENABLED 一样，不同工具包设不设全凭自觉。
-
-        只认 MODAL 会漏掉真实阻塞；把两档混为一谈，则是替一个不设 MODAL 的
-        对话框打我们无权打的包票。
+        LibreOffice 7.3's Tip of the Day dialog is role=dialog, ACTIVE and
+        SHOWING without MODAL, yet it blocks the application. Like ENABLED,
+        MODAL is set inconsistently across Linux toolkits. Requiring MODAL
+        would miss real blockers, while the strong claim would promise more
+        than the states prove.
         """
         dialog = self._window("Tip of the Day: 1/223", "dialog",
                               [STATE.SHOWING, STATE.ACTIVE])
@@ -133,7 +132,7 @@ class ModalDiagnosticTests(AtspiPatchedTestCase):
         notes = runtime.modal_diagnostic(dialog, self._app(dialog, main))
         self.assertEqual(len(notes), 1)
         self.assertIn("DIALOG IN FRONT", notes[0])
-        # 不许出现强断言
+        # Without MODAL the strong claim must not appear.
         self.assertNotIn("ignore input to every other window", notes[0])
         self.assertIn("not proof that the app is blocked", notes[0])
 
@@ -142,7 +141,7 @@ class ModalDiagnosticTests(AtspiPatchedTestCase):
         self.assertEqual(runtime.modal_diagnostic(main, self._app(main)), [])
 
     def test_a_lone_dialog_is_the_main_interface_not_a_blocker(self):
-        # 应用只有这一个对话框窗口时，它就是主界面。说"它挡着什么"是无中生有。
+        # With no other window, there is nothing for the dialog to block.
         only = self._window("Preferences", "dialog", [STATE.SHOWING, STATE.ACTIVE])
         self.assertEqual(runtime.modal_diagnostic(only, self._app(only)), [])
 
@@ -186,7 +185,7 @@ class InfrastructureWindowTests(AtspiPatchedTestCase):
             self.assertFalse(runtime.is_infrastructure_window(dialog))
 
 class ResolvedNoteTests(AtspiPatchedTestCase):
-    """动作要说清作用在了谁身上。"""
+    """Action notes name the element the target resolved to."""
 
     def test_reports_index_role_and_name(self):
         node = _NamedNode(name="Save", role="push button")
@@ -195,12 +194,13 @@ class ResolvedNoteTests(AtspiPatchedTestCase):
         self.assertEqual(note, "Resolved the target ref to push button 'Save'.")
 
     def test_drift_from_the_snapshot_is_a_warning_not_a_silent_pass(self):
-        """这是本条真正的价值所在。
+        """Drift from the snapshot record produces a warning.
 
-        解析是多级回退的（runtimeId 路径 → automationId → name+role → role+几何）。
-        record_still_matches 里记着 Nautilus 的实例：菜单关掉之后同一个 index 9
-        解析到了工具栏的"切换视图选项"，于是"重命名"变成了别的操作，
-        而且一路 isError=False——静默操作错误的控件是最坏的失败模式。
+        Resolution falls back through runtimeId path, automationId, name plus
+        role, and role plus geometry. After a menu closes, the same index can
+        resolve to a different control, such as a toolbar toggle instead of
+        the Rename item, while every step reports success. Silently acting on
+        the wrong control is the worst failure mode.
         """
         node = _NamedNode(name="Menu", role="toggle button")
         note = runtime.resolved_note(node, {"index": 9, "controlType": "menu item",
@@ -216,7 +216,7 @@ class ResolvedNoteTests(AtspiPatchedTestCase):
         self.assertEqual(note, "Resolved the target ref to an unnamed canvas.")
 
     def test_coordinate_actions_have_no_element_to_report(self):
-        # GUI track 不定位任何元素，硬报一条只会是噪声
+        # Coordinate actions resolve no element, so a note would be noise.
         self.assertIsNone(runtime.resolved_note(None, {"index": 1}))
         self.assertIsNone(runtime.resolved_note(_NamedNode(), None))
 
@@ -647,23 +647,18 @@ class ProcessResourceCandidateTests(unittest.TestCase):
         self.assertEqual(first, second)
 
 class ProcessNameAliasTests(unittest.TestCase):
-    """应用名可以用**进程名**去猜——以及别把网页地址当成进程名。
+    """Apps can be matched by process name, but URLs never become names.
 
-    第一条来自轨迹：`appNotFound("file-roller")`，而那个应用的 a11y 名是
-    `Archive Manager`。两个名字之间没有公共子串，分隔符归一化再宽松也救不回来，
-    但 `file-roller` 恰恰就是它的进程名。真机上同类的还有
-    org.gnome.Software / snap-store。
-
-    第二条是我加第一条时**自己引入的**：cmdline 的约定是 \0 分隔，但 Chrome
-    那条读出来是一整块 `chrome --remote-debugging-port=1337`（空格分隔）。
-    只按 \0 切再取 basename，就会从 `…/drugs.com` 里读出 "drugs.com"，
-    把一个网页地址注册成 Chrome 的别名——工具凭空编出一个不存在的应用名。
-    这两条都钉在这里。
+    The accessible name `Archive Manager` shares no substring with the query
+    `file-roller`, which is its process name; org.gnome.Software and
+    snap-store behave the same way. /proc cmdline is normally NUL-separated,
+    but Chrome's reads as one space-separated string, so splitting on NUL
+    and taking the basename would register a URL argument as an app alias.
     """
 
     def _process_names(self, blob, comm="x", exe=None):
-        # 不去补丁 builtins.open——那既脆又会波及无关代码。process_names 接受
-        # 一个 proc_root，测试造一棵假的 /proc 就够了。
+        # process_names accepts a proc_root, so a fake /proc tree avoids
+        # patching builtins.open, which is brittle and affects unrelated code.
         import tempfile
         with tempfile.TemporaryDirectory() as root:
             pid_dir = os.path.join(root, "4242")
@@ -682,7 +677,7 @@ class ProcessNameAliasTests(unittest.TestCase):
         self.assertIn("file-roller", names)
 
     def test_space_separated_cmdline_does_not_leak_a_url(self):
-        # 真机上 Chrome 就是这样：整块、空格分隔、末尾是访问过的地址。
+        # Chrome's cmdline is one space-separated block ending with the URL.
         names = self._process_names(
             b"/opt/google/chrome/chrome --app=https://www.drugs.com",
             comm="chrome")
@@ -691,7 +686,6 @@ class ProcessNameAliasTests(unittest.TestCase):
         self.assertNotIn("drugs", names)
 
     def test_suffixed_binary_also_registers_its_stem(self):
-        # soffice.bin 要能被 "soffice" 猜中。
         names = self._process_names(b"/usr/lib/libreoffice/program/soffice.bin\0",
                                     comm="soffice.bin")
         self.assertIn("soffice.bin", names)
@@ -734,21 +728,20 @@ class ProcessNameAliasTests(unittest.TestCase):
         self.assertNotIn("google", names)
 
 class HiddenMenuItemsTests(AtspiPatchedTestCase):
-    """菜单的子项一个都没渲染出来时，要在这个菜单自己身上说明白。
+    """A menu whose children were all pruned says so on its own line.
 
-    出处是第 47、48 题：agent 要把 GIMP 里的图导出，而树里找不到任何
-    Export/Save As，只能得出"这个应用没有导出"的结论。真相是 File 底下就有
-    `Export to <文件名>`，只是那 39 个菜单项自己不 SHOWING，被逐个裁掉了。
-
-    原有的 "N items collapsed" 提示救不了这种情况，因为它的判据是「菜单自己不
-    SHOWING」——而 GIMP 的 File 菜单**是** SHOWING 的，它就挂在菜单栏上。
-    树末尾那句全局的 "N node(s) omitted" 也救不了：它不指名道姓，
-    没人能从中知道是哪个菜单藏了东西。
+    GIMP's closed File menu is SHOWING on the menu bar while none of its items
+    are, so pruning removes all of them, Export included, and the agent would
+    conclude the app cannot export. The "N items collapsed" hint only covers
+    menus that are not SHOWING themselves, and the global "N node(s) omitted"
+    footer does not say which menu hid its items.
     """
 
     def _hidden(self):
-        """造一个"不在屏幕上"的菜单项——GIMP 未打开的菜单项就是这个状态：
-        AT-SPI 里它存在、有名字，但没有可见的几何。"""
+        """Build an off-screen menu item, like one in a closed GIMP menu.
+
+        It exists in AT-SPI and has a name, but no visible geometry.
+        """
         node = _TreeNode(role="menu item", name="Export As...", w=0, h=0)
         node.states = set()
         return node
@@ -762,7 +755,6 @@ class HiddenMenuItemsTests(AtspiPatchedTestCase):
         text = "\n".join(lines)
 
         self.assertIn('menu "File"', text)
-        # 数字要对得上，措辞要说清"打开之后才看得见"。
         self.assertIn("hidden-items=1", text)
         self.assertIn("open menu, then observe", text)
 
@@ -783,7 +775,7 @@ class HiddenMenuItemsTests(AtspiPatchedTestCase):
         )
 
     def test_menu_with_visible_children_gets_no_such_note(self):
-        # 子项渲染得出来时不该多这一句——否则每个正常菜单都要付这行字节。
+        # Menus that render their children skip the note to save output bytes.
         item = _TreeNode(role="menu item", name="Export As...", w=40, h=10)
         menu = _TreeNode(role="menu", name="File", w=40, h=20, kids=(item,))
         root = _TreeNode(role="frame", name="GIMP", w=100, h=100, kids=(menu,))
@@ -795,21 +787,19 @@ class HiddenMenuItemsTests(AtspiPatchedTestCase):
         self.assertNotIn("hidden-items=", text)
 
 class AppNotFoundListsWindowsTests(AtspiPatchedTestCase):
-    """appNotFound 的候选表要连**窗口标题**一起给。
+    """An app lookup failure lists the window titles each candidate owns.
 
-    轨迹证据：GIMP 那一段里 agent 三次拿对话框的名字当应用名去调——
-    appNotFound("script-fu") 两次、appNotFound("file-jpeg") 一次。
-    它并没有猜错：屏幕上确实摆着一个 "Script-Fu Console"、一个
-    "Export Image as JPEG"。错的是它无从知道这两个窗口都归 gimp 管，
-    因为候选表里只有一行光秃秃的 "gimp"。
+    Callers often name an app after a dialog they can see, such as
+    "file-jpeg" for GIMP's "Export Image as JPEG" window. A bare "gimp"
+    entry does not reveal that GIMP owns that window.
     """
 
     def test_listing_names_the_windows_each_app_owns(self):
         window = _NamedNode(name="Export Image as JPEG", role="frame")
         app = _NamedNode(name="gimp", role="application", children=[window])
-        # node_pid 直接取 get_process_id，假节点没有这个方法就会抛
-        # AttributeError，而候选表的构造整个包在 try 里——异常会把它清空，
-        # 测试于是看到一条光秃秃的 appNotFound，查半天才发现是假节点的锅。
+        # node_pid calls get_process_id directly. Without it the fake raises
+        # AttributeError inside the guarded candidate listing, which then
+        # comes back empty and hides the cause.
         app.get_process_id = lambda: 0
 
         with mock.patch.object(runtime, "iter_apps", return_value=[app]), \
@@ -823,7 +813,7 @@ class AppNotFoundListsWindowsTests(AtspiPatchedTestCase):
         self.assertEqual(caught.exception.failure_code, "ax_app_unavailable")
         self.assertIn('appNotVisibleToAccessibility("file-jpeg")', message)
         self.assertIn("no action was attempted", message)
-        # 光有 "gimp" 不够——要能看出那个对话框归它管。
+        # The owner name alone is not enough; the owned dialog must be listed.
         self.assertIn("gimp", message)
         self.assertIn("Export Image as JPEG", message)
 
@@ -951,15 +941,12 @@ class ExactLogicalWindowReadTests(AtspiPatchedTestCase):
         self.assertEqual(caught.exception.failure_phase, "precondition")
 
 class VisibleCellsIndexerTests(AtspiPatchedTestCase):
-    """render_visible_cells 必须拿到 indexer——漏传时它整条路径都会崩。
+    """render_visible_cells receives the indexer explicitly.
 
-    出处是第 108 题（LibreOffice Calc 算年龄）的真实轨迹：get_app_state
-    连着两次返回 `name 'indexer' is not defined`，agent 只好整题改用 Bash。
-
-    根因是作用域：render_visible_cells 是**模块级函数**，看不到 render_tree
-    的局部变量 indexer，而它函数体里直接用了这个名字。Python 直到真正执行到
-    那一行才报 NameError，所以静态上毫无征兆——而那一行正是 LibreOffice Calc
-    表格的渲染路径（自管理容器拒绝枚举后的替代路径）。
+    It is a module-level function and cannot see render_tree's local indexer.
+    Referring to that name raises NameError only when the line runs, and that
+    line is the rendering path for LibreOffice Calc sheets, the fallback used
+    when a self-managed container refuses enumeration.
     """
 
     def test_signature_accepts_indexer(self):
@@ -970,8 +957,9 @@ class VisibleCellsIndexerTests(AtspiPatchedTestCase):
                       "否则函数体里那个自由名字会在运行时炸")
 
     def test_call_site_passes_indexer(self):
-        # 光有参数不够：调用点漏传的话，默认值 None 会让单元格退回遍历序号，
-        # 下标就不再跨快照稳定了——那是另一种更隐蔽的错。
+        # The parameter alone is not enough: if the call site omits it, the
+        # None default falls back to traversal order and indices stop being
+        # stable across snapshots, which is a subtler bug.
         import inspect
         source = inspect.getsource(runtime.render_tree)
         self.assertIn("render_visible_cells(", source)

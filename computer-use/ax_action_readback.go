@@ -4,6 +4,10 @@ import (
 	"fmt"
 )
 
+// incrementalTree replaces the full tree with only the changed lines when
+// that is safe and cheaper. An incremental view is not always smaller: when
+// the structure changes, removed and added lines together can exceed the full
+// tree. It then reports false and the caller returns the full tree.
 func incrementalTree(before, after *appSnapshot) ([]string, bool) {
 	if before != nil && after != nil &&
 		before.axSnapshot != nil && after.axSnapshot != nil {
@@ -25,16 +29,12 @@ func incrementalTree(before, after *appSnapshot) ([]string, bool) {
 	}
 	old, now := before.TreeLines, after.TreeLines
 
-	// 掐掉公共前后缀，剩下的中间段就是这次动作真正动过的地方。
-	//
-	// **第一版的判据是"前后行数必须完全相同"，这在 GUI 上几乎等于不生效。**
-	// 实测 67 条轨迹、753 次动作，只命中 26.6%——因为菜单展开、对话框弹出、
-	// 列表增删一行都会改变行数，而那恰恰是最常见的动作。行数一变就退回全量，
-	// 于是"动作的副产品"吃掉了 87% 的观测开销。
-	//
-	// 前后缀掐掉之后，插入和删除都能被表达出来，不再要求行数相等。
-	// 代价是"开头和结尾各变一行"这种分布会让中间段覆盖整棵树——那时按下面的
-	// 比例判据退回全量，本来也该退。
+	// Trim the common prefix and suffix; the remaining middle span is what the
+	// action changed. This expresses insertions and deletions, so the line
+	// count may differ, as it does for the most common action effects: opening
+	// a menu, showing a dialog, or adding or removing a list row. When changes
+	// sit at both ends, the middle span covers the whole tree and the ratio
+	// checks below fall back to the full tree.
 	prefix := 0
 	for prefix < len(old) && prefix < len(now) && old[prefix] == now[prefix] {
 		prefix++
@@ -47,8 +47,10 @@ func incrementalTree(before, after *appSnapshot) ([]string, bool) {
 	removed := old[prefix : len(old)-suffix]
 	added := now[prefix : len(now)-suffix]
 
-	// 长度相同时再按行比一次：中间段里往往只有个别行真的变了。同时在这里把
-	// **行级差分的负压缩**拆掉——判据见 condenseLinePair。
+	// With equal lengths, compare line by line: often only a few lines of the
+	// middle span changed. Long lines whose content alone changed are condensed
+	// here so that a -old/+new pair cannot outgrow the tree; see
+	// condenseLinePair.
 	var changed []string
 	if len(removed) == len(added) {
 		var r, a []string
@@ -78,29 +80,26 @@ func incrementalTree(before, after *appSnapshot) ([]string, bool) {
 			),
 		}, true
 	}
-	// 变化超过三分之一就没必要绕弯，直接给全量更好读。
-	//
-	// 比的是**受影响的树行数**（两边取大），不是输出行数之和：一行被替换会
-	// 产生 -旧 +新 两行输出，但树上只有一行变了。按和去比会把它当成两行，
-	// 于是小树上的单行改动都被判成"变化太大"，增量再次形同虚设。
+	// When a third or more of the tree changed, the full tree reads better.
+	// Count affected tree lines (the larger side), not output lines: a
+	// replaced line prints as -old and +new but changes one tree line, and
+	// counting both would reject every single-line change on a small tree.
 	affected := len(removed)
 	if len(added) > affected {
 		affected = len(added)
 	}
 	affected += len(changed)
 
-	// 字节判据，与行数判据并列。
-	//
-	// 行数是**代价的坏代理**：一个把全部内容装在单个节点 value 里的控件
-	// （终端、日志视图、大 value 文本域）在树上只占一行，行数判据看它只是
-	// "1 行变了"，而字节上那一行可能是整棵树的 99%。两种失真都由此而来：
-	//   - 3 行的终端树里改 1 行 → 1*3 >= 3，行数判据退回全量，把那一行的
-	//     几千字符原样再发一遍；
-	//   - 行数判据放行时，-旧 +新 两份全长内容加起来**比整棵树还大**，
-	//     也就是评审里说的负压缩。
-	// 所以下面先立一条硬不变量：增量的正文永远不会比全量更长；
-	// 再让字节上明显更省的情况绕过行数判据。
-	// 表头是固定开销，不计入比较——否则小树上任何增量都会被它压垮。
+	// Byte limits complement the line-count rule, because line count is a
+	// poor proxy for cost. A control that holds all its content in one value
+	// (a terminal, log view or large text field) is a single tree line that
+	// may carry most of the tree's bytes. Counting lines alone either resends
+	// that line in full (one changed line in a three-line tree trips the
+	// one-third rule) or emits -old and +new copies that together exceed the
+	// full tree. Hence the hard invariant that the incremental payload is
+	// never longer than the full tree, and clearly cheaper byte counts bypass
+	// the line-count rule. The fixed header is excluded from the comparison,
+	// or it would outweigh any increment on a small tree.
 	payload := 0
 	for _, line := range removed {
 		payload += len(line) + 2
@@ -163,9 +162,26 @@ func incrementalTree(before, after *appSnapshot) ([]string, bool) {
 	return out, true
 }
 
+// condenseLinePair condenses a pair of lines for the same node, whose content
+// alone changed, into one change summary.
+//
+// A line diff has a structural flaw: its unit is the line, while a control can
+// hold thousands of characters in one node value (terminals, log views, large
+// text fields). Any content change then shows as one line removed and one
+// added, both printed in full, so the incremental view costs twice the full
+// tree.
+//
+// Condensing moves the granularity into the node content: it trims the common
+// prefix and suffix, reports only the changed span, and keeps enough context
+// to locate it. The common prefix begins with the element's index, role and
+// name, so the summary still identifies the element.
+//
+// Short lines are not condensed, because the metadata would outweigh the
+// content, and neither are lines that changed entirely, because there is no
+// shared prefix or suffix to reuse and a plain -old/+new is more honest.
 func condenseLinePair(before, after string) (string, bool) {
-	// 阈值取一行普通树行的数倍。低于它时 -旧 +新 本来就便宜，
-	// 压缩带来的元数据反而是净亏。
+	// The threshold is several ordinary tree lines long. Below it, -old/+new
+	// is already cheap and the condensing metadata would be a net loss.
 	const condenseMinBytes = 400
 	if len(before) < condenseMinBytes && len(after) < condenseMinBytes {
 		return "", false
@@ -186,13 +202,14 @@ func condenseLinePair(before, after string) (string, bool) {
 	oldMid := oldRunes[head : len(oldRunes)-tail]
 	newMid := newRunes[head : len(newRunes)-tail]
 
-	// 变化段占了大半时压缩没有收益，而且摘要会比原文更难读。
+	// When the changed span is most of the line, condensing gains nothing and
+	// the summary reads worse than the original.
 	if (len(oldMid)+len(newMid))*2 >= len(oldRunes)+len(newRunes) {
 		return "", false
 	}
 
-	// 前缀的开头用来认元素（下标、role、name 都在那里），
-	// 前缀的结尾用来定位改动，中间可以省。
+	// The start of the prefix identifies the element (index, role and name),
+	// and its end locates the edit; the part in between can be elided.
 	const identifyRunes = 120
 	const contextRunes = 48
 	leading := ""
@@ -215,8 +232,9 @@ func condenseLinePair(before, after string) (string, bool) {
 		head, len(oldRunes), len(newRunes)), true
 }
 
-// clipRunes 给变更段本身封顶。改动本身也可能是几千字符（终端刷屏一次就是），
-// 那时首尾各留一段、中间说明省了多少，比原样倒出来有用。
+// clipRunes caps the changed span itself. An edit can be thousands of
+// characters on its own (a single terminal refresh can be); keeping both ends
+// and stating how much was elided is more useful than dumping it.
 func clipRunes(runes []rune) string {
 	const keepEachSide = 240
 	if len(runes) <= keepEachSide*2 {
@@ -226,9 +244,6 @@ func clipRunes(runes []rune) string {
 		fmt.Sprintf("…(%d chars elided)…", len(runes)-keepEachSide*2) +
 		string(runes[len(runes)-keepEachSide:])
 }
-
-// observablyChanged 比较动作前后两份快照里 agent 能观察到的部分。
-// 截图不参与比较：光标闪烁之类的像素噪音会让它永远"有变化"。
 
 func compactActionObservationLines(
 	snapshot *appSnapshot,

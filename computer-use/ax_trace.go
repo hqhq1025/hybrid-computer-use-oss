@@ -9,6 +9,17 @@ import (
 	"time"
 )
 
+// windowFocusWasConfirmed reports whether the operation confirmed, before
+// synthesis, that the target application window was active. It proves neither
+// that a control held input focus nor that input reached a control. Clicks are
+// excluded because they may take the semantic path, which never confirms
+// window focus.
+//
+// An unchanged tree after such input does not show that the input had no
+// effect: formatting changes and file state (a Ctrl+S save, a paragraph
+// alignment) often never reach the accessibility tree. Notes therefore point
+// the agent to visual or durable evidence instead of concluding that the input
+// failed.
 func windowFocusWasConfirmed(request axServiceRequest) bool {
 	switch request.operationName() {
 	case "keypress", "scroll":
@@ -17,24 +28,23 @@ func windowFocusWasConfirmed(request axServiceRequest) bool {
 	return false
 }
 
-// tracePath 每个动作写一行 JSONL 的目标文件。**默认关闭**。
+// tracePath is the file that receives one JSONL line per action; tracing is
+// off by default.
 //
-// Playwright 的 trace viewer 是它最能打的运维特性：出了问题不用复现，
-// 直接看当时每一步的前后状态。我们此前出问题只能回读 transcript，
-// 而 transcript 里没有动作前后的完整状态。
-//
-// 默认关闭，因为它每步都要序列化两份树摘要，而绝大多数调用不需要事后复盘。
-// 打开的方式是给出路径，而不是布尔开关：写到哪里是调用方的事，
-// 一个诊断设施不该自作主张地选目录。
+// The trace is modeled on Playwright's trace viewer: a problem can be
+// diagnosed from each step's before and after state without reproducing it,
+// which a transcript alone does not allow. It is off by default because every
+// step serializes two tree summaries and most calls are never reviewed. It is
+// enabled by a path rather than a boolean, because where to write belongs to
+// the caller and a diagnostic facility should not choose a directory itself.
 func tracePath() string {
 	return strings.TrimSpace(os.Getenv("COMPUTER_USE_TRACE_FILE"))
 }
 
-// traceSummary 一份树的**摘要**，不是整棵树。
-//
-// 整棵树写进 trace 会让文件比 transcript 还大（VS Code 一棵树 15342 字符，
-// 一次基线跑 17 个动作），而复盘时真正要看的是"前后有没有变、变了哪里"。
-// 要看细节有 error-context 那条路。
+// traceSummary summarizes a tree instead of recording it whole. Full trees
+// would make the trace larger than the transcript, while a review mainly needs
+// to know whether and where the state changed; error-context files carry the
+// detail.
 func traceSummary(snapshot *appSnapshot) map[string]any {
 	if snapshot == nil {
 		return nil
@@ -61,8 +71,9 @@ func (s *service) appendTrace(app string, request axServiceRequest, before, afte
 		"after":  traceSummary(after),
 		"notes":  notes,
 	}
-	// 动作参数照抄请求，但**不含快照**：request 里带着 Element 记录和
-	// windowBounds，原样写进去会把每行撑到几 KB。
+	// Record the action arguments without snapshot data: the request carries
+	// element records and window bounds that would grow each line to
+	// kilobytes.
 	args := map[string]any{}
 	if request.Element != nil {
 		args["element_index"] = request.Element.Index
@@ -84,8 +95,9 @@ func (s *service) appendTrace(app string, request axServiceRequest, before, afte
 	if err != nil {
 		return
 	}
-	// 追加写，失败**静默放弃**：trace 是诊断设施，不该因为磁盘满就让一次
-	// 正常的动作报错。这条纪律和 error-context 是同一条。
+	// Append, and give up silently on failure: a diagnostic trace must not
+	// fail a normal action because the disk is full. Error context follows
+	// the same rule.
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if os.MkdirAll(dir, 0o755) != nil {
 			return
@@ -150,6 +162,3 @@ func settledActionNotes(
 	}
 	return notes
 }
-
-// actionResult 是不带验证意图的动作出口。**保持原样**：不传 expect 的调用
-// 走的是与本特性之前逐字相同的一条路径。

@@ -10,7 +10,8 @@ func containsFold(haystack, needle string) bool {
 	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }
 
-// recordMatches 判一条记录是否满足查询。多个条件是**与**关系。
+// recordMatches reports whether a record satisfies the query; conditions
+// combine with AND.
 func recordMatches(record *elementRecord, role, name, text, state string) bool {
 	if role != "" {
 		modelRole := canonicalRoleDescriptor(
@@ -29,9 +30,11 @@ func recordMatches(record *elementRecord, role, name, text, state string) bool {
 		return false
 	}
 	if text != "" {
-		// text 是"我不知道这串字出现在哪个字段"时的兜底：名字、描述、值、
-		// 占位符都扫。桌面上同一句话落在哪个字段**极不稳定**——实测同一个
-		// 搜索框在 GTK 里是 placeholder、在 Electron 里是 name。
+		// text is the fallback when the caller does not know which field
+		// holds the string, so it scans name, description, value and
+		// placeholder. Toolkits disagree on the field: the same search box
+		// exposes its hint as a placeholder in GTK and as the name in
+		// Electron.
 		if !containsFold(record.Name, text) &&
 			!containsFold(record.Description, text) &&
 			!containsFold(record.Value, text) &&
@@ -524,21 +527,3 @@ func axNodeByIndex(nodes []*AXNode, index int) *AXNode {
 	}
 	return nil
 }
-
-// ---------------------------------------------------------------------------
-// verify：带自动重试的断言
-//
-// 此前 `grep -c '"verify_'` = 0——一个断言工具都没有。动作后的状态回读是
-// **被动**的：它只告诉你"这次动作之后树里变了什么"。agent 想主动确认一件事
-// （"保存对话框关掉了没有"）只能再拉一棵树自己比对，而那是**一次性**判定，
-// 早一拍就得到错的答案。
-//
-// Playwright 的 `expect(...).toBeVisible()` 之所以可靠，关键不在断言本身，
-// 在于它**在超时窗口内反复重查**。桌面上这一点只会更重要：UI 变化没有
-// load 事件，settle 等待有实测过的边界（0.12s 之后才出现的窗口抓不到）。
-// 轮询正是那条边界的补救。
-//
-// 代价要如实说：每一轮都是一次完整的 AT-SPI 遍历，不便宜。所以默认超时压在
-// 5 秒、轮询间隔 400ms，且**第一轮一定会执行**——GIMP 单次快照实测就要 30s，
-// 若按"先判超时再取样"写，那种应用上 verify 会一次都不采样就报失败。
-// ---------------------------------------------------------------------------

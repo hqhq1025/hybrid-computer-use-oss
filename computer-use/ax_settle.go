@@ -44,8 +44,9 @@ func optionalSettleMS(args map[string]any) (int, error) {
 	return milliseconds, nil
 }
 
-// settlePlan 是一次动作携带的验证意图。expect 为 nil 时整条路径**完全不启用**，
-// 行为与加这个特性之前逐字相同。
+// settlePlan is the verification intent carried by one action. With a nil
+// expect the verification path is skipped entirely and the response is
+// unchanged.
 type settlePlan struct {
 	expect   *expectSpec
 	settleMS int
@@ -108,22 +109,27 @@ func settleReadRequest(app string, includeScreenshot *bool, screenshotScope stri
 	return request
 }
 
-// settle 轮询而不是死等：满足条件立刻返回，并报告实际耗时。
+// settle polls rather than sleeping for a fixed time: it returns as soon as
+// the predicate holds and reports the actual elapsed time.
 //
-// 起点是**动作返回的那一刻**，不是动作发出的那一刻。理由是诚实性：
-// 动作自己那一次 AT-SPI 遍历在 GIMP 上实测能到 30s，把它算进 settled_after_ms
-// 会让这个数字变成"观测有多慢"而不是"界面多久稳定"，那是在误导调用方。
+// Timing starts when the action returns, not when it was sent. The action's
+// own AT-SPI traversal can take tens of seconds in large apps such as GIMP;
+// counting it in settled_after_ms would measure observation speed instead of
+// how long the UI took to settle, misleading the caller.
 //
-// 第一轮采样复用动作刚建好的快照，所以不付任何额外代价——
-// 对话框已经弹出来的常见情况会在 0ms 处直接命中。
+// The first evaluation reuses the snapshot the action just built, so it costs
+// nothing extra; the common case of a dialog that is already open matches at
+// 0ms.
 //
-// includeScreenshot 与 screenshotScope 从动作请求原样带过来，让重取的那份
-// 快照与 observe 想要的观测一致：observe="screenshot"/"full" 时重取仍然带图，
-// "none"/"tree" 时仍然不带；GUI 动作始终重取全桌面，而不是在第一次轮询后
-// 悄悄退回窗口截图。
+// includeScreenshot and screenshotScope are carried over from the action
+// request so that re-reads match the requested observation. With
+// observe="screenshot" or "full" a re-read still includes an image, with
+// "none" or "tree" it does not, and GUI actions keep re-reading the full
+// desktop instead of silently falling back to a window screenshot after the
+// first poll.
 //
-// before 是**动作前**的那份快照，整个轮询过程里保持不变：它是 appears /
-// disappears 的基线。轮询换的只是 after，基线换了就不叫基线了。
+// before is the pre-action snapshot and stays fixed for the whole poll as the
+// baseline for appears and disappears; polling replaces only the after state.
 func (s *service) settle(app string, plan settlePlan, before, first *appSnapshot, includeScreenshot *bool, screenshotScope string) settleOutcome {
 	start := time.Now()
 	snapshot := first
@@ -161,8 +167,9 @@ func (s *service) settle(app string, plan settlePlan, before, first *appSnapshot
 		next, nextNotes, result := s.refreshSnapshotForSettle(
 			app, settleReadRequest(app, includeScreenshot, screenshotScope, before.projection))
 		if result.IsError || next == nil {
-			// 重新读树失败不该被吞掉，也不该盖住动作本身的结果：如实说明这个
-			// 结论只基于最后一份成功取得的快照。
+			// A failed re-read must neither be swallowed nor mask the action's
+			// own result: the verdict states that it rests only on the last
+			// successful snapshot.
 			basis := "the state captured immediately after the action"
 			if snapshotFromFollowup {
 				basis = "the last successful settled follow-up snapshot"
@@ -185,11 +192,13 @@ func (s *service) settle(app string, plan settlePlan, before, first *appSnapshot
 	}
 }
 
-// expectNote 是 expect 的唯一出口。第一段是机器可读的三元组
-// （predicate_verified / evidence / settled_after_ms），后面是给 LLM 读的解释。
+// expectNote is the single renderer for expect results. It starts with a
+// machine-readable JSON payload (predicate_verified, completeness flags,
+// evidence and settled_after_ms), followed by an explanation for the LLM.
 //
-// predicate_verified 只回答声明的 accessibility predicate 是否成立。它既不证明
-// 动作效果，也不补写运行时没有给出的 delivery 事实。
+// predicate_verified answers only whether the declared accessibility predicate
+// held. It neither proves the action's effect nor supplies delivery facts that
+// the runtime did not report.
 func expectNote(plan settlePlan, outcome settleOutcome, request axServiceRequest, actionNotes []string) string {
 	payload, err := json.Marshal(map[string]any{
 		"predicate_verified":    outcome.verified,
@@ -239,11 +248,3 @@ func expectNote(plan settlePlan, outcome settleOutcome, request axServiceRequest
 		"whether the expectation itself was the wrong thing to wait for. Raising settle_ms only " +
 		"helps for the first kind." + cost
 }
-
-// lookupBySelector 按 `<role> "<name>"` / `"<name>"` / `<role>` 找唯一元素。
-//
-// 语法刻意与快照行**逐字一致**：树里渲染的是 `4 push button "Save" [..]`，
-// 那么选择器就写 `push button "Save"`——从行里抄下来即可，不用学第二套写法。
-//
-// 命中多个时**不挑一个**，而是把候选连同下标一起列出来让调用方收敛。
-// 静默挑一个正是本项目一直在修的那类错误。

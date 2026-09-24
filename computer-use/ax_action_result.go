@@ -492,13 +492,15 @@ func (s *service) stabilizePostActionContent(
 	return refreshed, notes, true, true
 }
 
+// actionResult completes an action without an expect plan.
 func (s *service) actionResult(app string, request axServiceRequest) toolCallResult {
 	return s.actionResultSettling(app, request, settlePlan{})
 }
 
 func (s *service) actionResultSettling(app string, request axServiceRequest, plan settlePlan) toolCallResult {
-	// 动作前的状态在 Go 侧已经缓存着了（动作工具契约要求先调 get_app_state，
-	// 且每个动作自己也会刷新缓存），所以 before/after 比对不需要额外遍历一次树。
+	// The pre-action state is already cached (actions require a prior
+	// observation, and every action refreshes the cache), so the before/after
+	// comparison needs no extra tree traversal.
 	before := s.currentSnapshot(app)
 	if request.Actionability == nil {
 		evidence := initialActionabilityEvidence(
@@ -526,8 +528,8 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 					*request.SemanticTarget.SourceIndex
 			}
 		}
-		// 失败也要留一行。只记成功的 trace 会让复盘时看到一串顺利的动作，
-		// 而真正要查的那一步凭空消失。
+		// Trace failures too. A trace of successes alone shows a smooth run
+		// on review while the step that needs investigating is missing.
 		s.appendTrace(app, request, before, nil, nil, true)
 		if request.SourceRef != "" &&
 			request.SemanticTarget != nil &&
@@ -591,10 +593,10 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 	}
 	immediateSnapshot := snapshot
 	immediateNotes := append([]string(nil), notes...)
-	// act → settle → verify 的中段。放在这里（而不是所有 Note 攒完之后）是有讲究的：
-	// 后面每一条判据——格式属性比对、"什么都没变"、增量树、以及 observe 决定发出去
-	// 的那份树/图——都应当读**安置之后**的界面，否则会拿一份还没稳定下来的快照
-	// 去下结论。
+	// The settle step of act, settle and verify runs here, before any later
+	// note is derived: the formatting comparison, the unchanged-state check,
+	// the incremental tree and the observation chosen by observe must all
+	// read the settled UI rather than a snapshot that has not stabilized.
 	var outcome settleOutcome
 	if plan.expect != nil {
 		outcome = s.settle(
@@ -645,8 +647,9 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 	if note := s.hiddenCanonicalAddressChangeNote(before, snapshot); note != "" {
 		notes = append(notes, note)
 	}
-	// 格式属性的变化排在最前面：它说得出**什么变成了什么**，
-	// 而像素只说得出**有事发生**、树只说得出**结构没变**。
+	// Formatting changes come first: they say what changed into what, while
+	// pixels only say that something happened and the tree only that its
+	// structure did not change.
 	if changes := textAttributeChanges(before, snapshot); len(changes) > 0 {
 		shown := changes
 		if len(shown) > 4 {
@@ -657,54 +660,46 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 			strings.Join(shown, " | ") +
 			". The snapshot renders structure, not formatting, so the tree can look unchanged while this does not. Treat this as supporting evidence rather than proof: a page can also restyle itself on its own. Obvious repaint noise (a web font replacing the fallback font, colour shifts too small to see) is already filtered out."}, notes...)
 	}
-	// verified 为真时整段"什么都没变"的讨论直接跳过：expect 是比树差分**更强**
-	// 的证据，让两者同时说话只会自相矛盾（"没有可观测变化" vs "对话框出现了"）。
-	// 顺带也不会去重试一个目标已经达成的动作。
+	// A verified expect skips the unchanged-state notes: the predicate is
+	// stronger evidence than the tree comparison, and reporting both would
+	// contradict itself ("no observable change" next to "a dialog appeared").
 	semanticUnchanged :=
 		before != nil && !observablyChanged(before, snapshot) && !outcome.verified
 	if semanticUnchanged {
-		// 语义调用返回成功却什么都没发生——实测这不是罕见情况，Nautilus 文件
-		// 图标的 `menu`、GIMP 图层 cell 的 `activate`、VLC 单选按钮的 `Toggle`
-		// 都如此。此时 do_action 返回 True，
-		// `auto` 的原有回落分支（只在返回 False 时触发）不会启动，
-		// agent 手里没有任何一条能走通的路。
-		//
-		// 判据刻意只用**外部信号**：窗口标题、整棵树、焦点、选中。
-		// 不读被操作节点自身的状态——VLC 那颗单选按钮 Toggle 之后 CHECKED
-		// 真的翻转了、面板却不切换，读节点自身会把它判成"生效了"。
-		//
-		// **这个机制盖不住 VLC 那一类，要说清楚**：它只认"什么都没变"。
-		// VLC 的案例是"状态变了、行为没变"——CHECKED 翻转会让树跟着变，
-		// 于是这里判定"发生了变化"，不会重试。要接住那一类，需要知道
-		// 这次动作**本该**造成什么后果（比如面板应当切换），
-		// 那是任务级的语义，不是通用判据能给的。
-		// 所以这里覆盖的是静默无操作，不是全部执行失败。
-		//
-		// 重复执行的风险是可控的：只有整棵树逐行相同、标题/焦点/选中都没变时
-		// 才重试，也就是应用状态与动作前完全一致，此时再点一次等价于从同一
-		// 状态点第一次。会漏判的只有"生效了但界面毫无痕迹"这一类，
-		// 而当前的失败模式——静默无操作——是实测在 3 个应用上都会发生的。
+		// A semantic action can report success while nothing happens: some
+		// toolkits accept actions such as `menu`, `activate` or `Toggle` and
+		// do nothing. The check deliberately uses only external signals
+		// (window title, tree, focus and selection), not the target node's
+		// own state: a radio button's CHECKED state can flip while the panel
+		// it controls stays unchanged, and reading the node would count that
+		// as an effect. The check therefore detects silent no-ops only, not
+		// every failed effect; judging whether the intended consequence
+		// happened needs task-level knowledge. The response reports the
+		// unchanged state and never replays the action.
 		if windowFocusWasConfirmed(request) {
-			// require_window_focus 只证明合成前目标应用窗口处于活动状态。
-			// 它不识别窗口内的焦点控件，也不提供控件级送达或语义效果证据。
+			// require_window_focus proves only that the target application
+			// window was active before synthesis. It does not identify the
+			// focused control and gives no control-level delivery or
+			// semantic-effect evidence.
 			notes = append(notes, unchangedNotes(true, readPixelVerdict(notes), readTextAttributeChange(notes))...)
 		} else {
 			notes = append(notes, unchangedNotes(false, readPixelVerdict(notes), readTextAttributeChange(notes))...)
 		}
 	}
-	// expect 的结论写在最后，因为它是这次调用**最终的**答复：
-	// 前面那些 Note 都是线索，这一条是结论。它进的是 notes，而 notes 每一档
-	// observe 都会照发——包括 "none"。验证结论不是观测，省流量不该把结论也省掉。
+	// The expect verdict comes last because it is the call's final answer; the
+	// earlier notes are clues. It goes into notes, which every observe mode
+	// returns, including "none": a verdict is not observation, and returning
+	// less observation must never drop it.
 	if plan.expect != nil {
 		notes = append(notes, expectNote(plan, outcome, request, notes))
 	}
-	// 写在最后：此时 notes 已经攒齐（像素判据、状态回读、解析目标全在里面），
-	// 而那些 Note 正是复盘时最想看的东西。
+	// Trace last, once notes are complete (pixel verdict, state readback and
+	// resolved target), because those notes matter most on review.
 	s.appendTrace(app, request, before, snapshot, notes, false)
-	// 观测预算在**最后**才生效：上面每一条证据（解析到了哪个元素、像素变了多少、
-	// 有没有弹出模态框）都照常算完，observe 决定的只是**发出去多少**。
-	// 服务端的快照缓存无论哪种模式都已经刷新过，所以 element_index 不会因为
-	// 省流量而失效——这一点必须成立，否则 "none" 就成了另一个 P2。
+	// The observation budget applies last: all evidence above is computed as
+	// usual, and observe decides only how much is sent. The snapshot cache is
+	// refreshed in every mode, so returning less never invalidates element
+	// indices or refs.
 	var response toolCallResult
 	var deliveredLines []string
 	treeWasReturned := false
@@ -953,7 +948,3 @@ func withActionOutcomeForRequest(
 	}
 	return response
 }
-
-// withActionOutcome preserves the beta20 internal test seam. Production action
-// paths call withActionOutcomeForRequest so typed actionability evidence has the
-// exact request and target-resolution facts.

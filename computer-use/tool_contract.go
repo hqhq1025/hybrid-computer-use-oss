@@ -362,16 +362,17 @@ func globalPointerFallbacksEnabled() bool {
 	}
 }
 
-// 通道能力开关，对齐 Playwright 的 `--caps=vision`。
+// enabledChannels reads the channel capability switch, modeled on Playwright's
+// --caps=vision. COMPUTER_USE_CHANNELS is a comma-separated list; by default
+// all three channels (a11y, gui, keyboard) are enabled.
 //
-// `COMPUTER_USE_CHANNELS` 逗号分隔，默认三条全开：a11y, gui, keyboard。
-// 关掉某条通道时，**它的工具根本不出现在 tools/list 里**——不是调用时才拒绝。
-// 这个区别很要紧：模型看得见的工具会去试，试了被拒就是浪费一轮；
-// 看不见就不会试。Playwright 把坐标做成 opt-in 能力也是这个道理。
+// A disabled channel's tools are absent from tools/list rather than rejected
+// at call time: a model tries every tool it can see, and each rejection wastes
+// a turn. Playwright makes coordinate input opt-in for the same reason.
 //
-// 用途有二：
-//  1. `#29` 的 A/B 需要一个能真正**关掉**一条通道的开关，而不只是关掉截图
-//  2. 部署到只信任语义动作的环境时，可以整条关掉坐标合成
+// The switch serves ablation experiments that need a channel truly disabled,
+// not just its screenshots, and deployments that trust only semantic actions
+// and want coordinate synthesis disabled entirely.
 func enabledChannels() map[string]bool {
 	raw := strings.TrimSpace(os.Getenv("COMPUTER_USE_CHANNELS"))
 	if raw == "" {
@@ -387,35 +388,11 @@ func enabledChannels() map[string]bool {
 	return enabled
 }
 
-// 每个工具属于哪条通道。list_apps 不属于任何通道（它只枚举应用），永远可用。
-// appArgumentHelp 是**所有**接受 app 参数的工具共用的说明。
-//
-// 为什么值得写这么长：13 条真实 agent 轨迹里，**12 条**的开局都是
-// `list_apps → get_app_state`——agent 不敢直接猜应用名，于是每道题都先花一步
-// 去列一遍。还有一次直接报了 appNotFound("google-chrome")，而那个应用叫
-// "Google Chrome"。
-//
-// 根因是**这台机器上的 a11y 应用名同时存在三种风格，没有任何规则能推出来**
-// （实测）：
-//
-//	显示名     "Google Chrome"        进程却叫 chrome
-//	二进制名   "vlc" "gedit" "code"   与进程同名
-//	app-id     "org.gnome.Nautilus"   进程却叫 nautilus
-//	           "org.gnome.Software"   进程却叫 snap-store
-//
-// 既然规则推不出来，就直接把规则告诉调用方，并说明匹配有多宽松——
-// 让它敢于第一次就猜，猜错也能从错误里拿到候选名单。
-// observeArgumentHelp 说明动作工具的观测预算开关。
-//
-// 为什么需要它：量过 67 条真实轨迹，**74% 的观测开销是动作的副产品**——
-// 每个 click / press_key 都把整棵树重渲一遍再附一张图（动作附带的截图共 7779
-// 张），而调用方连"这一步我不需要看"都无法表达。9 个动作工具里只有 click 有
-// 一个 include_screenshot，其余 7 个没有任何观测控制参数。
-// 昂贵的通道不可控，可控的通道不昂贵，这是把预算的控制权装在了错误的一侧。
-//
-// 默认值取 "diff" 而不是 "none"：完全不回状态会让不熟悉的调用方陷入盲操作。
-// "diff" 就是这个工具此前一直在做的事（能省时给增量、不能省时给全量 + 按策略
-// 带图），所以不传这个参数时行为逐字节不变。
+// observeArgumentHelp documents the observation budget of action tools.
+// Post-action readback is the bulk of observation cost, so callers need a way
+// to say that they do not need to see a step. The default is "diff" rather
+// than "none" because returning no state would leave callers unfamiliar with
+// the tool operating blind.
 const observeArgumentHelp = "How much observation to return after the action. " +
 	"Defaults to \"diff\", which is exactly what this tool did before this " +
 	"parameter existed, so leaving it out changes nothing.\n" +
@@ -483,7 +460,7 @@ func parseObservation(args map[string]any) (observation, error) {
 	if raw == "" {
 		return obs, nil
 	}
-	// "notes" 是这个字段在内部使用过的旧名字，等价于 "none"。认它，但不宣传。
+	// "notes" is a legacy alias of "none"; it is accepted but not advertised.
 	if raw == "notes" {
 		raw = observeNone
 	}
@@ -499,8 +476,9 @@ func parseObservation(args map[string]any) (observation, error) {
 		optionalString(args, "observe"), strings.Join(observeValues, ", "), observeDiff)
 }
 
-// expectArgumentHelp 是 expect 参数**给 LLM 的全部文档**，所以它必须自己讲完
-// 所有谓词、目标语法、以及 verified 与 isError 的区别——调用方没有别处可查。
+// expectArgumentHelp is the complete LLM-facing documentation of expect, so it
+// must itself cover every predicate, the target syntax and the difference
+// between predicate_verified and isError; callers have nowhere else to look.
 const expectArgumentHelp = "OPTIONAL. State what this action should CAUSE, and the " +
 	"server will act, wait for the UI to settle, re-read the tree and come back with a " +
 	"definite verdict instead of \"delivery was not verified\". Without it nothing " +
@@ -562,7 +540,8 @@ const settleArgumentHelp = "How long, in milliseconds, to keep waiting for `expe
 	"tight. Maximum 3000. If the predicate is still false after 3 seconds, use the returned " +
 	"evidence and a fresh observation or assert_ax instead of extending or stacking waits."
 
-// expectProperty 把谓词写进 schema 本身，而不是只写在描述里。
+// expectProperty puts the predicates into the schema itself, not only into
+// the description.
 func expectProperty() map[string]any {
 	target := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
@@ -663,10 +642,12 @@ func settleProperty() map[string]any {
 	}
 }
 
-// expectVerificationHelp 挂在**每一个**动作工具的描述末尾。
-// 调用方是 LLM，描述就是它的全部文档：如果这段只写在某一个工具上，
-// 其余工具对它就等于不存在。最后一句讲的是它与 `observe` 的关系：两个参数
-// 正交，一个管返回什么观测，一个管验证什么结果，可以同时传。
+// expectVerificationHelp is appended to the description of every action tool.
+// The caller is an LLM and the description is its whole documentation, so
+// text present on one tool only does not exist for the others. The last
+// sentences state the relation to observe: the two parameters are orthogonal,
+// one choosing what observation comes back and the other what is verified,
+// and they can be combined.
 const expectVerificationHelp = " VERIFICATION: this call is fire-and-forget by default and " +
 	"says so (\"delivery was not verified\"). Pass `expect` to close the loop instead — the " +
 	"server then acts, waits for the UI to settle (`settle_ms`, default 800), re-reads the " +
@@ -680,16 +661,23 @@ const expectVerificationHelp = " VERIFICATION: this call is fire-and-forget by d
 	"{\"predicate_verified\", \"evidence\", \"settled_after_ms\"} verdict — the verdict is a conclusion, " +
 	"not observation, so it is never suppressed — it just comes without a tree or an image."
 
+// appArgumentHelp describes the app argument shared by every tool that accepts
+// one. Accessibility app names mix display names ("Google Chrome"), binary
+// names ("gedit") and app ids ("org.gnome.Nautilus"), and no rule derives one
+// from another, so the argument accepts any of these or a PID.
 const appArgumentHelp = "Bootstrap app/process name, app id, or PID; never a window title. " +
 	"Prefer returned aN/wN/rN refs."
 
+// toolChannel maps each internal tool to the channel that enables it. Tools
+// outside the map belong to no channel and are always enabled.
 var toolChannel = map[string]string{
 	"a11y": "a11y",
 	"gui":  "gui",
 }
 
-// actionTools 是"会改变界面、因而会顺带产生一次观测"的那一组。
-// observe 参数只对它们有意义——只读工具的观测本身就是它们的返回值。
+// actionTools are the tools that change the UI and therefore produce an
+// observation as a by-product. The observe parameter applies only to them; for
+// read-only tools the observation is the return value itself.
 var actionTools = map[string]bool{
 	"a11y": true,
 	"gui":  true,

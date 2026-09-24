@@ -1,4 +1,4 @@
-"""Linux provider module: resolver."""
+"""Resolution of snapshot refs and semantic targets to live nodes."""
 
 from typing import Any
 
@@ -75,13 +75,13 @@ def same_frame(record_frame, node_frame):
 
 
 def record_name_matches(node, record):
-    """节点的名字是否等于 record 里存的那个——**两边用同一把尺子量**。
+    """Return whether the node's name equals the name stored in ``record``.
 
-    存进 record 的 name 是 limit_text() 截断过的，而节点上读到的是完整的，
-    直接比就必然失配；而失配是静默的，调用方只会看到身份判据悄悄退化。
-
-    截断过的记录带 `nameHash`（完整名字的指纹），比的是完整名字，
-    所以既不会因为截断而失配，也不会因为前缀相同而误判。
+    Both sides must be measured the same way. Record names are truncated by
+    limit_text() while live names are complete, so a direct comparison would
+    fail silently and quietly weaken the identity check. Truncated records
+    carry ``nameHash``, a fingerprint of the full name, which avoids both
+    truncation mismatches and false matches on a shared prefix.
     """
     live = effective_name(node)
     fingerprint = record.get("nameHash")
@@ -91,21 +91,24 @@ def record_name_matches(node, record):
 
 
 def record_still_matches(node, record, window_bounds):
-    """按路径解析出来的节点，是否还是快照里那个元素。
+    """Return whether a node resolved by path is still the snapshot element.
 
-    `runtimeId` 是一条子节点下标路径，**位置性**的：树一变，同一条路径就指向
-    另一个控件。实测 Nautilus：拿着右键菜单打开时的快照（`9 menu item Rename…`），
-    在菜单关掉之后再用 index 9，路径解析到的是工具栏的
-    `toggle button Menu (View options)`——于是"重命名"变成了"切换视图选项"，
-    而且一路 isError=False，从记录上完全看不出来。
+    ``runtimeId`` is a positional path of child indices, so once the tree
+    changes the same path can point at a different control. A ref to a
+    context-menu item such as "Rename…" can, for example, resolve to a toolbar
+    toggle after the menu closes, and the action would still report success.
+    Silently acting on the wrong control is the worst failure mode: it is
+    undetectable and can be destructive ("Move to Trash" may sit next to
+    "Rename…"). Failing resolution so the caller re-reads state is preferable.
 
-    静默操作错误的控件是最坏的失败模式：不可检测，且可能是破坏性的
-    （同一份菜单里紧挨着就是 `Move to Trash`）。宁可解析失败让调用方重新取状态。
+    The check uses only identifiers the snapshot actually recorded:
 
-    判据按快照里**实际有的**标识逐级收紧，不无中生有：
-    - 有 automationId：必须相等（最强，工具包给的稳定 id）
-    - 有 name：role + name 必须相等
-    - 都没有：role 必须相等，且屏幕位置没变（无名控件只能靠位置指认）
+    - automationId, if present, must match (the strongest, a stable id
+      provided by the toolkit);
+    - otherwise a recorded name requires role and name to match;
+    - otherwise the role must match, the node must still be unnamed, and a
+      recorded frame must be unchanged, because an unnamed control can only
+      be identified by position.
     """
     if node is None:
         return False
@@ -119,9 +122,9 @@ def record_still_matches(node, record, window_bounds):
     if target_name:
         return record_name_matches(node, record)
     if effective_name(node):
-        # 快照里没名字、现在有名字，说明换了个元素。
-        # 这里也必须用 effective_name：借来的名字同样算"有名字"，
-        # 否则一个借到名字的节点会被判成"仍然无名"，与 record_for 存进去的相反。
+        # The snapshot recorded no name but the node now has one, so it is a
+        # different element. Use effective_name() here as well: a borrowed
+        # name counts as a name, as it does when record_for() stores records.
         return False
     if record.get("frame") is None:
         return True

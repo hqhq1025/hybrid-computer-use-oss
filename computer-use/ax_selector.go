@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+// lookupBySelector finds the unique element matching `<role> "<name>"`,
+// `"<name>"` or `<role>`.
+//
+// The syntax deliberately matches snapshot lines verbatim: the tree renders
+// `4 push button "Save" [..]`, so the selector is `push button "Save"`, copied
+// from the line with no second syntax to learn.
+//
+// Several matches are never resolved by picking one; the candidates are
+// listed with their indices so the caller can narrow the selector.
 func lookupBySelector(snapshot *appSnapshot, selector, hint string) (*elementRecord, error) {
 	return lookupBySelectorFor(snapshot, selector, "", "")
 }
@@ -24,17 +33,18 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 		e.next = selectorPredicateHelp
 		return nil, e
 	}
-	// 身份来源有两级，**优先级照 Playwright 的 selector generator**：
-	// 它给 role+accessible-name 打 100 分，给 label / alt-text 打 140–160
-	// （分数越低越优先），都远好于 nth= 的 10000 分。
+	// Identity comes from two tiers, prioritized as in Playwright's selector
+	// generator, which scores role plus accessible name at 100 and label or
+	// alt text at 140-160 (lower wins), all far ahead of nth= at 10000.
 	//
-	// 我们对应的两级是 name 与 description。加上 description 这一级是实测决定的：
-	// 七个应用 704 个节点里，只按 role+name 能唯一指认的占 55%，
-	// 加上 description 之后到 66%；GIMP 上从 57 个涨到 114 个（**翻一倍**），
-	// 因为它 170 个节点里 95 个有 description、只有 61 个有 name。
+	// The tiers here are name, then description. Description is a tier of its
+	// own because some toolkits describe many nodes that have no name: across
+	// seven sampled desktop apps it raised the share of uniquely addressable
+	// nodes from 55% to 66%, and it doubled that share in an app whose nodes
+	// mostly carry a description but no name.
 	//
-	// 顺带记一条**已经查实的死路**：AT-SPI 的 accessible_id（对应 Playwright
-	// 打 1 分的 test-id）在这七个应用上**全是 0**，桌面上没有这一级可用。
+	// AT-SPI accessible_id, the counterpart of Playwright's test-id tier, was
+	// unset in every sampled app, so that tier is unavailable on the desktop.
 	var byName, byDescription []elementRecord
 	for _, record := range snapshot.Elements {
 		if !selectorRoleMatches(&record, role) {
@@ -44,10 +54,10 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 			continue
 		}
 		if !hasName {
-			// role 与谓词都没有时不能放行，否则空选择器匹配全树。
-			// 只要有谓词，这条顾虑就不存在了——`[desc="View options"]`
-			// 本身就是一条足够窄的身份，实测是 Nautilus 那三个同名
-			// `toggle button Menu` 唯一能区分开的写法。
+			// Without a role or predicate, an empty selector would match the
+			// whole tree. A predicate alone is a narrow enough identity: a desc
+			// such as `[desc="View options"]` can be the only difference
+			// between same-named toggle buttons.
 			if role == "" && len(preds) == 0 {
 				continue
 			}
@@ -62,8 +72,9 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 	}
 	matches := byName
 	if len(matches) == 0 {
-		// name 一个都没匹配上，才退到 description——高优先级有结果时不混入低优先级，
-		// 否则一个精确的名字命中会被一堆描述命中稀释成"歧义"。
+		// Fall back to description only when no name matches. Mixing
+		// lower-priority matches into a higher-priority hit would turn an
+		// exact name match into an ambiguity.
 		matches = byDescription
 	}
 	if len(matches) == 1 {
@@ -86,31 +97,26 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 		e.log = append(e.log, closestElements(snapshot, declared+" "+name, 5)...)
 		e.next = "selectors are written exactly as the snapshot renders them, e.g. `push button \"Save\"`, or just `\"Save\"` to match by name alone. The quoted part matches an element's name, or its desc=\"…\" when no name matches. If the UI has changed, call AX mode=observe again."
 		if len(preds) > 0 {
-			// 有谓词时最可能的原因是状态已经变了（比如那个框已经不再 checked），
-			// 而不是名字抄错了。先说这一条，再说通用建议。
+			// With predicates, the likeliest cause is a state change (a box
+			// that is no longer checked, say) rather than a mistyped name, so
+			// say that before the general advice.
 			e.next = "the predicates are matched against the element's current state, which may have changed since the snapshot — try the selector without them first, then call AX mode=observe to see the state now. " + e.next
 		}
-		// 快照小得离谱时**直接点破**，而不是把数字摆在那儿让 agent 自己看出来。
-		//
-		// 出处是第 44 题的轨迹：Chrome 跳到"网络错误"页之后，快照里只剩 1 个元素，
-		// 选择器当然找不到地址栏。错误如实报了
-		// `Snapshot: captured 13.5s ago, 1 elements`——数字是对的，但没人会停下来
-		// 品这个 1 的含义。agent 白花一步重试了同一个选择器，才改用 ctrl+l 绕过去。
-		//
-		// 一位数的元素数只有两种可能：窗口还在加载，或者抓到了别的窗口。两种都不是
-		// "名字抄错了"，而通用建议只谈后者，等于把它往错路上引。
+		// Call out an implausibly small snapshot explicitly instead of leaving
+		// the agent to infer it from the element count. A single-digit count
+		// almost always means the window was still loading (for example, a
+		// browser showing an error page) or a different window was captured.
+		// Neither is a mistyped selector, and the generic advice, which only
+		// covers that case, would lead the agent astray.
 		if n := len(snapshot.Elements); n > 0 && n < 10 {
 			e.next = fmt.Sprintf("this snapshot has only %d element(s), which almost always means the window was still loading or a different window got captured — not that the selector is wrong. Call AX mode=observe again before trying another selector. ", n) + e.next
 		}
 		return nil, e
 	}
 
-	// 多匹配时**不挑一个**。Playwright 的 strict mode 就是这个纪律，
-	// 维护者原话：sometimes there are two elements, and picking the first
-	// "would just click the first element on the page… Locators on the other
-	// side would throw and the user would directly know that its unexpected
-	// instead of clicking on the wrong element."
-	// 静默挑一个正是本项目一直在修的那类错误。
+	// Never pick one of several matches. This is Playwright's strict-mode
+	// rule: picking the first match would silently act on the wrong element,
+	// while an error tells the caller at once that the match was unexpected.
 	e := base(fmt.Sprintf("the selector %q is ambiguous: it matches %d elements.",
 		selector, len(matches)))
 	e.step("parsed selector as role=%q name=%q%s", role, name, describePredicates(preds))
@@ -120,8 +126,9 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 			e.log = append(e.log, fmt.Sprintf("    … and %d more", len(matches)-6))
 			break
 		}
-		// 有名字的才给 `aka <选择器>`——无名元素的"替代写法"就是下标本身，
-		// 而下标已经在行首了，再写一遍是废话。
+		// Only elements with a name or description get an `aka` selector; for
+		// anonymous elements the alternative is the index that already starts
+		// the line.
 		line := fmt.Sprintf("    %-4d %s", record.Index, describeRecord(&record))
 		if record.Name != "" {
 			line = fmt.Sprintf("    %-4d %-26s aka %s %q",
@@ -137,12 +144,10 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 	} else {
 		e.next = "narrow it by adding the role, e.g. `push button \"Save\"`, or pass one of the indices above."
 	}
-	// 同名同角色的元素只能靠 desc 区分——实测 Nautilus 里三个 `toggle button
-	// "Menu"` 就是这种情况，唯一的区别是 desc="Show operations" / "View options"。
-	// 候选列表里已经把它们的 desc 打出来了，这里只需要告诉调用方能拿它来筛。
-	//
-	// 例子从**真实候选**里拿，拿不到就不给：编一个 desc 出来会让调用方
-	// 照抄一个不存在的值，那比不给建议更糟。
+	// Elements with the same role and name may differ only by desc. The
+	// candidate list above already prints it; this hint tells the caller to
+	// filter on it. The example comes from an actual candidate or is omitted,
+	// because an invented desc would be copied verbatim and match nothing.
 	if example := describeSelectorExample(matches); len(preds) == 0 && example != "" {
 		e.next += " If the candidates above differ only by desc=\"…\", add it as a predicate: `" +
 			example + "`."
@@ -163,32 +168,29 @@ func selectorRoleMatches(record *elementRecord, requested string) bool {
 		)
 }
 
-// parseSelector 拆出 role、name 与**末引号之后的残串**。
+// parseSelector splits a selector into role, name, whether a name was quoted,
+// and the remainder after the closing quote. The remainder must be returned
+// rather than dropped: ignoring it would silently discard constraints such as
 //
-// 第四个返回值是补的一个真 bug：原来这里取到 name 就 return，
-// `selector[end+1:]` 从头到尾没人看。于是
+//	push button "Save" [checked]
+//	push button "OK" >> nth=0
 //
-//	push button "Save" [checked]      -> role="push button" name="Save"
-//	push button "OK" >> nth=0         -> role="push button" name="OK"
-//
-// 两条都**静默丢掉约束、照常匹配、还返回成功**。调用方以为自己加了限定，
-// 实际拿到的是不带限定的结果——正是本项目反复在修的那类"工具骗 agent"。
-//
-// 残串交给 parsePredicates：认得的当约束执行，认不得的报错。
+// and report an unconstrained match as success. parsePredicates enforces the
+// predicates it recognizes and rejects everything else.
 func parseSelector(selector string) (string, string, bool, string) {
 	selector = strings.TrimSpace(selector)
 	start := strings.Index(selector, "\"")
-	// 角色段止于**第一个 `[` 或第一个 `"`，谁先来算谁**。
-	// 少了这一判，`toggle button [desc="Show operations"]` 会把谓词值的
-	// 那个引号当成名字的起点，解析成 role=`toggle button [desc=`——
-	// 这是写测试时当场撞出来的。
+	// The role segment ends at the first `[` or the first `"`, whichever
+	// comes first. Otherwise `toggle button [desc="Show operations"]` would
+	// take the predicate's quote as the start of the name and parse the role
+	// as `toggle button [desc=`.
 	if bracket := strings.Index(selector, "["); bracket >= 0 &&
 		(start < 0 || bracket < start) {
 		return strings.TrimSpace(selector[:bracket]), "", false,
 			strings.TrimSpace(selector[bracket:])
 	}
 	if start < 0 {
-		// 没有引号也没有方括号时整串都是 role，不存在残串。
+		// With neither a quote nor a bracket, the whole selector is the role.
 		return selector, "", false, ""
 	}
 	end := closingQuote(selector, start)
@@ -200,10 +202,9 @@ func parseSelector(selector string) (string, string, bool, string) {
 		true, strings.TrimSpace(selector[end+1:])
 }
 
-// closingQuote 找 start 处那个引号的配对引号，跳过 `\"` 转义。
-//
-// 原来这里用 strings.LastIndex，遇到 `[desc="…"]` 这种后面还有引号的
-// 选择器会把整段吞进 name。既然现在残串要参与匹配，配对就必须是真配对。
+// closingQuote finds the quote that closes the one at start, skipping `\"`
+// escapes. Quotes must pair exactly: taking the last quote in the string would
+// swallow trailing predicates such as `[desc="…"]` into the name.
 func closingQuote(text string, start int) int {
 	for i := start + 1; i < len(text); i++ {
 		if text[i] == '\\' {
@@ -217,7 +218,7 @@ func closingQuote(text string, start int) int {
 	return -1
 }
 
-// unescapeQuoted 还原 runtime.py 里 quoted() 做的转义。
+// unescapeQuoted reverses the escaping applied by the provider's quoted().
 func unescapeQuoted(text string) string {
 	var out strings.Builder
 	for i := 0; i < len(text); i++ {
@@ -240,20 +241,23 @@ func unescapeQuoted(text string) string {
 	return out.String()
 }
 
-// selectorPredicate 是选择器尾部方括号里的一条约束，语义是 AND。
+// selectorPredicate is one constraint from a selector's trailing brackets;
+// predicates combine with AND.
 type selectorPredicate struct {
 	kind  string // state | desc | placeholder | action
 	value string
 }
 
+// selectorStateWords are the state predicates a selector string may carry.
 // Public selectors accept only the compact working-projection spelling.
 // Canonical records may retain provider-facing state words internally, but
 // those are not a second public protocol.
 //
-// 刻意不收 [disabled]：state_segment 的注释里记着实测结论——Nautilus 的文件
-// 图标根本不设 ENABLED/SENSITIVE 却完全可操作，我们既然不打印它，
-// 就更不能让人拿它来筛。也不收 [level]，那是 aria 有我们没有的属性，
-// 为了对齐而造一个查不到的谓词只会让 agent 白撞墙。
+// [disabled] is deliberately absent: AT-SPI ENABLED/SENSITIVE is unreliable
+// on Linux (some toolkits leave it unset on fully operable controls), so the
+// snapshot never prints it and selectors must not filter on it. [level] is
+// absent too: it is an ARIA attribute with no provider counterpart here, and a
+// predicate that can never match would only mislead the agent.
 var selectorStateWords = map[string]bool{
 	"checked":  true,
 	"expanded": true,
@@ -275,8 +279,9 @@ const selectorPredicateHelp = "Supported trailing predicates are the ones the sn
 	"The leading index, the {x,y,w,h} box and the trailing : \"value\" are not part of a selector — drop them. " +
 	"Chained (>>), positional (nth=) and layout (:right-of) selectors do not exist here."
 
-// parsePredicates 把残串拆成约束。认不出来的一律报错，绝不跳过——
-// 静默跳过就是这次要修的那个 bug 本身。
+// parsePredicates splits the remainder into constraints. Anything it does not
+// recognize is an error rather than skipped, because a skipped constraint
+// would silently widen the match.
 func parsePredicates(rest string) ([]selectorPredicate, error) {
 	rest = strings.TrimSpace(rest)
 	var out []selectorPredicate
@@ -303,8 +308,8 @@ func parsePredicates(rest string) ([]selectorPredicate, error) {
 	return out, nil
 }
 
-// closingBracket 找配对的 `]`，跳过引号内部的那些——
-// desc 的值里带 `]` 完全可能（实测 Impress 的描述就是整句自然语言）。
+// closingBracket finds the matching `]`, skipping any inside quotes: desc
+// values can be whole sentences that contain `]`.
 func closingBracket(text string, start int) int {
 	inQuote := false
 	for i := start + 1; i < len(text); i++ {
@@ -350,8 +355,8 @@ func parsePredicateGroup(group string) ([]selectorPredicate, error) {
 			value: unescapeQuoted(value[1 : len(value)-1]),
 		}}, nil
 	}
-	// 状态在快照里是**一个方括号里的多个词**（`[selected focused]`），
-	// 所以一组要拆成多条约束，不是一条。
+	// The snapshot prints states as several words in one bracket
+	// (`[selected focused]`), so one group yields one constraint per word.
 	var out []selectorPredicate
 	for _, word := range strings.Fields(group) {
 		word = strings.ToLower(word)
@@ -366,8 +371,9 @@ func parsePredicateGroup(group string) ([]selectorPredicate, error) {
 	return out, nil
 }
 
-// describeSelectorExample 从候选里挑一个**真实存在**的 desc，拼成可直接抄用的
-// 选择器。没有任何候选带 desc 时返回空串，由调用方决定不给这条建议。
+// describeSelectorExample builds a directly copyable selector from a desc that
+// actually exists among the candidates. It returns "" when no candidate has a
+// usable desc, and the caller then omits the hint.
 func describeSelectorExample(matches []elementRecord) string {
 	for _, record := range matches {
 		if record.Description == "" || record.Description == record.Name {
@@ -382,8 +388,9 @@ func describeSelectorExample(matches []elementRecord) string {
 	return ""
 }
 
-// describePredicates 把解析结果回显进 Call log。调用方要能一眼看出
-// 自己那串方括号被读成了什么——尤其是在筛空的时候。
+// describePredicates echoes the parsed predicates into the call log, so the
+// caller can see at a glance how its brackets were read, especially when the
+// filter matched nothing.
 func describePredicates(preds []selectorPredicate) string {
 	if len(preds) == 0 {
 		return ""
@@ -403,8 +410,8 @@ func recordMatchesPredicates(record *elementRecord, preds []selectorPredicate) b
 	for _, pred := range preds {
 		switch pred.kind {
 		case "state":
-			// States 存的是渲染好的 " [checked expanded]"，按词比对，
-			// 不能用 Contains——那样 "selected" 会命中 "unselected"。
+			// States holds the rendered " [checked expanded]". Compare whole
+			// words; Contains would match "selected" inside "unselected".
 			found := false
 			for _, word := range strings.Fields(strings.Trim(record.States, " []")) {
 				if strings.EqualFold(word, pred.value) {

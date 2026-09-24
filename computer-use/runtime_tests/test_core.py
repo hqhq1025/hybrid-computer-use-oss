@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split Linux provider tests."""
+"""Linux provider text input, window focus, diagnostics, and action note tests."""
 
 from runtime_test_support import *  # noqa: F401,F403
 
@@ -43,9 +43,9 @@ class ProviderIdentityPrimitiveTests(unittest.TestCase):
 
 class FindEditableTextTests(AtspiPatchedTestCase):
     def test_skips_node_that_lacks_editable_state(self):
-        """回归：树序第一个带 EditableText 接口的节点可能是隐藏占位控件。
+        """The first EditableText node in tree order may be a hidden placeholder.
 
-        它没有 EDITABLE 状态，写进去会静默丢失，必须跳过。
+        It lacks the EDITABLE state, so text written to it is silently lost.
         """
         placeholder = FakeNode(
             states=(STATE.VISIBLE, STATE.ENABLED), text=FakeTextIface(honest=False)
@@ -131,7 +131,7 @@ class InsertTextTests(AtspiPatchedTestCase):
         )
 
     def test_rejects_buffer_that_reports_success_without_writing(self):
-        """回归：AT-SPI 对错误控件也会返回 True，必须回读字符数确认。"""
+        """AT-SPI reports success even for the wrong control; read back the length."""
         liar = FakeTextIface(honest=False)
         window = self._window_with(liar)
 
@@ -201,11 +201,11 @@ class ExtentsTests(AtspiPatchedTestCase):
         )
 
     def test_accepts_negative_coordinates_from_a_second_monitor(self):
-        """左侧副屏上的窗口坐标是负数，这是合法的，不能一并过滤掉。"""
+        """A monitor left of the primary one yields legitimate negative coordinates."""
         self.assertIsNotNone(runtime.extents(self._node(-1920, -100, 800, 600)))
 
     def test_rejects_int_min_origin_used_for_unrendered_widgets(self):
-        """回归：未渲染控件返回 INT_MIN 原点但尺寸看着正常，只查尺寸拦不住。"""
+        """Unrendered widgets report an INT_MIN origin but a plausible size."""
         self.assertIsNone(runtime.extents(self._node(-2147483648, -2147483648, 1, 1)))
 
     def test_rejects_int_min_origin_on_either_axis(self):
@@ -289,7 +289,7 @@ class CaretInsertionTests(AtspiPatchedTestCase):
         )
 
     def test_inserts_at_the_caret_instead_of_the_end(self):
-        """回归：一直追加到末尾，等于无视用户/agent 刚刚放好的光标位置。"""
+        """Appending at the end would ignore the caret the user or agent just placed."""
         iface = FakeTextIface(text="hello world", caret=5)
 
         self.assertTrue(runtime.insert_text(self._window_with(iface), " there"))
@@ -393,14 +393,14 @@ class SetElementValueTests(AtspiPatchedTestCase):
         self.assertEqual(iface.text, "new")
 
     def test_rejects_a_control_that_reports_success_without_changing(self):
-        """回归：set_text_contents 和 insert_text 一样会对错误控件返回 True。"""
+        """set_text_contents, like insert_text, returns True for the wrong control."""
         iface = FakeTextIface(text="old", honest=False)
         node = FakeNode(states=(STATE.EDITABLE,), text=iface)
 
         self.assertFalse(runtime.set_element_value(node, "new"))
 
     def test_rejects_a_control_that_changes_to_a_different_value(self):
-        """任意变化不等于请求值已经落地，不能据此给精确成功承诺。"""
+        """A change to some other value does not prove the requested value landed."""
         iface = FakeTextIface(text="old")
 
         def normalize(payload):
@@ -431,10 +431,11 @@ class SetElementValueTests(AtspiPatchedTestCase):
             )
 
 class ChannelTaggingTests(AtspiPatchedTestCase):
-    """回归：每条动作 note 必须带通道标签，否则"语义 vs 坐标"的比例无法统计。
+    """Every action note carries a channel tag.
 
-    这个比例是 plan 里 S3 报告口径的第四项，也是区分"agent 不想用 a11y"
-    与"用了但失败后退化"的唯一依据——两者修法相反。
+    The tags make the ratio of semantic to coordinate actions measurable and
+    separate "the agent did not use accessibility" from "it tried and fell
+    back after a failure"; the two cases need opposite fixes.
     """
 
     def setUp(self):
@@ -452,8 +453,8 @@ class ChannelTaggingTests(AtspiPatchedTestCase):
             ("send_text", lambda t: None),
             ("send_mouse_click", lambda *a: None),
             ("send_drag", lambda *a: None),
-            # scroll_element 现在收第三个参数（元素坐标）并**返回走了哪条路线**，
-            # Note 的措辞依赖这个返回值。桩子跟着改，否则测的是一个不存在的签名。
+            # Match scroll_element's signature: it takes an optional element
+            # point and returns the route used, which the note text reports.
             ("scroll_element", lambda d, p, point=None: "keys"),
             ("time", _NoSleep()),
         ):
@@ -462,10 +463,10 @@ class ChannelTaggingTests(AtspiPatchedTestCase):
             self.addCleanup(setattr, runtime, name, original)
 
     def _notes(self, op):
-        """只取动作 Note。
+        """Return only the action notes.
 
-        `[pixels]` 那条是**独立于树**的效果判据，按动作类型无关地附加，
-        不该混进"这个动作说了什么"的断言里。
+        The `[pixels]` note is a tree-independent effect check appended for
+        every action type, so it stays out of assertions about the action.
         """
         return [n for n in perform_provider_operation(op).get("notes", [])
                 if not n.startswith("[pixels]")]
@@ -504,8 +505,8 @@ class ChannelTaggingTests(AtspiPatchedTestCase):
         ):
             notes = self._notes(op)
             self.assertTrue(notes, "{} 没有产生 note".format(op["intent"]))
-            # 两个正交的轴各要有一个标签：寻址通道 + 执行路径。
-            # 少任何一个，agent 都无法判断"该拿什么去验证这次动作"。
+            # Each note is tagged on two orthogonal axes, addressing channel
+            # and execution path; the agent needs both to choose a check.
             self.assertTrue(
                 notes[0].startswith(("[a11y]", "[gui]", "[keyboard]")),
                 "{} 的 note 缺少寻址通道标签: {}".format(op["intent"], notes[0][:70]),
@@ -516,7 +517,7 @@ class ChannelTaggingTests(AtspiPatchedTestCase):
             )
 
 class ActionNotesTests(AtspiPatchedTestCase):
-    """动作必须如实说明走了哪条路径、结果有没有被确认。"""
+    """Action notes state which path ran and whether the result was confirmed."""
 
     def setUp(self):
         super().setUp()
@@ -552,8 +553,8 @@ class ActionNotesTests(AtspiPatchedTestCase):
         self.assertEqual(len(notes), 1)
         self.assertIn("confirm it landed (3 -> 8 characters)", notes[0])
         self.assertNotIn("not verified", notes[0])
-        # 必须说清确认的边界：确认的是控件变了，不是应用采纳了。
-        # 对话框普遍把控件状态与文档状态分开，只在 OK/Apply 时才提交。
+        # The confirmation covers the control, not the application: many
+        # dialogs commit control state to the document only on OK/Apply.
         self.assertIn("may still require OK/Apply", notes[0])
 
     def test_synthesis_fallback_is_reported_as_unverified(self):
@@ -689,11 +690,11 @@ class ActionNotesTests(AtspiPatchedTestCase):
         self.assertTrue(any("2 coordinate click(s)" in note for note in notes))
 
 class SnapshotDiagnosticsTests(AtspiPatchedTestCase):
-    """回归：应用活着、窗口也在，但 a11y 只有一个窗口框时必须明确告知。
+    """An app whose accessibility tree holds only its window frame is flagged.
 
-    实测证据：Chrome 未加 --force-renderer-accessibility 时有 11 个活进程、
-    AT-SPI 里有正常注册和窗口标题，但 get_app_state 返回 isError=false 且树里
-    只有 1 个元素。agent 无从分辨"界面是空的"和"我看不见这个界面"。
+    Chrome started without --force-renderer-accessibility registers with
+    AT-SPI and exposes its window title, yet the tree has a single element.
+    Without a note the agent cannot tell an empty UI from one it cannot see.
     """
 
     def test_flags_app_that_exposes_only_its_window_frame(self):
@@ -730,7 +731,7 @@ class SnapshotDiagnosticsTests(AtspiPatchedTestCase):
         self.assertEqual(runtime.snapshot_diagnostics(records), [])
 
     def test_containers_without_content_do_not_count(self):
-        """只有一堆无名无动作的容器，等同于空壳。"""
+        """Unnamed containers without actions amount to an empty shell."""
         records = [
             {"controlType": "frame", "name": "App", "actions": ["doDefault"]},
             {"controlType": "panel", "name": "", "actions": []},
@@ -740,7 +741,7 @@ class SnapshotDiagnosticsTests(AtspiPatchedTestCase):
         self.assertEqual(len(runtime.snapshot_diagnostics(records)), 1)
 
     def test_empty_record_set_is_not_diagnosed(self):
-        """完全没有 records 是另一类问题（取不到窗口），不在本诊断范围内。"""
+        """No records at all means no window was read, which is out of scope here."""
         self.assertEqual(runtime.snapshot_diagnostics([]), [])
 
     def test_get_app_state_returns_the_diagnostic_as_notes(self):
@@ -829,13 +830,12 @@ class ContentHostDiagnosticTests(unittest.TestCase):
         self.assertNotIn("The content is on screen", notes[0])
 
 class MainWindowSelectionTests(AtspiPatchedTestCase):
-    """回归：弹出模态对话框后，agent 必须能看到对话框而不是主窗口。
+    """An open modal dialog is observed instead of the main window.
 
-    实测证据：LibreOffice Writer 打开「格式 → 段落」对话框后，frame 与 dialog
-    的状态分别是 (SHOWING, VISIBLE) 和 (SHOWING, VISIBLE, MODAL)——**两者都不报
-    ACTIVE**。旧逻辑按 ACTIVE > SHOWING > 第一个 排序，于是模态对话框因为在
-    子节点顺序里靠后而输给主窗口，`get_app_state` 返回主窗口的树，
-    树里连一个 dialog 角色的节点都没有。而对话框是 OSWorld 的主要操作对象。
+    With LibreOffice Writer's Format > Paragraph dialog open, the frame reports
+    (SHOWING, VISIBLE) and the dialog (SHOWING, VISIBLE, MODAL); neither
+    reports ACTIVE. Ranking by ACTIVE, then SHOWING, then child order picks
+    the frame, whose tree contains no dialog node at all.
     """
 
     def _app(self, *windows):
@@ -852,7 +852,7 @@ class MainWindowSelectionTests(AtspiPatchedTestCase):
         self.assertEqual(index, 1)
 
     def test_modal_dialog_wins_even_when_frame_claims_active(self):
-        """模态按定义阻塞其余窗口，比 ACTIVE 更强。"""
+        """A modal window blocks the others by definition, so it outranks ACTIVE."""
         frame = FakeNode(states=(STATE.SHOWING, STATE.VISIBLE, STATE.ACTIVE))
         dialog = FakeNode(states=(STATE.SHOWING, STATE.VISIBLE, STATE.MODAL))
         self._patch_roles({id(frame): "frame", id(dialog): "dialog"})
@@ -862,7 +862,7 @@ class MainWindowSelectionTests(AtspiPatchedTestCase):
         self.assertIs(chosen, dialog)
 
     def test_hidden_modal_dialog_does_not_win(self):
-        """已关闭但仍挂在树上的模态对话框不该抢走主窗口。"""
+        """A closed modal dialog still attached to the tree does not take over."""
         frame = FakeNode(states=(STATE.SHOWING, STATE.VISIBLE, STATE.ACTIVE))
         stale = FakeNode(states=(STATE.MODAL,))
         self._patch_roles({id(frame): "frame", id(stale): "dialog"})
@@ -872,11 +872,11 @@ class MainWindowSelectionTests(AtspiPatchedTestCase):
         self.assertIs(chosen, frame)
 
     def test_active_modal_wins_over_earlier_modal(self):
-        """回归：combo 下拉是叠在对话框之上的第二个模态窗口。
+        """A combo box popup is a second modal window stacked on the dialog.
 
-        实测 LibreOffice：Paragraph 对话框是 MODAL+SHOWING，
-        行距下拉弹出的独立顶层 window 是 MODAL+SHOWING+**ACTIVE**。
-        只取"第一个模态"会拿到对话框，下拉里的选项仍然看不见。
+        In LibreOffice the Paragraph dialog is MODAL+SHOWING, while the line
+        spacing popup is a separate top-level window that is also ACTIVE.
+        Taking the first modal window would hide the popup's options.
         """
         dialog = FakeNode(states=(STATE.SHOWING, STATE.VISIBLE, STATE.MODAL))
         popup = FakeNode(
@@ -928,8 +928,8 @@ class MainWindowSelectionTests(AtspiPatchedTestCase):
         original = runtime.node_role
         self.addCleanup(setattr, runtime, "node_role", original)
         runtime.node_role = lambda node: mapping.get(id(node), "frame")
-        # extents 走真实 Atspi.Component，这里的 Fake 没有 component，
-        # app_windows 靠 role 判定即可
+        # The fakes have no component for the real extents() to query;
+        # app_windows can classify them by role alone.
         original_ext = runtime.extents
         self.addCleanup(setattr, runtime, "extents", original_ext)
         runtime.extents = lambda node: None
@@ -954,7 +954,7 @@ class FocusWindowTests(AtspiPatchedTestCase):
         self.assertEqual(component.grab_calls, 1)
 
     def test_prefers_the_previously_focused_widget(self):
-        """窗口失活后，上次获得焦点的控件仍保留 FOCUSED 状态，应优先试它。"""
+        """An inactive window keeps FOCUSED on its last focused widget; try it first."""
         window = FakeNode()
         plain = FakeComponent(window=window, grabs=True)
         remembered = FakeComponent(window=window, grabs=True)
@@ -983,7 +983,7 @@ class FocusWindowTests(AtspiPatchedTestCase):
         self.assertEqual(component.grab_calls, 0)
 
     def test_caps_the_number_of_grab_attempts(self):
-        """抓焦点会真的改变应用内焦点位置，不能把整棵树扫一遍。"""
+        """Each grab moves focus inside the app, so the whole tree is not tried."""
         components = [FakeComponent(grabs=False) for _ in range(20)]
         window = FakeNode(
             children=[
@@ -1002,7 +1002,7 @@ class RequireWindowFocusTests(AtspiPatchedTestCase):
     def test_passes_through_when_window_is_active(self):
         window = FakeNode(states=(STATE.ACTIVE,))
 
-        runtime.require_window_focus(window, "press_key")  # 不应抛异常
+        runtime.require_window_focus(window, "press_key")  # must not raise
 
     def test_raises_instead_of_synthesizing_into_the_wrong_window(self):
         component = FakeComponent(grabs=False)
@@ -1185,7 +1185,7 @@ class KeySyntaxTests(unittest.TestCase):
         self.assertEqual(runtime.KEY_ALIASES["forward_slash"], "slash")
 
 class PerformOperationGuardTests(AtspiPatchedTestCase):
-    """确认焦点守卫真的接在了调度路径上，防止以后被摘掉。"""
+    """The focus guard stays wired into the dispatch path."""
 
     def setUp(self):
         super().setUp()
@@ -1228,7 +1228,7 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
         self.assertEqual(self.sent_keys, ["ctrl+a"])
 
     def test_invalid_key_is_rejected_before_stealing_focus(self):
-        """夺焦点会打断用户，不该为一个拼错的按键先抢窗口再报错。"""
+        """Stealing focus disrupts the user, so a misspelled key fails first."""
 
         def refuse_parse(key):
             raise RuntimeError("Unsupported modifier: shft")
@@ -1248,7 +1248,7 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
         self.assertEqual(self.sent_text, ["hi"])
 
     def test_type_text_skips_focus_when_direct_write_succeeds(self):
-        """AT-SPI 直写不需要焦点，不该无谓地抢用户的窗口。"""
+        """A direct AT-SPI write needs no focus, so the user's window is left alone."""
         self._patch(
             "insert_text_outcome_on_node",
             lambda root, text: ("verified", 0, 2, True),

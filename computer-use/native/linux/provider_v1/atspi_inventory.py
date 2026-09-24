@@ -36,43 +36,39 @@ def wait_for_ui_to_settle(
     clock=time.monotonic,
     sleep=time.sleep,
 ):
-    """动作之后等界面安置好，再让调用方去建快照。
+    """Wait for the UI to settle after an action, before the caller snapshots.
 
-    修的是一个**静默操作错误窗口**的竞态。实测（Thunderbird
-    `Tools → Message Filters`，AT-SPI 2.44 + GNOME Shell）：
+    This closes a race that silently targets the wrong window. Measured with
+    Thunderbird's Tools > Message Filters (AT-SPI 2.44, GNOME Shell):
 
-        t=0.070s  新窗口已经进入 AT-SPI 树，但 ACTIVE 还挂在主窗口身上
-        t=0.123s  ACTIVE 才转移过去（X11 的 _NET_ACTIVE_WINDOW 同一刻翻转）
+        t=0.070s  the new window is in the AT-SPI tree, but ACTIVE is still
+                  on the main window
+        t=0.123s  ACTIVE moves (X11 _NET_ACTIVE_WINDOW flips at the same time)
 
-    而这里原先是固定 `sleep(0.12)`——**正好压在边界上**。快照因此有相当概率
-    落在 0.070~0.123 这段窗口期里建成：树是完整的、状态是自洽的、
-    `main_window()` 也按既有判据挑得没错，挑出来的却是主窗口。
-    agent 拿着主窗口的树按索引点击，就静默地操作了另一个窗口——
-    实测后果是在 Message Filters 里点 `New…`，弹出的是主窗口的「新建邮件」。
+    A fixed 0.12 s sleep lands on that boundary, so a snapshot built inside
+    the interval is complete and self-consistent, and `main_window()`
+    applies its criteria correctly, yet it selects the main window;
+    index-based actions then silently operate on the wrong window. A longer
+    fixed sleep only moves the boundary, which slower applications or busier
+    machines hit again, so the wait is based on state:
 
-    **把固定 sleep 调大修不了它**：那只是把边界挪到另一个不确定的位置，
-    应用越慢、机器越忙越容易重新撞上。判据必须从"等够时间"换成"等到状态"。
+    - If the set of top-level windows is unchanged, nothing opened or
+      closed; return at once, so the common path is not slowed down.
+    - Otherwise wait until a newly appeared window reports ACTIVE or MODAL,
+      or, if windows only closed, until a remaining window takes focus.
 
-    完成条件分两种：
-    - 顶层窗口集合与动作前一致 → 什么都没开也没关，立刻返回（常见路径不变慢）。
-    - 集合变了 → 等到**新出现的那个窗口**报 ACTIVE 或 MODAL 为止；
-      如果只有窗口关闭，则等到剩下的窗口里有人接管焦点。
+    On timeout, return a note instead of None: a new window that did not
+    take focus means the snapshot may show a different window than the
+    caller expects.
 
-    超时**不静默**：返回一条说明，因为"新窗口没接管焦点"意味着这份快照可能
-    照的不是 agent 以为的那个窗口，这正是它需要知道的事。
-
-    **边界：窗口在最短安置时间之后才出现的，这里接不住。**
-    实测六例开窗口，进入 AT-SPI 树的耗时都 ≤ 0.070s：
-
-        Thunderbird 消息过滤器 (Gecko) 0.070   LibreOffice 查找替换 (VCL) 0.045
-        gedit 查找替换       (GTK)   0.045   gedit 另存为        (GTK) 0.064
-        VLC 首选项           (Qt)    0.046
-
-    `SETTLE_MIN_SECONDS` = 0.12 对最慢的一例仍有 1.7 倍余量，所以没有再加一段
-    固定观察期——那要给**每一个**动作加上几百毫秒，用真实延迟去买一个没量到的
-    余量。更慢的应用漏掉之后是另一种失败：快照照到的是动作前的状态，
-    新窗口完全不出现。那是**看得见**的失败（agent 会发现动作像是没生效），
-    与这里要修的"树自洽、却照错了窗口"不是一回事，不要混为一谈。
+    Limitation: a window that appears after `min_seconds` is not detected.
+    Dialogs measured in Gecko, VCL, GTK and Qt applications joined the
+    AT-SPI tree within 0.045-0.070 s, so the 0.12 s minimum leaves a 1.7x
+    margin over the slowest case, and no fixed observation period (which
+    would add hundreds of milliseconds to every action) is used. A slower
+    application yields a snapshot of the pre-action state without the new
+    window: a visible failure (the action seems to have had no effect)
+    rather than a consistent tree of the wrong window.
     """
     sleep(min_seconds)
     if before is None:
@@ -86,8 +82,9 @@ def wait_for_ui_to_settle(
                 for index, window in windows
             }
         except Exception:
-            # 应用可能被这次动作关掉了。安置等待失败不该盖住真正的错误——
-            # 紧接着的 build_snapshot 会把它报出来。
+            # The action may have closed the application. A failed settle
+            # wait must not mask the real error, which the following
+            # build_snapshot reports.
             return None
         if current == before:
             return None
@@ -111,15 +108,11 @@ def wait_for_ui_to_settle(
 
 
 def loose(text):
-    """把应用名压成"只剩字母数字"的形式，用来做**分隔符不敏感**的比对。
+    """Return lowercase alphanumerics only, for separator-insensitive matching.
 
-    这条是从真实 agent 的轨迹里读出来的：13 条轨迹里有一次直接报了
-    `appNotFound("google-chrome")`——而这台机器上那个应用叫 `Google Chrome`。
-    agent 猜的名字**完全合理**，只是连字符和空格对不上。
-
-    更贵的是它的连带影响：13 条轨迹里 **12 条**的开局都是
-    `list_apps → get_app_state`。agent 不敢直接猜名字，于是每道题都先花一步
-    去列应用。分隔符归一化之后，猜中的概率大幅提高，那一步就不必付了。
+    A reasonable guess such as `google-chrome` must match the application
+    `Google Chrome`; otherwise callers list applications before every
+    lookup instead of naming the one they want.
     """
     return "".join(ch for ch in str(text or "").lower() if ch.isalnum())
 
@@ -206,14 +199,13 @@ def process_names(pid, proc_root="/proc"):
         cmd_path = os.path.join(proc_root, str(int(pid)), "cmdline")
         with open(cmd_path, "rb") as handle:
             raw = handle.read()
-        # 先按 \0 切，再按空白切。
+        # Split on NUL, then on whitespace.
         #
-        # 为什么两步都要：cmdline 的约定是 \0 分隔，但**并非所有进程都守约**——
-        # 这台机器上 Chrome 那条读出来是一整块
-        # `chrome --remote-debugging-port=1337`，中间是空格。只按 \0 切就会把整块
-        # 当成 argv[0]，再取 basename，于是从 `…/drugs.com` 里读出 "drugs.com"，
-        # 把一个**网页地址**注册成了 Chrome 的别名。那样 `resolve_app("drugs")`
-        # 会解析到 Chrome——工具凭空编出一个不存在的应用名，正是最该避免的那种谎。
+        # cmdline is NUL-separated by convention, but not every process
+        # keeps it: Chrome can expose its whole command line as one
+        # space-separated block. Splitting only on NUL would take that block
+        # as argv[0], and its basename, taken from a URL argument, would
+        # register a website name as a Chrome alias for resolve_app().
         first = raw.split(b"\0")[0].decode("utf-8", "replace").split()
         if first:
             names.update(executable_identity_names(first[0]))
@@ -524,8 +516,9 @@ def matches_query(app, query):
     app_name = node_name(app).lower()
     if app_name == normalized or normalized in app_name:
         return True
-    # 分隔符不敏感：google-chrome / google_chrome / googlechrome 都能对上
-    # "Google Chrome"。只在两边都非空时才比，避免空串匹配一切。
+    # Separator-insensitive: google-chrome, google_chrome and googlechrome all
+    # match "Google Chrome". Compare only when both forms are non-empty, since
+    # an empty string would match everything.
     tight_query, tight_name = loose(normalized), loose(app_name)
     if tight_query and tight_name and (
             tight_query == tight_name or tight_query in tight_name
@@ -575,15 +568,14 @@ def matches_app_bootstrap_query(app, query):
 
 
 def foreground_app():
-    """X11 认定的前台窗口属于哪个 a11y 应用。拿不到就 None。
+    """Return the accessibility application that owns the X11 active window.
 
-    这条存在的理由是轨迹给的：13 条真实 agent 轨迹里 **12 条**的第一步是
-    `list_apps`，第二步才是 `get_app_state`。它们真正想知道的是同一件事——
-    "我现在面前是什么"——而这件事此前需要两次调用外加一次猜名字。
+    Return None when it cannot be determined. This answers an empty
+    application query ("what is in front of me") in a single call.
 
-    改用 X11 的活动窗口而不是 AT-SPI 的 ACTIVE 位：后者在门户对话框、
-    LibreOffice 等一大类窗口上**根本不设**（本仓库反复实测过），
-    拿它当"前台"的判据会经常判空。
+    The X11 active window is used instead of the AT-SPI ACTIVE state, which a
+    large class of windows, including portal dialogs and LibreOffice, never
+    sets; relying on it would often find no foreground application.
     """
     try:
         active = subprocess.run(["xdotool", "getactivewindow"],
@@ -605,11 +597,13 @@ def foreground_app():
 
 
 def input_capable_app_labels():
-    """当前**能承载用户输入**的应用，一行一个，带进程名与窗口标题。
+    """Return one label per application that can take user input.
 
-    只列能接收输入的：把窗口管理器、合成器、面板、桌面本身也摆进候选表，
-    等于邀请调用方去操作它们——实测确实发生过（agent 对桌面反复 press_key
-    254 次）。候选表的语义必须是"这些是你可以操作的"，而不是"这些进程活着"。
+    Each label carries the process name and window titles. Only
+    input-capable applications are listed: including window managers,
+    compositors, panels or the desktop itself invites the caller to operate
+    on them, and input sent there goes nowhere. The list means "applications
+    you can operate", not "processes that are alive".
     """
 
     running = []
@@ -620,19 +614,18 @@ def input_capable_app_labels():
                 continue
             if not accepts_user_input(app):
                 continue
-            # 一并给出进程名。a11y 名和进程名常常毫不相干（Archive Manager /
-            # file-roller），而 agent 猜的多半是后者——把两者摆在一起，它下一次
-            # 就知道该怎么对应，而不是再猜一轮。
+            # Include the process name. Accessibility names and process names
+            # often differ completely (Archive Manager vs file-roller), and
+            # callers usually guess the latter; showing both lets them map
+            # one to the other instead of guessing again.
             others = sorted(n for n in process_names(node_pid(app))
                             if loose(n) and loose(n) != loose(name))
             label = "{} ({})".format(name, others[0]) if others else name
-            # 窗口标题也要列出来。
-            #
-            # 轨迹证据：GIMP 那一段里 agent 三次拿**对话框的名字**当应用名去调，
-            # `appNotFound("script-fu")` 两次、`appNotFound("file-jpeg")` 一次。
-            # 它并没有猜错——屏幕上确实摆着一个 "Script-Fu Console"、一个
-            # "Export Image as JPEG"。错的是它无从知道这两个窗口都归 gimp 管：
-            # 候选表里只有一行光秃秃的 "gimp"，看不出它名下有这些窗口。
+            # Include window titles as well, so callers can tell which
+            # application owns a dialog. Dialog titles such as GIMP's
+            # "Script-Fu Console" or "Export Image as JPEG" are natural guesses
+            # for an application name, and a bare "gimp" label does not show
+            # that these windows belong to it.
             titles = []
             for _, window in app_windows(app):
                 title = str(node_name(window) or "").strip()
@@ -649,11 +642,12 @@ def input_capable_app_labels():
 
 
 def infrastructure_app_error(app, query):
-    """解析到了桌面基础设施而不是应用时的拒绝理由。
+    """Return the error rejecting a query that matched desktop infrastructure.
 
-    必须**明确拒绝**而不是照常返回：动作工具此前无条件接受任何有顶层窗口的
-    进程，于是窗口管理器 / 桌面 / 面板都能当"应用"用，输入送过去石沉大海，
-    而调用方看到的是一次次"成功"。实测有 agent 因此对桌面本身按了 254 次键。
+    The query must be rejected explicitly rather than served. If any process
+    with a top-level window were accepted, window managers, the desktop and
+    panels would pass as applications: input sent to them goes nowhere while
+    the caller sees one "success" after another.
     """
     name = str(node_name(app) or "").strip() or query
     candidates = input_capable_app_labels()
@@ -673,35 +667,41 @@ def infrastructure_app_error(app, query):
 
 
 def resolve_app(query):
-    """按名字/标题/pid 找**能承载用户输入的应用窗口**，找不到时重试几次再宣告失败。
+    """Resolve an application with an input-capable window by name or PID.
 
-    契约刻意比"找到一个有顶层窗口的进程"窄一档。窗口管理器、合成器、面板、
-    桌面本身各自都挂着一个顶层窗口，旧契约下它们都能被解析成"应用"，动作工具
-    再无条件接受——实测有 agent 因此对桌面反复 press_key 254 次。解析到这类
-    窗口时明确拒绝并列出候选，见 infrastructure_app_error。
+    The query is matched against application display names and process
+    names, and a transient failure is retried a few times before resolution
+    fails.
 
-    实测（LibreOffice 7.3）：`get_app_state` 刚成功，紧接着同一会话里的 `click`
-    就报 `appNotFound("soffice")`，而 AT-SPI 桌面里那一条自始至终都在。
-    三次失败都发生在**会开关对话框的点击之后**——应用正忙于重建窗口时，
-    枚举链路上任何一环（`Atspi.get_desktop`、`get_child_count`、`get_name`）
-    瞬时读失败，都会被 `safe()` 吞成"这个应用不存在"。
+    The contract is deliberately narrower than "a process with a top-level
+    window". Window managers, compositors, panels and the desktop each own a
+    top-level window and would otherwise resolve as applications, so such
+    matches are rejected with a list of candidates; see
+    infrastructure_app_error.
 
-    没能钉死具体是哪一环（空名字与桌面条目消失两种猜想都实测证伪了），
-    但无论哪种瞬时故障，处置都一样：**"暂时读不到"不等于"不存在"**。
-    直接抛 appNotFound 是在向 agent 谎报事实——它会据此改用别的应用名、
-    重启应用，甚至判定任务无法完成，而真相只是需要再读一次。
+    Enumeration can fail transiently while an application rebuilds its
+    windows. With LibreOffice 7.3, a click that opened or closed a dialog was
+    followed by `appNotFound("soffice")` although the application stayed on
+    the AT-SPI desktop throughout: any link in the enumeration chain
+    (`Atspi.get_desktop`, `get_child_count`, `get_name`) can fail
+    momentarily, and `safe()` turns that failure into absence. Unreadable is
+    not absent. Reporting it as absent misinforms the agent, which then tries
+    other names, restarts the application or gives up, when reading again
+    would have succeeded.
 
-    重试上限很小：应用真的不存在时不该让调用方多等。
+    The retry limit stays small so that a truly missing application does not
+    keep the caller waiting.
     """
     from .ax_actions import RESOLVE_APP_ATTEMPTS, RESOLVE_APP_RETRY_SECONDS
 
-    # 空查询 = "现在前台是什么"。这是 agent 真正想问的第一个问题，
-    # 让它一次调用就能问出来，而不是先 list_apps 再猜名字。
+    # An empty query asks which application is in the foreground, so it can
+    # be answered in one call.
     if not str(query or "").strip():
         app = foreground_app()
         if app is not None:
-            # 前台那个也可能是桌面本身：X11 的活动窗口在没有应用获得焦点时
-            # 就是桌面 / 面板。返回它等于把"你面前什么都没有"说成"你面前是个应用"。
+            # With no application focused, the X11 active window is the
+            # desktop or a panel. Returning it would present "nothing is in
+            # front of you" as an application.
             if not accepts_user_input(app):
                 raise infrastructure_app_error(app, "(foreground)")
             return app
@@ -710,9 +710,10 @@ def resolve_app(query):
             "any application on the accessibility bus. Pass an app name, or call "
             "list_apps to see what is running.")
     last_error = None
-    # 匹配上了、但只有基础设施窗口的应用。**不当作匹配，也不当作没找到**：
-    # 继续找别的候选，全都找不到时才拿它来解释拒绝的理由——那句解释
-    # 比一句 appNotFound 有用得多。
+    # An application that matched but has only infrastructure windows is
+    # neither a match nor a miss: keep looking at other candidates, and if
+    # none is found, use it to explain the rejection, which is more useful
+    # than a not-found error.
     infrastructure = None
     incomplete_inventory = False
     for attempt in range(RESOLVE_APP_ATTEMPTS):
@@ -751,7 +752,7 @@ def resolve_app(query):
                     input_events_emitted=False,
                 )
             last_error = None
-        except Exception as error:      # 枚举本身炸了也算这一轮没找到
+        except Exception as error:  # A failed enumeration counts as a miss.
             if isinstance(error, OperationFailure):
                 raise
             last_error = error
@@ -772,13 +773,10 @@ def resolve_app(query):
             input_events_emitted=False,
             provider_reset_required=True,
         )
-    # 失败时**把在跑的应用列出来**。
-    #
-    # 轨迹证据：13 条里 12 条的开局是 `list_apps → get_app_state`——agent 不
-    # 敢直接猜应用名，于是每道题都先花一步去列。把候选写进错误里，猜错的代价
-    # 就从"再来一轮"降为"这一轮就知道该叫什么"，那一步开销可以省掉。
-    #
-    # 一条死路错误和一条带候选的错误，对 agent 是两件完全不同的事。
+    # On failure, list the applications that can take input, so a wrong
+    # guess costs no extra round trip: the next call can use the right name
+    # instead of listing applications first. A dead-end error and one with
+    # candidates are very different outcomes for the agent.
     running = input_capable_app_labels()
     if running:
         raise OperationFailure(

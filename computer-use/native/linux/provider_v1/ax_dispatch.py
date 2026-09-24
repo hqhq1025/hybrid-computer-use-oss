@@ -1,4 +1,4 @@
-"""Linux provider module: dispatch."""
+"""Dispatch of Provider V2 operations to AX and GUI handlers."""
 
 from .foundation import (
     Atspi,
@@ -247,22 +247,25 @@ def dispatch_provider_operation(
             prune=observation.get("prune", True),
             boxes=bool(observation.get("boxes", False)),
             known_refs=operation.get("known_refs"),
-            # None = 按默认策略（带图）。`find` 与 `verify` 会显式传 False：
-            # 前者是查询、后者是断言，都不是"观测"，不该付视觉 token
-            # ——基线里一次观测的视觉部分是 5120 token，而 verify 会**轮询**，
-            # 带图的话一次断言就能烧掉十几次观测的钱。
+            # None selects the default policy, which includes a screenshot.
+            # Find and assertion requests pass False: they query or assert
+            # rather than observe, and assertions poll, so attaching a
+            # screenshot (about 5120 tokens) to every poll would be costly.
             include_screenshot=observation.get("include_screenshot"),
             screenshot_scope=observation.get("screenshot_scope", "window"),
             app_identity=operation.get("app_identity"),
             target_window_handle=operation.get("window_handle"),
         )
         response = {"ok": True, "snapshot": snapshot}
-        # 模态提示排在最前：它决定了下面整棵树该怎么读。
+        # Modal notes come first: they determine how the rest of the tree
+        # should be read.
         elements = snapshot.get("elements") or []
         shell_notes = snapshot_diagnostics(elements)
-        # 两条诊断说的是同一件事的两个程度，**不同时发**：
-        # snapshot_diagnostics 管"整棵树只剩窗口框"，content_host_diagnostic 管
-        # "外壳齐全但内容平面缺席"。前者已经触发时，后者只是重复同一个结论。
+        # The two diagnostics describe degrees of the same problem and are
+        # never emitted together: snapshot_diagnostics covers a tree reduced to
+        # its window frame, content_host_diagnostic a complete shell whose
+        # content plane is missing. Once the former fires, the latter would
+        # only repeat its conclusion.
         diagnostics = snapshot.pop("modalNotes", []) + shell_notes
         if not shell_notes:
             diagnostics += content_host_diagnostic(elements)
@@ -378,18 +381,24 @@ def dispatch_provider_operation(
                 input_events_emitted=False,
             )
     pixel_bounds = bounds
-    # 动作前抓一张像素，动作后抓两张——只认在两张里都持续存在的变化。
-    # 语义目标先在所有可见 app-owned 窗口里解析，像素和后续焦点动作才能绑定到
-    # 真正命中的窗口，而不是解析前碰巧被 main_window 选中的那个窗口。
+    # Capture pixels once before the action and twice after it; only a change
+    # present in both later captures counts. Semantic targets are resolved
+    # across all visible app-owned windows first, so pixel capture and later
+    # focus actions bind to the window that actually matched rather than the
+    # one main_window() picked before resolution.
     pixels_before = safe(lambda: capture_window_pixels(pixel_bounds))
-    # 重新解析出活节点之后，**立刻**把几何也刷新成它当前的位置。
-    # 不这么做的话，语义路径用活节点、合成路径用旧几何，是同一次调用里的两套事实。
+    # Refresh the geometry from the live node right after resolving it;
+    # otherwise semantic actions would use the live node while synthesized
+    # input used the snapshot geometry.
     element_record, moved_note = current_geometry(element, element_record, bounds)
-    # 动作之前先记下顶层窗口集合。动作之后要靠它判断有没有开出/关掉窗口，
-    # 从而决定该不该多等焦点落定——详见 wait_for_ui_to_settle。
+    # Record the top-level window set before acting. wait_for_ui_to_settle()
+    # compares against it to detect opened or closed windows and decide
+    # whether to wait longer for focus to settle.
     windows_before = safe(lambda: window_identity_set(app))
-    # 每个动作都要说清楚实际走了哪条路径、结果有没有被校验过。返回一棵新的
-    # accessibility tree 看着像执行确认，其实只是快照，不能当成动作生效的证据。
+    # Every action reports the route it actually took and whether the result
+    # was verified. A fresh accessibility tree in the response looks like
+    # confirmation but is only a snapshot, not evidence that the action took
+    # effect.
     notes = []
     action_evidence = {
         "route": "unknown",
@@ -409,12 +418,14 @@ def dispatch_provider_operation(
     action_evidence_state.replace(action_evidence)
     if semantic_note:
         notes.append(semantic_note)
-    # "解析到了谁"排在所有动作 Note 之前：先说对谁做，再说做了什么。
+    # The resolved-target note precedes all action notes: first what was
+    # targeted, then what was done.
     resolved = resolved_note(element, element_record)
     if resolved:
         notes.append(A11Y_CHANNEL + " " + resolved)
     if moved_note:
-        # 通道标签后面要有空格，否则渲染成 `[a11y]The element MOVED`。
+        # A11Y_CHANNEL has no trailing space; without the separator this would
+        # render as `[a11y]The element MOVED`.
         notes.append(A11Y_CHANNEL + " " + moved_note)
     if element is not None:
         # A present ENABLED/EDITABLE state is useful positive evidence. Its
@@ -520,9 +531,11 @@ def dispatch_provider_operation(
                     click_count,
                     *window_relative(bounds, x, y),
                     UNVERIFIED_SYNTHESIS,
-                    # 调用方已经指定了元素，再劝它"改用 element_index"是答非所问：
-                    # 走到这里通常正是因为语义调用失效了（实测多个应用的
-                    # AT-SPI 动作返回成功却不生效），此时坐标是唯一出路。
+                    # Omit PREFER_ELEMENT_INDEX when the caller already named
+                    # an element: this route is usually taken because the
+                    # semantic action failed (several applications report
+                    # AT-SPI action success without any effect), so
+                    # coordinates are the only remaining option.
                     "" if element_record else PREFER_ELEMENT_INDEX,
                 )
             )
@@ -583,9 +596,10 @@ def dispatch_provider_operation(
                 action_evidence["focus_verified"] = True
                 action_evidence["input_emitted"] = True
                 if is_dropdown_item(element, window):
-                    # 说清楚为什么没走语义通道。不解释的话这条 Note 读起来像
-                    # "这个元素没有动作"，与事实相反——它有，只是那个动作会
-                    # 关掉下拉却不提交值，而且关掉之后连校验的机会都没有。
+                    # Explain why the semantic route was skipped. Otherwise the
+                    # note reads as if the element had no action; it has one,
+                    # but that action closes the drop-down without committing
+                    # the value and leaves nothing to verify.
                     reason = (
                         "This element is an item inside a drop-down popup, where the "
                         "AT-SPI action closes the popup without committing the value "
@@ -613,7 +627,7 @@ def dispatch_provider_operation(
     elif action_intent == "scroll":
         direction = action_input.get("direction", "down")
         pages = action_input.get("pages", 1)
-        # 有元素几何就按位置滚。element_index 从"必填但没人用"变成真的参与定位。
+        # Scroll at the target's position when its geometry is known.
         point = None
         if action_input.get("window_centre") and bounds is not None:
             point = (
@@ -653,10 +667,9 @@ def dispatch_provider_operation(
                     int(math.ceil(float(pages or 1))) * WHEEL_CLICKS_PER_PAGE,
                     wx,
                     wy,
-                    # **这句话必须说实话。** element_index 现在可以留空（那表示
-                    # "滚当前窗口"），而原文一律写着"位置来自 element_index，
-                    # 所以这次滚动是定位过的"——留空时那是假的。
-                    # 工具骗 agent 一次，它后面所有的推断都建立在假前提上。
+                    # State where the position came from: without a target ref
+                    # the wheel lands at the window centre, and claiming a
+                    # targeted scroll would mislead every later inference.
                     "no target ref was given, so this is the centre of the window "
                     "— the wheel lands on whatever scrollable sits there"
                     if action_input.get("window_centre")
@@ -765,7 +778,8 @@ def dispatch_provider_operation(
                 )
             )
     elif action_intent == "keypress":
-        # 先解析再夺焦点：拼错的按键不该先把用户的窗口抢过来才报错。
+        # Parse the key before taking focus, so a misspelled key fails without
+        # first pulling the user's window to the foreground.
         parse_key(action_input.get("key", ""))
         if element_record is not None:
             focus_target_element(
@@ -809,17 +823,12 @@ def dispatch_provider_operation(
                 failure_subject="element",
             )
         if value_outcome != "verified":
-            # 语义写值失败**不等于写不了**。实测 Chrome 的 `entry "Name"`
-            # （chrome://settings/manageProfile 里的用户名框）明明holds "Person 1"，
-            # set_value 却报"不可设置"——Blink 的输入框不实现 AT-SPI 的
-            # Value/EditableText 接口。
-            #
-            # click 和 type_text 早就有"语义失败就降级到合成"的模式，
-            # set_value 却只会硬失败，于是一个到处都是的控件类型整个不可用。
-            # 这里补上同一条降级：聚焦 → 全选 → 打字，与人手做的完全一样。
-            #
-            # 降级要**说清楚**：它没有回读确认，也不保证落到了那个控件上
-            # ——键盘合成是全局的。
+            # A refused semantic write does not mean the control is read-only:
+            # Blink text inputs, for example, implement neither the AT-SPI
+            # Value nor the EditableText interface. As click and type_text do,
+            # fall back to synthesis: focus, select all, then type. The note
+            # must state that this path has no read-back confirmation and that
+            # keyboard synthesis is global, so delivery is not guaranteed.
             focus_target_element(
                 window, element, element_record,
                 "targeted set_value keyboard fallback",
@@ -889,8 +898,9 @@ def dispatch_provider_operation(
     settle_note = wait_for_ui_to_settle(app, windows_before)
     if settle_note:
         notes.append(settle_note)
-    # 像素比对必须在**安置之后**：动作刚发出去时界面还没画完，
-    # 那时比出来的"变化"是渲染中途的样子，不是效果。
+    # Compare pixels only after the UI settles: right after the action the UI
+    # may still be repainting, so an earlier diff would show an intermediate
+    # frame rather than the effect.
     after_bounds = safe(lambda: extents(main_window(app)[1])) or bounds
     after_pixel_bounds = after_bounds
     pixels_after_one = safe(lambda: capture_window_pixels(after_pixel_bounds))
@@ -909,12 +919,14 @@ def dispatch_provider_operation(
         screenshot_scope=observation.get("screenshot_scope", "window"),
         app_identity=operation.get("app_identity"),
     )
-    # 动作**开出**模态对话框是最需要说这句话的时刻：下标全部重排，而 agent
-    # 手上那份还是点击之前的。插在最前面，让它在所有动作 Note 之前被读到。
+    # Modal notes matter most right after an action opens a modal dialog,
+    # because the caller's element list predates the dialog. Insert them first
+    # so they are read before any action note.
     notes[:0] = after_snapshot.pop("modalNotes", [])
-    # 通道失效检测也要跟着动作后的快照走：动作把一个内容宿主推到前面
-    # （打开了浏览器窗口、切到了 webview 标签）正是最该说"这条通道在这里看不见
-    # 内容"的时刻，而那时调用方往往不会再单独调一次 get_app_state。
+    # Run the content-host check on the post-action snapshot as well: an
+    # action that brings a content host to the front (a browser window, a
+    # webview tab) is exactly when the caller must learn that this channel
+    # cannot see the content, and it often will not observe again separately.
     notes += content_host_diagnostic(after_snapshot.get("elements") or [])
     after_layout = desktop_layout_state(gui_bounds_before)
     app_windows_after = safe(lambda: window_identity_set(app))
@@ -946,8 +958,10 @@ def dispatch_provider_operation(
         })
     if element_record is not None:
         response["resolvedElement"] = public_element_record(element_record)
-    # 第二张动作后画面放在**建完快照之后**抓：resolve_app 自己就要 0.15–0.3s，
-    # 这段已有的耗时正好当作两张之间的间隔，足够让 1Hz 的光标闪一次。
+    # Take the second post-action capture after building the snapshot. That
+    # work (resolve_app alone takes 0.15-0.3 s) spaces the two captures far
+    # enough apart for a 1 Hz caret blink to toggle, so the blink is not
+    # reported as a persistent change.
     change_note = pixel_change_note(persistent_pixel_change(
         pixels_before, pixels_after_one,
         safe(lambda: capture_window_pixels(after_pixel_bounds))),

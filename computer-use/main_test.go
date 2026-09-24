@@ -340,10 +340,10 @@ func TestToolDefinitionCount(t *testing.T) {
 }
 
 func TestConfirmationNotesStateTheirLimit(t *testing.T) {
-	// "confirmed it applied" 是过度承诺：回读确认的是控件的值变了，
-	// 不是应用采纳了这个值。实测中把行距 combo 写成 "Double" 会回读成功，
-	// 但文档的 line-height 纹丝不动——对话框把控件状态与文档状态分开，
-	// 只在 OK/Apply 时提交。
+	// "confirmed it applied" over-claims: readback proves that the control's
+	// value changed, not that the application adopted it. Dialogs such as a
+	// line-spacing combo box keep control state separate from document state
+	// and commit only on OK/Apply.
 	for _, fragment := range []string{
 		"CONTROL changed, not that the application adopted the value",
 		"require OK/Apply before the value takes effect",
@@ -358,11 +358,12 @@ func TestConfirmationNotesStateTheirLimit(t *testing.T) {
 }
 
 func TestDecisionRelevantStatesAreRendered(t *testing.T) {
-	// 禁用、选中、展开、勾选这几类状态此前完全不在树里。agent 因此会对着
-	// 禁用控件反复点击，也看不出下拉/菜单到底展开没有。
+	// Disabled, selected, expanded and checked states must appear in the tree;
+	// without them the agent keeps clicking disabled controls and cannot tell
+	// whether a drop-down or menu is open.
 	for _, fragment := range []string{
-		// 断言函数存在即可，不钉签名——签名会因为参数增减而变，
-		// 那不是这条测试要保护的东西。
+		// Assert only that the function exists, not its signature, which
+		// changes as parameters are added or removed.
 		"def state_segment(",
 		"NOTABLE_STATES",
 	} {
@@ -370,12 +371,14 @@ func TestDecisionRelevantStatesAreRendered(t *testing.T) {
 			t.Fatalf("tree must expose decision-relevant states: missing %q", fragment)
 		}
 	}
-	// 只渲染"非默认"的一侧：每个节点都标 enabled 会淹没信号。
+	// Render only the non-default side: marking every node "enabled" would
+	// drown the signal.
 	if strings.Contains(linuxRuntimeScript, `("ENABLED", "enabled")`) {
 		t.Fatal("rendering the default side of every state would drown the signal")
 	}
-	// 绝不从状态缺失反推语义：Nautilus 的文件图标不设 ENABLED/SENSITIVE 却完全
-	// 可操作，标成 disabled 会让 agent 跳过真实目标。
+	// Never infer semantics from an absent state: Nautilus file icons lack
+	// ENABLED/SENSITIVE yet are fully operable, and marking them disabled would
+	// make the agent skip real targets.
 	if strings.Contains(linuxRuntimeScript, `marks.append("disabled")`) {
 		t.Fatal("inferring 'disabled' from a missing ENABLED state produces false positives on Linux")
 	}
@@ -385,8 +388,9 @@ func TestDecisionRelevantStatesAreRendered(t *testing.T) {
 }
 
 func TestTruncationIsPrioritisedAndVisible(t *testing.T) {
-	// 深度优先截断等于按遍历顺序随机丢弃：先到的占满配额，后面的整片消失，
-	// 而且 agent 完全不知道树被砍过。
+	// Depth-first truncation drops nodes arbitrarily in traversal order: early
+	// subtrees fill the quota, later ones vanish entirely, and the agent never
+	// learns that the tree was cut.
 	for _, fragment := range []string{
 		"BUDGET_PRESSURE_RATIO",
 		"def is_structural_filler(record):",
@@ -1296,28 +1300,14 @@ func TestWorkingTreeProjectionAttachesIndentedNotesByTheirDepth(t *testing.T) {
 	}
 }
 
-// 能力必须是**测出来的**，不能按应用名声明。
-//
-// 这条曾经写成"Browsers are NOT handled by these tools. Chrome 和 Chromium
-// 由另一个控制平面（Playwright/browser-use over CDP）驱动，别对它们调
-// get_app_state / click / type_text"。它是整份文档里唯一一句**在 agent 看之前
-// 就替它下结论**的话，而且是按应用名下的——正是本仓库在代码里明令禁止的那种
-// 分支，只不过写在散文里。
-//
-// v16 54mini 的实测把它判死了：
-//
-//   - 70 道题里 29 道**一个动作都没有**（占失败 60 道的 48%）。其中 14 道的
-//     结束语是"这些工具不处理浏览器 / 我在这里无法驱动它"——直接复述这段话；
-//     另外 14 道连一次工具调用都没有，把 GUI 任务当成信息问答答掉了。
-//   - 而 5 道成功的 chrome 任务**全部**是直接 get_app_state + set_value/click
-//     驱动 Chrome 完成的，快照回来 600+ 个元素、页面内容俱全。也就是说
-//     "a11y 树默认关闭"这个前提在本部署里是假的，照做的放弃，不照做的做成了。
-//   - 它承诺的那个"另一个控制平面"在会话里根本不存在：轨迹显示 agent 反复
-//     搜索 browser-use / playwright 工具，一个也没找到，然后收工。
-//
-// 所以规则反过来：**不按名字排除任何应用**，可达性由 list_apps 的输入能力标记
-// 与快照的 CONTENT PLANE MISSING 当场测出来，并且内容不可达只吃掉那部分内容的
-// a11y 通道，不吃掉整个应用（外壳仍有 element_index，内容仍可走 gui）。
+// TestCapabilityIsMeasuredNeverDeclaredByAppName checks that the server
+// instructions never scope capability by application name. Declaring an app
+// unsupported by name makes the agent give up on tasks the tools can perform;
+// browsers, for example, often expose a complete accessibility tree.
+// Reachability must be measured at runtime instead, and content missing from
+// the accessibility tree only removes the AX channel for that content: the
+// application shell stays addressable and the content can still be driven
+// through GUI.
 func TestCapabilityIsMeasuredNeverDeclaredByAppName(t *testing.T) {
 	if !strings.Contains(
 		serverInstructions,
@@ -1325,9 +1315,9 @@ func TestCapabilityIsMeasuredNeverDeclaredByAppName(t *testing.T) {
 	) {
 		t.Fatal("instructions must describe accessibility reachability without app exclusions")
 	}
-	// 回归护栏：范围声明里不得再出现具体应用/驱动名。
-	// LibreOffice / gedit 之类仍然允许，它们出现在**实测数字**的出处里
-	// （"a file manager tree ~2100"、"gedit ~350"），那是证据不是分支。
+	// Regression guard: capability statements must not name specific apps or
+	// drivers. App names that only cite the source of a measured number are
+	// evidence, not capability branches, so they are not banned here.
 	for _, banned := range []string{
 		"Browsers are NOT handled",
 		"Chrome", "Chromium", "Playwright", "browser-use", "CDP",
@@ -1339,10 +1329,10 @@ func TestCapabilityIsMeasuredNeverDeclaredByAppName(t *testing.T) {
 	}
 }
 
-// 零动作失败的另一半：agent 从未意识到自己接在一台**正在运行的桌面**上。
-// 14/29 条轨迹一次工具都没调，把"给我看某某东西"当成检索题答掉并宣布完成。
-// 开场白因此必须先陈述环境事实（会话已挂在一台开着应用的桌面上、只有这些
-// 工具能看见它），再讲工具怎么用。
+// TestInstructionsOpenWithTheLiveSessionFact checks that the instructions first
+// state that the session is attached to a running desktop, before describing
+// the tools. Without that fact an agent may answer a request such as "show me
+// X" from its own knowledge and never call a tool.
 func TestInstructionsOpenWithTheLiveSessionFact(t *testing.T) {
 	if !strings.HasPrefix(serverInstructions, "Control the already-running desktop") {
 		t.Fatalf("instructions must open with the live desktop fact: %q", serverInstructions)
@@ -1354,20 +1344,15 @@ func TestInstructionsOpenWithTheLiveSessionFact(t *testing.T) {
 	}
 }
 
-// 观测的两条通道是**互补**，不是主备。
-//
-// 这条曾经写成"两条独立轨道、截图是 fallback"，`build_snapshot` 也默认不带图，
-// 理由是 a11y 轨不该顺带付截图的钱。成本数字至今成立，**但"独立"这个前提被
-// 实测推翻了**（手动跑 OSWorld Impress 任务，见 docs/exec-plans/active/
-// 20260730-impress-manual-run-findings.md）：
-//
-//   - 右对齐与保存都真的生效了，a11y 树却字节不变，于是两个动作都被判成
-//     "送达但被忽略"——**两次假阴性，都是一张截图一眼判掉的**。
-//   - 反过来，"四个没有名字的 spin button 里哪个是 Position Y" 靠截图只能凭
-//     标签的空间邻近去猜，靠树的 description 是确定的。
-//
-// 所以树给**可操作性**，截图给**可观察性**；视觉变化仍需单独断言。
-// #29 的 A/B 靠 COMPUTER_USE_A11Y_SCREENSHOTS=0 关掉再比。
+// TestObservationChannelsAreComplementary checks that the instructions present
+// the accessibility tree and screenshots as complementary, not as primary and
+// fallback. Some effective actions, such as saving a document, leave the
+// accessibility tree byte-identical, which a screenshot resolves at a glance.
+// Conversely, telling unnamed spin buttons apart is guesswork from pixels but
+// deterministic from tree descriptions. The tree provides actionability and
+// the screenshot observability; visual change still needs its own assertion.
+// COMPUTER_USE_A11Y_SCREENSHOTS=0 disables target screenshots so the two
+// setups can be compared.
 func TestObservationChannelsAreComplementary(t *testing.T) {
 	gui := findToolDefinition(t, "GUI")
 	if !strings.Contains(gui.Description, "Full-desktop") {
@@ -1407,7 +1392,7 @@ func TestLinuxClickMethodSafetyAndPlatformSupport(t *testing.T) {
 		t.Fatalf("sky_click result = %#v", result)
 	}
 
-	// click 不再接受 x/y——坐标点击是另一条通道，另一个工具。
+	// click rejects x/y; coordinate clicks belong to the GUI tool.
 	x, y := 10.0, 20.0
 	result = service.click("Text Editor", "7", "", &x, &y, 1, "left", "auto", observation{}, settlePlan{})
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "use GUI") {
@@ -1418,9 +1403,11 @@ func TestLinuxClickMethodSafetyAndPlatformSupport(t *testing.T) {
 		t.Fatalf("click 缺 target.ref 应当明确报错: %#v", result)
 	}
 
-	// 原来的 COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS 闸门整个禁掉了
-	// 无锚点坐标点击，代价是 GUI 通道默认不可用。现在 GUI 通道使用全桌面截图
-	// 的屏幕绝对坐标：原样发送，越界报错，既不加窗口偏移也不静默改点。
+	// Coordinate input is not gated by COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS,
+	// since the gate would leave the GUI channel disabled by default. GUI uses
+	// absolute coordinates of the full-desktop screenshot: they are sent
+	// unchanged, rejected when out of bounds, and never offset by a window
+	// origin or silently adjusted.
 	if strings.Contains(serverInstructions, "COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS") {
 		t.Fatal("闸门已移除，instructions 不该再提它")
 	}
@@ -1790,9 +1777,9 @@ func TestLinuxRuntimeReportsExecutionPath(t *testing.T) {
 	if !strings.Contains(linuxRuntimeScript, "UNVERIFIED_SYNTHESIS") {
 		t.Fatal("Linux runtime should mark synthesis-based actions as unverified")
 	}
-	// 语义调用同样不能当成"生效"的证据：实测 Nautilus / GIMP / VLC 三个应用的
-	// AT-SPI 动作都会返回成功却什么都不做。工具必须把这一点说出来，
-	// 否则 agent 会据此推进下一步，而真实界面还停在原地。
+	// A semantic call is not evidence of effect either: AT-SPI actions in apps
+	// such as Nautilus, GIMP and VLC can report success and do nothing. The tool
+	// must say so, or the agent moves on while the UI has not changed.
 	if !strings.Contains(linuxRuntimeScript, "UNVERIFIED_SEMANTIC") {
 		t.Fatal("Linux runtime should mark semantic AT-SPI actions as unverified too")
 	}
@@ -1814,21 +1801,19 @@ func TestLinuxRuntimeReportsExecutionPath(t *testing.T) {
 }
 
 func TestIncrementalTreeOnlyWhenSafeAndCheaper(t *testing.T) {
-	// 这个测试原来的判据是**前后行数必须完全相同**，理由写着"结构一变
-	// element_index 就永久重排，行数不变即无结构变化"。判断没错，但它是个
-	// 过强的代理条件：菜单展开、对话框弹出、列表增删一行都会改变行数，
-	// 而那恰恰是最常见的动作。实测 67 条轨迹、753 次动作，增量只命中 26.6%，
-	// 于是"动作的副产品"吃掉了 87% 的观测开销。
+	// Requiring an identical line count is too strong a proxy for "no
+	// structural change": opening a menu, showing a dialog or adding a list row
+	// all change the count, and those are the most common actions.
 	//
-	// 真正的安全不变量比行数细一层：**下标就印在行文本里**（StableIndexer 按
-	// 树内路径 + role + name 发号，见 runtime.py index_for）。所以
+	// The real safety invariant is finer. The element index is printed in each
+	// line, and StableIndexer derives it from the tree path, role and name, so
 	//
-	//     一行逐字节相同  ⇒  路径、role、name 都没变  ⇒  下标也没变
+	//     byte-identical line  =>  same path, role and name  =>  same index
 	//
-	// 反过来，插入一个节点会让后面兄弟的路径全变、领到新下标，
-	// 于是**它们的行文本也变了**，必然出现在 diff 里——不会被悄悄漏掉。
-	// 而那种大范围重排会让变化行数超过三分之一，按下面的比例判据自动退回全量。
-	// 也就是说这套机制在"索引重排"这件事上是自纠的。
+	// Conversely, inserting a node changes the paths of later siblings, which
+	// receive new indices and therefore new line text, so they always appear in
+	// the diff. A large reorder exceeds the size thresholds and falls back to
+	// the full tree, so the mechanism corrects itself when indices shift.
 	base := func(lines ...string) *appSnapshot { return &appSnapshot{TreeLines: lines} }
 
 	unchanged, ok := incrementalTree(base("a", "b", "c"), base("a", "b", "c"))
@@ -1848,7 +1833,8 @@ func TestIncrementalTreeOnlyWhenSafeAndCheaper(t *testing.T) {
 		t.Fatal("表头必须说明未失效的短 ref 仍保持绑定")
 	}
 
-	// 纯插入：这正是老判据挡掉、而实际最常见的那一类。
+	// Pure insertion: the most common change after an action, which a
+	// line-count criterion would reject.
 	diff, ok = incrementalTree(base("a", "b", "c", "d", "e", "f", "g"),
 		base("a", "b", "NEW", "c", "d", "e", "f", "g"))
 	if !ok {
@@ -1858,7 +1844,7 @@ func TestIncrementalTreeOnlyWhenSafeAndCheaper(t *testing.T) {
 		t.Fatalf("纯插入应只给出 +新行，得到 %v", diff)
 	}
 
-	// 纯删除。
+	// Pure deletion.
 	diff, ok = incrementalTree(base("a", "b", "GONE", "c", "d", "e", "f"),
 		base("a", "b", "c", "d", "e", "f"))
 	if !ok {
@@ -1938,7 +1924,8 @@ func TestActionResultFlagsUnchangedState(t *testing.T) {
 	if !observablyChanged(base(), changedFocus) {
 		t.Fatal("a different focused element must count as changed")
 	}
-	// 截图必须排除在外：光标闪烁会让每次动作都"有变化"，信号就废了。
+	// Screenshots are excluded: a blinking caret would make every action look
+	// like a change and destroy the signal.
 	sameButNewScreenshot := base()
 	sameButNewScreenshot.ScreenshotPNGBase64 = "different-pixels"
 	if observablyChanged(base(), sameButNewScreenshot) {
@@ -1997,7 +1984,7 @@ func TestIdenticalSnapshotSeparatesStillBusyFromTrimmedAway(t *testing.T) {
 		SnapshotID:   "same",
 		capturedAt:   time.Now().Add(-2 * time.Second),
 	}
-	// 应用自报在忙 → 可以断言"再等等"。
+	// The app reports itself busy, so the note may tell the agent to wait.
 	busy := &appSnapshot{
 		WindowHandle: "pid7/win0/frame",
 		SnapshotID:   "same",
@@ -2011,8 +1998,9 @@ func TestIdenticalSnapshotSeparatesStillBusyFromTrimmedAway(t *testing.T) {
 		t.Fatal("the equality verdict must reach the rendered snapshot")
 	}
 
-	// 没有忙碌证据时只能说"我不知道"，绝不能反过来断言动作失败：
-	// 实测 LibreOffice Impress 上右对齐与保存都生效了，树却逐字未变。
+	// Without busy evidence the note may only say the outcome is unknown, never
+	// that the action failed: saving a document, for example, takes effect
+	// without changing the tree.
 	quiet := &appSnapshot{
 		WindowHandle: "pid7/win0/frame",
 		SnapshotID:   "same",
@@ -2517,8 +2505,9 @@ func TestPersistAXTelemetryKeepsTruePreflightErrorOnly(t *testing.T) {
 }
 
 func TestRootWindowSwitchAnnouncesRenumbering(t *testing.T) {
-	// 同一应用的第二个**同标题**窗口会让快照根静默切换，全部 element_index
-	// 平移而返回文本上一个字不变。标题相同正是这条判据存在的理由。
+	// A second window of the same app with the same title can silently switch
+	// the snapshot root: every element index shifts while the returned text
+	// looks unchanged. The identical title is the case this check exists for.
 	previous := &appSnapshot{WindowHandle: "pid7/win0/frame", WindowTitle: "Home", SnapshotID: "a"}
 	current := &appSnapshot{WindowHandle: "pid7/win1/frame", WindowTitle: "Home", SnapshotID: "b"}
 
@@ -2533,8 +2522,9 @@ func TestRootWindowSwitchAnnouncesRenumbering(t *testing.T) {
 }
 
 func TestContentPlaneDetectionIsStructuralNotApplicationSpecific(t *testing.T) {
-	// P3：树结构完整、语义正常、只是缺少目标内容时必须报警，而判据只能落在
-	// 角色语义上——嵌入式内容宿主横跨浏览器、Electron、PDF 查看器、webview。
+	// A tree that is structurally complete but lacks the target content must
+	// raise a diagnostic. The criterion can only rest on role semantics, since
+	// embedded content hosts span browsers, Electron, PDF viewers and webviews.
 	for _, fragment := range []string{
 		"def content_host_diagnostic(records):",
 		"CONTENT_PLANE_ROLES",
@@ -2545,15 +2535,17 @@ func TestContentPlaneDetectionIsStructuralNotApplicationSpecific(t *testing.T) {
 			t.Fatalf("content-plane detection missing %q", fragment)
 		}
 	}
-	// 处方必须指向另一条通道，否则报了警也没有出路。
+	// The diagnostic must point to the other channel, or the caller has no way
+	// forward.
 	if !strings.Contains(linuxRuntimeScript, "Inspect the full-desktop screenshot") {
 		t.Fatal("the uncertain diagnostic must direct the caller to visual evidence")
 	}
 }
 
 func TestForegroundAlarmsAreFilteredAndGraded(t *testing.T) {
-	// P4：实测 multi_apps 触发 3955 次前台抢占告警，97.7% 的"抢占者"是
-	// 无标题零内容的伪窗口，而那条 Note 还附带硬处方。
+	// Foreground alarms must be filtered and graded: most windows that appear
+	// to take the foreground are untitled pseudo-windows with no content, so
+	// they are filtered out and the remaining alarm is worded as uncertain.
 	for _, fragment := range []string{
 		"def is_infrastructure_window(window):",
 		"def accepts_user_input(app):",
@@ -2565,7 +2557,8 @@ func TestForegroundAlarmsAreFilteredAndGraded(t *testing.T) {
 			t.Fatalf("alarm filtering/grading missing %q", fragment)
 		}
 	}
-	// 判据必须是窗口形状，不是进程名白名单：按名字过滤换个桌面环境就失效。
+	// Detection must rely on window shape, not a process-name allowlist, which
+	// breaks on any other desktop environment.
 	for _, fitted := range []string{`"xfdesktop"`, `"xfwm4"`, `"mutter"`, `"gnome-shell"`} {
 		if strings.Contains(linuxRuntimeScript, "if "+fitted) {
 			t.Fatalf("infrastructure detection must not branch on a process name: %s", fitted)
@@ -2717,21 +2710,21 @@ func TestSourceDoesNotReplaySuccessfulSemanticClicks(t *testing.T) {
 	}
 }
 
-// 渲染一个节点时，动作表只允许问一次。
-//
-// LibreOffice 的 ATK 桥被反复问动作表会打出
+// TestTreeRenderingReadsActionTableOnce checks that rendering a node queries
+// its action table only once. Repeated queries make LibreOffice's ATK bridge
+// log
 //
 //	(soffice): CRITICAL: impl_get_NActions: assertion 'ATK_IS_ACTION (user_data)' failed
 //
-// 密集调用下应用会整个退出（实测：对话框循环第 3~4 轮 soffice 消失，
-// 随后 get_app_state 报 appNotFound）。早先为了给出 [has-click-action] 标记，
-// record_for 经 state_segment -> preferred_action_index 又问了第二次，
-// 等于在一个已知脆弱的桥上把每个节点的问询翻倍。
+// and under heavy use the application exits altogether. Deriving the
+// [has-click-action] mark from a second query (record_for -> state_segment ->
+// preferred_action_index) would double the per-node queries on a bridge that
+// is known to be fragile.
 func TestTreeRenderingReadsActionTableOnce(t *testing.T) {
 	if !strings.Contains(linuxRuntimeScript, "def node_actions(") {
 		t.Fatal("动作表必须有一个一次读完的入口 node_actions()")
 	}
-	// record_for 里不得再出现第二次动作表读取。
+	// record_for must not read the action table a second time.
 	if strings.Contains(linuxRuntimeScript, "state_segment(node)\n") {
 		t.Fatal("state_segment 不应自己再去问一次动作表，标记要由 record_for 传入")
 	}
@@ -2740,8 +2733,10 @@ func TestTreeRenderingReadsActionTableOnce(t *testing.T) {
 	}
 }
 
-// require_window_focus 只确认合成前目标应用窗口处于活动状态。
-// 它不识别窗口内的焦点控件，也不证明控件级送达。
+// TestSynthesisOnlyToolsConfirmOnlyWindowFocus checks the limits of
+// require_window_focus: before synthesis it only confirms that the target
+// application's window is active. It neither identifies the focused control
+// inside that window nor proves delivery to a specific control.
 func TestSynthesisOnlyToolsConfirmOnlyWindowFocus(t *testing.T) {
 	for _, tool := range []string{"keypress", "scroll"} {
 		request := axServiceRequest{}
@@ -2769,12 +2764,12 @@ func TestSynthesisOnlyToolsConfirmOnlyWindowFocus(t *testing.T) {
 	}
 }
 
-// a11y 优先的理由是**可操作性**，不是普遍更便宜。
-//
-// 实测（#29）：gedit 树 349 token vs 窗口截图约 1014 视觉 token（截图贵 2.9x）；
-// 文件管理器树 2135 token vs 截图 756（截图反而便宜 0.4x）。
-// 早先的措辞暗示截图总是更贵，对内容丰富的应用是错的——工具不该拿一个
-// 会被实测推翻的理由去引导 agent。
+// TestInstructionsDoNotClaimScreenshotsAreAlwaysCostlier checks that AX is
+// recommended for actionability, not for being cheaper. Costs vary by app: a
+// gedit tree measured about 350 tokens against about 1,000 for its window
+// screenshot, while a file manager tree measured about 2,100 tokens against
+// about 750. The instructions must not steer the agent with a claim that fails
+// on content-rich applications.
 func TestInstructionsDoNotClaimScreenshotsAreAlwaysCostlier(t *testing.T) {
 	if !strings.Contains(serverInstructions, "Use AX for named controls") {
 		t.Fatal("应当把语义定位讲成 AX 优先的理由")
@@ -2784,21 +2779,20 @@ func TestInstructionsDoNotClaimScreenshotsAreAlwaysCostlier(t *testing.T) {
 	}
 }
 
-// 工具名本身就是引导：perform_secondary_action 读起来像 fallback，而 a11y
-// 语义动作恰恰是首选路径。实测中通道选对与否直接决定任务成败，而名字是模型
-// 选通道时最强的信号——比描述强。用户拍板改名（方案 C），接受与官方 schema
-// 及 macOS/Windows 的分歧。
-// 意图声明的交叉核对。抄自 Playwright 的 element 参数（"Human-readable element
-// description"），它本意是可读性与权限，副作用正好是**意图可核对**。
-//
-// 修的是实测踩过的一类**静默**失败：F4 打开对话框后索引全部重排，用上一份快照
-// 的下标调 click(element_index=5)，工具照点不误——本想点 Position Y，实际点到
-// 菜单，把对象高度误改成 16.26cm，全程没有一条报错。
+// TestElementIntentCrossCheck covers the cross-check between a declared intent
+// and the resolved element. The declaration is modeled on the element
+// parameter of Playwright MCP tools ("Human-readable element description"),
+// which exists for readability and permissions but also makes intent
+// verifiable. It guards against a silent failure: after a dialog opens, all
+// indices shift, and a click on an index from an earlier snapshot lands on a
+// different control, such as a menu instead of a spin button, without any
+// error.
 func TestElementIntentCrossCheck(t *testing.T) {
 	spin := &elementRecord{Index: 5, ControlType: "spin button", Description: "Enter the vertical distance"}
 	menu := &elementRecord{Index: 5, ControlType: "menu", Name: "Insert"}
 
-	// 就是那次实测：声明"Position Y spin button"，下标却解析到 menu Insert。
+	// The declaration names a spin button, but the index resolves to the
+	// Insert menu.
 	mismatch := elementIntentMismatch(menu, "Position Y spin button")
 	if mismatch == "" {
 		t.Fatal("下标解析到完全不同的控件时必须拒绝")
@@ -2809,29 +2803,29 @@ func TestElementIntentCrossCheck(t *testing.T) {
 		}
 	}
 
-	// 回归：第一版把 role 也算进可匹配范围，被最常见的词击穿——声明里几乎必然
-	// 有 "button"，role 里也几乎必然有 "button"，于是正要拦的情况照样放行。
-	// 实测确认过：声明 "the Save button"、给的却是 New 的下标，当时放行了。
+	// Regression: role words must not count as matches. Nearly every
+	// declaration and every role contains "button", so matching on the role
+	// would let "the Save button" pass against the New button.
 	if elementIntentMismatch(&elementRecord{Index: 8, ControlType: "push button", Name: "New",
 		Description: "Create a new document"}, "the Save button") == "" {
 		t.Fatal("通用词 button 不得让校验失效")
 	}
 
-	// 无名元素的身份常来自旁边的 label，自身属性里没有可比对的东西——
-	// 实测 LibreOffice「位置和大小」的四个 spin button 全无名字，
-	// "哪个是 Position Y" 只写在旁边的 label 上。这类**判不了就别判**。
+	// An unnamed element usually takes its identity from a nearby label and has
+	// nothing of its own to compare; the spin buttons in LibreOffice's Position
+	// and Size dialog have no names at all. Skip the check rather than guess.
 	if got := elementIntentMismatch(spin, "Position Y spin button"); got != "" {
 		t.Fatalf("无名元素不该校验（否则纯误伤）: %s", got)
 	}
 
-	// 同一句声明对上正确的元素时不得拒绝。
+	// The same declaration must pass against the matching element.
 	if got := elementIntentMismatch(&elementRecord{ControlType: "push button", Name: "Save",
 		Description: "Save the current file"}, "the Save button"); got != "" {
 		t.Fatalf("声明与元素相符不该拒绝: %s", got)
 	}
 
-	// **误拒比漏过更糟**：被误拒的 agent 会以为目标根本不存在。
-	// 以下都必须放行。
+	// A false rejection is worse than a miss, because a rejected agent concludes
+	// that the target does not exist. All of the following must pass.
 	for _, ok := range []struct {
 		record   *elementRecord
 		declared string
@@ -2852,15 +2846,15 @@ func TestElementIntentCrossCheck(t *testing.T) {
 	}
 }
 
-// element 必须出现在所有按 element_index 寻址的工具上，否则这道校验会有缺口，
-// 而缺口正好落在 agent 最容易搞错的地方。
-// 这两条都是**真实 agent 轨迹**（Claude Code 挂 MCP 跑 OSWorld Impress 任务，
-// 官方评估器判 1.0）暴露出来的，不是设想的场景。
+// TestNotesLearnedFromTheRealAgentRun covers two messages whose wording misled
+// an agent: the note after synthesized input with no tree change, and the error
+// for an element index that is missing from the snapshot.
 func TestNotesLearnedFromTheRealAgentRun(t *testing.T) {
-	// ① ctrl+s 之后 "delivered-but-ignored" 说过头了：文件其实存下来了，
-	//    agent 却因此多花截图 + 点 Save 两步去自证，占那次 12 步里的 17%。
-	//    格式类改动与文件状态**根本不进 a11y 树**，所以"树没变"只能推出
-	//    "树看不见"，推不出"没生效"。
+	// 1. After ctrl+s, calling the result "delivered but ignored" over-claims:
+	//    the file was saved, yet the note sent the agent on extra steps to prove
+	//    it. Formatting changes and file state never reach the accessibility
+	//    tree, so an unchanged tree only shows that the tree cannot see the
+	//    effect, not that nothing happened.
 	for _, fragment := range []string{
 		"No accessibility change observed",
 		"Visual change was not measured",
@@ -2871,16 +2865,16 @@ func TestNotesLearnedFromTheRealAgentRun(t *testing.T) {
 		}
 	}
 
-	// ② `unknown element_index "128"` 只有 27 个字符、零指引，而同样是"下标
-	//    过期"，解析到别的控件时的报错却讲清了原因和出路。两条路径的帮助程度
-	//    不该差这么多。
+	// 2. A missing index is as stale as one that resolves to a different
+	//    control, so its error must be just as helpful and explain the cause
+	//    and the way forward instead of a bare `unknown element_index "128"`.
 	snapshot := &appSnapshot{Elements: []elementRecord{{Index: 0}, {Index: 59}}}
 	_, err := lookupElement(snapshot, "128")
 	if err == nil {
 		t.Fatal("下标不存在时必须报错")
 	}
-	// 照 Playwright 的错误形态：工具名前缀 + 结构化字段 + Call log + 下一步。
-	// 替换掉的是 `unknown element_index "128"` 那种 27 字符零指引。
+	// Follows Playwright's error shape: tool prefix, structured fields, a call
+	// log and the next step.
 	for _, fragment := range []string{
 		"indices 0..59",
 		"Call log:",
@@ -2893,21 +2887,23 @@ func TestNotesLearnedFromTheRealAgentRun(t *testing.T) {
 			t.Fatalf("下标不存在的报错要给出完整事实链与出路，缺 %q:\n%s", fragment, err)
 		}
 	}
-	// 快照年龄是我们特有的必需信息：桌面上快照可能陈旧几十秒而 agent 毫无察觉。
+	// Snapshot age is a desktop-specific addition: a snapshot can be tens of
+	// seconds stale without the agent noticing.
 	if !strings.Contains(err.Error(), "Snapshot:") {
 		t.Fatalf("报错要说清快照有多旧:\n%s", err)
 	}
 }
 
-// 把那句 Note 单独取出来，测试才不用去猜它藏在哪个分支里。
+// unchangedSynthesisNote returns the note for synthesized input that produced
+// no accessibility change, so tests need not know which branch emits it.
 func unchangedSynthesisNote() string {
 	return strings.Join(unchangedNotes(true, pixelsUnknown, false), " ")
 }
 
-// P4：选择器要能替代数字下标，语法与快照行**逐字一致**。
-//
-// 数字下标每次 get_app_state 都会重排，是 agent 最容易犯错的地方——意图声明
-// 只是把那个错误变得**响亮**，没有消除它。选择器从快照行抄下来就能用。
+// TestSelectorLookup checks that a selector can replace a numeric index, using
+// exactly the syntax of snapshot lines. Numeric indices can shift on every
+// observation and are the agent's most common mistake; intent declarations only
+// make that mistake loud. A selector copied from a snapshot line works as is.
 func TestSelectorLookup(t *testing.T) {
 	snapshot := &appSnapshot{Elements: []elementRecord{
 		{Index: 4, ControlType: "push button", Name: "Save"},
@@ -2933,13 +2929,14 @@ func TestSelectorLookup(t *testing.T) {
 		}
 	}
 
-	// 歧义时**不许挑一个**——静默挑一个正是本项目一直在修的那类错误。
+	// An ambiguous selector must fail instead of picking one; a silent pick is
+	// exactly the kind of error these checks exist to prevent.
 	_, err := lookupElement(snapshot, `"Save"`)
 	if err == nil {
 		t.Fatal(`"Save" 同时命中 push button 与 menu，必须报歧义`)
 	}
-	// 候选行的形态照 Playwright 的 strict mode 违规报错：下标 + 描述 + `aka` 一个
-	// 可直接使用的替代选择器。
+	// Candidate lines follow Playwright's strict-mode violation error: index,
+	// description, and an `aka` selector that can be used directly.
 	for _, fragment := range []string{"ambiguous", "matches 2 elements",
 		`4    push button "Save"`, `9    menu "Save"`, "aka", "adding the role"} {
 		if !strings.Contains(err.Error(), fragment) {
@@ -2947,8 +2944,8 @@ func TestSelectorLookup(t *testing.T) {
 		}
 	}
 
-	// 收敛建议要看**缺的是哪一半**：只给了 role 的选择器，该让它补名字，
-	// 而不是补一个它已经给了的 role。
+	// The suggestion depends on which half is missing: a role-only selector
+	// should be told to add the name, not the role it already has.
 	_, err = lookupElement(snapshot, "push button")
 	if err == nil {
 		t.Fatal("只给 role 且命中多个时必须报歧义")
@@ -2958,22 +2955,23 @@ func TestSelectorLookup(t *testing.T) {
 		t.Fatalf("只给 role 时应当建议补名字: %s", err)
 	}
 
-	// 找不到时要说清选择器怎么写。
+	// A selector without a match must be reported explicitly.
 	_, err = lookupElement(snapshot, `push button "Nope"`)
 	if err == nil || !strings.Contains(err.Error(), "no element matches") {
 		t.Fatalf("找不到时要明确报出来: %v", err)
 	}
 
-	// 数字下标仍然照旧。
+	// Numeric indices keep working.
 	if record, err := lookupElement(snapshot, "8"); err != nil || record.Index != 8 {
 		t.Fatalf("数字下标不得失效: %v", err)
 	}
 }
 
-// P5：通道整体可关，且被关掉的工具**根本不出现在 tools/list 里**。
-//
-// 这个区别很要紧：模型看得见的工具会去试，试了被拒就是浪费一轮；看不见就不会试。
-// Playwright 把坐标做成 opt-in 能力（--caps=vision）也是这个道理。
+// TestChannelCapabilitySwitch checks that a whole channel can be disabled and
+// that its tools then disappear from tools/list. A model tries every tool it
+// can see, and a refused call wastes a turn; a hidden tool is never tried.
+// Playwright MCP makes coordinate input an opt-in capability (--caps=vision)
+// for the same reason.
 func TestChannelCapabilitySwitch(t *testing.T) {
 	names := func() map[string]bool {
 		out := map[string]bool{}
@@ -3002,7 +3000,8 @@ func TestChannelCapabilitySwitch(t *testing.T) {
 		}
 	}
 
-	// 硬调也要拒，而且要说清是**通道被关了**，不是工具不存在。
+	// A direct call must be refused as well, and the error must say that the
+	// channel is disabled rather than that the tool does not exist.
 	service := newService()
 	result := service.callTool("gui", map[string]any{"actions": []any{}})
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "channel, which is disabled") {
@@ -3166,12 +3165,12 @@ func TestPreflightOnlyErrorsDoNotCaptureFreshUIContext(t *testing.T) {
 	}
 }
 
-// 像素比对是**独立于树**的第二个信号。两条合起来才有强弱之分。
-//
-// 起因是实测过的一次误判：ctrl+s 之后树字节不变，工具断言"送达但被忽略"，
-// 而文件其实存下来了；agent 因此多花截图 + 点 Save 两步自证。
-// 树看不见整类效果（格式改动、文件状态、画布像素），所以"树没变"推不出
-// "没生效"——但配上"屏幕也没变"就推得出。
+// TestUnchangedNotesReportOnlyObservedChange checks that notes after an action
+// report only what was observed. Pixel comparison is a second signal,
+// independent of the tree, which cannot see whole classes of effects such as
+// formatting, file state and canvas pixels. An unchanged tree therefore never
+// implies that the action had no effect, and even an unchanged screen leaves
+// delivery and semantic effect unknown.
 func TestUnchangedNotesReportOnlyObservedChange(t *testing.T) {
 	changed := strings.Join(unchangedNotes(true, pixelsChanged, false), " ")
 	if !strings.Contains(changed, "visual change observed") {
@@ -3579,14 +3578,12 @@ func TestHiddenSettlePollsDoNotConsumeDeliveredDiagnosticState(t *testing.T) {
 	}
 }
 
-// 选择器的第二身份来源：description。
-//
-// 优先级照 Playwright 的 selector generator——它给 role+accessible-name 打 100 分，
-// 给 label / alt-text 打 140–160（分数越低越优先），都远好于 nth= 的 10000 分。
-// 我们的 element_index 就是 nth，是它排名倒数第二的定位方式。
-//
-// 加 description 这一级是实测决定的：七个应用 704 个节点里，只按 role+name 能唯一
-// 指认的占 55%，加上 description 之后到 66%；GIMP 上从 57 涨到 114（翻一倍）。
+// TestSelectorFallsBackToDescription covers description as the second identity
+// source for selectors. The priority follows Playwright's selector generator,
+// which scores role plus accessible name at 100 and label or alt text at
+// 140-160 (lower is better), far ahead of nth= at 10000; an element index is
+// the equivalent of nth. Adding descriptions raised the share of uniquely
+// identifiable nodes across seven desktop apps from 55% to 66%.
 func TestSelectorFallsBackToDescription(t *testing.T) {
 	snapshot := &appSnapshot{Elements: []elementRecord{
 		{Index: 3, ControlType: "push button", Name: "", Description: "Go back"},
@@ -3594,21 +3591,22 @@ func TestSelectorFallsBackToDescription(t *testing.T) {
 		{Index: 9, ControlType: "push button", Name: "", Description: "Go forward"},
 	}}
 
-	// 没有名字的按钮，靠 description 指认。
+	// A button without a name is identified by its description.
 	record, err := lookupElement(snapshot, `push button "Go back"`)
 	if err != nil || record.Index != 3 {
 		t.Fatalf("应当按 description 命中 3：%v %v", record, err)
 	}
 
-	// **name 命中时不得被 description 稀释成歧义。**
-	// "Save" 既是 4 号的 name，也出现在它自己的 description 里；如果两级混在一起，
-	// 一个精确的名字命中就会被一堆描述命中拖成"歧义"。
+	// A name match must not be diluted into ambiguity by description matches.
+	// "Save" is both the name of element 4 and part of its description; if the
+	// two levels were merged, an exact name match could become ambiguous.
 	record, err = lookupElement(snapshot, `push button "Save"`)
 	if err != nil || record.Index != 4 {
 		t.Fatalf("name 命中优先，不该报歧义：%v %v", record, err)
 	}
 
-	// description 这一级同样要能报歧义，而不是静默挑一个。
+	// The description level must also report ambiguity instead of silently
+	// picking one.
 	ambiguous := &appSnapshot{Elements: []elementRecord{
 		{Index: 1, ControlType: "push button", Description: "Close"},
 		{Index: 2, ControlType: "menu item", Description: "Close"},
@@ -5493,17 +5491,17 @@ func TestSemanticTargetIntentMismatchFailsBeforeRuntime(t *testing.T) {
 	}
 }
 
-// 选择器尾部的约束**必须真的生效或真的报错**，不能静默丢弃。
+// TestSelectorPredicatesApplyOrFailLoudly checks that trailing selector
+// constraints either take effect or produce an error; they must never be
+// silently dropped. A parser that stops after the quoted name would accept
+// each of these as a bare role and name:
 //
-// 这是修一个实测出来的 bug：parseSelector 原来取到 name 就 return，
-// 末引号之后的内容从头到尾没人看。实测四条全部被吞：
+//	push button "Save" [checked]
+//	push button "OK" >> nth=0
+//	menu item "Ruler" (12)
+//	push button "Save" and then some garbage
 //
-//	push button "Save" [checked]              -> role="push button" name="Save" ok=true
-//	push button "OK" >> nth=0                 -> role="push button" name="OK"   ok=true
-//	menu item "Ruler" (12)                    -> role="menu item"   name="Ruler" ok=true
-//	push button "Save" and then some garbage  -> role="push button" name="Save" ok=true
-//
-// 调用方以为自己加了限定，拿到的却是不带限定的结果——工具在骗 agent。
+// The caller would then believe the result honours a constraint it ignored.
 func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 	snapshot := &appSnapshot{Elements: []elementRecord{
 		{Index: 1, ControlType: "check menu item", Name: "Ruler", States: " [checked]"},
@@ -5515,7 +5513,8 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 		{Index: 11, ControlType: "list item", Name: "Row", States: " [selected focused]"},
 	}}
 
-	// 谓词真的把候选筛窄了：不带谓词是歧义，带上就唯一。
+	// The predicate narrows the candidates: without it the selector is
+	// ambiguous, with it the match is unique.
 	if _, err := lookupElement(snapshot, `check menu item "Ruler"`); err == nil {
 		t.Fatal("两个同名 Ruler，本该报歧义")
 	}
@@ -5524,8 +5523,8 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 		t.Fatalf("[checked] 应当筛出 1 号：%v %v", record, err)
 	}
 
-	// 快照把多个状态打在**同一个方括号里**，所以一组要拆成多条约束。
-	// agent 从行里原样抄下来的就是这个形状。
+	// Snapshots print several states inside one bracket, so a group splits
+	// into several constraints; this is the shape an agent copies from a line.
 	if record, err = lookupElement(snapshot, `list item "Row" [selected focused]`); err != nil ||
 		record.Index != 11 {
 		t.Fatalf("一组多词应当逐词匹配：%v %v", record, err)
@@ -5534,12 +5533,13 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 		t.Fatal("组里有一个词对不上就不该命中")
 	}
 
-	// 同名同角色只能靠 desc 区分——实测 Nautilus 的三个 toggle button "Menu"。
+	// Elements sharing role and name can only be told apart by desc, as with
+	// the three "Menu" toggle buttons in Nautilus.
 	if record, err = lookupElement(snapshot, `toggle button "Menu" [desc="View options"]`); err != nil ||
 		record.Index != 5 {
 		t.Fatalf("[desc=…] 应当筛出 5 号：%v %v", record, err)
 	}
-	// desc 单独用作身份（不给引号名字）也要能走通。
+	// desc alone, without a quoted name, must also work as an identity.
 	if record, err = lookupElement(snapshot, `toggle button [desc="Show operations"]`); err != nil ||
 		record.Index != 6 {
 		t.Fatalf("只给 role + desc 也该唯一：%v %v", record, err)
@@ -5556,15 +5556,15 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 		t.Fatalf("[a=…] 应当命中 8 号：%v %v", record, err)
 	}
 
-	// 认不出来的一律报错，且错误里要点名残串——这是这次修的核心。
+	// Anything unrecognised is an error that names the unread remainder.
 	for _, selector := range []string{
 		`push button "OK" >> nth=0`,
 		`menu item "Ruler" (12)`,
 		`push button "Save" and then some garbage`,
 		`push button "Save" [disabled]`,
 		`push button "Save" [level=2]`,
-		`push button "Save" [desc=View options]`, // 值没加引号
-		`push button "Save" [checked`,            // 括号没闭合
+		`push button "Save" [desc=View options]`, // unquoted value
+		`push button "Save" [checked`,            // unclosed bracket
 	} {
 		_, err := lookupElement(snapshot, selector)
 		if err == nil {
@@ -5576,8 +5576,9 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 		}
 	}
 
-	// 报错要把支持的写法摆出来，并当场宣告 >> / nth= / :right-of 不存在，
-	// 否则模型会照着 Playwright 的记忆自己发明语法。
+	// The error must list the supported syntax and state that >>, nth= and
+	// :right-of do not exist; otherwise the model invents syntax from its
+	// memory of Playwright.
 	_, err = lookupElement(snapshot, `push button "OK" >> nth=0`)
 	for _, want := range []string{"[checked]", "desc=", "nth=", ">>", ":right-of"} {
 		if !strings.Contains(err.Error(), want) {
@@ -5585,22 +5586,23 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 		}
 	}
 
-	// 谓词把候选筛空时，最可能的原因是状态变了而不是名字抄错，
-	// 建议要先说这一条。
+	// When predicates filter out every candidate, the likeliest cause is a
+	// state change rather than a mistyped name, so the hint says that first.
 	_, err = lookupElement(snapshot, `check menu item "Ruler" [expanded]`)
 	if err == nil || !strings.Contains(err.Error(), "may have changed since the snapshot") {
 		t.Fatalf("筛空时应当提示状态可能已变：%v", err)
 	}
-	// 解析结果要回显，调用方才知道自己那串被读成了什么。
+	// The parsed predicates are echoed so the caller sees how the selector was
+	// read.
 	if !strings.Contains(err.Error(), "predicates [expanded]") {
 		t.Fatalf("Call log 里没回显解析到的谓词：%v", err)
 	}
 }
 
-// 名字里带引号或反斜杠时，配对引号必须是**真配对**，不是最后一个引号。
-//
-// 原来用 strings.LastIndex 找收尾引号，在没有尾部内容时恰好正确；
-// 一旦后面跟上 [desc="…"]，整段就会被吞进 name。
+// TestSelectorFindsTheRealClosingQuote checks that the closing quote of a name
+// is its real match rather than the last quote in the selector, including when
+// the name contains quotes or backslashes. Taking the last quote only works
+// without a suffix; a trailing [desc="..."] would be swallowed into the name.
 func TestSelectorFindsTheRealClosingQuote(t *testing.T) {
 	role, name, hasName, rest := parseSelector(`toggle button "Menu" [desc="View options"]`)
 	if role != "toggle button" || name != "Menu" || !hasName {
@@ -5610,7 +5612,8 @@ func TestSelectorFindsTheRealClosingQuote(t *testing.T) {
 		t.Fatalf("残串不对：%q", rest)
 	}
 
-	// 渲染侧 quoted() 会把引号转义成 \"，这里要还原回去。
+	// The renderer's quoted() escapes quotes as \", so parsing must unescape
+	// them.
 	_, name, _, rest = parseSelector(`static "say \"hi\"" [focused]`)
 	if name != `say "hi"` {
 		t.Fatalf("转义还原错了：%q", name)
@@ -5619,20 +5622,19 @@ func TestSelectorFindsTheRealClosingQuote(t *testing.T) {
 		t.Fatalf("带转义时残串不对：%q", rest)
 	}
 
-	// desc 的值里带 `]` 也要能闭合到正确的位置。
+	// A `]` inside a desc value must not end the predicate.
 	preds, err := parsePredicates(`[desc="a] b"]`)
 	if err != nil || len(preds) != 1 || preds[0].value != "a] b" {
 		t.Fatalf("引号内的 ] 不该当成收尾：%v %v", preds, err)
 	}
 }
 
-// 这条通道是查 Playwright 时反推出来的。它的 aria snapshot 只渲染一小撮语义属性，
-// "查任意样式属性"是 toHaveCSS 这类**断言**的事——快照是摘要，断言是精确查询，
-// 两者不必是同一套字段。顺着这条思路回头查 AT-SPI，才发现
-// Atspi.Text.get_default_attributes() 一直能读到 justification / size / weight。
-//
-// **此前记进文档的"改段落对齐后 a11y 树字节不变"是错的**：树不变是因为我们
-// 没取这些字段，不是信息不存在。真机验证 ctrl+r 报出 `justification: left -> right`。
+// TestTextAttributeChanges checks that text attribute changes are reported.
+// Like Playwright's aria snapshot, the snapshot renders only a few semantic
+// properties; exact style queries belong to assertions, as with toHaveCSS.
+// AT-SPI's Atspi.Text.get_default_attributes() exposes justification, size
+// and weight, so a paragraph alignment change is reported as
+// `justification: left -> right`.
 func TestTextAttributeChanges(t *testing.T) {
 	before := &appSnapshot{Elements: []elementRecord{
 		{Index: 26, RuntimeID: []int{0, 0, 1}, ControlType: "paragraph",
@@ -5654,14 +5656,15 @@ func TestTextAttributeChanges(t *testing.T) {
 	if !strings.Contains(changes[0], "justification: left -> right") {
 		t.Fatalf("要说出什么变成了什么：%s", changes[0])
 	}
-	// 没变的属性不许混进来。
+	// Unchanged attributes must not be included.
 	if strings.Contains(changes[0], "weight") {
 		t.Fatalf("没变的属性不该出现：%s", changes[0])
 	}
 
-	// 回归：第一版按 role+name 配对，而 LibreOffice 侧栏有四个无名 `text` 节点，
-	// key 全撞成 `text\x00""`，于是某个节点的悬停高亮被张冠李戴到别人头上，
-	// **连空操作都报出"格式变了"**。按 runtimeId 路径配对就没有这个问题。
+	// Regression: elements are paired by runtime ID path, not by role and name.
+	// The LibreOffice sidebar has several unnamed `text` nodes whose role/name
+	// keys collide, so one node's hover highlight would be attributed to another
+	// and even a no-op would report a formatting change.
 	collide := &appSnapshot{Elements: []elementRecord{
 		{Index: 1, RuntimeID: []int{0, 1}, ControlType: "text",
 			TextAttributes: map[string]string{"bg-color": "a"}},
@@ -5740,31 +5743,32 @@ func TestTextAttributeChanges(t *testing.T) {
 		t.Fatalf("text under a document ancestor must retain formatting evidence: %v", got)
 	}
 
-	// 缺一份快照时不许编。
+	// Without a snapshot from before the action, no change may be invented.
 	if got := textAttributeChanges(nil, after); got != nil {
 		t.Fatalf("没有动作前的快照就不该报变化：%v", got)
 	}
 }
 
-// 大输出落盘只回路径——照抄 playwright-mcp 的 --output-mode file|stdout。
-//
-// 它的解法不是压缩内容，是**把大输出写文件、只回一个路径**，agent 需要细节时
-// 自己去读。LibreOffice 的树 17694 字符、VS Code 24731 字符，而 agent 通常
-// 只关心其中一两个元素。
+// TestOutputSpillsToFileOnlyWhenAskedAndOnlyWhenBig checks that large output
+// can be written to a file and replaced by its path, following playwright-mcp's
+// --output-mode file|stdout. Rather than compressing the content, the agent
+// reads the file when it needs detail: a LibreOffice or VS Code tree runs to
+// tens of thousands of characters while the agent usually needs one or two
+// elements.
 func TestOutputSpillsToFileOnlyWhenAskedAndOnlyWhenBig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("COMPUTER_USE_OUTPUT_DIR", dir)
 
 	big := strings.Repeat("a very long tree line\n", 500)
 
-	// 默认 stdout：一个字都不落盘。
+	// The default stdout mode writes nothing to disk.
 	t.Setenv("COMPUTER_USE_OUTPUT_MODE", "")
 	if got := spillToFile("snapshot", big); got != "" {
 		t.Fatalf("默认不该落盘：%s", got[:60])
 	}
 
-	// 开了 file 模式，但内容小于阈值时也不落盘——
-	// 落盘把一次调用变成两次，对小树是净损失（gedit 的树只有 659 字符）。
+	// In file mode, output below the threshold stays inline: spilling turns one
+	// call into two, a net loss for small trees.
 	t.Setenv("COMPUTER_USE_OUTPUT_MODE", "file")
 	if got := spillToFile("snapshot", "short tree"); got != "" {
 		t.Fatalf("小输出不该落盘：%s", got)
@@ -5779,12 +5783,14 @@ func TestOutputSpillsToFileOnlyWhenAskedAndOnlyWhenBig(t *testing.T) {
 			t.Fatalf("替代文本要说清写到哪、有多大、怎么读，缺 %q：%s", fragment, replacement)
 		}
 	}
-	// 替代文本必须**远小于**原文，否则这个机制毫无意义。
+	// The replacement must be far smaller than the original, or the mechanism
+	// is pointless.
 	if len(replacement) >= len(big)/4 {
 		t.Fatalf("替代文本没省下东西：%d vs %d", len(replacement), len(big))
 	}
 
-	// 写出去的必须是原文，一个字节都不能少——agent 读它是为了拿全量。
+	// The file must hold the original byte for byte, since the agent reads it
+	// to get the full output.
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("应当只写出一个文件：%v %v", entries, err)
@@ -5795,7 +5801,8 @@ func TestOutputSpillsToFileOnlyWhenAskedAndOnlyWhenBig(t *testing.T) {
 	}
 }
 
-// 落盘失败绝不能让工具失败——原样回文本即可。
+// TestSpillFailureFallsBackToInlineText checks that a failed spill never fails
+// the tool; the text is returned inline instead.
 func TestSpillFailureFallsBackToInlineText(t *testing.T) {
 	t.Setenv("COMPUTER_USE_OUTPUT_MODE", "file")
 	t.Setenv("COMPUTER_USE_OUTPUT_DIR", "/proc/definitely-not-writable")
@@ -5805,8 +5812,9 @@ func TestSpillFailureFallsBackToInlineText(t *testing.T) {
 }
 
 func TestFindFiltersAreAndedAndReuseTheRenderedLines(t *testing.T) {
-	// find 的输出必须**逐字复用**树的渲染行，不能在 Go 里再写一份渲染器。
-	// 两份实现迟早漂移，而 agent 只该学一套读法。
+	// find output must reuse the tree's rendered lines verbatim instead of a
+	// second renderer in Go. Two implementations would drift apart, and the
+	// agent should only have to learn one format.
 	snapshot := &appSnapshot{
 		WindowTitle: "Untitled 1",
 		Elements: []elementRecord{
@@ -5836,13 +5844,14 @@ func TestFindFiltersAreAndedAndReuseTheRenderedLines(t *testing.T) {
 		role, name, text, state string
 		want                    []int
 	}{
-		// role 用子串：agent 写 "button" 时两种 button 都该找到
+		// role matches as a substring, so "button" finds both kinds of button.
 		{role: "button", want: []int{3, 4, 5}},
-		// 多条件是**与**，不是或
+		// Multiple filters are combined with AND.
 		{role: "button", state: "checked", want: []int{5}},
 		{name: "save", want: []int{3, 4}},
-		// text 要能落到 placeholder 上——同一个搜索框在 GTK 是 placeholder、
-		// 在 Electron 是 name，agent 不该被迫知道是哪个
+		// text also matches the placeholder: the same search box exposes its
+		// label as a placeholder in GTK and as the name in Electron, and the
+		// agent should not need to know which.
 		{text: "search files", want: []int{6}},
 		{role: "button", name: "nonexistent", want: nil},
 	}
@@ -5865,8 +5874,8 @@ func TestFindFiltersAreAndedAndReuseTheRenderedLines(t *testing.T) {
 }
 
 func TestVerifyReportsWhatItActuallySawNotJustFailure(t *testing.T) {
-	// "断言失败"没有信息量。有信息量的是"期望 checked，实际 [enabled focused]"
-	// ——agent 拿到后者才知道下一步该做什么。
+	// A bare "assertion failed" carries no information; "expected checked,
+	// observed [enabled focused]" tells the agent what to do next.
 	record := &elementRecord{Index: 5, ControlType: "toggle button", Name: "Bold", States: "enabled focused"}
 
 	ok, observed := verifyGoal{state: "checked"}.check(record, nil)
@@ -5877,12 +5886,12 @@ func TestVerifyReportsWhatItActuallySawNotJustFailure(t *testing.T) {
 		t.Fatalf("失败时必须回报实际观测到的状态，得到 %q", observed)
 	}
 
-	// 取反语法
 	if ok, _ := (verifyGoal{state: "!checked"}).check(record, nil); !ok {
 		t.Fatal("!checked 对一个未选中的元素应当通过")
 	}
 
-	// exists:false 是"等对话框消失"的写法：元素找不到才算通过
+	// exists:false expresses "wait for the dialog to disappear": it passes only
+	// when the element is absent.
 	no := false
 	if ok, _ := (verifyGoal{exists: &no}).check(nil, nil); !ok {
 		t.Fatal("元素不存在时 exists:false 应当通过")
@@ -5891,7 +5900,8 @@ func TestVerifyReportsWhatItActuallySawNotJustFailure(t *testing.T) {
 		t.Fatal("元素还在时 exists:false 不该通过")
 	}
 
-	// 缺省超时下，断言不存在的元素要给出可行动的理由，而不是空的失败
+	// With the default timeout, asserting a state on a missing element must
+	// return an actionable reason, not an empty failure.
 	if ok, observed := (verifyGoal{state: "checked"}).check(nil, nil); ok || observed == "" {
 		t.Fatalf("找不到元素时要给出理由，得到 ok=%v observed=%q", ok, observed)
 	}
@@ -6019,7 +6029,8 @@ func TestModelFacingContractsAreBenchmarkNeutral(t *testing.T) {
 }
 
 func TestVerifyDoesNotDoubleWrapTheStates(t *testing.T) {
-	// 树里渲染出来的 states 自带方括号，再包一层就成了 `[ [enabled]]`。
+	// Rendered states already carry brackets; wrapping them again yields
+	// `[ [enabled]]`.
 	record := &elementRecord{Index: 1, ControlType: "push button", Name: "Search", States: " [has-click-action]"}
 	_, observed := verifyGoal{state: "checked"}.check(record, nil)
 	if strings.Contains(observed, "[ [") || strings.Contains(observed, "]]") {
@@ -6028,9 +6039,9 @@ func TestVerifyDoesNotDoubleWrapTheStates(t *testing.T) {
 }
 
 func TestVerifyAcceptsNumericIndicesNotJustSelectors(t *testing.T) {
-	// 实测踩到过：verify 走 lookupBySelectorFor，传下标 "62" 会连报 6 轮
-	// "no element matches the selector" —— 元素一直在，断言却报不存在。
-	// 断言工具给假阴性，比没有断言更糟。
+	// verify must resolve a numeric index, not only a selector. Treating "62"
+	// as a selector reports "no element matches the selector" while the element
+	// exists, and a false negative from an assertion is worse than none.
 	snapshot := &appSnapshot{Elements: []elementRecord{
 		{Index: 62, ControlType: "text", Value: "baseline-marker", States: "[focused]"},
 	}}
@@ -6044,15 +6055,16 @@ func TestVerifyAcceptsNumericIndicesNotJustSelectors(t *testing.T) {
 }
 
 func TestCoordinateNotesDeclareTheirExplicitSpace(t *testing.T) {
-	// 实测踩到过：Nautilus 图标在树里是 {256,76,78,68}（中心 295,110），
-	// 合成右键的 Note 却报 (384,159)——差的正是窗口原点 (89,49)。
-	// a11y 元素兜底仍要把绝对落点换回窗口相对后再报告；gui 使用独立的
-	// screen_absolute_point，不共享窗口偏移约定。
+	// Coordinates in notes must use the space they declare. Reporting the
+	// absolute click point next to window-relative element bounds is off by
+	// exactly the window origin. The AX element fallback converts the absolute
+	// point back to window-relative coordinates before reporting; GUI uses
+	// screen_absolute_point and does not share the window-offset convention.
 	if !strings.Contains(linuxRuntimeScript, "def window_relative(") {
 		t.Fatal("需要一个把绝对坐标换回窗口相对的转换函数")
 	}
 	for _, fragment := range []string{
-		// a11y 元素坐标兜底仍是窗口相对。
+		// The AX element coordinate fallback stays window-relative.
 		"coordinate click(s) at ({:.0f}, {:.0f}) in ",
 		"window-relative pixels after bringing the window to the foreground",
 	} {
@@ -6070,7 +6082,8 @@ func TestCoordinateNotesDeclareTheirExplicitSpace(t *testing.T) {
 			t.Fatalf("GUI 坐标必须是无隐式偏移的屏幕绝对空间：缺 %q", fragment)
 		}
 	}
-	// 每一处报坐标的地方都要经过转换，不能直接打印 screen_point 的返回值
+	// Every reported coordinate must go through the conversion instead of
+	// printing screen_point's return value directly.
 	if strings.Contains(linuxRuntimeScript, `"{}".format(action, x, y, UNVERIFIED_SYNTHESIS)`) {
 		t.Fatal("menu 兜底仍在直接打印屏幕绝对坐标")
 	}
@@ -8071,17 +8084,19 @@ func TestProviderSpecificSecondaryActionIsNotReachable(t *testing.T) {
 }
 
 func TestActionsReResolveGeometryAtActionTime(t *testing.T) {
-	// Playwright 的 locator 每次动作重新解析。我们其实早就在 find_element 里
-	// 解析出了活节点，却仍拿 Go 缓存的旧记录去算坐标——同一次调用里两套事实。
-	// 实测：VS Code 里由外部收起侧栏后，click(element_index=21) 合成在 (572,38)，
-	// 正是缓存框 {547,28,50,19} 的中心，而界面那时已经重排。
+	// Like a Playwright locator, the target is re-resolved at action time.
+	// find_element already resolves the live node, so computing coordinates
+	// from the cached Go record would mix two versions of the UI in one call:
+	// after a sidebar collapses, the click would land at the centre of the
+	// stale cached box even though the layout has changed.
 	if !strings.Contains(linuxRuntimeScript, "def current_geometry(") {
 		t.Fatal("动作路径必须在解析出活节点之后重新取一次几何")
 	}
 	if !strings.Contains(linuxRuntimeScript, "element_record, moved_note = current_geometry(") {
 		t.Fatal("重算的几何必须真的被后续动作使用，而不是算完丢掉")
 	}
-	// 位移发生了就必须说——这是 agent 判断"我读到的坐标还能不能用"的唯一依据
+	// A move must be reported: it is the agent's only way to know whether the
+	// coordinates it read are still valid.
 	if !strings.Contains(linuxRuntimeScript, "The element MOVED since the snapshot") {
 		t.Fatal("元素移动过要如实告知，否则 agent 会继续用快照里的旧坐标")
 	}
@@ -8208,13 +8223,14 @@ func mainGoSource(t *testing.T) string {
 }
 
 func TestStabilityWaitPortsOnlyWhatLinuxCanSupport(t *testing.T) {
-	// Playwright 动作前等三件事：visible、enabled、stable（外加命中测试）。
-	// 这里**只**照搬 stable，另外两条不能照搬，理由都是本仓库自己的实测：
-	//   enabled —— Nautilus 的文件图标根本不设 ENABLED / SENSITIVE，状态里
-	//              只有 SHOWING/VISIBLE/FOCUSABLE，却带着 open / menu 两个动作、
-	//              完全可点。拿它当门禁会让 agent 跳过可用目标。
-	//   命中测试 —— 实测命中率 gedit 11/11、Nautilus 19/25、LibreOffice 12/25，
-	//              当门禁会拦掉一半 LibreOffice 的正常点击。
+	// Before an action Playwright waits for visible, enabled and stable, plus a
+	// hit test. Only stable is ported; enabled and the hit test fail on Linux:
+	//   enabled  - Nautilus file icons never set ENABLED/SENSITIVE (only
+	//              SHOWING/VISIBLE/FOCUSABLE) yet expose open and menu actions
+	//              and are fully clickable; gating on it skips usable targets.
+	//   hit test - measured hit rates were 11/11 in gedit, 19/25 in Nautilus
+	//              and 12/25 in LibreOffice, so gating on it would block about
+	//              half of the valid clicks in LibreOffice.
 	if !strings.Contains(linuxRuntimeScript, "def wait_until_stable(") {
 		t.Fatal("动作前要等元素停止移动")
 	}
@@ -8226,11 +8242,13 @@ func TestStabilityWaitPortsOnlyWhatLinuxCanSupport(t *testing.T) {
 			t.Fatalf("缺少 %q：既要实现，也要写清为什么只port这一条", fragment)
 		}
 	}
-	// 坐标 fallback 必须在不稳定时拒绝；语义动作不依赖几何，不走该门禁。
+	// The coordinate fallback must refuse while the target is unstable;
+	// semantic actions do not depend on geometry and skip this gate.
 	if !strings.Contains(linuxRuntimeScript, "require_stable_coordinate_geometry") {
 		t.Fatal("坐标动作缺少稳定几何门禁")
 	}
-	// 上限要可调：动画重的应用需要更久，追求低延迟的场景要能关掉
+	// The limit is configurable: animation-heavy apps need longer, and
+	// latency-sensitive setups must be able to turn the wait off.
 	if !strings.Contains(linuxRuntimeScript, "COMPUTER_USE_STABLE_TIMEOUT_MS") {
 		t.Fatal("稳定等待的上限要可配置")
 	}
@@ -8788,9 +8806,10 @@ func TestRuntimeStderrIsOperatorOnly(t *testing.T) {
 }
 
 func TestErrorContextIsOnByDefaultAndDisableable(t *testing.T) {
-	// 和 --output-mode file 相反的默认值，理由也相反：那个改变的是成功路径上
-	// 每次调用的形态，这个只在失败时触发——而失败时没有任何别的手段能事后复盘，
-	// 响应里只剩一行错误，现场早就没了。
+	// Unlike --output-mode file, error context is on by default, for the
+	// opposite reason: output mode changes the shape of every successful call,
+	// while error context fires only on failure, when nothing else preserves
+	// the scene for later diagnosis and the response holds a single error line.
 	t.Setenv("COMPUTER_USE_ERROR_CONTEXT", "")
 	if !errorContextEnabled() {
 		t.Fatal("失败现场默认要落盘")
@@ -8808,27 +8827,27 @@ func TestErrorContextIsOnByDefaultAndDisableable(t *testing.T) {
 func TestErrorContextNeedsAnAppAndNeverMasksTheOriginalError(t *testing.T) {
 	service := newService()
 	t.Setenv("COMPUTER_USE_ERROR_CONTEXT", "")
-	// 没有 app 就没有现场可抓。这条同时防住 list_apps 这种无 app 的工具
-	// 在失败时去做一次毫无意义的快照。
+	// Without an app there is nothing to capture. This also keeps app-less
+	// operations such as list_apps from taking a pointless snapshot on failure.
 	if note, sampled := service.writeErrorContext("", "click", "boom"); note != "" || sampled {
 		t.Fatalf("没有 app 时不该采样或落盘，得到 note=%q sampled=%v", note, sampled)
 	}
-	// 抓现场自己失败时返回空串，绝不制造第二层错误——一个诊断设施
-	// 在诊断失败时又抛一个错，只会把原始错误埋掉。
+	// If capturing the context fails, the result is an empty string and never a
+	// second error, which would only bury the original one.
 	if note, sampled := service.writeErrorContext("no-such-app-xyzzy", "click", "boom"); note != "" || sampled {
 		t.Fatalf("抓不到现场时要静默放弃，得到 note=%q sampled=%v", note, sampled)
 	}
 }
 
 func TestTraceIsOffUnlessGivenAPath(t *testing.T) {
-	// 打开的方式是给出路径，不是布尔开关：写到哪里是调用方的事，
-	// 一个诊断设施不该自作主张地选目录。
+	// Tracing is enabled by giving a path, not a boolean: where to write is the
+	// caller's decision, and a diagnostic facility should not pick a directory.
 	t.Setenv("COMPUTER_USE_TRACE_FILE", "")
 	if tracePath() != "" {
 		t.Fatal("没给路径就不该开 trace")
 	}
 	service := newService()
-	// 关着的时候写任何东西都不该有副作用
+	// While tracing is off, appending must have no side effects.
 	service.appendTrace("gedit", axServiceRequest{Action: axClickCommand{}}, nil, nil, nil, false)
 }
 
@@ -8843,8 +8862,8 @@ func TestTraceRecordsOneLinePerActionIncludingFailures(t *testing.T) {
 		Action:  axClickCommand{},
 		Element: &elementRecord{Index: 7, ControlType: "menu item", Name: "Preferences"},
 	}, before, after, []string{"[a11y] Resolved element_index 7 to menu item 'Preferences'."}, false)
-	// 失败也要留一行：只记成功会让复盘时看到一串顺利的动作，
-	// 而真正要查的那一步凭空消失。
+	// Failures get a line too; recording only successes would show a smooth run
+	// in which the step under investigation is missing.
 	service.appendTrace("vlc", axServiceRequest{
 		Action: axSetValueCommand{Value: "x"},
 	}, before, nil, nil, true)
@@ -8873,8 +8892,8 @@ func TestTraceRecordsOneLinePerActionIncludingFailures(t *testing.T) {
 	if args["element_name"] != "Preferences" {
 		t.Fatalf("动作参数要记下作用在谁身上，得到 %v", args)
 	}
-	// 但**不能**把整份记录抄进去：一次基线 16 个动作，抄整棵树会让 trace
-	// 比 transcript 还大。要细节有 error-context 那条路。
+	// The full record must not be copied, though: with whole trees the trace
+	// would outgrow the transcript. Error context provides detail when needed.
 	if strings.Contains(lines[0], "runtimeId") || strings.Contains(lines[0], "treeLines") {
 		t.Fatal("trace 只记摘要，不记整棵树")
 	}
@@ -8889,9 +8908,9 @@ func TestTraceRecordsOneLinePerActionIncludingFailures(t *testing.T) {
 }
 
 func TestUnnamedWindowsStillGetAUsableLabel(t *testing.T) {
-	// 实测（跑 OSWorld 第 3 题时从 trace 里看出来的）：agent 在 Chrome 的菜单
-	// 之间穿行时，有 4 个动作的窗口标题是空的——`Window: ""`。菜单、下拉、popup
-	// 很多都不设名字，而窗口标题是 agent 判断"我现在在哪儿"的第一信号。
+	// Many menus, drop-downs and popups have no name, which renders as
+	// `Window: ""`, yet the window title is the agent's first cue for where it
+	// is. Unnamed windows therefore need a substitute label.
 	if !strings.Contains(linuxRuntimeScript, "def window_label(") {
 		t.Fatal("无名窗口要有可用的替代标题")
 	}
@@ -8902,13 +8921,15 @@ func TestUnnamedWindowsStillGetAUsableLabel(t *testing.T) {
 }
 
 func TestComboBoxSelectionIsVisibleInTheTree(t *testing.T) {
-	// 实测（OSWorld 第 4 题）：Chrome 打印对话框里 Margins / Destination / Scale
-	// 三个 combo box 在树里**只有名字、没有值**，而任务恰恰要求"把边距设成 None"。
-	// 看不见当前值，就既没法判断要不要改，也没法确认改成功了。
+	// Combo boxes such as Margins, Destination and Scale in Chrome's print
+	// dialog expose only a name, so the agent can neither decide whether to
+	// change the value nor confirm a change.
 	//
-	// 值不在 Value 接口上（Chrome 的 combo box 不实现它），也不在 Text 接口上
-	// （实测读回来是一个对象替换符 `￼`）。它在后代 menu item 的 SELECTED 状态上，
-	// 而且**下拉关着时也读得到**——这一点是实测确认的，否则就得先展开每个下拉框。
+	// The value is not on the Value interface (Chrome's combo boxes do not
+	// implement it) nor on the Text interface (it reads back as an object
+	// replacement character). It is the SELECTED state of a descendant menu
+	// item, which is readable even while the drop-down is closed, so no
+	// drop-down has to be expanded first.
 	if !strings.Contains(linuxRuntimeScript, "def selected_option_name(") {
 		t.Fatal("下拉框的当前选中项要能读出来")
 	}
@@ -8918,18 +8939,20 @@ func TestComboBoxSelectionIsVisibleInTheTree(t *testing.T) {
 }
 
 func TestFocusGuardHasAnX11FallbackForWindowsThatNeverGoActive(t *testing.T) {
-	// GNOME 门户文件对话框（每一次另存为/打开都是它）状态位是 MODAL+VISIBLE，
-	// **既没有 ACTIVE 也没有 SHOWING**；它的二级确认框（"文件已存在，是否替换"）
-	// 更是**在 a11y 树里根本不存在**，却握着输入焦点。
-	// 只认 ACTIVE 的焦点守卫会让整条 GUI 通道在这类对话框上完全不可用。
+	// The GNOME portal file dialog, used for every Save As and Open, reports
+	// MODAL+VISIBLE but neither ACTIVE nor SHOWING, and so does its secondary
+	// confirmation ("file exists, replace?"), which holds input focus. A focus
+	// guard that trusts only ACTIVE would make synthesized input unusable on
+	// these dialogs.
 	if !strings.Contains(linuxRuntimeScript, "def x11_holds_focus(") {
 		t.Fatal("AT-SPI 说不出话时要有一层 X11 旁证")
 	}
-	// 判据必须是**同进程**：那个二级对话框没有标题，也不是目标窗口本身。
+	// The criterion must be the owning process: the secondary dialog has no
+	// title and is not the target window itself.
 	if !strings.Contains(linuxRuntimeScript, "_NET_WM_PID") {
 		t.Fatal("旁证要比 pid，不能比标题——那个挡路的对话框没有标题")
 	}
-	// 但它只是兜底，不能顶替 AT-SPI 的判断
+	// The X11 check is only a fallback and must not replace the AT-SPI check.
 	shim := strings.Index(linuxRuntimeScript, "def x11_holds_focus(")
 	active := strings.Index(linuxRuntimeScript, "if window_is_active(window):")
 	if active < 0 || shim < 0 {
@@ -8938,9 +8961,9 @@ func TestFocusGuardHasAnX11FallbackForWindowsThatNeverGoActive(t *testing.T) {
 }
 
 func TestForeignForegroundAppIsCalledOutByName(t *testing.T) {
-	// 实测：在 Chrome 里点 Save，弹出的保存对话框属于 xdg-desktop-portal-gnome，
-	// 和 Chrome 是两个进程。get_app_state(chrome) 永远看不到它，
-	// agent 会以为"点了 Save 什么都没发生"。
+	// A Save dialog opened from Chrome belongs to xdg-desktop-portal-gnome, a
+	// separate process, so observing Chrome never shows it and the agent would
+	// conclude that clicking Save did nothing.
 	if !strings.Contains(linuxRuntimeScript, "ANOTHER APP IS IN FRONT") {
 		t.Fatal("前台窗口属于别的进程时要指名道姓地说出来")
 	}
@@ -8950,33 +8973,35 @@ func TestForeignForegroundAppIsCalledOutByName(t *testing.T) {
 }
 
 func TestSetValueFallsBackToSynthesisWhenTheApiRefuses(t *testing.T) {
-	// 实测（OSWorld 第 8 题，改 Chrome 配置文件用户名）：
-	// chrome://settings/manageProfile 里的 `entry "Name"` 明明 holds "Person 1"，
-	// set_value 却报"不可设置"——Blink 的输入框不实现 AT-SPI 的 Value/EditableText。
+	// Blink text inputs implement neither the AT-SPI Value nor the EditableText
+	// interface, so set_value is refused on an entry that visibly holds a value,
+	// such as the profile name in chrome://settings/manageProfile.
 	//
-	// click 和 type_text 早就有"语义失败就降级到合成"，set_value 却只会硬失败，
-	// 于是一个到处都是的控件类型整个不可用。
+	// Like click and type_text, set_value must fall back to synthesis when the
+	// semantic path refuses; otherwise a ubiquitous control type is unusable.
 	if !strings.Contains(linuxRuntimeScript, "The AT-SPI value API refused this element") {
 		t.Fatal("语义写值被拒时要降级到 聚焦→全选→打字，而不是硬失败")
 	}
-	// 降级必须说清它没有回读确认——语义路径有，合成路径没有，
-	// 两条路给同一句保证就是骗人。
+	// The fallback must state that it has no read-back confirmation. Only the
+	// semantic path reads back, and giving both paths the same assurance would
+	// mislead the agent.
 	if !strings.Contains(linuxRuntimeScript, "no read-back ") {
 		t.Fatal("降级路径要声明自己没有回读确认")
 	}
 }
 
 func TestFocusGuardMustNotGiveFalsePositives(t *testing.T) {
-	// 实测（OSWorld 第 14 题，Chrome 加载解压扩展）：GNOME 门户对话框开着，
-	// 焦点却漂回了发起它的 Chrome。我往对话框输路径，字符**全部打进了 Chrome**，
-	// 而守卫放行了。
+	// While a GNOME portal dialog is open, focus can drift back to the app that
+	// opened it, so text meant for the dialog is typed into that app.
 	//
-	// 守卫的假阳性比误拒危险得多：误拒会让 agent 看到一条报错、换条路；
-	// 假阳性让输入静默落到别的窗口，**没有任何迹象**——正是本仓库最恨的那类失败。
+	// A false positive from the guard is far more dangerous than a false
+	// refusal: a refusal shows the agent an error and lets it try another way,
+	// while a false positive silently delivers input to another window.
 	if !strings.Contains(linuxRuntimeScript, `["wmctrl", "-a", title]`) {
 		t.Fatal("抢焦点失败时要向窗口管理器再请求一次激活")
 	}
-	// 但请求成功 ≠ 焦点到位。必须重新确认，否则只是把假阳性换了个位置。
+	// A successful activation request does not mean focus arrived. It must be
+	// re-checked, or the false positive merely moves elsewhere.
 	after := linuxRuntimeScript[strings.Index(linuxRuntimeScript, `["wmctrl", "-a", title]`):]
 	if !strings.Contains(after[:600], "window_is_active(window) or x11_holds_focus(window)") {
 		t.Fatal("激活请求之后必须重新确认焦点，不能直接返回成功")
@@ -8984,67 +9009,64 @@ func TestFocusGuardMustNotGiveFalsePositives(t *testing.T) {
 }
 
 func TestX11ArbitratesWhichWindowIsInFrontWhenAtspiCannotTell(t *testing.T) {
-	// 这条修的是一个**根因**，不是症状。
-	//
-	// GNOME 门户的文件对话框和它的二级确认框（"文件已存在，是否替换？"）是同一个
-	// 应用下的两个窗口，状态位**完全相同**：MODAL + VISIBLE，都没有 ACTIVE，
-	// 也都没有 SHOWING。按顺序取第一个，就永远拿到文件选择器，
-	// 而真正挡在前面、握着焦点的是那个无名确认框。
-	//
-	// 我一度断定"那个确认框根本不在 a11y 树里"——**结论是错的**。它在树里，
-	// 2418 个节点，只是我们选错了窗口。
+	// The GNOME portal file dialog and its secondary confirmation ("file
+	// exists, replace?") are two windows of the same application with
+	// identical states: MODAL + VISIBLE, neither ACTIVE nor SHOWING. Taking the
+	// first one in order always yields the file chooser, while the untitled
+	// confirmation is the window in front that holds focus. The confirmation
+	// is present in the accessibility tree; the root cause is picking the wrong
+	// window, which X11 can arbitrate.
 	if !strings.Contains(linuxRuntimeScript, "def x11_preferred_window(") {
 		t.Fatal("AT-SPI 分不出高下时要让 X11 裁决")
 	}
-	// 判据必须是尺寸：位置不行（GTK4 把 a11y extents 报成 (0,0) 起点），
-	// 标题不行（那个确认框没有标题）。尺寸行，减掉 _GTK_FRAME_EXTENTS 之后
-	// 与 a11y 逐像素相等——实测 827x291 - (61,61,55,67) = 705x169。
+	// The criterion must be size. Position fails because GTK4 reports
+	// accessibility extents with a (0,0) origin, and title fails because the
+	// confirmation has none. After subtracting _GTK_FRAME_EXTENTS the X11 size
+	// matches the accessibility size exactly, for example
+	// 827x291 - (61,61,55,67) = 705x169.
 	if !strings.Contains(linuxRuntimeScript, "_GTK_FRAME_EXTENTS") {
 		t.Fatal("尺寸对比必须先减掉 GTK 的不可见阴影边框")
 	}
-	// 候选集合**不能**依赖 SHOWING。第一版就是因为只在 `MODAL and SHOWING`
-	// 的列表上裁决，而门户窗口没有 SHOWING，于是一次都没跑到。
+	// The candidate set must not depend on SHOWING: portal windows lack it, so
+	// arbitrating only among `MODAL and SHOWING` windows would never run.
 	if !strings.Contains(linuxRuntimeScript, "x11_preferred_window(windows)") {
 		t.Fatal("裁决要在全部窗口上做，不能只在 modal+showing 的子集上做")
 	}
-	// 命中不唯一时要让原有顺序接管——裁决判据在自己含糊时不该硬裁。
+	// Without a unique match the original order takes over; an ambiguous
+	// criterion must not force a decision.
 	if !strings.Contains(linuxRuntimeScript, "return matched[0] if len(matched) == 1 else None") {
 		t.Fatal("命中不唯一时必须放弃裁决")
 	}
 }
 
 func TestAppNameMatchingIsSeparatorInsensitiveAndFailsWithCandidates(t *testing.T) {
-	// 这两条都是从**真实 agent 的轨迹**里读出来的，不是我想出来的：
-	//
-	//   13 条轨迹里有一次直接报了 appNotFound("google-chrome")——而这台机器上
-	//   那个应用叫 "Google Chrome"。agent 猜的名字完全合理，只是连字符对不上。
-	//
-	//   更贵的是连带影响：13 条轨迹里 **12 条**的开局都是
-	//   `list_apps → get_app_state`。agent 不敢直接猜名字，于是每道题都先花
-	//   一步去列应用。
+	// App names must match regardless of separators: "google-chrome" is a
+	// reasonable guess for an app registered as "Google Chrome". Strict
+	// matching also teaches agents to spend a step listing apps before every
+	// task instead of naming the app directly.
 	if !strings.Contains(linuxRuntimeScript, "def loose(") {
 		t.Fatal("应用名比对要对分隔符不敏感：google-chrome 应当找到 Google Chrome")
 	}
-	// 失败时要给候选。一条死路错误和一条带候选的错误，对 agent 是两件事：
-	// 前者要再来一轮，后者这一轮就知道该叫什么。
+	// A failure must list candidates: a dead-end error costs the agent another
+	// round, while an error with candidates gives it the right name at once.
 	if !strings.Contains(linuxRuntimeScript,
 		"Applications currently visible to the ") {
 		t.Fatal("appNotFound 要列出当前在跑的应用")
 	}
-	// 空串不能匹配一切——归一化之后 "" 会 in 任何字符串。
+	// An empty string must not match everything; after normalisation "" is
+	// contained in every string.
 	if !strings.Contains(linuxRuntimeScript, "if tight_query and tight_name and (") {
 		t.Fatal("归一化后的空串必须先被挡掉，否则空查询会匹配所有应用")
 	}
 }
 
 func TestAppArgumentHelpDefinesStrictBootstrapIdentity(t *testing.T) {
-	// 13 条真实轨迹里 **12 条**的开局是 `list_apps → get_app_state`——agent 不敢
-	// 直接猜应用名。根因是这台机器上的 a11y 应用名同时存在三种风格，
-	// 且**没有任何规则能推出来**（实测）：
-	//     显示名   "Google Chrome"       进程叫 chrome
-	//     二进制名 "vlc" "gedit" "code"  与进程同名
-	//     app-id   "org.gnome.Nautilus"  进程叫 nautilus
-	// 规则推不出来，就直接告诉调用方。
+	// Agents hesitate to guess app names because accessibility app names come
+	// in three styles that no rule can predict:
+	//     display name  "Google Chrome"        process is chrome
+	//     binary name   "vlc" "gedit" "code"   same as the process
+	//     app id        "org.gnome.Nautilus"   process is nautilus
+	// Since no rule derives them, the help text states the accepted forms.
 	for _, fragment := range []string{
 		"app/process name", "app id", "PID",
 	} {
@@ -9055,7 +9077,7 @@ func TestAppArgumentHelpDefinesStrictBootstrapIdentity(t *testing.T) {
 	if strings.Contains(appArgumentHelp, "window-title") {
 		t.Fatal("app bootstrap must not accept document or dialog window titles")
 	}
-	// 每一个接受 app 的工具都要用这份说明，不能只改一处
+	// Every mode that accepts app must use this help text, not just one.
 	tool := findToolDefinition(t, "AX")
 	branches := tool.InputSchema["oneOf"].([]any)
 	defs := tool.InputSchema["$defs"].(map[string]any)
@@ -9079,14 +9101,11 @@ func TestAppArgumentHelpDefinesStrictBootstrapIdentity(t *testing.T) {
 }
 
 func TestSnapshotCacheLookupIsAsLooseAsAppResolution(t *testing.T) {
-	// 这个回归是我自己引入的：get_app_state 允许不传 app 之后，快照按解析出的
-	// 真名（"Google Chrome"）缓存，而 agent 下一步动作写的是 "chrome"——
-	// 于是它刚刚成功取过状态，紧接着被告知
-	// "No app state is available for chrome. Run get_app_state before action tools."
-	//
-	// 对 agent 来说这是最迷惑的一类回答：它照做了，工具却说它没做。
-	// 应用名解析已经是宽松的，缓存查找必须一样宽松，否则两套规则之间会漏出
-	// 这种没人猜得到的缝。
+	// Snapshots are cached under the resolved name ("Google Chrome"), while the
+	// agent's next action may say "chrome". If cache lookup were stricter than
+	// app resolution, an agent that has just observed the app would be told
+	// that no app state is available, the most confusing answer possible.
+	// Cache lookup must therefore be exactly as loose as app resolution.
 	service := newService()
 	service.rememberSnapshot("", &appSnapshot{App: appDescriptor{Name: "Google Chrome"}})
 	for _, spelling := range []string{"chrome", "Chrome", "google-chrome", "google chrome"} {
@@ -9094,7 +9113,8 @@ func TestSnapshotCacheLookupIsAsLooseAsAppResolution(t *testing.T) {
 			t.Fatalf("用 %q 应当能查到刚缓存的 Google Chrome 快照", spelling)
 		}
 	}
-	// 但**不能松到匹配别的应用**——那会让动作打到错误的目标上。
+	// It must not be so loose that it matches another app, which would send
+	// actions to the wrong target.
 	if service.currentSnapshot("thunderbird") != nil {
 		t.Fatal("宽松匹配不能把无关的应用名也匹上")
 	}
@@ -9161,13 +9181,11 @@ func TestRememberSnapshotRemovesAliasesToTheReplacedAddressSpace(t *testing.T) {
 }
 
 func TestOversizedResponsesAreCappedInlineNotSpilled(t *testing.T) {
-	// 轨迹证据（26 条真实轨迹，60 次观测类调用）：**8 次（13%）**的响应达到
-	// 114–119KB，被 MCP 客户端整块换成
+	// MCP clients may replace an oversized result wholesale with a pointer:
 	//     <persisted-output> Output too large (118.1KB). Full output saved to: …
-	// 而 OSWorld 跑测里 Read 是禁用的，于是那 8 次 agent **什么都没拿到**。
-	//
-	// --output-mode file 救不了这一条：那同样是一个读不了的指针。
-	// 唯一有效的办法是让内容本来就装得下。
+	// An agent without file access cannot read it and receives nothing.
+	// --output-mode file fails for the same reason; the only remedy is output
+	// that fits inline in the first place.
 	t.Setenv("COMPUTER_USE_MAX_INLINE_CHARS", "")
 	small := strings.Repeat("line\n", 100)
 	if capInline(small) != small {
@@ -9181,14 +9199,14 @@ func TestOversizedResponsesAreCappedInlineNotSpilled(t *testing.T) {
 	if len(capped) > maxInlineChars()+400 {
 		t.Fatalf("裁完还是太长：%d", len(capped))
 	}
-	// **必须说清裁掉了多少**。静默截断会让 agent 以为自己看到了整棵树，
-	// 那比丢失更糟。
+	// The notice must say how much was cut. Silent truncation makes the agent
+	// believe it saw the whole tree, which is worse than losing the data.
 	for _, fragment := range []string{"TRUNCATED", "of", "lines", "`find`"} {
 		if !strings.Contains(capped, fragment) {
 			t.Fatalf("截断说明里缺少 %q", fragment)
 		}
 	}
-	// 阈值要可调，因为不同客户端的上限不同
+	// The threshold is configurable because clients have different limits.
 	t.Setenv("COMPUTER_USE_MAX_INLINE_CHARS", "500")
 	if maxInlineChars() != 500 {
 		t.Fatal("上限要可以由环境变量覆盖")
@@ -9196,35 +9214,35 @@ func TestOversizedResponsesAreCappedInlineNotSpilled(t *testing.T) {
 }
 
 func TestTreeBudgetIsMeasuredInCharactersNotOnlyNodes(t *testing.T) {
-	// 根因链（全部实测）：
-	//   1. MAX_ELEMENTS=1200 是**节点数**预算，而 MCP 客户端限制的是**字节**；
-	//   2. chrome://flags 正好吃满 1200 节点、平均每行 112 字符 = 135327 字符；
-	//   3. 客户端把超过约 100KB 的结果整块换成一个文件指针，而跑测里 Read 是
-	//      禁用的——26 条真实轨迹里 **13%** 的观测调用因此 agent 什么都没拿到。
-	// 节点数管不住字节：1200 个短节点 40KB，1200 个长节点 135KB。
+	// MAX_ELEMENTS=1200 is a node budget, while MCP clients limit bytes. A page
+	// such as chrome://flags fills all 1200 nodes at about 112 characters per
+	// line (about 135,000 characters), and clients replace results above about
+	// 100KB with a file pointer the agent may be unable to read. Node counts do
+	// not bound bytes: 1200 short nodes are about 40KB, 1200 long ones 135KB.
 	if !strings.Contains(linuxRuntimeScript, "MAX_RENDERED_CHARS") {
 		t.Fatal("树预算要有以字符计的那一条")
 	}
-	// 必须**在渲染时**就停手，不能渲染完再截——那样开销白付
-	// （GIMP 实测 8.45ms/节点，白付 800 个就是 6.7 秒）。
+	// The walk must stop while rendering; truncating afterwards wastes the cost
+	// (about 8.45 ms per node in GIMP, so 800 wasted nodes take 6.7 seconds).
 	if !strings.Contains(linuxRuntimeScript, `if budget["chars"] >= max_rendered_chars:`) {
 		t.Fatal("字符预算要在遍历里生效，不能事后截断")
 	}
-	// 省略原因要分开说：笼统一句会让调用方以为提高 max_tree_nodes 就能看全，
-	// 而字符预算耗尽时那样做只会让整份响应被客户端丢掉。
+	// Omission reasons are reported separately. A generic notice suggests that
+	// raising max_tree_nodes would show everything, but when the character
+	// budget is exhausted that only makes the client drop the whole response.
 	if !strings.Contains(linuxRuntimeScript, "character budget was exhausted") {
 		t.Fatal("字符预算耗尽要单独说明，不能和节点预算混为一谈")
 	}
-	// 处方必须**跟着原因走**。旧版对每一种省略都说 "raise max_tree_nodes to
-	// see them"，而剪枝掉的那些是有意过滤的——调大参数一个都不会回来。
-	// 实测这句提示出现 3912 次、覆盖全部 11 个 domain，而 agent 几乎从不调参：
-	// 它既不知道该调多大，也无从判断调了有没有用。
-	//
-	// 节点预算真的吃满时，建议调大是对的，但必须给出**具体数字**。
+	// The hint must follow the cause. Pruned nodes are filtered on purpose, so
+	// a generic "raise max_tree_nodes to see them" would bring none back, and
+	// agents rarely tune such parameters anyway. When the node budget fills
+	// up, the notice says it is a server-owned budget instead of asking the
+	// caller to guess a parameter.
 	if !strings.Contains(linuxRuntimeScript, "server-owned node budget filled up") {
 		t.Fatal("节点预算耗尽时要说明这是服务端预算，而不是让调用方猜参数")
 	}
-	// 剪枝过滤那一档必须给当前 AX 恢复路径，不能继续广告已删除参数。
+	// Nodes hidden by pruning must point to the current AX recovery path, not
+	// to removed parameters.
 	if !strings.Contains(linuxRuntimeScript, "AX mode=find searches canonical records") {
 		t.Fatal("被 working projection 隐藏的节点必须指向 find/root")
 	}
@@ -9240,9 +9258,9 @@ func TestTreeBudgetIsMeasuredInCharactersNotOnlyNodes(t *testing.T) {
 }
 
 func TestUniversalContextMenuActionIsNotAnAffordance(t *testing.T) {
-	// 实测 chrome://flags：`showContextMenu` 出现在**全部 1200 个节点**上——
-	// Chrome 给整棵 DOM 都挂了它，因为任何元素都能右键。
-	// 不排掉它，is_structural_filler 的"没有动作"判据永远不成立，剪枝完全失效。
+	// Chrome attaches `showContextMenu` to every DOM node, since any element can
+	// be right-clicked. Unless it is excluded, the "no actions" test in
+	// is_structural_filler never holds and pruning stops working.
 	if !strings.Contains(linuxRuntimeScript, "UNIVERSAL_ACTIONS") {
 		t.Fatal("人人都有的动作要单独归类并排除")
 	}
@@ -9252,17 +9270,14 @@ func TestUniversalContextMenuActionIsNotAnAffordance(t *testing.T) {
 }
 
 func TestVerifyFailureSaysWhatDidChange(t *testing.T) {
-	// 轨迹证据（OSWorld 第 28 题，delta.com 查航班）：agent 把
-	// verify(exists=false) 当"等页面跳走"用了**四次**，全部超时，
-	// 白烧 15+20+25+20 = 80 秒预算。
-	//
-	// 它反复重试是因为我们只说了"你要的那件事没发生"，没说"这段时间里
-	// 发生了什么"——于是它无法判断该继续等，还是那一次点击根本没生效。
-	//
-	// 三种处境要分开说，因为下一步完全不同：
-	//   窗口换了     → 你等的元素可能已经不在这个窗口里
-	//   树变了       → 界面在动，但不是你等的那样，该换判据
-	//   什么都没变   → 只说明 A11y 没观察到结构变化，不归因上一步
+	// A verify timeout that only says the expected condition did not happen
+	// leaves the agent unable to decide whether to keep waiting, so it retries
+	// with ever longer timeouts. The failure must also say what changed in the
+	// meantime, because each case calls for a different next step:
+	//   window changed  -> the awaited element may be in another window
+	//   tree changed    -> the UI is moving, but not as expected; change the check
+	//   nothing changed -> AX saw no structural change; no claim is made about
+	//                      the previous input
 	for _, fragment := range []string{
 		"Window changed", "Tree changed", "Nothing changed",
 		"no AX-visible structural ",
@@ -9278,10 +9293,10 @@ func TestVerifyFailureSaysWhatDidChange(t *testing.T) {
 }
 
 func TestVerifyAmbiguityDoesNotOverclaimStateFailure(t *testing.T) {
-	// v96 ecc2413d used selector `label`, which matched 12 elements. verify never
-	// identified a target, but the old timeout text claimed the requested state
-	// was genuinely false and that the prior action probably did not land. A
-	// fresh snapshot immediately showed the requested Page 1 of 8 label.
+	// A broad selector such as `label` can match many elements, so verify never
+	// identifies a target. The timeout text must not then claim that the
+	// requested state is false or that the prior action did not land; a fresh
+	// snapshot may well show the requested element.
 	src := mainGoSource(t)
 	for _, fragment := range []string{
 		"the selector remained ambiguous",
@@ -9296,39 +9311,34 @@ func TestVerifyAmbiguityDoesNotOverclaimStateFailure(t *testing.T) {
 }
 
 func TestTreeWalkHasAWallClockDeadline(t *testing.T) {
-	// **借鉴 maka-cu 的 macOS 侧**：它的四条硬预算里有一条是 deadline，
-	// 我们此前只有节点数和深度。
+	// Besides node count and depth, the tree walk needs a wall-clock deadline,
+	// because per-node cost varies by an order of magnitude. A full record_for
+	// in GIMP costs about 8.45 ms per node, so a 3162-node tree takes 38
+	// seconds, beyond the 30-second Go timeout.
 	//
-	// 节点预算管不住时间，因为每个节点的开销差一个数量级：本仓库实测 GIMP
-	// 完整 record_for 是 8.45ms/节点，3162 次调用、整棵树 38 秒，
-	// **超过 Go 层 30 秒的超时**——a11y 通道在 GIMP 上默认直接不可用。
-	// maka-cu 记着同型的教训（跨进程存取面板 23.6ms/节点、1500 节点 35 秒、
-	// 宿主只给 20 秒）。
-	//
-	// 我们靠"先便宜探针再建记录"降低了常态成本，但那是针对某一种开销分布的
-	// 优化；deadline 是与分布无关的兜底。两者不冲突。
+	// Cheap probes before building records lower the usual cost, but only for
+	// one cost distribution; the deadline is a backstop that holds for any.
 	if !strings.Contains(linuxRuntimeScript, "TREE_DEADLINE_SECONDS") {
 		t.Fatal("遍历要有墙钟上限")
 	}
-	// 根节点必须豁免：空树没有任何可寻址元素，调用方连"这是什么窗口"都答不上来。
+	// The root node is exempt: an empty tree has no addressable element and
+	// cannot even tell the caller which window this is.
 	if !strings.Contains(linuxRuntimeScript,
 		"if deadline is not None and records and time.monotonic() >= deadline:") {
 		t.Fatal("超时判据要豁免根节点，否则可能返回一棵空树")
 	}
-	// 三种省略原因必须分开说：建议提高 max_tree_nodes 在时间耗尽时是错的建议。
+	// The three omission reasons are reported separately; suggesting a larger
+	// max_tree_nodes is wrong advice when time ran out.
 	if !strings.Contains(linuxRuntimeScript, "time budget exhausted") {
 		t.Fatal("时间预算耗尽要单独说明")
 	}
 }
 
 func TestVerifyRedirectsTheDisappearanceIdiom(t *testing.T) {
-	// 轨迹证据（第 28 题 delta.com）：agent 连着四次
-	// verify(exists=false, 15/20/25/20s) 当"等页面跳转"用，全部超时，
-	// 白烧 80 秒预算，最后放弃。
-	//
-	// 判据本身选错了：单页应用点完之后旧节点常常**留在 DOM 里**，
-	// 于是那个条件永远不会满足，等多久都一样。工具知道这一点，就该说出来，
-	// 而不是让它按 15→20→25 秒一路加码。
+	// Waiting for an old element to disappear (exists=false) is a poor proxy
+	// for navigation: single-page apps often leave old nodes in the DOM, so the
+	// condition never holds however long the agent waits. The tool knows this
+	// and must say so instead of letting the agent keep raising the timeout.
 	src := mainGoSource(t)
 	for _, fragment := range []string{
 		"is a poor proxy for ",
@@ -9339,23 +9349,21 @@ func TestVerifyRedirectsTheDisappearanceIdiom(t *testing.T) {
 			t.Fatalf("exists:false 超时要指出这是个坏代理：缺 %q", fragment)
 		}
 	}
-	// 只在**界面确实没动**时才这么说。界面动了说明它等的方向没错，
-	// 那种情况列候选更有用——给错建议比不给建议更浪费。
+	// Say this only when the UI has not changed. If it changed, the agent is
+	// waiting in the right direction and candidates are more useful; wrong
+	// advice wastes more than no advice.
 	if !strings.Contains(src, "snapshot.WindowTitle == firstWindow && len(snapshot.Elements) == firstCount") {
 		t.Fatal("这条建议要限定在界面没动的情形")
 	}
 }
 
 func TestIntentGuardSkipsElementsWithVeryShortNames(t *testing.T) {
-	// 实测（OSWorld 第 34 题，Macy's 筛选尺码）：agent 声明 "Size L checkbox"，
-	// 元素是 `check box "L"`——**完全正确的操作被守卫拒了**。
-	//
-	// 因为分词会跳过长度 < 2 的词元（为了滤掉 "a"/"of" 这类噪声），
-	// 而这个元素的名字整个就是一个字符 "L"，于是任何声明都匹配不上，
-	// 守卫**必然**误拒。尺码、单选字母、表格列标题都是这一类。
-	//
-	// 守卫的价值是拦住"声明 Save 却给了 New 的下标"，代价是偶尔误伤；
-	// 这里不是偶尔，是这一类元素上 100% 误伤。宁可漏判，不可必然误判。
+	// Tokenisation drops tokens shorter than two characters to filter noise
+	// such as "a", so an element named "L" (a size filter, an option letter, a
+	// column header) can never match any declaration, and "Size L checkbox"
+	// would be rejected against `check box "L"`. The guard is worth an
+	// occasional false rejection, not a certain one for a whole class of
+	// elements, so such names are skipped.
 	short := &elementRecord{Name: "L", ControlType: "check box"}
 	if got := elementIntentMismatch(short, "Size L checkbox"); got != "" {
 		t.Fatalf("单字符名字判不了，不该拒：%s", got)
@@ -9363,12 +9371,12 @@ func TestIntentGuardSkipsElementsWithVeryShortNames(t *testing.T) {
 	if got := elementIntentMismatch(short, "the Save button"); got != "" {
 		t.Fatalf("单字符名字上一律不判，包括本该不符的声明：%s", got)
 	}
-	// 但有描述时仍然判得了，不能一并放行
+	// With a description the check is still possible and must still apply.
 	withDesc := &elementRecord{Name: "L", ControlType: "check box", Description: "Large size filter"}
 	if elementIntentMismatch(withDesc, "the Save button") == "" {
 		t.Fatal("有描述时仍应校验")
 	}
-	// 正常长度的名字，原有行为不变
+	// Names of normal length keep the usual check.
 	normal := &elementRecord{Name: "Save", ControlType: "push button"}
 	if elementIntentMismatch(normal, "the New button") == "" {
 		t.Fatal("正常名字上守卫必须照常拦截")
@@ -9376,12 +9384,13 @@ func TestIntentGuardSkipsElementsWithVeryShortNames(t *testing.T) {
 }
 
 func TestScrollNoteDoesNotClaimTargetingItDidNotDo(t *testing.T) {
-	// scroll 的 element_index 变成可选之后，原来那句
-	//     "the position came from element_index, so this scroll IS targeted"
-	// 在留空时**是假的**。工具骗 agent 一次，它后面所有推断都建立在假前提上。
+	// With the scroll target optional, a note such as "the position came from
+	// element_index, so this scroll IS targeted" is false when no target was
+	// given, and every later inference would rest on it.
 	//
-	// 判据必须是**显式标志**，不能靠推断：Go 侧合成的落点记录 index 是 0
-	// 而不是 null，第一版靠 `index is not None` 判断，结果照样说"定位过"。
+	// The distinction must be an explicit flag: the synthesized point record
+	// built in Go has index 0, not null, so an `index is not None` check would
+	// still claim targeting.
 	if !strings.Contains(mainGoSource(t), "WindowCentre") {
 		t.Fatal("滚窗口中心要有显式标志，不能让运行时去猜")
 	}
@@ -9393,19 +9402,16 @@ func TestScrollNoteDoesNotClaimTargetingItDidNotDo(t *testing.T) {
 	}
 }
 
-// TestWithoutRepaintNoise 钉住 [text-attrs] 不再替**没发生的事**作证。
-//
-// 出处是第 44 题的真实轨迹：agent 在第 16 步只按了个 ctrl+l，回答开头却是
-// `[text-attrs] Formatting changed … heading "Friday, August 2nd" —
-//
-//	family-name: Ubuntu -> All-Pro Sans; size: 18pt -> 22.5pt …
-//	This is direct evidence the action took effect`。
-//
-// 真相是 nfl.com 的网页字体异步加载完了，把回退字体 Ubuntu 换成了 All-Pro Sans，
-// 与那次按键毫无关系。工具替一件没发生的事作了证——这比不给证据更坏。
+// TestWithoutRepaintNoise checks that [text-attrs] does not present repaint
+// noise as evidence. When a web font finishes loading asynchronously, the
+// fallback family is replaced (for example Ubuntu -> All-Pro Sans) together
+// with the size and weight metrics of the new font. Reporting that as
+// "Formatting changed ... direct evidence the action took effect" after an
+// unrelated keypress is worse than giving no evidence.
 func TestWithoutRepaintNoise(t *testing.T) {
 	t.Run("网页字体加载不算证据", func(t *testing.T) {
-		// 真实取自轨迹：字体换掉的同时 size/weight 也跟着变，那是新字体的度量。
+		// When the family changes, size and weight change with it; those are
+		// the new font's metrics.
 		got := withoutRepaintNoise([]string{
 			"family-name: Ubuntu -> All-Pro Sans",
 			"size: 18pt -> 22.5pt",
@@ -9424,8 +9430,9 @@ func TestWithoutRepaintNoise(t *testing.T) {
 	})
 
 	t.Run("真的加粗照样报得出来", func(t *testing.T) {
-		// 这条 note 的价值全在这里：LibreOffice 里加粗只改格式、不改结构，
-		// 树看上去纹丝不动。滤噪声不能把它一起滤掉。
+		// This is what the note is for: bold in LibreOffice changes formatting,
+		// not structure, so the tree looks unchanged. Noise filtering must
+		// keep such changes.
 		got := withoutRepaintNoise([]string{"weight: 400 -> 700"})
 		if len(got) != 1 {
 			t.Fatalf("真实的加粗应当保留，却得到 %v", got)
@@ -9440,8 +9447,8 @@ func TestWithoutRepaintNoise(t *testing.T) {
 	})
 
 	t.Run("同一节点里字体没换时 size 变化保留", func(t *testing.T) {
-		// fontSwap 是**按节点**判定的：没有字体替换的证据时，
-		// size 变化仍然可能是谁调了字号。
+		// fontSwap is decided per node: without evidence of a font swap, a size
+		// change may be a genuine font size change.
 		got := withoutRepaintNoise([]string{"size: 12pt -> 24pt"})
 		if len(got) != 1 {
 			t.Fatalf("没有字体替换时 size 应当保留，却得到 %v", got)
@@ -9482,7 +9489,8 @@ func TestIncrementalTreeDoesNotInflateSingleHugeLine(t *testing.T) {
 	}
 }
 
-// TestIncrementalTreeKeepsLineDiffForShortLines 保证短行仍走原来的 -/+ 形式。
+// TestIncrementalTreeKeepsLineDiffForShortLines checks that short lines keep
+// the plain -/+ diff form.
 func TestIncrementalTreeKeepsLineDiffForShortLines(t *testing.T) {
 	base := func(lines ...string) *appSnapshot { return &appSnapshot{TreeLines: lines} }
 	diff, ok := incrementalTree(base("a", "b", "c", "d", "e", "f"),
@@ -9514,7 +9522,7 @@ func TestIncrementalTreeRejectsNearFullDynamicPageDiff(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// expect：act → settle → verify（P0）
+// expect: act -> settle -> verify
 // ---------------------------------------------------------------------------
 
 func expectSnapshot(elements ...elementRecord) *appSnapshot {
@@ -9532,7 +9540,7 @@ func TestExpectTargetSyntaxIsToolkitIndependent(t *testing.T) {
 
 	cases := []struct {
 		target string
-		want   int // 期望命中的 element_index，-1 表示不该命中
+		want   int // expected element_index; -1 means no match
 	}{
 		{"role=dialog", 12},
 		{"element_index=17", 17},
@@ -9561,14 +9569,15 @@ func TestExpectTargetSyntaxIsToolkitIndependent(t *testing.T) {
 		}
 	}
 
-	// 字段写错必须硬失败：悄悄忽略一个拼错的字段等于给出一个永远为真的验证。
+	// A misspelled field must fail hard; silently ignoring it would make the
+	// check pass unconditionally.
 	for _, bad := range []string{"", "rle=dialog", "element_index=abc", "  "} {
 		if _, err := parseExpectTarget(bad); err == nil {
 			t.Fatalf("parseExpectTarget(%q) 应当报错", bad)
 		}
 	}
 
-	// 引号里的逗号属于名字，不是字段分隔符。
+	// A comma inside quotes is part of the name, not a field separator.
 	target, err := parseExpectTarget(`name="Save, As"`)
 	if err != nil {
 		t.Fatalf("引号内的逗号不该被当成分隔符: %v", err)
@@ -9585,7 +9594,8 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 	checkbox := elementRecord{Index: 43, ControlType: "check box", Name: "Keep", States: "[checked enabled]"}
 	row := elementRecord{Index: 44, ControlType: "list item", Name: "Result", States: "[selected enabled]"}
 	snapshot := expectSnapshot(dialog, entry, button, checkbox, row)
-	// 基线：动作前只有那个按钮，对话框与输入框都是动作之后才出现的。
+	// Baseline: only the button exists before the action; the dialog and the
+	// entry appear after it.
 	before := expectSnapshot(button)
 
 	must := func(args map[string]any) *expectSpec {
@@ -9596,7 +9606,7 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		return spec
 	}
 
-	// appears：匹配数量增加才算出现。
+	// appears: an element appears only when the match count increases.
 	ok, evidence := must(map[string]any{"appears": "role=dialog"}).evaluate(before, snapshot)
 	if !ok || !strings.Contains(evidence, "Save As") || !strings.Contains(evidence, "increased from 0") {
 		t.Fatalf("appears 应当命中并报出匹配数量增加: ok=%v evidence=%q", ok, evidence)
@@ -9606,7 +9616,7 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		t.Fatalf("appears 落空时应当说清没有匹配: ok=%v evidence=%q", ok, evidence)
 	}
 
-	// disappears：动作前有、动作后没有。
+	// disappears: present before the action and absent after it.
 	ok, _ = must(map[string]any{"disappears": "role=dialog"}).evaluate(snapshot, before)
 	if !ok {
 		t.Fatal("动作前存在、动作后不存在应当算作已消失")
@@ -9616,7 +9626,8 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		t.Fatalf("元素还在时应当报 still present: ok=%v evidence=%q", ok, evidence)
 	}
 
-	// exists_after：只断言动作后存在，不冒充新增，也不需要 baseline。
+	// exists_after: asserts presence after the action only, without claiming
+	// that the element is new and without needing a baseline.
 	ok, evidence = must(map[string]any{"exists_after": "role=dialog"}).evaluate(nil, snapshot)
 	if !ok || !strings.Contains(evidence, "exists in the post-action tree") {
 		t.Fatalf("exists_after 应当允许无 baseline 的存在性断言: ok=%v evidence=%q", ok, evidence)
@@ -9644,8 +9655,8 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 	if !ok {
 		t.Fatalf("equals empty string should match an empty accessibility value: %q", evidence)
 	}
-	// value_becomes 只读 accessibility value，不能拿 name/description/placeholder
-	// 的文本冒充控件值。
+	// value_becomes reads only the accessibility value; name, description or
+	// placeholder text must not stand in for the control's value.
 	ok, evidence = must(map[string]any{
 		"value_becomes": map[string]any{"element_index": "12", "contains": "Save As"},
 	}).evaluate(before, snapshot)
@@ -9653,7 +9664,7 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		t.Fatalf("仅 name 命中不得满足 value_becomes: ok=%v evidence=%q", ok, evidence)
 	}
 
-	// state_is_after：按完整 state token 判断，支持常见状态和否定状态。
+	// state_is_after compares whole state tokens and explains absent states.
 	for _, testCase := range []struct {
 		index string
 		state string
@@ -9729,7 +9740,7 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		t.Fatalf("焦点不在目标上时要说清焦点在谁身上: ok=%v evidence=%q", ok, evidence)
 	}
 
-	// 多个谓词是"与"关系。
+	// Multiple predicates are combined with AND.
 	spec := must(map[string]any{"appears": "role=dialog", "focus_moves_to": "role=push button"})
 	if ok, _ := spec.evaluate(before, snapshot); ok {
 		t.Fatal("多个谓词应当全部满足才算通过")
@@ -9775,12 +9786,11 @@ func TestFocusWithinAcceptsFocusedDescendants(t *testing.T) {
 	}
 }
 
-// TestAppearsIsAChangeAssertionNotAPresenceCheck 钉住这一版修掉的头号假阳性。
-//
-// 实测：62 次 verified=true 里 16–23% 是硬假阳性，最典型的一类是一直挂在那儿的
-// 顶层窗口标题被判成"新出现"——一次应用内点击不可能让窗口标题新出现。成因是
-// appears 只看动作之后那一份快照，判据是"存在"而不是"新增"。
-// 假的确定性比 not verified 更危险：它让 agent 停止怀疑。
+// TestAppearsIsAChangeAssertionNotAPresenceCheck checks that appears asserts a
+// change, not presence. Judging only the post-action snapshot would report a
+// top-level window title that was there all along as newly appeared. False
+// certainty is more dangerous than "not verified" because it stops the agent
+// from doubting.
 func TestAppearsIsAChangeAssertionNotAPresenceCheck(t *testing.T) {
 	frame := elementRecord{Index: 0, ControlType: "frame", Name: "Files"}
 	dialog := elementRecord{Index: 12, ControlType: "dialog", Name: "Save As"}
@@ -9793,7 +9803,8 @@ func TestAppearsIsAChangeAssertionNotAPresenceCheck(t *testing.T) {
 		return spec
 	}
 
-	// 动作前就在那儿的东西，动作后还在，**不算出现**。
+	// An element present before the action and still present after it has not
+	// appeared.
 	before := expectSnapshot(frame, dialog)
 	after := expectSnapshot(frame, dialog)
 	ok, evidence := must(map[string]any{"appears": "role=frame"}).evaluate(before, after)
@@ -9804,13 +9815,14 @@ func TestAppearsIsAChangeAssertionNotAPresenceCheck(t *testing.T) {
 		t.Fatalf("证据必须说明匹配数量没有增加: %q", evidence)
 	}
 
-	// 真的新增才算：动作前没有 dialog，动作后有。
+	// Only a real addition counts: no dialog before the action, one after it.
 	ok, evidence = must(map[string]any{"appears": "role=dialog"}).evaluate(
 		expectSnapshot(frame), after)
 	if !ok {
 		t.Fatalf("真正的新增应当判 true: %q", evidence)
 	}
-	// 证据必须给出数量变化。element_index 只是现在的地址。
+	// The evidence must give the count change; the element index is only the
+	// current address.
 	if !strings.Contains(evidence, "increased from 0") {
 		t.Fatalf("appears 的证据必须以匹配数量增加为据: %q", evidence)
 	}
@@ -9818,8 +9830,8 @@ func TestAppearsIsAChangeAssertionNotAPresenceCheck(t *testing.T) {
 		t.Fatalf("证据不得让 element_index 冒充新增的证据: %q", evidence)
 	}
 
-	// 没有基线就没有"变化"可言。**不回落成存在性判定**：宁可 verified=false，
-	// 也不给一个假的 true。
+	// Without a baseline there is no change to report. The check must not fall
+	// back to presence: verified=false is better than a false true.
 	ok, evidence = must(map[string]any{"appears": "role=dialog"}).evaluate(nil, after)
 	if ok {
 		t.Fatalf("没有动作前快照时不得判 true: %q", evidence)
@@ -9828,7 +9840,8 @@ func TestAppearsIsAChangeAssertionNotAPresenceCheck(t *testing.T) {
 		t.Fatalf("证据必须说清缺的是基线、以及怎么补上: %q", evidence)
 	}
 
-	// disappears 对称：动作前就没有的东西"消失"是空真命题，不得判 true。
+	// disappears is symmetric: an element absent before the action cannot
+	// disappear, and the vacuous truth must not pass.
 	ok, evidence = must(map[string]any{"disappears": "role=alert"}).evaluate(before, after)
 	if ok {
 		t.Fatalf("从未出现过的目标不得判成 disappears: %q", evidence)
@@ -9836,7 +9849,7 @@ func TestAppearsIsAChangeAssertionNotAPresenceCheck(t *testing.T) {
 	if !strings.Contains(evidence, "nothing to disappear") {
 		t.Fatalf("空真命题必须被说破: %q", evidence)
 	}
-	// 动作前有、动作后没有，才算消失。
+	// Only an element present before and absent after has disappeared.
 	ok, evidence = must(map[string]any{"disappears": "role=dialog"}).evaluate(
 		before, expectSnapshot(frame))
 	if !ok || !strings.Contains(evidence, "decreased from 1") {
@@ -9906,9 +9919,10 @@ func TestChangePredicatesSeparateSameTextByRole(t *testing.T) {
 	}
 }
 
-// TestBareExpectWordNeverMatchesARole 钉住第二类假阳性：
-// `expect={"appears":"menu"}` 曾被 `push button "Back"` 命中，因为裸串的兜底
-// 匹配把 ControlType 也算进去了。角色是一个封闭词表，必须用 role= 显式限定。
+// TestBareExpectWordNeverMatchesARole checks that a bare word never matches a
+// role. A fallback match that included ControlType would let
+// `expect={"appears":"menu"}` hit unrelated controls. Roles form a closed
+// vocabulary and must be selected explicitly with role=.
 func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 	menu := elementRecord{Index: 3, ControlType: "menu", Name: "File"}
 	entry := elementRecord{Index: 8, ControlType: "entry", Name: "Address and search bar"}
@@ -9918,7 +9932,7 @@ func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 		!strings.Contains(err.Error(), "Write role=menu") {
 		t.Fatalf("裸角色必须 fail fast 并给出 role= 写法，实际 err=%v", err)
 	}
-	// 显式写角色才命中。
+	// Only an explicit role matches.
 	explicit, err := parseExpectTarget("role=menu")
 	if err != nil {
 		t.Fatal(err)
@@ -9932,9 +9946,10 @@ func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 		t.Fatalf("dialog 也必须显式写 role=，实际 err=%v", err)
 	}
 
-	// 裸串也不得横跨 role + name 两个字段拼起来匹配：单个字段整串包含才算。
-	// 这正是 focus_moves_to 那四次全军覆没的成因——焦点摘要打印的是
-	// `entry Address and search bar`，agent 原样贴回来，结构性必假。
+	// A bare string must not match across the role and name fields either; a
+	// single field has to contain the whole string. An unquoted summary such
+	// as `entry Address and search bar` therefore never matches when pasted
+	// back, which is why element references are printed in the quoted form.
 	crossField, err := parseExpectTarget("entry Address and search bar")
 	if err != nil {
 		t.Fatal(err)
@@ -9942,7 +9957,7 @@ func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 	if record := crossField.find(snapshot); record != nil {
 		t.Fatalf("裸串不得横跨 role 与 name 匹配，却命中了 %d", record.Index)
 	}
-	// 而带引号的规范写法（也正是现在打印出去的那种）必须命中。
+	// The canonical quoted form, which is what gets printed, must match.
 	quotedForm, err := parseExpectTarget(`entry "Address and search bar"`)
 	if err != nil {
 		t.Fatal(err)
@@ -9952,15 +9967,16 @@ func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 	}
 }
 
-// TestElementReferencesRoundTripThroughTheTargetParser 钉住渲染出口的统一：
-// 凡是我们打印给 agent 的元素指称，agent 原样贴回 expect 都必须解析成同一个
-// 元素。渲染器与解析器是同一份文法的两端，漂移一次就会让证据自相矛盾。
+// TestElementReferencesRoundTripThroughTheTargetParser checks that every
+// element reference printed for the agent resolves to the same element when
+// pasted back into expect. The renderer and the parser are two ends of one
+// grammar, and any drift would make the evidence contradict itself.
 func TestElementReferencesRoundTripThroughTheTargetParser(t *testing.T) {
 	records := []elementRecord{
 		{Index: 4, ControlType: "push button", Name: "Save"},
 		{Index: 5, ControlType: "entry", Name: "Address and search bar"},
 		{Index: 6, ControlType: "panel", Name: "PageShape: Weekday in school"},
-		{Index: 7, ControlType: "separator"}, // 无名元素
+		{Index: 7, ControlType: "separator"}, // unnamed element
 		{Index: 8, ControlType: "entry", Name: `say "hi"`},
 	}
 	snapshot := expectSnapshot(records...)
@@ -9978,7 +9994,7 @@ func TestElementReferencesRoundTripThroughTheTargetParser(t *testing.T) {
 		}
 	}
 
-	// 焦点摘要走的也是这个渲染器，所以它同样回读得动。
+	// The focus summary uses the same renderer, so it round-trips as well.
 	focused := elementRecord{Index: 5, ControlType: "entry",
 		Name: "Address and search bar", States: "[focused enabled]"}
 	live := expectSnapshot(focused)
@@ -10016,14 +10032,12 @@ func TestQuotedExpectSelectorUsesExactRoleAndName(t *testing.T) {
 	}
 }
 
-// TestExpectEvidenceNeverContradictsItself 钉住第二个缺陷的核心不变量：
-// 一条证据不得跨越两个观测源。
-//
-// 实测的原话是 `nothing in the tree matches "entry Address and search bar";
-// focus is currently on entry Address and search bar` —— 前半句读的是剪枝后的
-// Elements，后半句读的是运行时另一次独立的整窗扫描。两句话在同一条证据里
-// 互相否定，agent 无从判断该信哪一句。389 个带树响应里 79 个（约 20%）处在
-// "散文报告焦点在 X、树里没有任何节点带 focused"的状态。
+// TestExpectEvidenceNeverContradictsItself checks that one piece of evidence
+// never mixes two observation sources. A message such as `nothing in the tree
+// matches "entry Address and search bar"; focus is currently on entry Address
+// and search bar` reads its first half from the pruned Elements and its second
+// half from a separate whole-window scan, so the halves contradict each other
+// and the agent cannot tell which to trust.
 func TestExpectEvidenceNeverContradictsItself(t *testing.T) {
 	spec, err := parseExpect(map[string]any{
 		"expect": map[string]any{"focus_moves_to": `entry "Address and search bar"`},
@@ -10032,8 +10046,9 @@ func TestExpectEvidenceNeverContradictsItself(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 焦点节点被剪枝掉了：树里既没有匹配项，也没有任何 focused 节点，
-	// 而独立扫描却报得出焦点。这正是那句自相矛盾的证据的产地。
+	// The focused node was pruned: the tree has neither a match nor any
+	// focused node, while the separate scan still reports focus. This is the
+	// situation that produces self-contradicting evidence.
 	pruned := expectSnapshot(elementRecord{Index: 1, ControlType: "frame", Name: "Browser"})
 	pruned.FocusedSummary = `entry "Address and search bar"`
 	ok, evidence := spec.evaluate(expectSnapshot(), pruned)
@@ -10043,8 +10058,9 @@ func TestExpectEvidenceNeverContradictsItself(t *testing.T) {
 	if strings.Contains(evidence, "nothing in the tree matches") {
 		t.Fatalf("不得输出会与下半句自相矛盾的'树里没有匹配项': %q", evidence)
 	}
-	// 必须把"目标不匹配"与"焦点节点未进入本次快照"分开说，
-	// 并且点明那份摘要来自另一次扫描、不是判定所用的视图。
+	// The evidence must separate "the target does not match" from "the focused
+	// node is not in this snapshot", and state that the summary comes from a
+	// separate scan rather than the view used for the decision.
 	for _, fragment := range []string{
 		"cannot decide",
 		"not part of the tree",
@@ -10055,8 +10071,9 @@ func TestExpectEvidenceNeverContradictsItself(t *testing.T) {
 		}
 	}
 
-	// 反过来：焦点节点确实在这份树里、只是不是目标，那就得说得死死的——
-	// 焦点在谁身上，用的是同一份 Elements，不掺第二个观测源。
+	// Conversely, when the focused node is in this tree but is not the target,
+	// the evidence must say so definitively, naming the focused element from
+	// the same Elements without a second observation source.
 	elsewhere := expectSnapshot(
 		elementRecord{Index: 2, ControlType: "push button", Name: "Reload", States: "[focused]"},
 		elementRecord{Index: 3, ControlType: "entry", Name: "Address and search bar"},
@@ -10075,7 +10092,8 @@ func TestExpectEvidenceNeverContradictsItself(t *testing.T) {
 }
 
 func TestExpectIsOptionalAndMisuseIsACallError(t *testing.T) {
-	// 不传 expect：完全向后兼容，没有验证意图，settle 路径整个不启用。
+	// Without expect: fully backward compatible, no verification intent, and
+	// the settle path stays disabled.
 	plan, err := parseSettlePlan(map[string]any{"app": "gedit"})
 	if err != nil {
 		t.Fatalf("不传 expect 不该报错: %v", err)
@@ -10087,7 +10105,8 @@ func TestExpectIsOptionalAndMisuseIsACallError(t *testing.T) {
 		t.Fatalf("settle_ms 默认值 = %d, want %d", plan.settleMS, defaultSettleMS)
 	}
 
-	// 写错 expect 是**调用错误**，要硬失败——与"预期没达成"是两件事。
+	// A malformed expect is a call error and must fail hard, which is distinct
+	// from an unmet expectation.
 	for _, bad := range []map[string]any{
 		{"expect": "role=dialog"},
 		{"expect": map[string]any{}},
@@ -10107,7 +10126,8 @@ func TestExpectIsOptionalAndMisuseIsACallError(t *testing.T) {
 		}
 	}
 
-	// settle_ms = 0 是合法的：只看动作刚结束那一份快照，不再等。
+	// settle_ms = 0 is valid: only the snapshot taken right after the action is
+	// checked, without waiting.
 	plan, err = parseSettlePlan(map[string]any{
 		"expect": map[string]any{"appears": "role=dialog"}, "settle_ms": 0.0,
 	})
@@ -10146,7 +10166,8 @@ func TestExpectSettlesByPollingAndReportsElapsed(t *testing.T) {
 	}
 	plan := settlePlan{expect: spec, settleMS: 0}
 
-	// 动作刚结束就已经满足：一次额外遍历都不付，耗时如实报 0 上下。
+	// Already satisfied right after the action: no extra walk is paid for, and
+	// the elapsed time is reported as roughly zero.
 	svc := newService()
 	before := expectSnapshot(elementRecord{Index: 1, ControlType: "push button", Name: "Save"})
 	ready := expectSnapshot(elementRecord{Index: 12, ControlType: "dialog", Name: "Save As"})
@@ -10158,13 +10179,15 @@ func TestExpectSettlesByPollingAndReportsElapsed(t *testing.T) {
 		t.Fatalf("首轮命中的耗时应当接近 0，实际 %dms", outcome.elapsedMS)
 	}
 
-	// 没满足且预算为 0：立刻收敛成 verified=false，不阻塞。
+	// Unsatisfied with a zero budget: the result is verified=false at once,
+	// without blocking.
 	outcome = svc.settle("gedit", plan, before, expectSnapshot(), nil, "")
 	if outcome.verified || outcome.polls != 0 {
 		t.Fatalf("预算为 0 时应当立刻给出否定结论: %#v", outcome)
 	}
 
-	// predicate_verified:false **不是** isError，且不得把 delivery 写死成成功。
+	// predicate_verified:false is not isError, and it must not report delivery
+	// as successful.
 	actionNotes := []string{
 		"[synthesis] Delivery to the intended target was not verified: input was emitted.",
 	}
@@ -10244,9 +10267,10 @@ func TestFollowupReadFailureIsVerificationIncompleteNotTimeout(t *testing.T) {
 	}
 }
 
-// TestObserveAndExpectAreOrthogonal 钉住合并后的关键不变量：
-// observe 管"回多少观测"，expect 管"验什么结果"，两者互不干扰。
-// 特别是 observe="none" + expect：树和图都不回，但验证结论必须照常返回。
+// TestObserveAndExpectAreOrthogonal checks that observe controls how much
+// observation is returned and expect controls which outcome is verified, with
+// neither affecting the other. With observe="none" plus expect, neither tree
+// nor screenshot is returned, but the verification result still is.
 func TestObserveAndExpectAreOrthogonal(t *testing.T) {
 	args := map[string]any{
 		"app":       "gedit",
@@ -10269,8 +10293,9 @@ func TestObserveAndExpectAreOrthogonal(t *testing.T) {
 		t.Fatal("observe=none 不该把验证意图一起省掉")
 	}
 
-	// observe="none" 的出口是 notesOnlyResult，验证结论走的是 notes，
-	// 所以结论必须出现在返回里——它是结论，不是观测。
+	// observe="none" returns notesOnlyResult and the verdict travels in the
+	// notes, so it must appear in the result: it is a conclusion, not an
+	// observation.
 	svc := newService()
 	outcome := svc.settle("gedit", plan, expectSnapshot(), expectSnapshot(), nil, "")
 	if outcome.verified {

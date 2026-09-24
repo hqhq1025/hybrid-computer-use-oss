@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split Linux provider tests."""
+"""Linux provider wire protocol, action evidence, and failure boundary tests."""
 
 import io
 

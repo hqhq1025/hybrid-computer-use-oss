@@ -174,8 +174,8 @@ func semanticTargetIntentMismatch(target *semanticTarget, declared string) strin
 }
 
 // resolveActionElement keeps numeric addresses bound to the cached snapshot.
-// Semantic selectors and refs are only parsed here: the Python runtime resolves
-// them against the live tree inside the same invocation that emits input.
+// Semantic selectors and refs are only parsed here: the provider resolves them
+// against the live tree inside the same invocation that emits input.
 func (s *service) resolveActionElement(
 	app,
 	address,
@@ -340,8 +340,9 @@ func (s *service) click(app, elementIndex, declared string, x, y *float64, click
 		return textResult("Missing required argument: app", true)
 	}
 	if x != nil || y != nil {
-		// 通道要能从工具名上看出来。坐标点击**不定位任何元素**——谁在那个点上
-		// 谁收到——所以它是另一个工具，不是 click 的一个参数变体。
+		// The channel must be evident from the tool name. A coordinate click
+		// targets no element (whatever lies under the point receives it), so
+		// it belongs to GUI rather than being a variant of the AX click.
 		return textResult("AX click does not accept x/y. Use target.ref with a current rN; use GUI for full-desktop pixel coordinates.", true)
 	}
 	if elementIndex == "" {
@@ -356,13 +357,11 @@ func (s *service) click(app, elementIndex, declared string, x, y *float64, click
 	if clickMethod == "sky_click" {
 		return textResult("click_method 'sky_click' is not supported on Linux", true)
 	}
-	// 这里原本有一道 COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS 闸门，
-	// 挡"把指针甩到屏幕上任意一点"。现在 click 必须带 element_index，
-	// 裸坐标全部走 gui，这道闸门在这里已经不可达。
-	//
-	// 元素点击的合成兜底仍由 runtime.py 的 screen_point 从窗口相对 Frame
-	// 换算到屏幕坐标。独立 GUI track 不走这条路径：gui 接受全桌面截图的
-	// 屏幕绝对坐标，既不加窗口原点，也不夹紧到目标窗口。
+	// AX clicks always target an element; bare coordinates belong to GUI. The
+	// synthesis fallback for element clicks converts the window-relative frame
+	// to screen coordinates in the provider's screen_point. GUI does not use
+	// this path: it takes absolute full-desktop screenshot coordinates, without
+	// adding a window origin or clamping to a target window.
 	resolution, result := s.resolveActionElement(
 		app, elementIndex, declared, "click")
 	if result.IsError {
@@ -374,7 +373,7 @@ func (s *service) click(app, elementIndex, declared string, x, y *float64, click
 			X: x, Y: y, ClickCount: clickCount,
 			MouseButton: mouseButton, ClickMethod: clickMethod,
 		},
-		// nil = 按当前策略（带图）。调用方显式传 false 时才省。
+
 		IncludeScreenshot: obs.resolvedScreenshot(),
 		Observe:           obs.resolvedMode(),
 		CaptureSnapshot:   obs.captureSnapshot,
@@ -423,17 +422,13 @@ func (s *service) scroll(
 	if app == "" {
 		return textResult("Missing required argument: app", true)
 	}
-	// element_index **可以留空**：那表示"滚当前窗口"，落点取窗口中心。
-	//
-	// 轨迹证据：scroll 12 次调用错 4 次（33%），全部是
-	//     scroll: no element matches the selector "document web"
-	// ——agent 想滚的是整页，却被迫先说出"哪个元素是这一页"，
-	// 而网页根节点的角色在不同站点上并不统一（document web / document frame /
-	// section 都出现过），猜错就报错。
-	//
-	// 滚轮本来就作用在**指针下方的可滚动祖先**上（见 runtime.py 的
-	// scroll_element），窗口中心几乎总是主内容区。要滚某个特定面板时再传
-	// element_index，那条路径一个字没变。
+	// The target may be omitted, which scrolls the current window at its
+	// centre. Scrolling a whole page would otherwise require naming the page
+	// element, and the role of a web page's root varies across sites
+	// (document web, document frame, section). The wheel acts on the
+	// scrollable ancestor under the pointer (see scroll_element in the
+	// provider), and the window centre is almost always the main content.
+	// Pass a target to scroll a specific panel.
 	normalized := strings.ToLower(direction)
 	if normalized != "up" && normalized != "down" && normalized != "left" && normalized != "right" {
 		return textResult("Invalid scroll direction: "+direction, true)
@@ -561,16 +556,3 @@ func (s *service) setValue(app, elementIndex, declared, value string, obs observ
 	applyActionElementResolution(&request, resolution)
 	return s.actionResultSettling(app, request, plan)
 }
-
-// windowFocusWasConfirmed 只记录合成前是否确认过目标应用窗口处于活动状态。
-// 它不证明某个控件持有输入焦点，也不证明输入送达了某个控件。
-// click 不在此列：它可能走的是语义通道，压根没经过窗口焦点确认。
-//
-// 措辞改过一次，因为它**说过头了**。真实 agent 轨迹里，ctrl+s 之后旧 Note
-// 对无变化作了因果推断，而文件**其实存下来了**。agent 于是多花
-// 截图 + 点 Save 按钮**两步去自证**，占那次 12 步里的 17%。
-//
-// 成因是这条判据的结构性盲区：格式类改动与文件状态**根本不进 a11y 树**
-// （同一轮还实测到右对齐生效而树字节不变）。所以"树没变"在这里推不出
-// "没生效"，只能推出"树看不见"。截图现在恒带，那才是这类效果的可判之处
-// ——把 agent 指过去，而不是替它下一个会错的结论。

@@ -82,7 +82,7 @@ PROVIDER_MODULES = (
 )
 
 class RuntimeTestSurface:
-    """Compatibility facade that patches only real imported dependencies."""
+    """Test facade that patches a name in every provider module that imports it."""
 
     def __init__(self):
         object.__setattr__(self, "_originals", {})
@@ -254,10 +254,11 @@ class FakeSpan:
         self.end_offset = end
 
 class FakeTextIface:
-    """假的 Text/EditableText 接口。
+    """Fake Text/EditableText interface.
 
-    `honest=False` 复现真实世界里的坑：insert_text 返回 True，字符数却不变。
-    `caret=None` 模拟不实现 caret 查询的控件。
+    `honest=False` reproduces controls whose insert_text returns True without
+    changing the character count. `caret=None` models controls that do not
+    implement caret queries.
     """
 
     def __init__(self, text="", honest=True, accept=True, caret=None, selection=None):
@@ -333,7 +334,7 @@ class FakeNode:
         self.extents = extents
         self.value = value
 
-    # --- AT-SPI Accessible surface used by runtime.py ---
+    # --- AT-SPI Accessible surface used by the provider ---
     def get_state_set(self):
         return FakeStateSet(self.states)
 
@@ -359,9 +360,9 @@ class FakeNode:
         return ""
 
     def get_role_name(self):
-        # 真实 AT-SPI 节点一律实现这个方法。假节点缺了它会让 node_role()
-        # 在属性访问阶段就抛 AttributeError——safe() 收的是可调用对象，
-        # 拦不住这一步。
+        # Real AT-SPI nodes always implement this. Without it node_role()
+        # raises AttributeError during attribute lookup, which safe() cannot
+        # catch because it only wraps the call.
         return ""
 
 class FakeAtspiText:
@@ -434,11 +435,11 @@ class FakeCoordType:
 RELATION = runtime.Atspi.RelationType
 
 class FakeAtspi:
-    """保留真的 StateType 枚举，只替换会打到真实 a11y 总线的接口调用。"""
+    """Keep the real StateType enum; replace only calls that reach the a11y bus."""
 
     StateType = STATE
-    # RelationType 和 StateType 一样保留**真的**枚举：labelled_by_name() 拿它
-    # 做相等比较，换成假值就等于测了一个不存在的分支。
+    # Like StateType, RelationType stays the real enum: labelled_by_name()
+    # compares against it, and a fake value would test a nonexistent branch.
     RelationType = RELATION
     CoordType = FakeCoordType
     Text = FakeAtspiText
@@ -456,11 +457,12 @@ class AtspiPatchedTestCase(unittest.TestCase):
         runtime.Atspi = self._real_atspi
 
 class _LyingNode(FakeNode):
-    """自报子节点数与真实子节点数不一致的节点。
+    """A node whose reported child count differs from its real children.
 
-    这不是构造出来的假设：Calc 的 sheet 自报 21 亿个子节点（accessible range
-    是整张表），Nautilus 的侧边栏声明自管理却只有 12 个。守卫必须只看
-    **自报数**，因为真实数量恰恰是它不该去问的东西。
+    Real toolkits do this: a Calc sheet reports about 2.1 billion children
+    because its accessible range is the whole sheet, and the Nautilus sidebar
+    declares itself self-managed with only 12. Guards must rely on the
+    reported count alone, since the real count is what they must not query.
     """
 
     def __init__(self, reported, **kwargs):
@@ -471,8 +473,11 @@ class _LyingNode(FakeNode):
         return self.reported
 
 class _TreeNode(FakeNode):
-    """够渲染一棵树用的节点。FakeNode 只覆盖了 a11y 接口取值那部分，
-    record_for() 还要 role / toolkit / accessible_id / attributes 等一整圈。"""
+    """A node complete enough for tree rendering.
+
+    FakeNode covers only the accessibility interface getters, while
+    record_for() also reads role, toolkit, accessible id, attributes and more.
+    """
 
     def __init__(self, role="panel", name="", x=0, y=0, w=10, h=10, kids=(),
                  description=""):
@@ -545,7 +550,7 @@ class _ProbeFailureNode(_TreeNode):
         return super().get_child_count()
 
 class _FakeClock:
-    """假时钟。sleep 直接推进时间，测试因此既确定又不真的等。"""
+    """Fake clock whose sleep advances time, keeping tests deterministic and fast."""
 
     def __init__(self):
         self.now = 0.0
@@ -565,10 +570,10 @@ class _WindowNode(_TreeNode):
             self.states.add(STATE.MODAL)
 
 class _ScriptedApp(_TreeNode):
-    """顶层窗口集合随假时钟推进而变化的应用节点。
+    """Application node whose top-level windows change as the fake clock advances.
 
-    timeline 形如 [(生效时刻, [窗口...]), ...]，按时刻升序；读取时取最后一条
-    已经生效的。这样就能把实测到的时序原样搬进测试。
+    timeline is [(start_time, [windows...]), ...] in ascending order; reads use
+    the last entry that has started, so measured timings can be replayed.
     """
 
     def __init__(self, clock, timeline):
@@ -590,7 +595,7 @@ class _ScriptedApp(_TreeNode):
         return self._windows()[index]
 
 class _NoSleep:
-    """让 perform_operation 里的固定 sleep 不拖慢测试。"""
+    """Stand-in time module: sleep returns at once and the clock stays at zero."""
 
     @staticmethod
     def sleep(_seconds):
@@ -619,7 +624,7 @@ class _FakeRelation:
         return self.targets[index]
 
 class _NamedNode(FakeNode):
-    """带名字、可带 LABELLED_BY 关系的假节点。"""
+    """Fake node with a name and optional LABELLED_BY relations."""
 
     def __init__(self, name="", role="", relations=(), **kwargs):  # noqa: D107
         super().__init__(**kwargs)

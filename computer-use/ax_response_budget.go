@@ -8,6 +8,21 @@ import (
 	"strings"
 )
 
+// maxInlineChars is the inline character limit for one tool response.
+//
+// The limit prevents loss rather than saving tokens. MCP clients may replace
+// an oversized result wholesale with a file pointer such as
+//
+//	<persisted-output> Output too large (118.1KB). Full output saved to: …
+//
+// and a client without file access then receives nothing usable, leaving the
+// agent to guess coordinates. File output mode cannot help for the same
+// reason; the content itself must fit.
+//
+// The default of 24000 characters keeps typical small and medium working
+// trees inline while keeping trees of 40,000 to 110,000 characters out of the
+// conversation history. Use find for deeper local detail; operators can raise
+// COMPUTER_USE_MAX_INLINE_CHARS to debug full ancestry.
 func maxInlineChars() int {
 	if raw := strings.TrimSpace(os.Getenv("COMPUTER_USE_MAX_INLINE_CHARS")); raw != "" {
 		if value, err := strconv.Atoi(raw); err == nil && value > 0 {
@@ -17,8 +32,9 @@ func maxInlineChars() int {
 	return 24000
 }
 
-// capInline 把过长的响应按行裁到预算内，并**明说裁掉了多少**。
-// 静默截断会让 agent 以为自己看到了整棵树——那比丢失更糟。
+// capInline trims an oversized response to the budget on line boundaries and
+// states how much was cut. Silent truncation would make the agent believe it
+// saw the whole tree, which is worse than losing it.
 func capInline(text string) string {
 	limit := maxInlineChars()
 	if len(text) <= limit {

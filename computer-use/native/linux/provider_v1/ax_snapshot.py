@@ -87,7 +87,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
     unknown_child_count = object()
     provider_probe_errors = {}
 
-    # 每一类省略都单独计数：处方必须跟着原因走，合并计数就没法给出**匹配的**处方。
+    # Count each omission cause separately: the report must give the remedy
+    # that matches the cause, which a merged count cannot do.
     dropped = {"count": 0, "chars": 0, "time": 0, "depth": 0,
                "budget": 0, "filtered": 0, "pressure": 0,
                "render_error": 0, "fanout": 0}
@@ -177,7 +178,10 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         return known_children(), True, fanout
 
     def is_structural_filler(record):
-        """无语义、无状态、无操作能力的纯布局容器。"""
+        """Return whether the record is a pure layout container.
+
+        Such a container has no semantics, no state and nothing to act on.
+        """
         return not (
             record["name"]
             or record["description"]
@@ -188,16 +192,18 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             or is_interactive_role(record["controlType"])
         )
 
-    # 纯文本角色。它们没有可操作性，唯一的价值是"说出一段字"。
+    # Text-only roles: not actionable; their only value is the text they
+    # carry.
     TEXT_ONLY_ROLES = {"static", "label", "paragraph", "heading", "caption"}
 
     def visit_impl(node, depth, path, render_depth=0, parent_text=""):
-        """depth 用于遍历预算，render_depth 用于缩进。
+        """Visit one node; `depth` drives the budget, `render_depth` indents.
 
-        两者必须分开：被裁掉的节点仍会递归子节点，若沿用 depth 做缩进，
-        子节点会带着父节点的层级出现，树里就凭空多出空档——实测 Nautilus 上
-        缩进会从第 1 层直接跳到第 6 层，读起来像断掉的树。
-        render_depth 只在节点**真的被渲染**时才加一。
+        The two must differ because pruned nodes still recurse into their
+        children. Indenting by `depth` would leave children at their pruned
+        parent's level and open gaps in the tree (on Nautilus, indentation
+        jumped from level 1 to level 6). `render_depth` advances only when a
+        node is actually rendered.
         """
         if node is None:
             return
@@ -210,14 +216,15 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             dropped["count"] += 1
             dropped["depth"] += 1
             return
-        # 字符预算与节点预算是两件事，见 MAX_RENDERED_CHARS。
+        # The character budget is separate from the node budget; see
+        # MAX_RENDERED_CHARS.
         if budget["chars"] >= max_rendered_chars:
             dropped["count"] += 1
             dropped["chars"] += 1
             return
-        # 时间预算与前两者都是两件事，见 TREE_DEADLINE_SECONDS。
-        # **根节点豁免**：一棵空树没有任何可寻址的元素，调用方连"这是什么窗口"
-        # 都答不上来——maka-cu 在同一处也留了这个豁免，理由相同。
+        # The time budget is separate from both; see TREE_DEADLINE_SECONDS.
+        # The root is exempt: an empty tree has no addressable element, and
+        # the caller could not even tell which window it observed.
         if deadline is not None and records and time.monotonic() >= deadline:
             dropped["count"] += 1
             dropped["time"] += 1
@@ -225,19 +232,22 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
 
         child_count_hint = no_child_count_hint
 
-        # 裁剪：只保留"可操作角色 + 屏幕上可见"的节点。
-        # 离线轨迹回放达到 22% 压缩率、100% 目标保留率。被裁的只是它自己这一行，**仍然继续递归
-        # 子节点**——中间容器往往正是有价值控件的父节点，连子树一起砍会适得其反。
+        # Pruning keeps only nodes with an interactive role that are visible
+        # on screen; in offline replay this reduced trees to 22% of their size
+        # while keeping every action target. Only the node's own line is
+        # dropped and its children are still visited: intermediate containers
+        # are often the parents of valuable controls, so cutting the subtree
+        # would backfire.
         #
-        # 判据**先只读它真正用到的四个字段**，不要先建整条记录。
-        # 实测 GIMP（GAIL）：完整的 record_for 是 8.45ms/节点，而一次 render_tree
-        # 调用它 3162 次却只产出 157 条记录——**95% 的开销当场丢弃**，
-        # 占渲染耗时的 87%，整棵树 38s，超过 Go 层 30s 的超时。
-        # 也就是说 a11y 通道在 GIMP 上**默认根本用不了**，而原因只是取数顺序。
-        #
-        # 这四个字段合计约 2.3ms；状态段(2.52)、动作表(1.78)、值(0.92)、
-        # 占位符(0.58)、automationId(0.57) 只在节点确定保留时才读。
-        # 幸存者会把这四个字段重读一遍，但幸存率只有 5%，重读的代价可以忽略。
+        # The decision reads only the fields it uses (strict_prune_probe)
+        # instead of building the full record first. On GIMP (GAIL), a full
+        # record_for cost 8.45 ms per node; one render_tree call built 3162
+        # records but kept 157, so 95% of the cost (87% of rendering time) was
+        # thrown away and the tree took 38 s, beyond the Go layer's 30 s
+        # timeout. The probe fields cost about 2.3 ms; states (2.52 ms),
+        # actions (1.78 ms), value (0.92 ms), placeholder (0.58 ms) and
+        # automationId (0.57 ms) are read only for kept nodes. Kept nodes read
+        # the probe fields again, which is negligible at a 5% survival rate.
         if prune and depth > 0:
             probe, probe_errors = strict_prune_probe(
                 node, window_bounds, text_limit
@@ -251,11 +261,14 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 child_count_hint = unknown_child_count
             probe_frame = probe["frame"]
             probe_role = probe["role"]
-            # 有名字的可见节点一律保留，哪怕角色不"可交互"。
-            # 实测教训：行距 combo 的 toggle button 本身没有名字，agent 只能靠
-            # 父节点 `panel Line Spacing` 指认它。纯按角色白名单裁掉这个 panel，
-            # 目标元素虽然还在树里，却**没法被指认**——整条对话框链路当场断掉。
-            # 保留率指标只看"目标在不在"，看不到这一层，是它的盲区。
+            # Keep every visible named node, even with a non-interactive role.
+            # The toggle button of LibreOffice's line-spacing combo has no
+            # name and can be identified only through its parent, the
+            # `Line Spacing` panel. A pure role allowlist would drop that
+            # panel: the target stays in the tree but can no longer be
+            # identified, which breaks the whole dialog flow. A retention
+            # metric that only checks whether the target is present cannot
+            # see this failure.
             probe_name = probe["name"]
             keeps = bool(probe_errors) or (
                 probe_frame is not None and (
@@ -264,18 +277,16 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                     or bool(probe["description"])
                 )
             )
-            # **文字与父节点完全重复的纯文本叶子不保留。**
+            # Drop text-only leaves whose text repeats the parent's verbatim.
             #
-            # "有名字的可见节点一律保留"那条规则是为桌面对话框定的（见上面
-            # Line Spacing 的例子），但在网页上"有名字"等于"所有文字"。
-            # 实测 chrome://flags：521 个纯文本节点里 **212 个（41%）的文字与
-            # 父节点逐字相同**——父节点已经把这句话说过一遍了，
-            #     paragraph […]: "You will start with the entrypoint file…"
-            #         static "You will start with the entrypoint file…"
-            # 第二行没有增加任何信息，却要付同样的字节。
+            # Keeping every visible named node suits desktop dialogs (see the
+            # Line Spacing case above), but on web pages every text node is
+            # named. On chrome://flags, 212 of 521 text nodes (41%) repeated
+            # their parent's text word for word, adding no information at the
+            # same byte cost.
             #
-            # 只裁**没有子节点**的纯文本角色：有子节点的容器仍然可能是指认
-            # 无名控件的唯一途径，那正是 Line Spacing 那条教训。
+            # Only childless text roles are dropped: a container may still be
+            # the only way to identify an unnamed control.
             if (keeps and probe_role in TEXT_ONLY_ROLES and probe_name
                     and parent_text and probe_name == parent_text
                     and child_count_hint == 0):
@@ -288,15 +299,18 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 for child_index, child in children:
                     if child is None:
                         continue
-                    # 本节点没渲染，render_depth 不推进，子节点顶替它的位置
+                    # This node is not rendered, so render_depth stays and the
+                    # children take its place.
                     visit(child, depth + 1,
                           path + [child_index], render_depth, parent_text)
                 return
 
         record = record_for(node, None, path, window_bounds, text_limit=text_limit)
 
-        # 预算吃紧时优先保住有名字/有动作/有值的节点。丢容器只丢它自己这一行，
-        # 仍然继续递归子节点——被丢的容器往往正是有价值控件的父节点。
+        # Under budget pressure, keep named, actionable and valued nodes by
+        # dropping structural containers first. Only the container's own line
+        # is dropped and its children are still visited, because a dropped
+        # container is often the parent of valuable controls.
         if (
             prune
             and len(records) >= pressure_at
@@ -313,14 +327,16 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                       path + [child_index], render_depth, "")
             return
 
-        # 编号要**跨快照存活**，所以不能用 len(records) 这种遍历序号——
-        # 插入一个元素就会把它后面所有元素的号全推走。见 StableIndexer。
+        # Indices must survive across snapshots, so they cannot be traversal
+        # ordinals such as len(records): inserting one element would shift
+        # every later index. See StableIndexer.
         #
-        # 发号必须在**确定这个节点真的进树之后**。原来它在两处裁剪之前，
-        # 于是被裁掉的节点先领了号再被丢弃：号被消耗、却不进 records/refs。
-        # 实测 Nautilus 一次快照 91 个元素、下标散布在 0..670——7 倍膨胀。
-        # 而且被裁节点每次快照都重新领一批新号（它们不在 known 里），
-        # 所以号会随会话单调涨下去，越涨越长、越涨越不像"树里的位置"。
+        # Assign the index only once the node is known to be kept. Assigning
+        # it before pruning consumed indices for discarded nodes that never
+        # reached records or refs (one Nautilus snapshot of 91 elements used
+        # indices spread over 0..670). Pruned nodes are not in `known`, so
+        # they took fresh indices on every snapshot and the numbers grew
+        # steadily over a session.
         record["index"] = (indexer.index_for(path, record["controlType"],
                                              record["name"],
                                              record.get("nameHash", ""))
@@ -332,8 +348,10 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         budget["chars"] += len(rendered) + 1
         role = record["localizedControlType"] or record["controlType"] or "element"
 
-        # 未展开的菜单：保留节点自身（它仍是普通 click 的语义入口），
-        # 但不递归其子项。role 与 state 都走 libatspi 本地缓存，零 D-Bus 成本。
+        # Collapsed menu: keep the node itself, which is still the semantic
+        # target of a plain click, but do not descend into its items. Role
+        # and state come from the libatspi cache, so this costs no D-Bus
+        # round trip.
         if (
             depth > 0
             and role.lower() in MENU_ROLES
@@ -364,23 +382,24 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             node, child_count_hint
         )
         if not children_enumerable:
-            # 超大/自管理容器不能枚举，改用坐标寻址取当前视口内的单元格。
+            # Huge or self-managing containers cannot be enumerated; address
+            # the cells in the current viewport by coordinate instead.
             rendered = render_visible_cells(
                 node, render_depth, path, window_bounds, records, lines,
                 text_limit=text_limit, max_tree_nodes=max_tree_nodes,
                 boxes=boxes,
-                # **必须显式传进去。** 这个函数是模块级的，看不到 render_tree
-                # 的局部变量 indexer——漏传时它在函数体里是个自由名字，
-                # Python 直到真正执行到那一行才报 NameError。
-                # 于是这条路径一走就崩，而它正是 LibreOffice Calc 表格的渲染路径
-                # （自管理容器拒绝枚举后的替代路径）。
-                # 实测 Calc 快照曾连续返回 `name 'indexer' is not defined`，
-                # 使调用方被迫放弃语义通道。
+                # Pass the indexer explicitly: the cell renderer is a
+                # module-level function and cannot see this local. Without
+                # it, cells fall back to traversal ordinals whose indices are
+                # not stable across snapshots. This is the rendering path for
+                # LibreOffice Calc sheets, the fallback once a self-managing
+                # container refuses enumeration.
                 indexer=indexer,
                 annotations=annotations,
             )
             if rendered == 0:
-                # 寻址也失败时显式说明，避免模型以为这里本来就是空的。
+                # If cell addressing fails too, say so, so the model does not
+                # assume the container is empty.
                 lines.append(
                     ("\t" * (render_depth + 2))
                     + "(contents not enumerated: {} manages its own descendants "
@@ -388,11 +407,13 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 )
             return
 
-        # 配额检查必须在 child_at() **之前**。visit() 开头虽然也查配额并立刻
-        # return，但 range(child_count) 这个循环本身不会停 —— 面对谎报十亿
-        # 子节点的容器，光是发起那些注定被丢弃的 child_at() 往返就要数十小时。
-        # 这是比 should_enumerate_children() 更底层的兜底：后者依赖容器正确
-        # 声明 MANAGES_DESCENDANTS，而这里不依赖任何声明。
+        # Check the node budget before each child_at() call. visit() also
+        # checks it and returns at once, but the loop itself would not stop:
+        # for a container that misreports a billion children, the child_at()
+        # round trips that are bound to be discarded would alone take tens of
+        # hours. Unlike should_enumerate_children(), which relies on the
+        # container declaring MANAGES_DESCENDANTS, this guard relies on no
+        # declaration.
         before_records = len(records)
         before_lines = len(lines)
         child_iterator = iter(children)
@@ -414,27 +435,26 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             child_slots_seen += 1
             if child is None:
                 continue
-            # 本节点渲染出来了，子节点缩进推进一级
-            # 把本节点渲染出来的文字传下去，供子节点判断"我是否只是重复了父亲"。
+            # This node was rendered: indent its children one level deeper and
+            # pass its text down so they can detect verbatim repetition.
             visit(child, depth + 1, path + [child_index], render_depth + 1,
                   str(record.get("name") or record.get("value") or ""))
 
-        # 菜单的子项**一个都没渲染出来**时，在这个菜单自己身上说明白。
+        # If a menu rendered none of its children, report that on the menu
+        # itself.
         #
-        # 上面那条 "N items collapsed" 的判据是「菜单自己不 SHOWING」，
-        # 而 GIMP（GAIL）根本不是这样：File 菜单自己**是** SHOWING 的——它就挂在
-        # 菜单栏上——不 SHOWING 的是它底下那 39 个菜单项。于是那条判据不触发，
-        # 39 项被逐个裁掉，agent 看到的是光秃秃一行 `menu "File"`，
-        # 和一个真正的空菜单**长得一模一样**。
+        # The collapsed-menu check above requires the menu itself to lack
+        # SHOWING, which GIMP (GAIL) does not satisfy: the File menu is
+        # SHOWING on the menu bar while its 39 items are not. Every item is
+        # then pruned, and the agent sees a bare `menu "File"` line that looks
+        # exactly like an empty menu, so it cannot find Export or Save As
+        # although they are one click away. The global omission count at the
+        # end of the tree does not help, because it does not say which menu
+        # hid items.
         #
-        # 后果是实测到的：第 47、48 题里 agent 要把图导出，而树里
-        # 找不到任何 Export/Save As——它只能得出"这个应用没有导出"的结论。
-        # 真相是 File 底下就有 `Export to <文件名>`，点一下 File 就全出来了。
-        # 树末尾那句全局的 "3092 node(s) omitted" 救不了它：那句话不指名道姓，
-        # 没人能从中知道**是这个菜单**藏了东西。
-        #
-        # 判据改成看**结果**而不是看状态位：递归完一圈，如果这个菜单一条子记录
-        # 都没产出、而 AT-SPI 说它有子节点，就照实说有多少项藏着。
+        # This check therefore looks at the outcome instead of a state bit:
+        # if the menu produced no rendered line while the provider reported
+        # children, state how many items are hidden.
         if (child_slots_seen and len(records) == before_records
                 and len(lines) == before_lines
                 and role.lower() in MENU_ROLES):
@@ -538,8 +558,10 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
 
     visit(root, 0, root_path)
     if dropped["count"]:
-        # 省略账本保留原因、计数和可恢复路径，但不在每次快照里重复整段教程。
-        # 完整语义已经在工具描述中；这里的职责是报告这一次到底缺了什么。
+        # The omission summary keeps causes, counts and recovery paths but
+        # does not repeat the whole tutorial in every snapshot: the tool
+        # description carries the full semantics, and this summary reports
+        # what this particular snapshot is missing.
         reasons = []
         if dropped["time"]:
             reasons.append(
@@ -628,23 +650,3 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
     if include_annotations:
         return records, lines, annotations
     return records, lines
-
-
-# 像素比对的采样步长与阈值。
-# 实测 1850x1053 窗口：抓一张 23ms，4px 步长比对 67ms、8px 步长 16ms。
-# 取 8px——每个动作多约 40ms，相对 resolve_app 自己的 0.3s 可以忽略，
-# 而 8px 足以看出一段文字挪位置、一个对话框开合。
-# 判据不用"变化超过某个百分比"，用**持续性**——见 persistent_pixel_change。
-#
-# 走过两版弯路，都记下来：
-#  1. 一开始设了个固定阈值 PIXEL_FAINT_PERCENT=0.05%，低于它就算"微弱"。
-#     这是**猜的**，而 Playwright 恰恰拒绝猜：它的 toHaveScreenshot 把
-#     maxDiffPixels / maxDiffPixelRatio **默认留空**交给调用方，对噪声源
-#     采取的是消除（caret:"hide"、animations:"disabled" 都是默认值）。
-#  2. 第二版改成"动作前连抓两张测噪声底"。方向对，但两张只隔几毫秒，
-#     1Hz 的文本光标根本没来得及闪，噪声底测出来是 0——于是**空操作也被判成
-#     "屏幕变了"**，变化区域正是那个 8x16 的光标。
-#
-# 现在照 Playwright"反复截图直到连续两张一致再比"的思路：动作后抓两张，
-# 只认在两张里**都存在**的变化。闪烁的东西两张状态不同，自然被滤掉。
-# 两张之间的间隔由建快照的耗时填上，几乎不额外增加延迟。

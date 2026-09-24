@@ -9,6 +9,25 @@ import (
 	"time"
 )
 
+// ---------------------------------------------------------------------------
+// assert_ax: assertions that retry until a timeout
+//
+// Post-action readback is passive: it reports what changed after an action.
+// Confirming a condition actively (has the save dialog closed?) otherwise
+// means pulling another tree and comparing once, which gives the wrong answer
+// when it runs a moment too early.
+//
+// Like Playwright's expect(...).toBeVisible(), an assertion is reliable
+// because it re-checks within a timeout window. That matters more on the
+// desktop, where UI changes raise no load event and a window can appear after
+// the post-action settle wait has ended.
+//
+// Every poll is a full AT-SPI traversal, so the default timeout is 5 seconds
+// with a 400ms interval, and the first sample always runs: one snapshot of a
+// large app can take longer than the whole budget, and checking the deadline
+// first would fail without sampling once.
+// ---------------------------------------------------------------------------
+
 type verifyGoal struct {
 	state           string
 	valueEquals     string
@@ -51,8 +70,9 @@ func (g verifyGoal) describe() string {
 	return strings.Join(parts, " and ")
 }
 
-// check 返回是否满足，以及**实际观测到了什么**。第二个返回值是这个工具的重点：
-// "断言失败"本身没有信息量，"期望 checked，实际 enabled focused"才有。
+// check reports whether the goal holds and what was actually observed. The
+// observation matters most: "assertion failed" carries no information, while
+// "expected checked, observed enabled focused" does.
 func (g verifyGoal) check(record *elementRecord, lookupErr error) (bool, string) {
 	if record == nil {
 		if g.exists != nil && !*g.exists {
@@ -80,8 +100,9 @@ func (g verifyGoal) check(record *elementRecord, lookupErr error) (bool, string)
 		if has != want {
 			ok = false
 		}
-		// States 渲染出来时**自带方括号**（树里就是 `[enabled focused]`），
-		// 这里再包一层会变成 `[ [enabled focused]]`。照抄树的写法，不加工。
+		// States already renders with brackets (`[enabled focused]` in the
+		// tree); wrapping it again would print `[ [enabled focused]]`, so it
+		// is shown exactly as the tree shows it.
 		shown := strings.TrimSpace(record.States)
 		if shown == "" {
 			shown = "(no states reported)"
@@ -137,9 +158,10 @@ func (g verifyGoal) check(record *elementRecord, lookupErr error) (bool, string)
 	return ok, strings.Join(observed, ", ")
 }
 
-// selectorHint 从选择器里抽出可用于模糊比对的那部分文字。
-// `push button "Thomas"` → `Thomas`；`"Calculate"` → `Calculate`；
-// 没有引号时整串都算——`heading Depart` 这种写法也要能给出候选。
+// selectorHint extracts the part of a selector that is usable for fuzzy
+// matching: `push button "Save"` gives `Save` and `"Calculate"` gives
+// `Calculate`. Without quotes the whole string counts, so a selector such as
+// `heading Results` still yields candidates.
 func selectorHint(selector string) string {
 	if start := strings.Index(selector, "\""); start >= 0 {
 		if end := strings.LastIndex(selector, "\""); end > start {
@@ -908,12 +930,10 @@ func (s *service) verify(
 	noScreenshot := false
 	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
 	attempts := []string{}
-	// 等待期间界面**到底变没变**，是失败时最该说的一件事。
-	//
-	// 轨迹证据：agent 把 verify(exists=false) 当"等页面跳走"
-	// 用了**四次**，全部超时，白烧 15+20+25+20 = 80 秒预算。它反复重试是因为
-	// 我们只说了"你要的那件事没发生"，没说"这段时间里发生了什么"——
-	// 于是它无法判断该继续等、还是那一次点击根本没生效。
+	// Whether the UI changed during the wait is the most useful fact on
+	// failure. Reporting only that the requested condition never held leaves
+	// the agent unable to tell whether to keep waiting or whether its last
+	// action never took effect, so it keeps retrying with longer timeouts.
 	var firstWindow string
 	var firstHandle string
 	var firstCount int
@@ -962,10 +982,11 @@ func (s *service) verify(
 			}
 			return result
 		}
-		// 必须走 lookupElementFor 而不是 lookupBySelectorFor：前者数字下标和
-		// 选择器都认，后者只认选择器。实测代价——传 "62" 时它会连报 6 轮
-		// `no element matches the selector "62"`，看上去像元素真的不见了，
-		// 而元素一直在那儿。一个断言工具给出这种假阴性比没有断言更糟。
+		// Resolve with lookupElementFor rather than lookupBySelectorFor: it
+		// accepts numeric indices as well as selectors. A selector-only lookup
+		// would treat an index such as "62" as a selector and keep reporting
+		// no match while the element is present, a false negative that is
+		// worse than no assertion.
 		if attempt == 1 {
 			firstWindow, firstHandle, firstCount = snapshot.WindowTitle,
 				snapshot.WindowHandle,
@@ -1042,11 +1063,13 @@ func (s *service) verify(
 				displaySelector, goal.describe(), timeoutMS)}
 			e.add("Selector", strconv.Quote(displaySelector))
 			e.add("Snapshot", snapshotAge(snapshot))
-			// 说清等待期间界面动没动。这两行区分的是三种完全不同的处境：
-			// 界面纹丝不动（多半上一次动作没生效）、界面变了但不是你等的那样
-			// （该换个判据）、窗口换了（你等的元素可能已经不在这个窗口里）。
-			// 窗口身份按**实例句柄**比，不按标题：同一应用的第二个同标题窗口
-			// 换根时标题一个字都不变，而 element_index 已经全部重排。
+			// Report whether the UI changed during the wait. This separates
+			// three situations: no AX-visible change, a change that is not the
+			// awaited one (the predicate may be the wrong test), and a
+			// different window (the target may live elsewhere). Windows are
+			// compared by instance handle, not title: a second same-titled
+			// window of one app can become the root without any title change
+			// while every element index is renumbered.
 			if (firstHandle != "" && snapshot.WindowHandle != firstHandle) ||
 				snapshot.WindowTitle != firstWindow {
 				e.add("Window changed", fmt.Sprintf(
@@ -1073,26 +1096,15 @@ func (s *service) verify(
 			for _, line := range attempts {
 				e.log = append(e.log, "  - "+line)
 			}
-			// 找不到元素时**把最接近的候选列出来**。
-			//
-			// 轨迹证据：26 条真实轨迹里 verify 被调用 5 次、失败 3 次，
-			// **三次全是 exists:true 超时**——agent 拿它当"等这个元素出现"用，
-			// 而它猜的选择器（`push button "Thomas"`、`"Calculate"`、
-			// `heading "Depart"`）名字对不上。
-			//
-			// 此前的失败提示是"去 call get_app_state 读一读"，而那棵树有
-			// **286 个元素**——等于让它把整棵树重读一遍再猜第二次。
-			// 选择器找不到时列候选这件事，click 那边早就在做了，verify 没接上。
-			// `exists:false` 超时时，多半是在拿"旧元素消失"当"页面跳转"的代理。
-			//
-			// 轨迹证据（第 28 题 delta.com）：agent 连着四次
-			// verify(exists=false, 15/20/25/20s)，全部超时，白烧 80 秒预算。
-			// 那个判据本身选错了：单页应用点完之后旧节点常常**留在 DOM 里**，
-			// 于是它永远不会满足，等多久都一样。
-			//
-			// 正确的等法是**等新东西出现**，而不是等旧东西消失。这条建议只在
-			// 确实是 exists:false 且界面没动时给——界面动了说明它等的方向没错，
-			// 只是判据挑得不好，那种情况上面的候选列表更有用。
+			// Choose the next step by cause. When the target never appeared,
+			// list the closest current elements so the agent need not reread
+			// the whole tree to correct a guessed selector. When an
+			// exists:false wait times out without any UI change, the agent is
+			// probably using the disappearance of an old element as a proxy
+			// for navigation; single-page apps often keep the old node, so the
+			// condition may never hold, and waiting for something new is the
+			// better test. When the UI did change, the candidate list is more
+			// useful than that advice.
 			if selectorAmbiguous {
 				e.next = "the selector remained ambiguous throughout the wait, so assert_ax " +
 					"never identified one element to test. Use a fresh rN ref or a selector " +
@@ -1301,36 +1313,3 @@ func (s *service) verifyContentRevisionChanged(
 		time.Sleep(400 * time.Millisecond)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// expect：把 act → settle → verify 收进**一次**调用
-//
-// 为什么要有它。A11Y track 内的输入合成（press_key / type_text，以及 click
-// 的坐标回退路径）走 AT-SPI 的 generate_*_event，是 fire-and-forget：
-// 事件入队即返回，无从得知目标收没收到。于是动作只能如实标注
-// `[synthesis] … Delivery to the intended target was not verified`。
-//
-// 实测代价：9285 次动作调用里 6381 次（69%）返回 not verified，而 agent 主动
-// 调用独立的 verify 工具只有 20 次（4% 的任务）。闭环从来没有合上——agent 只能
-// 盲目轮询（get_app_state 占全部调用 18%）或反复重试（83 个任务打转 120+ 次）。
-// verify 使用率低不是因为 agent 不知道它存在，而是它需要**额外一次往返**；
-// 在不确定的时候，再抓一次全树比再发一次工具调用更省事。所以解法是把验证
-// 并进动作，而不是更大声地推销一个设计上就吃亏的工具。
-//
-// 三条不可动摇的边界：
-//
-//  1. verified: false **不等于** isError。动作确实发出去了，只是没达成预期——
-//     这是 agent 需要知道的事实，不是调用错误。isError 仍然只用于参数/寻址类错误
-//     （app 不存在、element_index 解析不到、expect 本身写错）。把"没达成"报成
-//     错误会让 agent 以为自己调错了工具，转而去改调用形式，而该改的是下一步动作。
-//  2. 不传 expect 时**保持现状**。既有的 Note、既有的 not verified 措辞、
-//     既有的增量树，一个字不变。这是纯增量参数。
-//  3. 四种谓词只用**与 toolkit 无关**的语义：role / name / value / focus。
-//     不引入任何应用特定的概念，也绝不按应用名分支——应用可以作为证据，
-//     不能作为条件。
-//
-// settle 用轮询而不是死等：满足条件立刻返回，并如实报告实际耗时。
-// 代价要说清楚——每一轮都是一次完整的 AT-SPI 遍历，所以默认预算只有 800ms，
-// 而且**第一轮采样是免费的**：它复用动作自己刚建好的那份快照，
-// 绝大多数情况（对话框已经弹出来了）会在 0ms 处直接命中，一次额外遍历都不付。
-// ---------------------------------------------------------------------------

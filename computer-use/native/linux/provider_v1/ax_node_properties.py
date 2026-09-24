@@ -1,4 +1,4 @@
-"""Linux provider module: ax snapshot."""
+"""Linux provider module: AX node properties and tree-line rendering."""
 
 from .foundation import (
     Atspi,
@@ -42,29 +42,28 @@ from .x11_windows import (
 )
 from .primitives import name_fingerprint, quoted
 def node_actions(node):
-    """**一次读完**该节点的动作表，同时给出渲染需要的两个结论。
+    """Read the node's action table once and derive both rendering facts.
 
-    返回 `(未被 click 覆盖的动作名, 是否存在可调用的 click 入口)`。
+    Return (names of actions that click does not cover, whether an
+    invocable click entry exists).
 
-    为什么必须合成一次读：LibreOffice 的 ATK 桥在被反复问动作表时会打出
+    The table must be read in a single pass. Queried repeatedly, the
+    LibreOffice ATK bridge logs
 
         (soffice): CRITICAL: impl_get_NActions:
                    assertion 'ATK_IS_ACTION (user_data)' failed
 
-    密集调用下**应用会整个退出**（实测：对话框循环第 3~4 轮 soffice 消失，
-    随后 get_app_state 报 appNotFound）。渲染一棵树本来每个节点就要问一次，
-    早先为了给出 `[has-click-action]` 标记又经 preferred_action_index() 问了
-    第二次——等于在一个已知脆弱的桥上把压力翻倍。
-
-    动作名与描述在同一轮里取，因此每个节点对 ATK 的问询次数减半。
+    and under dense querying the application exits entirely (soffice
+    disappeared after three or four dialog round trips). Rendering already
+    reads the table once per node; reading it again for the
+    `[has-click-action]` mark through preferred_action_index() would double
+    the load on a bridge known to be fragile. Action names and descriptions
+    are therefore read in the same pass.
     """
-    # 先确认这个节点真的实现了 Action 接口再问动作数。
-    #
-    # 不先问就直接调 get_n_actions()，LibreOffice 的 ATK 桥会对着一个不是
-    # ATK_ACTION 的对象打断言：
-    #     CRITICAL: impl_get_NActions: assertion 'ATK_IS_ACTION (user_data)' failed
-    # 而树里绝大多数节点（panel / filler / label / 各种容器）本来就没有这个接口，
-    # 于是每渲染一棵树就刷出成百上千条。实测一轮对话框循环刷出 3482 条。
+    # Check for the Action interface before asking for the action count.
+    # get_n_actions() on an object without it triggers the ATK assertion
+    # above, and most nodes (panels, fillers, labels, other containers) lack
+    # the interface, so a single dialog round trip logged 3482 assertions.
     if safe(node.get_action_iface) is None:
         return [], False
     count = int(safe(node.get_n_actions, 0) or 0)
@@ -77,8 +76,9 @@ def node_actions(node):
         )
         label = name or description
         lower = label.strip().lower()
-        # 与 preferred_action_index() 用同一套判据：精确命中，或含
-        # activate/click/press 的兜底。两者必须一致，否则标记会撒谎。
+        # Same criteria as preferred_action_index(): an exact match or the
+        # activate/click/press substring fallback. The two must agree, or the
+        # mark would misreport what click can invoke.
         if lower in CLICK_COVERED_ACTIONS or (
             normalized_action(lower) not in NON_SELF_ACTIONS
             and ("activate" in lower or "click" in lower or "press" in lower)
@@ -88,7 +88,8 @@ def node_actions(node):
             continue
         if lower in CLICK_COVERED_ACTIONS:
             continue
-        # 人人都有的动作不进列表，也就不会让 is_structural_filler 失效。
+        # Skip actions that every node has, so is_structural_filler still
+        # recognizes filler nodes.
         if normalized_action(lower) in UNIVERSAL_ACTIONS:
             continue
         names.append(label)
@@ -96,16 +97,13 @@ def node_actions(node):
 
 
 def action_names(node):
-    """列出该节点**尚未被 click 工具覆盖**的语义动作。
+    """List the node's semantic actions that the click tool does not cover.
 
-    必须过滤掉 preferred_action_index() 会挑中的那些（click/press/activate/…），
-    否则每个可点击节点都会显示 "Secondary Actions: click"，而那恰恰就是
-    click 工具自己要调用的动作。重复列出会让模型误以为那是另一条备选路径，
-    进而在语义 click 与坐标 fallback 之间反复摇摆，
-    甚至退回坐标点击。
-
-    macOS 侧的 meaningfulActions() 出于同样理由过滤掉
-    AXPress / AXConfirm / AXOpen / AXShowMenu。这里与之对齐。
+    Actions that preferred_action_index() would pick (click, press,
+    activate, ...) must be filtered out. Otherwise every clickable node
+    shows a secondary `click` action, which is exactly what the click tool
+    invokes; the model then reads it as an alternative path and alternates
+    between semantic clicks and coordinate fallbacks.
     """
     return node_actions(node)[0]
 
@@ -153,26 +151,29 @@ def numeric_value(node):
     return str(current)
 
 
-# 一个下拉框最多往下翻这么多节点去找"当前选中的是哪一项"。
-# 选项列表通常几项到几十项，200 足够，而封顶保证这条路径的代价是有界的。
+# Maximum nodes scanned below a dropdown to find the selected option. Option
+# lists usually hold a few to a few dozen entries, so 200 is enough, and the
+# cap keeps the cost of this path bounded.
 SELECTION_SCAN_BUDGET = 200
 
 
 def selected_option_name(node):
-    """下拉框当前选中的是哪一项。
+    """Return the name of the dropdown's selected option, or "".
 
-    这补的是一个**大缺口**：此前 agent 在树里根本看不见任何下拉框的值。
-    实测 Chrome 的打印对话框——`combo box "Margins"`、`"Destination"`、
-    `"Scale"` 三个，树里全都只有名字、没有值，而任务恰恰要求"把边距设成 None"。
-    看不见当前值，就既没法判断要不要改，也没法确认改成功了。
+    Without it, dropdown values are invisible in the tree: Chrome's print
+    dialog shows the combo boxes "Margins", "Destination" and "Scale" with
+    names but no values, so the agent can neither decide whether a change is
+    needed nor confirm that one worked.
 
-    值不在 Value 接口上（Chrome 的 combo box 根本不实现 Value），也不在 Text
-    接口上（实测读回来是一个对象替换符 `￼`）。它在**后代 menu item 的
-    SELECTED 状态**上——而且**下拉关着时也读得到**，这一点是实测确认的，
-    否则这个功能就得先展开每一个下拉框，代价完全不可接受。
+    The value is not on the Value interface (Chrome combo boxes do not
+    implement it) or the Text interface (it reads back as U+FFFC). It is the
+    SELECTED state of a descendant menu item, which is readable even while
+    the dropdown is closed; opening every dropdown first would be far too
+    costly.
 
-    有些下拉框确实读不到（实测 `combo box "Layout"` 就是 None）。那种情况下
-    返回空串、树里不显示值——**不猜**。少给一个信号，好过给一个编出来的。
+    Some dropdowns expose no selection (Chrome's "Layout" combo box, for
+    example). In that case return an empty string rather than guess: a
+    missing value is better than an invented one.
     """
     if node is None:
         return ""
@@ -196,7 +197,7 @@ def element_value(node, text_limit=DEFAULT_TEXT_LIMIT):
     direct = text_value(node, text_limit=text_limit) or numeric_value(node)
     if direct:
         return direct
-    # 只对下拉类角色做这次扫描，别的角色不付这个代价。
+    # Only dropdown roles pay for the descendant scan.
     role = str(node_role(node) or "")
     if role in ("combo box", "list box"):
         return limit_text(selected_option_name(node), text_limit=text_limit)
@@ -221,9 +222,9 @@ def parse_text_limit(value, fallback=DEFAULT_TEXT_LIMIT):
     return positive_int(value, fallback)
 
 
-# 对决策有用、但此前完全不在树里体现的状态。只渲染"非默认"的那一侧：
-# 每个节点都标 enabled/not-focused 只会淹没信号，而 disabled / checked /
-# expanded / selected / focused 才是 agent 需要据以决策的信息。
+# Decision-relevant states, rendered only on their non-default side. Marking
+# every node enabled or not-focused would drown the signal; checked,
+# expanded, selected and focused are what the agent decides on.
 NOTABLE_STATES = (
     ("CHECKED", "checked"),
     ("EXPANDED", "expanded"),
@@ -232,39 +233,32 @@ NOTABLE_STATES = (
 )
 
 
-# 动作名 -> 它承诺会改变的东西。**表里的名字全部来自实测**，不是猜的。
+# Action name -> the state it promises to change.
 #
-# 思路照抄 Playwright 的 `_setChecked`（packages/playwright-core/src/server/dom.ts）：
+# The approach is adapted from Playwright's `_setChecked`
+# (packages/playwright-core/src/server/dom.ts, Apache-2.0): Playwright reads
+# the checkbox state back after clicking and throws a non-recoverable error
+# ("Clicking the checkbox did not change its state") without retrying,
+# because repeating the same action will not give a different result.
 #
-#     const finalState = await isChecked(progress);
-#     if (finalState.matches !== state)
-#       throw new NonRecoverableDOMError('Clicking the checkbox did not change its state');
-#
-# 它抛的是 **NonRecoverableDOMError**——不重试，直接抛。重复同一个动作不会有
-# 不同结果。
-#
-# **第一版这张表是照 Playwright 的语义写的**（check / uncheck / expand / collapse
-# / select / deselect），实测六个应用**一个都没有**，整张表是死代码。
-# 真实存在的是下面这些（gedit / Nautilus / VLC / VS Code / GIMP / Thunderbird
-# 全量扫出来的动作名）：
-#
-#     click 1197 / press 144 / activate 138 / expand or contract 119 / edit 119
-#     menu 81 / open 80 / click ancestor 75 / showcontextmenu 61 / release 33
-#     showmenu 27 / dodefault 18 / setfocus 4 / increase 3 / decrease 3 / toggle 2
-#
-# 注意 `expand or contract` 和 `toggle` 是**翻转**语义，不是"设成某个值"——
-# 所以判据是"必须翻转"，不是"必须等于某值"。
+# The names come from action tables observed in gedit, Nautilus, VLC,
+# VS Code, GIMP and Thunderbird. `expand or contract` and `toggle` flip a
+# state rather than set a value, so the check is that the state flipped, not
+# that it equals a target value.
 ACTION_MUST_FLIP = {
     "expand or contract": "EXPANDED",
     "expandorcontract": "EXPANDED",
     "toggle": "CHECKED",
 }
-# 方向明确的动作：值必须变。
+# Directional actions: the value must change.
 ACTION_MUST_CHANGE_VALUE = ("increase", "decrease")
 
 
 def readable_states(node):
-    """读回那几个**可判定**的状态；读不到就返回 None（不返回空字典冒充读到了）。"""
+    """Read back the decidable states, or return None if they are unreadable.
+
+    None is returned instead of an empty dict that would pose as a reading.
+    """
     if node is None:
         return None
     out = {}
@@ -277,15 +271,16 @@ def readable_states(node):
 
 
 def state_transition_note(action, before, after):
-    """动作承诺会改变什么时，动作后回读校验。
+    """Verify, after an action that promises a state change, that it happened.
 
-    返回 (note, failed)。failed=True 表示这是**不该重试**的失败——
-    重复同一个动作不会有不同结果。
+    Return (note, failed). failed=True marks a failure that must not be
+    retried: repeating the same action will not produce a different result.
 
-    **边界必须写清楚：状态翻转证明的是"控件状态动了"，不是"行为发生了"。**
-    本仓库实测过反例：VLC 首选项里那颗单选按钮，`Toggle` 之后 CHECKED 真的
-    翻转了，面板却**不切换**。所以这条判据接不住"状态变了行为没变"那一类。
-    把它当万能验证会制造假阳性——它只接住一类：**动作承诺翻转，而状态没翻**。
+    A flipped state proves that the control changed, not that the
+    application acted on it. In VLC's preferences a radio button's CHECKED
+    state flipped after `Toggle` while the panel did not switch. This check
+    catches only one case, an action that promised a flip and did not flip;
+    treating it as general verification would produce false positives.
     """
     name = ACTION_MUST_FLIP.get(str(action).strip().lower())
     if name is None or not before or not after:
@@ -308,21 +303,24 @@ def state_transition_note(action, before, after):
 
 
 def plain_text_from_rich_text(value):
-    """把 Qt 的富文本 tooltip 还原成纯文本。
+    """Convert a Qt rich-text tooltip to plain text.
 
-    Qt 会把 tooltip 存成一整段 HTML，带 `<head>` 里的 CSS。VLC 首选项实测：
-    19 段这样的 HTML 合计 9149 字符，占整次观测的 **56%**，而其中真正的信息
-    往往只有一句话。不处理的话，`Description:` 段会把整个观测预算吃掉。
+    Qt stores tooltips as complete HTML documents with CSS in `<head>`. In
+    VLC's preferences, 19 such tooltips totalled 9149 characters, 56% of one
+    observation, while the actual information was often one sentence.
+    Unconverted, the description segments would consume the whole
+    observation budget.
 
-    判据卡在 `<html>` 开头——这是 Qt 富文本的标志。**不对普通文本做剥离**：
-    真实内容里完全可能出现尖括号（代码、模板、数学表达式），
-    对它们动手会篡改 agent 读到的数据。
+    Only text starting with `<html`, the Qt rich-text marker, is converted.
+    Ordinary text may legitimately contain angle brackets (code, templates,
+    math), and stripping it would alter the data the agent reads.
     """
     text = str(value or "")
     if not text.lstrip().lower().startswith("<html"):
         return text
-    # `<head>` 里全是 CSS，剥完标签会漏成 `p, li { white-space: pre-wrap; }`，
-    # 所以整块丢掉而不是逐个剥标签。
+    # `<head>` holds only CSS, which would leak as
+    # `p, li { white-space: pre-wrap; }` after tag stripping, so the whole
+    # block is dropped instead of stripping tags one by one.
     text = re.sub(r"(?is)<head>.*?</head>", " ", text)
     text = re.sub(r"(?is)<style.*?</style>", " ", text)
     text = re.sub(r"(?i)<br\s*/?>", " ", text)
@@ -334,21 +332,22 @@ def plain_text_from_rich_text(value):
 
 
 def node_description(node, text_limit=DEFAULT_TEXT_LIMIT):
-    """取控件的描述文本（AT-SPI `get_description`，GTK 通常填的是 tooltip）。
+    """Return the control's description (AT-SPI `get_description`).
 
-    实测 Nautilus：工具栏上 `Go back` / `Go forward` / `Search` / `Show list`
-    四个按钮**名字全是空的**，唯一的可读标识就在 description 里；而三个
-    `toggle button Menu` 名字完全相同，只有 description（`Show operations` /
-    `View options`）能区分。不渲染这一项，返回/前进这类文件管理器核心操作
-    在树里就只是 `push button`，agent 除了按像素坐标猜没有别的办法——
-    a11y 优先的整条路径在这里断掉。
+    GTK usually fills it with the tooltip, and it is often the only readable
+    label. In Nautilus the toolbar buttons `Go back`, `Go forward`, `Search`
+    and `Show list` have empty names, and three `toggle button Menu`
+    controls with identical names differ only by description
+    (`Show operations`, `View options`). Without it, core file-manager
+    actions such as back and forward render as a bare `push button`, and the
+    agent can only guess pixel coordinates.
 
-    GTK 的惯例与 macOS 相反：macOS 把可读标签放 AXTitle，GTK 常常只填
-    tooltip。所以这不是"移植时漏了"，是 Linux 侧必须多读一处。
+    GTK's convention is the opposite of macOS, which puts the readable label
+    in AXTitle, so Linux has to read this extra field.
 
-    与 name 分开渲染而不是顶替它：name 是元素身份的一部分（轨迹回放、
-    裁剪保留率都按 `role + name` 匹配），改写它会让同一个元素在不同版本里
-    对不上号。
+    The description is rendered separately instead of replacing the name,
+    because the name is part of element identity (matching uses role +
+    name) and rewriting it would break matching across snapshots.
     """
     getter = getattr(node, "get_description", None)
     raw = str(safe(getter, "") or "") if callable(getter) else ""
@@ -381,16 +380,18 @@ def role_supports_placeholder(role):
 
 
 def placeholder_text(node, text_limit=DEFAULT_TEXT_LIMIT, role=None):
-    """取控件的占位提示文本（AT-SPI 的 `placeholder-text` 对象属性）。
+    """Return the control's placeholder (AT-SPI `placeholder-text` attribute).
 
-    对齐 macOS 的 `placeholderValue`。必须和真实内容分开渲染：占位文本长得
-    像内容但其实是空的，混在一起 agent 会以为输入框已经有值、跳过输入，
-    或者把提示语当成数据读走。
+    Equivalent to macOS `placeholderValue`. It must be rendered apart from
+    real content: a placeholder looks like content although the control is
+    empty, so mixing the two makes the agent skip input it still needs or
+    read the hint as data.
 
-    `get_attributes()` 是可选且昂贵的 AT-SPI 对象属性接口，不能为整棵树上的
-    panel、shape、table cell 等节点预探测。Impress 在文档结构变更后被这样
-    全树扫描会直接退出。placeholder 只对文本输入类角色有定义，因此先按角色
-    收窄，再对真正可能携带该字段的节点读取一次。
+    `get_attributes()` is an optional and expensive AT-SPI call and must not
+    be probed on every panel, shape or table cell; Impress exited when its
+    whole tree was scanned this way after a document structure change.
+    Placeholders exist only on text-input roles, so the role is checked first
+    and the attributes are read once for the nodes that can carry one.
     """
     effective_role = node_role(node) if role is None else role
     if not role_supports_placeholder(effective_role):
@@ -427,23 +428,28 @@ def text_attributes(node):
 
 
 def render_element_line(record, render_depth, boxes=True):
-    """把一条元素记录渲染成一行。文法（借鉴 Playwright 的 aria snapshot）：
+    """Render one element record as a tree line.
 
-        <缩进><index> <role> "<name>" [<states>] [desc="…"] [placeholder="…"]
-                     [actions=a,b] {x,y,w,h}: "<value>"
+    The grammar is modeled on Playwright's aria snapshot:
 
-    - 所有自由文本一律**加引号**，消掉旧格式里名字与字段分隔符撞车的歧义
-    - 附加属性一律进**方括号**，与 aria snapshot 的 `[checked]` `[level=1]` 同构
-    - 几何压成 `{x,y,w,h}`：旧写法 `Frame: {x: 687, y: 23, width: 64, height: 46}`
-      是 45 字符，新写法 14 字符，**每行省 31 字符而信息不少一个字**。
-      实测几何占整棵树的 35–50%，这一项就能砍掉其中约三分之二。
-    - `boxes=False` 时整段几何都不渲染（对齐 Playwright 的 `boxes` 开关）。
-      **这不削弱任何能力**：`click(element_index)` 的坐标是服务端内部从记录里
-      取的，不经过这一行；而 agent 需要坐标时截图恒带、且与树同一个坐标空间
-      （已实测：真实 agent 只靠截图命中了 a11y 树里零存在的 GIMP 画布目标）。
-    - 值放在**最后、冒号之后**，对齐 aria 的 `- textbox: Enter your name`
-    - 空的段一律省略，不留空壳
-    - `index` 保留在行首：我们没有 selector，它是唯一的引用手段
+        <indent><index> <role> "<name>" [<states>] [desc="..."]
+            [placeholder="..."] [actions=a,b] {x,y,w,h}: "<value>"
+
+    - All free text is quoted, so a name cannot be confused with a field
+      separator.
+    - Extra attributes go in square brackets, like the aria snapshot's
+      `[checked]` and `[level=1]`.
+    - Geometry is compacted to `{x,y,w,h}`: 14 characters where
+      `Frame: {x: 687, y: 23, width: 64, height: 46}` takes 45, with no loss
+      of information. Geometry is 35-50% of a rendered tree, so this saves
+      about two thirds of it.
+    - `boxes=False` omits geometry entirely, like Playwright's `boxes`
+      option. Actions take coordinates from the stored record, not from this
+      line.
+    - The value comes last, after a colon, as in aria's
+      `- textbox: Enter your name`.
+    - Empty segments are omitted.
+    - The index leads the line; the Go side keys rendered lines by it.
     """
     role = record["localizedControlType"] or record["controlType"] or "element"
     title = record["name"] or record["automationId"] or ""
@@ -454,11 +460,13 @@ def render_element_line(record, render_depth, boxes=True):
     if state_seg:
         parts.append(state_seg.strip())
     if record.get("description") and record["description"] != title:
-        # 单独一段，不并进 name：name 是元素身份的一部分（轨迹按 role+name
-        # 匹配）。GTK 把可读标签放在这里的情况很常见，尤其是纯图标按钮。
+        # A separate segment, not merged into the name, which is part of
+        # element identity. GTK often puts the only readable label here,
+        # especially on icon-only buttons.
         parts.append("[desc=" + quoted(record["description"]) + "]")
     if record.get("placeholder") and record["placeholder"] != title:
-        # 提示不是内容——控件其实是空的，所以绝不能混进值里。
+        # A placeholder is not content: the control is actually empty, so it
+        # must never be merged into the value.
         parts.append("[placeholder=" + quoted(record["placeholder"]) + "]")
     if record["actions"]:
         parts.append("[actions=" + ",".join(record["actions"]) + "]")
@@ -473,53 +481,47 @@ def render_element_line(record, render_depth, boxes=True):
 
 
 def state_segment(node, has_click_action=False, borrowed_name=False):
-    """把值得关注的状态渲染成紧凑标记，如 `[checked expanded]`。
+    """Render notable states as compact marks such as `[checked expanded]`.
 
-    **只报告"存在即有意义"的状态，绝不从状态的缺失反推语义。**
-
-    这条规则是踩坑换来的：最初这里会在缺少 `ENABLED` 时标 `[disabled]`，
-    实测发现 Nautilus 的文件图标根本不设 `ENABLED` / `SENSITIVE`——
-    它们状态里只有 `SHOWING, VISIBLE, FOCUSABLE`，却带着 `open` / `menu` 两个动作，
-    完全可操作。被误标成 disabled 之后，agent 会直接跳过真正的目标。
-
-    对照组同样说明问题：gedit 那个被我一度当成"禁用"的 `Clear Highlight`，
-    其实是**没有 SHOWING**（藏在折叠的搜索面板里），不是禁用。
-
-    结论：AT-SPI 的 ENABLED/SENSITIVE 在 Linux 上不可靠，不同工具包设不设全凭自觉，
-    没有可靠判据能区分"真禁用"与"这个工具包不上报"。宁可少给一个信号，
-    也不能给一个会让 agent 跳过可用目标的假信号。
+    Report only states whose presence is meaningful, and never infer meaning
+    from an absent state (绝不从状态的缺失反推语义). In particular, a
+    missing ENABLED state is not rendered as `[disabled]`: Nautilus file
+    icons set neither ENABLED nor SENSITIVE (only SHOWING, VISIBLE and
+    FOCUSABLE) yet expose working `open` and `menu` actions. Toolkits set
+    ENABLED/SENSITIVE inconsistently on Linux, and nothing reliably
+    distinguishes a disabled control from a toolkit that does not report the
+    state. A missing signal is better than a false one that makes the agent
+    skip a usable target.
     """
     marks = []
     for name, label in NOTABLE_STATES:
         state = getattr(Atspi.StateType, name, None)
         if state is not None and state_contains(node, state):
             marks.append(label)
-    # `clickable` 不是 AT-SPI 状态，是一条**能力**判断，但它属于同一个括号组：
-    # agent 扫一眼就该知道这个元素能不能直接按元素点。
+    # `has-click-action` is a capability, not an AT-SPI state, but it belongs
+    # in the same group: the agent should see at a glance whether the element
+    # can be clicked semantically.
     #
-    # 为什么必须显式标出来：action_names() 会隐藏 click 类动作（否则每个可点节点
-    # 都显示 "More actions: click"，模型会以为那是 click 工具之外的另一条路，
-    # 于是在两个工具之间反复摇摆）。但一并隐藏之后，"有语义点击"和"根本没有动作
-    # 接口"在树里长得**一模一样**：
-    #     3  push button Home              <- 有 click 动作，可直接调
-    #     12 list item  Recent files       <- 没有 Action 接口，只能坐标点
-    # agent 无从分辨，只好一律退回坐标——恰好背离 a11y 优先。
+    # The mark is needed because action_names() hides click-like actions
+    # (otherwise every clickable node would list `click` as another action,
+    # and the model would alternate between two tools). With them hidden, a
+    # node with a semantic click and a node without an Action interface
+    # would render identically, and the agent would fall back to coordinates
+    # for both. Clickable nodes are the minority (10 of 113 in Nautilus, 7 of
+    # 37 in gedit), so marking them is an order of magnitude cheaper than
+    # marking the rest.
     #
-    # 实测这是少数派（Nautilus 10 个可点 vs 103 个不可点，gedit 7 vs 30），
-    # 所以标可点的比标不可点的省一个数量级。
-    #
-    # 判据必须与 click 工具实际调用的入口同源（preferred_action_index），
-    # 否则这个标记本身就成了新的谎言。
+    # The mark must use the same criteria as the entry point that the click
+    # tool invokes (preferred_action_index), or it would mislead.
     if has_click_action:
-        # 措辞刻意是"有一个动作"而不是"点得动"。它保证的是 click 工具能在这个
-        # 元素上找到可调用的动作，**不保证那个动作生效**——实测 Nautilus /
-        # GIMP / VLC 三个应用的动作都会返回成功却什么都不做。
-        # 叫 `clickable` 会被读成"点这里就行"，那就是工具在替 agent 打包票。
+        # The wording promises an invocable action, not an effect: in
+        # Nautilus, GIMP and VLC such actions can report success and do
+        # nothing. A name like `clickable` would read as a guarantee.
         marks.append("has-click-action")
-    # 名字是从 LABELLED_BY 借来的就要标出来，理由不是洁癖：同一个「位置和大小」
-    # 对话框里 `Position Y` 出现了**两次**（两个标签页各一个）。调用方需要知道
-    # 这个名字是借来的、因此可能不唯一——选择器命中多个时会报歧义，
-    # 那时这个标记就是解释。
+    # Mark names borrowed from LABELLED_BY because they may not be unique:
+    # LibreOffice's Position and Size dialog has two `Position Y` labels, one
+    # per tab. When a selector then matches several elements, this mark
+    # explains why.
     if borrowed_name:
         marks.append("labelled")
     if not marks:

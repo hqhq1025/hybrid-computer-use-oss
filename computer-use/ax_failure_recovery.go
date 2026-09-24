@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// withActionOutcome is a test seam that applies an outcome without request
+// facts. Production action paths call withActionOutcomeForRequest so typed
+// actionability evidence has the exact request and target-resolution facts.
 func withActionOutcome(
 	response toolCallResult,
 	plan settlePlan,
@@ -301,17 +304,3 @@ func withFailedActionContinuity(
 	result.StructuredContent["current_state_cause"] = "independent"
 	return result
 }
-
-// incrementalTree 在安全且划算时，用"只给变化的行"替代整棵树。
-//
-// 实测（gedit 轨迹）：无结构变化的步骤上增量能省 62%，其中若干步的 diff 直接是 0；
-// 但有结构变化的步骤上增量反而**亏 7%**——增删两边都要付钱，加起来超过全量。
-// 所以不能无条件用增量。
-//
-// 判据是行数不变。这一条同时解决了两个问题：
-//  1. 成本：行数不变意味着只有内容变了，diff 必然小于全量
-//  2. 正确性：#15 实测表明结构一变 element_index 就永久重排（gedit 上 26%），
-//     而行数不变正是"没有结构变化"的充分信号，此时索引 0% 漂移，
-//     agent 可以安全沿用上一轮观测里的索引
-//
-// 两个条件恰好对齐，不需要额外的稳定标识。

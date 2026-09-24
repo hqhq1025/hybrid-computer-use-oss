@@ -318,11 +318,12 @@ func handleMCPRequest(request map[string]any, svc *service) map[string]any {
 			result = prepareAXEvidence(result)
 		}
 		if svc.protocolVersion == mcpProtocolLegacy || !structuredContentEnabled() {
-			// structuredContent was added after 2025-03-26 and remains optional.
-			// Keep the richer internal result, but put the evidence on the
-			// model-visible text channel before omitting the structured field.
-			// Some clients prioritize structuredContent and hide sibling text
-			// from the model, which made computer-use state appear unavailable.
+			// structuredContent was added after MCP revision 2025-03-26 and
+			// remains optional. Keep the richer internal result, but put the
+			// evidence on the model-visible text channel before omitting the
+			// structured field. Some clients prioritize structuredContent and
+			// hide sibling text from the model, which can make computer-use
+			// state appear unavailable.
 			if isAX {
 				result = withAXTextEvidence(result)
 			} else {

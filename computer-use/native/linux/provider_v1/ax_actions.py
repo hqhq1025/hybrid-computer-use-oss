@@ -95,20 +95,22 @@ def normalize_key_expression(key):
 
 
 def keycode(name):
-    """把键名解析成 X11 hardware keycode。
+    """Resolve a key name to an X11 hardware keycode.
 
-    Atspi.generate_keyboard_event(keyval, keystring, synth_type) 在
-    PRESS / RELEASE / PRESSRELEASE 三种模式下，第一个参数要的是
-    **hardware keycode**；只有 SYM 模式才接受 keysym。
+    Atspi.generate_keyboard_event(keyval, keystring, synth_type) expects a
+    hardware keycode as its first argument in PRESS, RELEASE and
+    PRESSRELEASE modes; only SYM mode accepts a keysym.
 
-    传 keysym 进去不会报错，而是被截断到低 8 位，发出完全不相干的键：
+    A keysym passed there is not rejected but truncated to its low 8 bits,
+    which emits an unrelated key:
 
-        Escape    keysym 65307 -> 截断 27  -> 实际发出 'r'
-        Return    keysym 65293 -> 截断 13  -> 实际发出 '4'
-        Delete    keysym 65535 -> 截断 255 -> 实际发出 XF86RFKill
-        Control_L keysym 65507 -> 截断 227 -> 修饰键根本没按下
+        Escape    keysym 65307 -> 27  -> emits 'r'
+        Return    keysym 65293 -> 13  -> emits '4'
+        Delete    keysym 65535 -> 255 -> emits XF86RFKill
+        Control_L keysym 65507 -> 227 -> the modifier is never pressed
 
-    这是静默注入错误动作，比直接报错危险，所以这里解析失败一律抛异常。
+    Silently injecting the wrong key is more dangerous than an error, so
+    every resolution failure raises.
     """
     if Gdk is None:
         raise RuntimeError("Gdk unavailable; cannot resolve keycode for: " + name)
@@ -125,10 +127,11 @@ def keycode(name):
 
 
 def parse_key(key):
-    """把按键字符串解析成 (修饰键 keycode 列表, 规范化后的主键)，不发送任何事件。
+    """Parse a key expression into (modifier keycodes, normalized main key).
 
-    解析必须能独立于发送先做一遍：夺焦点是有副作用的（会打断用户），
-    不该为了一个根本拼错的按键先把窗口抢过来、再报参数错误。
+    No events are sent. Parsing must be possible before delivery because
+    taking focus has side effects (it interrupts the user): a misspelled key
+    must fail before the window is raised, not after.
     """
     normalized_expression = normalize_key_expression(key)
     parts = [part for part in normalized_expression.split("+") if part]
@@ -139,18 +142,20 @@ def parse_key(key):
     for modifier in parts[:-1]:
         name = MODIFIER_KEYS.get(modifier.lower())
         if name is None:
-            # 原实现是静默 continue，会让 "ctrl+shft+s" 这类拼写错误
-            # 悄悄退化成孤立的 "s"，行为诡异且极难排查。
+            # Reject unknown modifiers: skipping them would silently turn a
+            # typo such as "ctrl+shft+s" into a bare "s", which is confusing
+            # and very hard to diagnose.
             raise RuntimeError(
                 "Unsupported modifier: {}. Use CTRL, SHIFT, ALT, or SUPER; "
                 "Control_L/Ctrl_L and GTK forms such as <Control>s are also accepted."
                 .format(modifier))
         codes.append(keycode(name))
     normalized = KEY_ALIASES.get(main.lower(), main)
-    # 单字符键只有在**无修饰键**时才能走 STRING。STRING 是"插入这段文本"
-    # 的语义，会绕过已经 PRESS 的修饰键状态，使 ctrl+a 退化成输入字面 'a'。
+    # A single-character key may use STRING only without modifiers. STRING
+    # means "insert this text" and bypasses modifiers already pressed, so
+    # ctrl+a would degrade into typing a literal 'a'.
     if not (len(normalized) == 1 and not codes):
-        keycode(normalized)  # 提前确认主键可解析，失败就在这里报错
+        keycode(normalized)  # Fail here if the main key cannot be resolved.
     return codes, normalized
 
 
@@ -220,15 +225,19 @@ def send_text(text):
 
 
 def find_editable_text(root):
-    """挑出真正该接收文本的可编辑控件。
+    """Return the one editable control that should receive text, or None.
 
-    不能只看 EditableText 接口存不存在就取树序第一个。gedit 这类应用里，
-    树序靠前的往往是隐藏的占位控件：它实现了 EditableText 接口，却没有
-    EDITABLE 状态。对它调 Atspi.EditableText.insert_text() **照样返回 True**，
-    但字符数不变——文本静默写丢，工具却报成功。
+    Taking the first node in tree order that implements EditableText is not
+    enough. In applications such as gedit, early nodes are often hidden
+    placeholders that implement EditableText without the EDITABLE state;
+    Atspi.EditableText.insert_text() on them still returns True while the
+    character count stays the same, so the text is silently lost and the
+    tool reports success.
 
-    因此这里同时要求 EDITABLE 与 FOCUSED，并且只接受唯一候选。没有明确
-    焦点时不按可见性或树序猜测，交给标记为 unverified 的键盘路径。
+    The node must therefore be both EDITABLE and FOCUSED, and exactly one
+    candidate must exist. Without a clear focus owner nothing is guessed
+    from visibility or tree order; the caller uses the keyboard path, which
+    is reported as unverified.
     """
     focused = []
     for node in iter_all(root):
@@ -244,7 +253,10 @@ def find_editable_text(root):
 
 
 def read_all_text(text_iface):
-    """读出控件当前的全部文本；读不到返回 None（用来区分"空"和"读不到"）。"""
+    """Return the control's full text, or None if it cannot be read.
+
+    None distinguishes an unreadable control from an empty one.
+    """
     if text_iface is None:
         return None
     count = safe(lambda: Atspi.Text.get_character_count(text_iface))
@@ -257,12 +269,15 @@ def read_all_text(text_iface):
 
 
 def text_insertion_point(text_iface):
-    """决定文本该插到哪里，返回 (offset, selection)。
+    """Return (offset, selection) for inserting text.
 
-    优先级：非空选区起点 > caret > 末尾追加。selection 非空时调用方要先把它
-    删掉——真的在键盘上打字会覆盖选中内容，`type_text` 应该保持一致。
+    Priority: start of a non-empty selection, then the caret, then the end.
+    When a selection is returned, the caller must delete it first: typing on
+    a real keyboard replaces the selection, and `type_text` should behave
+    the same way.
 
-    只有读不到 caret 时才退回末尾追加（部分控件不实现 caret 查询）。
+    The end is used only when the caret cannot be read (some controls do not
+    implement caret queries).
     """
     count = safe(lambda: Atspi.Text.get_character_count(text_iface))
     count = int(count) if count is not None else 0
@@ -284,9 +299,10 @@ def text_insertion_point(text_iface):
 
 
 def insert_text_detail(root, text):
-    """通过 AT-SPI 直写文本，返回 (是否落地, 写前字符数, 写后字符数)。
+    """Write text through AT-SPI; return (verified, count_before, count_after).
 
-    调用方需要这三个值来如实报告"写进去了、并且确认过"，而不是只说一句成功。
+    Callers need all three values to report a write that landed and was
+    verified, rather than a bare success.
     """
     node = find_editable_text(root)
     status, before, after, _emitted = insert_text_outcome_on_node(node, text)
@@ -355,7 +371,8 @@ def insert_text_outcome_on_node(node, text):
             return "no_change", len(original_text), len(original_text), False
         selection_deleted = after_delete != original_text
 
-    # 删掉选区会改变内容，精确判定的基准必须在删除之后再读一次。
+    # Deleting the selection changed the content, so the baseline for exact
+    # verification must be read again after the deletion.
     before_text = read_all_text(text_iface)
     if before_text is None:
         return (
@@ -374,8 +391,9 @@ def insert_text_outcome_on_node(node, text):
         if selection_deleted:
             return "effect_unknown", before, before, True
         return "no_change", before, before, False
-    # insert_text 的返回值和字符数都不可信：错误控件可以返回 True，错误文本
-    # 也可以保持相同长度。回读完整内容并核对精确插入结果。
+    # Neither insert_text's return value nor the character count can be
+    # trusted: the wrong control can return True, and wrong text can keep the
+    # same length. Read the full content back and check the exact insertion.
     after_text = read_all_text(text_iface)
     if after_text is None:
         return "effect_unknown", before, before, True
@@ -462,9 +480,10 @@ def set_element_value_outcome(node, value):
                 False,
             ):
                 return "no_change"
-            # set_text_contents 和 insert_text 一样，对写不进去的控件同样返回
-            # True。只有精确回读到请求值才算确认；变成任意其他值不能被描述成
-            # "the control now holds it"。
+            # Like insert_text, set_text_contents returns True for controls
+            # that ignore the write. Only an exact readback of the requested
+            # value counts as verified; any other value must not be described
+            # as "the control now holds it".
             after = read_all_text(text_iface)
             if after is None:
                 return "effect_unknown"
@@ -487,40 +506,38 @@ def set_element_value(node, value):
     return outcome == "verified"
 
 
-# 应用解析的重试次数与间隔。见 resolve_app() 的说明：应用忙于重建窗口时，
-# 枚举可能瞬时读不到，而"读不到"被当成"不存在"会让 agent 走上完全错误的分支。
+# Retry count and interval for application resolution; see resolve_app().
+# Enumeration can fail transiently while an application rebuilds its
+# windows, and treating "unreadable" as "absent" sends the agent down an
+# entirely wrong path.
 RESOLVE_APP_ATTEMPTS = int(os.environ.get("COMPUTER_USE_RESOLVE_ATTEMPTS", "3"))
 RESOLVE_APP_RETRY_SECONDS = float(
     os.environ.get("COMPUTER_USE_RESOLVE_RETRY", "0.3")
 )
 
 
-# 一"页"折算成多少次滚轮。滚轮一格通常是 3 行，这里取 5 格 ≈ 15 行。
-# 这是**近似**，真实距离取决于应用自己的滚动设置——所以 Note 里要说是近似，
-# 不能让 agent 以为 pages=1 精确等于一次 Page_Down。
+# Wheel clicks per scrolled "page". One click usually scrolls three lines,
+# so five clicks is about 15 lines. This is an approximation that depends on
+# the application's scroll settings, so notes must call it approximate and
+# must not imply that pages=1 equals exactly one Page_Down.
 WHEEL_CLICKS_PER_PAGE = 5
 
 
 def scroll_element(direction, pages, point=None):
-    """滚动。有元素坐标就用滚轮按位置滚，没有就退回往焦点发 Page 键。
+    """Scroll with the mouse wheel at `point`, or send Page keys to the focus.
 
-    此前这里**只有**后一条路：element_index 是必填参数却完全不参与，键盘
-    事件落到当前焦点上。工具描述里如实标注了这一点——但如实说明一个缺陷
-    不等于修好它。
+    Wheel scrolling acts at a position: six wheel clicks at the center of a
+    600-line gedit document changed 23% of the text area's pixels, against
+    0% without scrolling. It acts on the scrollable ancestor under the
+    pointer, which is not necessarily the requested element itself. That is
+    the meaning of "scroll here", but not quite "scroll this control", and
+    notes must say so.
 
-    滚轮是真的按位置生效，实测（gedit 打开 600 行文件，在文本区中心发 6 次
-    b5c）：
-        对照组（什么都不做）  文本区 0% 像素变化
-        实验组（滚轮 x6）     文本区 23% 像素变化
+    Horizontal scrolling still uses Left/Right keys because the horizontal
+    wheel buttons (b6/b7) have not been verified.
 
-    要说清它**滚的是谁**：滚轮作用在指针下方的可滚动祖先上，不一定是你指定
-    的那个元素本身。这正是"在这个位置滚"的语义，但和"滚动这个控件"不完全
-    等同，Note 里要讲明白。
-
-    横向滚动仍然走 Left/Right 键：滚轮的横向按钮（b6/b7）我没有实测过，
-    不测就不发——这个仓库里没测过的路径不该以"应该能work"的名义上线。
-
-    返回实际走的路线，让 Note 说实话。
+    Return the route actually taken ("wheel" or "keys") so the note can
+    report it accurately.
     """
     pages = float(pages or 1)
     if not math.isfinite(pages) or pages <= 0 or pages > MAX_SCROLL_PAGES:
@@ -550,18 +567,22 @@ def scroll_element(direction, pages, point=None):
     return "keys"
 
 
-# 每条动作 Note 都带**两个正交的标签**，因为这是两件不同的事，
-# 混成一个会同时丢掉两边的信息。
+# Every action note carries two orthogonal labels, because they describe
+# different things and merging them would lose information on both sides.
+# The label constants are defined in ax_dispatch.
 #
-# 【寻址轴】目标是**怎么定位到的**——决定了该拿什么去验证它：
-#   [a11y]      通过无障碍树的 element_index 定位
-#   [gui]       通过屏幕坐标定位，树完全没有参与
-#   [keyboard]  通过当前输入焦点定位，两条通道都没参与
+# Addressing axis: how the target was located, which determines how to
+# verify it.
+#   [a11y]      through an element of the accessibility tree
+#   [gui]       through screen coordinates, without the tree
+#   [keyboard]  through the current input focus, without either channel
 #
-# 【执行轴】定位好之后**用什么把动作发出去**：
-#   [semantic]   AT-SPI 语义动作 / 可编辑文本 API
-#   [synthesis]  XTEST 全局合成
+# Execution axis: how the located action was delivered.
+#   [semantic]   AT-SPI semantic action or editable-text API
+#   [synthesis]  global XTEST input synthesis
 #
-# 两个轴会交叉。最要紧的一格是 `[a11y][synthesis]`：**用树给的坐标去合成点击**
-# ——寻址是 a11y 的，执行是合成的。以前只有执行轴一个标签，这一格会被记成
-# 纯合成，于是"agent 压根没用 a11y"和"用了但语义动作失效后回落"就分不开了。
+# The axes combine. The most important cell is `[a11y][synthesis]`: a click
+# synthesized at coordinates taken from the tree. With only an execution
+# label it would read as pure synthesis, and "the agent never used the tree"
+# could not be told apart from "it did, and fell back after the semantic
+# action failed".

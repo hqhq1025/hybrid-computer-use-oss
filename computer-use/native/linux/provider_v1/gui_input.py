@@ -1,4 +1,4 @@
-"""Linux provider module: gui input."""
+"""Validation and AT-SPI synthesis of GUI pointer and keyboard actions."""
 
 from .foundation import (
     Atspi,

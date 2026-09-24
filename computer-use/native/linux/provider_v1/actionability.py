@@ -1,4 +1,4 @@
-"""Linux provider module: actionability."""
+"""Action choice, geometry stability and coordinate-delivery checks."""
 
 from .foundation import (
     Atspi,
@@ -32,10 +32,9 @@ from .element_resolver import (
 )
 
 def preferred_action_index(node):
-    # 直接用 CLICK_COVERED_ACTIONS，不再维护一份副本。
-    # 两份集合是同一件事的两面（一个决定调用哪个动作、一个决定不要重复展示它），
-    # 抄成两处必然分歧：本轮加 `doDefault` 时就漏了这一份，
-    # 结果 VS Code 的 19 个节点仍然点不动。
+    # Use CLICK_COVERED_ACTIONS directly rather than a local copy: the same
+    # set decides which action a click invokes and which actions are hidden
+    # as redundant, so two copies would drift apart.
     preferred_exact = CLICK_COVERED_ACTIONS
     if safe(node.get_action_iface) is None:
         return None
@@ -63,27 +62,30 @@ def do_action_by_index(node, index):
 
 
 def window_relative(window_bounds, x, y):
-    """把 A11Y 内部合成使用的屏幕坐标换回目标窗口相对坐标。
+    """Convert an AX input-synthesis screen point to window coordinates.
 
-    A11Y tree Frame 与它的可选窗口截图使用这个空间。独立 gui 工具只接受
-    自己返回的全桌面屏幕绝对坐标，不经过这里。
+    AX tree frames and the optional window screenshot use window-relative
+    coordinates. The GUI tool accepts only coordinates in its own full-desktop
+    image and never uses this conversion.
     """
     if window_bounds is None:
         return x, y
     return x - window_bounds["x"], y - window_bounds["y"]
 
 
-# 稳定判据：两次采样一致即认为停住了。Playwright 等的是"连续两个动画帧内
-# bounding box 不变"，这里是同一件事的桌面版。
+# An element is stable once two consecutive samples match: the desktop analogue
+# of Playwright waiting for an unchanged bounding box across two animation
+# frames.
 STABLE_SAMPLE_SECONDS = 0.08
 
 
 def stable_timeout_seconds():
-    """等元素停住的上限，可调。
+    """Return the maximum wait for an element to stop moving, in seconds.
 
-    默认 1 秒是折中：够长，能盖住实测里绝大多数一次性重排；够短，遇到永远在
-    动的东西（进度条、动画）也不会把一次点击拖成几秒。动画重的应用可以调大，
-    追求最低延迟的场景可以调小到 0——那等于关掉这项等待。
+    COMPUTER_USE_STABLE_TIMEOUT_MS overrides the 1 second default. The default
+    covers most one-off relayouts without letting a permanently moving element
+    (progress bar, animation) delay a click by seconds. Animation-heavy
+    applications may need more; 0 disables the wait.
     """
     raw = os.environ.get("COMPUTER_USE_STABLE_TIMEOUT_MS", "").strip()
     if not raw:
@@ -95,18 +97,19 @@ def stable_timeout_seconds():
 
 
 def wait_until_stable(element, window_bounds, first=None):
-    """等元素停止移动再动手。返回 (最终 frame, 采样次数, 是否稳定下来)。
+    """Wait for an element to stop moving before acting on it.
 
-    **只做 stable，不做 enabled。** Playwright 的可操作性检查里还有"等元素
-    enabled"，那一条在 Linux 上不能照搬：本仓库实测 Nautilus 的文件图标根本
-    不设 ENABLED / SENSITIVE，状态里只有 SHOWING / VISIBLE / FOCUSABLE，却带着
-    open / menu 两个动作、完全可点。拿 ENABLED 当门禁会让 agent 直接跳过可用
-    目标。宁可不等这一项，也不能用一个不可靠的信号去拦住真实可用的元素。
-    同理不做 "receives events" 的命中测试门禁——本仓库实测命中率
-    gedit 11/11、Nautilus 19/25、LibreOffice 12/25，拿它当门禁会拦掉一半
-    LibreOffice 的正常点击。
+    Returns ``(final_frame, samples, settled)``. Pass ``first`` when the frame
+    has already been sampled, to avoid a redundant read.
 
-    `first` 让调用方把已经取过的那次采样传进来，省掉一次重复读取。
+    Only stability is checked, not enablement (只做 stable，不做 enabled).
+    Playwright's actionability checks also wait for "enabled", but that signal
+    is unreliable over AT-SPI: Nautilus file icons expose neither ENABLED nor
+    SENSITIVE (only SHOWING, VISIBLE and FOCUSABLE) yet offer working "open"
+    and "menu" actions, so an ENABLED gate would reject usable targets. A
+    "receives events" hit test is skipped for the same reason: measured hit
+    rates were 11/11 in gedit, 19/25 in Nautilus and 12/25 in LibreOffice, so
+    such a gate would block about half of valid LibreOffice clicks.
     """
     if element is None:
         return None, 0, True
@@ -134,22 +137,19 @@ def wait_until_stable(element, window_bounds, first=None):
 
 
 def current_geometry(element, element_record, window_bounds):
-    """把记录里的几何换成**活节点此刻的位置**，并说明它挪了多少。
+    """Replace the record's frame with the live node's current frame.
 
-    Playwright 的 locator 在每次动作时重新解析，这是同一件事的桌面版。
-    我们其实早就在 find_element 里重新解析出了活节点，却仍然拿 Go 缓存里的
-    那份旧记录去算坐标——于是同一次调用里有两套事实：语义路径作用在活节点上，
-    合成路径打在快照拍摄时的位置上。
+    Like a Playwright locator, the target is re-resolved at action time. The
+    live node is already resolved, so coordinates must come from it rather
+    than from the snapshot record cached by the Go side; otherwise semantic
+    actions and synthesized input could target different positions within one
+    call. Desktop UIs have no page-load event, and animation, asynchronous
+    loading or another process can move an element between tool calls.
 
-    实测：VS Code 里由外部收起侧栏后，click(element_index=21) 把坐标合成在
-    (572,38)，正是缓存框 {547,28,50,19} 的中心，而界面那时已经重排。
-
-    桌面比浏览器更需要这一条：这里没有"页面加载完成"这种事件，界面可以在
-    两次工具调用之间被动画、异步加载、甚至**别的进程**移动。
-
-    返回 (记录, 位移说明)。活节点取不到位置时保留旧记录仅供诊断；
-    coordinate fallback 会在 require_stable_coordinate_geometry() 中拒绝，
-    绝不会使用旧坐标发出输入。
+    Returns ``(record, movement_note)``. If the live frame is unavailable, the
+    old record is kept for diagnostics only; coordinate fallbacks reject it in
+    require_stable_coordinate_geometry() and never emit input at stale
+    coordinates.
     """
     if element is None or not element_record:
         return element_record, None
@@ -300,7 +300,8 @@ def screen_point(window_bounds, element=None, x=None, y=None):
             )
     if x is None or y is None or window_bounds is None:
         raise RuntimeError("coordinate action requires window bounds and x/y")
-    # 这里只服务 A11Y click 的元素坐标兜底。gui 不经过这里。
+    # Window-relative x/y input is used only by AX coordinate fallbacks; GUI
+    # input never takes this path.
     left, top = window_bounds["x"], window_bounds["y"]
     right = left + max(window_bounds["width"] - 1, 0)
     bottom = top + max(window_bounds["height"] - 1, 0)

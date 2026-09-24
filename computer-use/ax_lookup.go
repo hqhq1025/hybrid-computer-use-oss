@@ -11,6 +11,27 @@ import (
 	"unicode"
 )
 
+// toolError follows Playwright's error shape: the chain of facts first, the
+// advice after. A Playwright action timeout (1.55.1, issue #37695) reads:
+//
+//	Error: locator.click: Test timeout of 30000ms exceeded.
+//	Call log:
+//	  - waiting for getByText('Get started')
+//	    - locator resolved to <a href="/docs/intro">Get started</a>
+//	  - attempting click action
+//	    - waiting for element to be visible, enabled and stable
+//
+// It states facts rather than advice: what it waited for, what the locator
+// resolved to, how far the checks got and in which state it failed. Its core
+// errors carry no advice strings such as "Consider using force: true".
+//
+// The exception is its MCP layer, whose consumer is an LLM:
+//
+//	Ref e3 not found in the current page snapshot. Try capturing new snapshot.
+//
+// That message names the next tool to call. The consumer here is also an LLM,
+// so errors carry both the chain of facts and an explicit next step, labeled
+// separately so that speculation never enters the call log.
 type toolError struct {
 	tool    string
 	summary string
@@ -52,8 +73,9 @@ func (e *toolError) Error() string {
 	if len(e.log) > 0 {
 		b.WriteString("\n\nCall log:")
 		for _, line := range e.log {
-			// 已经带缩进的是上一条的续行（候选列表那种），不再套 "- "。
-			// 照 Playwright 的 call log 缩进规则：带前导空格的渲染成子行。
+			// Indented lines continue the previous entry (as in candidate
+			// lists) and get no "- " bullet, following Playwright's call-log
+			// rule that lines with leading spaces render as sub-lines.
 			if strings.HasPrefix(line, " ") {
 				b.WriteString("\n  " + line)
 			} else {
@@ -67,7 +89,8 @@ func (e *toolError) Error() string {
 	return b.String()
 }
 
-// snapshotAge 把"这份快照有多旧"写成一句话。
+// snapshotAge summarizes how old the snapshot is and which element indices it
+// holds.
 func snapshotAge(snapshot *appSnapshot) string {
 	if snapshot == nil {
 		return ""
@@ -84,8 +107,9 @@ func snapshotAge(snapshot *appSnapshot) string {
 		time.Since(snapshot.capturedAt).Seconds(), indices)
 }
 
-// closestElements 找出与声明意图最像的几个元素，连同可直接使用的选择器一起给出。
-// 对应 Playwright strict mode 违规时那份 "aka <可用的替代 locator>" 候选表。
+// closestElements finds the elements that best match the declared intent,
+// each with a directly usable selector. It corresponds to the "aka <locator>"
+// candidate list of a Playwright strict-mode violation.
 func closestElements(snapshot *appSnapshot, declared string, limit int) []string {
 	if snapshot == nil || strings.TrimSpace(declared) == "" {
 		return nil
@@ -137,7 +161,8 @@ func lookupElement(snapshot *appSnapshot, elementIndex string) (*elementRecord, 
 	return lookupElementFor(snapshot, elementIndex, "", "")
 }
 
-// lookupElementFor 解析一个引用，失败时给出**完整的事实链**而不是一句话。
+// lookupElementFor resolves a reference and, on failure, reports the full
+// chain of facts rather than a one-line error.
 func lookupElementFor(snapshot *appSnapshot, elementIndex, declared, tool string) (*elementRecord, error) {
 	fail := func(summary string) *toolError {
 		e := &toolError{tool: tool, summary: summary}
@@ -404,34 +429,26 @@ func elementIntentMismatch(record *elementRecord, declared string) string {
 	if declared == "" || record == nil {
 		return ""
 	}
-	// 只对**有名字**的元素校验。
-	//
-	// 第一版把 role 也算进可匹配范围，结果被最常见的词击穿：声明里几乎必然有
-	// "button"，而 role 里也几乎必然有 "button"，于是"声明 Save 却给了 New 的
-	// 下标"这种正要拦的情况照样放行（实测确认）。
-	//
-	// 反过来，无名元素的身份常常来自**旁边的标签**而不是自身属性——
-	// 实测 LibreOffice 的「位置和大小」对话框，四个 spin button 全都没有名字，
-	// "哪个是 Position Y" 只写在旁边的 label 上。这类元素上任何声明都匹配不了，
-	// 硬校验就是纯误伤。**判不了就别判。**
+	// Check only named elements. Matching against the role is useless because
+	// declarations and roles both almost always contain "button". Unnamed
+	// elements often take their identity from an adjacent label (for example,
+	// the unnamed spin buttons of a position-and-size dialog), so no
+	// declaration can match them and a check would only reject correct
+	// actions.
 	if strings.TrimSpace(record.Name) == "" {
 		return ""
 	}
 	if !containsASCIILetter(declared) {
-		// 声明是非 ASCII 文字（例如中文），而 name 通常是英文。判不了。
+		// A declaration without ASCII letters (for example, Chinese text)
+		// cannot be compared with names, which are usually English.
 		return ""
 	}
-	// 名字太短时**同样判不了**，理由和无名元素一模一样。
-	//
-	// 实测一个筛选界面：agent 声明 "Size L checkbox"，
-	// 元素是 `check box "L"`——**完全正确的操作，被守卫拒了**。
-	// 因为下面的分词会跳过长度 < 2 的词元（那是为了滤掉 "a"/"of" 这类噪声），
-	// 而这个元素的名字整个就是一个字符 "L"，于是任何声明都匹配不上，
-	// 守卫**必然**误拒。
-	//
-	// 守卫的价值在于拦住"声明 Save 却给了 New 的下标"，代价是偶尔误伤；
-	// 而这里不是"偶尔"——是这一类元素上 100% 误伤。尺码、单选字母、
-	// 表格列标题都是这样。宁可漏判，不可必然误判。
+	// Very short names without a description cannot be checked either.
+	// Tokenization below skips tokens shorter than two characters to drop
+	// noise such as "a" or "of", so an element named "L" (a size filter,
+	// a lettered radio option, a column header) could never match a correct
+	// declaration such as "Size L checkbox" and would always be rejected.
+	// Missing a mismatch is better than a guaranteed false rejection.
 	if len([]rune(strings.TrimSpace(record.Name))) <= 2 &&
 		strings.TrimSpace(record.Description) == "" {
 		return ""
@@ -452,7 +469,8 @@ func elementIntentMismatch(record *elementRecord, declared string) string {
 		}
 	}
 	if specific == 0 || matched {
-		// 声明里没有区分性的实词（"the button"），或者对上了。
+		// The declaration has no distinguishing word ("the button"), or it
+		// matched.
 		return ""
 	}
 	return fmt.Sprintf(
@@ -462,7 +480,8 @@ func elementIntentMismatch(record *elementRecord, declared string) string {
 		record.Index, describeRecord(record), declared)
 }
 
-// 对任何元素都成立的词。拿它们判等于不判——而且第一版正是被 "button" 击穿的。
+// genericIntentWords are words that fit any element, so matching them proves
+// nothing; "button", for example, appears in most declarations and roles.
 var genericIntentWords = map[string]bool{
 	"the": true, "a": true, "an": true, "of": true, "in": true, "on": true,
 	"for": true, "to": true, "this": true, "that": true, "and": true, "with": true,
@@ -483,18 +502,17 @@ func containsASCIILetter(text string) bool {
 	return false
 }
 
-// renderElementReference 是**所有**面向 agent 的元素指称的唯一出口：树行之外的
-// find 结果、谓词证据、焦点摘要，全部经由这里。
+// renderElementReference is the single renderer for agent-facing element
+// references outside tree lines: find results, predicate evidence and focus
+// summaries.
 //
-// 唯一的硬性契约是**可回读**：这里吐出来的任何一串，原样贴回 expect 的 target
-// （parseExpectTarget）都必须解析成同一个指称。三种形态各自对应 parser 的一条
-// 分支——`push button "Save"` 走选择器，`"Save"` 走选择器的空角色分支，
-// `role="push button"` 走字段式——所以三种都能回读。
-//
-// 这一条不是洁癖。此前焦点摘要走的是另一套渲染（runtime.py 的 role + " " + name，
-// 无引号），于是我们一边告诉 agent "焦点在 entry Address and search bar"，
-// 一边在它把这串贴进 expect 时判它不匹配：裸串横跨 role 与 name 两个字段，
-// 结构性必假。我们打印的东西必须是我们自己认得的东西。
+// Its one hard contract is round-tripping: any string it returns, pasted
+// verbatim into an expect target (parseExpectTarget), must parse back to the
+// same reference. Each form maps to one parser branch: `push button "Save"`
+// to the selector, `"Save"` to the selector's empty-role branch, and
+// `role="push button"` to the field form. An unquoted "role name" string
+// would span both fields and never match, so the tool would reject the very
+// text it printed.
 func renderElementReference(role, name string) string {
 	role = strings.TrimSpace(role)
 	name = strings.TrimSpace(name)
@@ -502,8 +520,8 @@ func renderElementReference(role, name string) string {
 	case role == "" && name == "":
 		return "an element with neither a role nor a name"
 	case name == "":
-		// 无名元素不能写成散文（"an unnamed push button" 回读不了），
-		// 写成字段式才既准确又能贴回去。
+		// Prose such as "an unnamed push button" cannot be read back; the
+		// field form is both accurate and pasteable.
 		return fmt.Sprintf("role=%q", role)
 	case role == "":
 		return fmt.Sprintf("%q", name)
@@ -529,16 +547,14 @@ func renderElementAddress(record *elementRecord) string {
 }
 
 // ---------------------------------------------------------------------------
-// find：不用先把整棵树拉下来就能定位
+// find: locating elements without first retrieving the whole tree
 //
-// 这是我们与 Playwright 之间**身份级**的差距，不是体验问题。Playwright 的
-// locator（`getByRole('button', {name:'OK'})`）从不要求你先 dump 一份 DOM；
-// 我们此前只有"整棵拉下来再挑一个"这一条路——VS Code 的树 15342 字符，
-// 为了点一个按钮让 agent 把这些读完，是纯粹的浪费。
-//
-// **必须说清它不省什么**：运行时那边照样遍历一整棵 AT-SPI 树，机器成本一分没少。
-// 省的是 agent 的上下文。桌面上不存在 CSS 选择器那种能下推给引擎的查询，
-// 遍历避不掉——这一点写进工具描述，免得调用方以为 find 比 get_app_state "快"。
+// Like a Playwright locator (getByRole('button', {name: 'OK'})), find does not
+// require dumping the full tree before acting, which spares the agent's
+// context when a large tree holds one relevant control. It does not save
+// machine cost: the provider still traverses the whole AT-SPI tree, because
+// the desktop has no query that can be pushed down to the engine the way a
+// CSS selector can.
 // ---------------------------------------------------------------------------
 
 func rawLinesByIndex(snapshot *appSnapshot) map[int]string {
@@ -552,11 +568,12 @@ func rawLinesByIndex(snapshot *appSnapshot) map[int]string {
 	return indexTreeLines(lines)
 }
 
-// linesByIndex 把渲染好的树行按行首编号建索引。
+// linesByIndex indexes rendered tree lines by their leading element index.
 //
-// 刻意**复用 Python 渲染的原文**，而不在 Go 里再写一个渲染器：文法只有一份，
-// 两份实现迟早会漂移，而 find 的输出和 get_app_state 的输出必须逐字同构——
-// 否则 agent 得学两套读法。截断提示行（"… 12 more"）行首不是数字，自然被跳过。
+// It reuses the provider-rendered text rather than a second renderer in Go:
+// two implementations of one grammar would drift, and find output must match
+// observation output verbatim so the agent reads both the same way. Truncation
+// lines such as "… 12 more" do not start with a number and are skipped.
 func linesByIndex(snapshot *appSnapshot) map[int]string {
 	if snapshot == nil {
 		return nil

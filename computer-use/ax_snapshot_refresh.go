@@ -68,19 +68,9 @@ func (s *service) hiddenCanonicalAddressChangeNote(
 	)
 }
 
-// condenseLinePair 把"同一个节点、只有内容变了"的一对行压成一行变更摘要。
-//
-// 修的是行级差分的一个结构性缺陷：差分粒度是**行**，而一个控件完全可以把
-// 几千字符装进单个节点的 value 里（终端、日志视图、大 value 文本域都是这样）。
-// 那时任意一次内容变化都表现为"1 行消失 + 1 行新增"，于是旧版和新版被**同时**
-// 原样输出，增量的输出量反而是全量的两倍——本该省钱的机制在这里加倍收费。
-//
-// 解法是把粒度下沉到节点内容里：掐掉公共前后缀，只报真正变化的那一段，
-// 并保留足够的上下文让调用方知道它落在哪里。行首那段公共前缀天然包含
-// `<index> <role> "<name>"`，所以摘要仍然自带元素身份，下标不会因此丢失。
-//
-// 什么时候不压：短行压了没意义（元数据比内容还长），
-// 以及"整行都变了"——那时没有可复用的前后缀，原样给 -旧 +新 更诚实。
+// observablyChanged compares the parts of two snapshots that the agent can
+// observe. Screenshots are excluded: pixel noise such as a blinking cursor
+// would always register as a change.
 func observablyChanged(before, after *appSnapshot) bool {
 	if before == nil || after == nil {
 		return true
@@ -101,9 +91,9 @@ func observablyChanged(before, after *appSnapshot) bool {
 	return false
 }
 
-// looseKey 把应用名压成"只剩字母数字"，用于缓存查找的宽松比对。
-// 与 runtime.py 里 loose() 同一套规则——两处规则不一致，
-// 就会出现"解析得到但缓存查不到"这种没人能猜到的状态。
+// looseKey reduces an app name to lowercase letters and digits for lenient
+// cache lookup. It must follow the same rule as loose() in the Linux provider;
+// if the two diverged, an app could resolve but then miss the cache.
 func looseKey(text string) string {
 	var out strings.Builder
 	for _, r := range strings.ToLower(text) {
@@ -118,16 +108,11 @@ func (s *service) currentSnapshot(app string) *appSnapshot {
 	if snapshot, ok := s.snapshots[strings.ToLower(app)]; ok {
 		return snapshot
 	}
-	// 精确键找不到时**按同样的宽松规则再找一遍**。
-	//
-	// 实测踩到过，而且是我自己引入的：get_app_state 允许不传 app 之后，
-	// 快照按解析出的真名（"Google Chrome"）缓存，而 agent 下一步动作写的是
-	// "chrome"——于是它刚刚成功取过状态，紧接着就被告知
-	// "No app state is available for chrome. Run get_app_state before action tools."
-	//
-	// 对 agent 来说这是最迷惑的一类回答：它照做了，工具却说它没做。
-	// 应用名解析已经是宽松的，缓存查找也必须一样宽松，否则两套规则之间
-	// 会漏出这种没人猜得到的缝。
+	// When the exact key misses, search again with the same lenient rule that
+	// app-name resolution uses. Snapshots are cached under the resolved name
+	// (for example "Google Chrome") while the next call may say "chrome"; a
+	// strict lookup would report no app state right after a successful
+	// observation.
 	needle := looseKey(app)
 	if needle == "" {
 		return nil
@@ -185,10 +170,9 @@ func (s *service) currentOrFreshSnapshot(
 	return snapshot, toolCallResult{}
 }
 
-// readSnapshot 取一份快照但**不写缓存槽位**。
-//
-// 拆出来是为了让只读工具真的只读。快照槽位是 element_index 的唯一依据，
-// 写它就是副作用——见 takeSnapshot 的说明。
+// readSnapshot captures a snapshot without writing the snapshot cache, so that
+// read-only tools stay read-only. The cached snapshot is the address space for
+// later actions, and replacing it is a side effect.
 func (s *service) readSnapshot(app string, request axServiceRequest) (*appSnapshot, []string, toolCallResult) {
 	if err := s.bindRuntimeAppIdentity(&request); err != nil {
 		return nil, nil, textResult(
@@ -923,9 +907,9 @@ func (s *service) runtimeFailureResult(
 
 // readProjectedSnapshot samples live state without replacing the action cache.
 //
-// find and verify are read-only tools, but their queries still need the same
-// projection as the cached action snapshot. Otherwise a default pruned read can
-// silently replace or disagree with a preceding prune=false address space.
+// Assertions are read-only, but their queries still need the same projection
+// as the cached action snapshot. Otherwise a default pruned read can silently
+// replace or disagree with a preceding prune=false address space.
 func (s *service) readProjectedSnapshot(app string, request axServiceRequest) (*appSnapshot, []string, toolCallResult) {
 	if previous := s.currentSnapshot(app); previous != nil {
 		applyProjection(&request, previous.projection)
@@ -935,7 +919,7 @@ func (s *service) readProjectedSnapshot(app string, request axServiceRequest) (*
 
 // refreshProjectedSnapshot samples live state in the existing address-space
 // projection, then updates the action cache. find uses this path because every
-// element_index it returns must be directly usable by the next action.
+// target it returns must be directly usable by the next action.
 func (s *service) refreshProjectedSnapshot(app string, request axServiceRequest) (*appSnapshot, []string, toolCallResult) {
 	if previous := s.currentSnapshot(app); previous != nil {
 		applyProjection(&request, previous.projection)
@@ -943,15 +927,16 @@ func (s *service) refreshProjectedSnapshot(app string, request axServiceRequest)
 	return s.refreshSnapshot(app, request)
 }
 
-// continuityNotes 把这一份快照和上一份的关系说清楚，并**就地填好**新快照上
-// 那几个只有持有历史的一侧才答得出的字段。
+// continuityNotes describes how this snapshot relates to the previous one and
+// fills in, in place, the snapshot fields that only the history-holding side
+// can answer. It separates cases that otherwise look identical:
 //
-// 它回答的是两个此前无法区分的问题：
-//
-//  1. 「什么都没变」到底是异步操作还没做完，还是信息被裁掉了——前者在树上
-//     和后者长得一模一样，调用方只能猜，猜错就是一轮无效重试。
-//  2. 快照的根窗口换了没有。同一应用开出第二个同标题窗口时，根会静默切换、
-//     全部 element_index 平移，而返回文本上一个字都不变。
+//  1. Whether an unchanged tree means that an asynchronous operation is still
+//     running or that information was trimmed. Both look the same in the
+//     tree, and a wrong guess costs a wasted retry.
+//  2. Whether the root window changed. When an app opens a second window with
+//     the same title, the root can switch silently and every element index
+//     shifts while the returned text stays the same.
 func continuityNotes(previous, current *appSnapshot) []string {
 	if current == nil {
 		return nil
@@ -1019,8 +1004,9 @@ func continuityNotes(previous, current *appSnapshot) []string {
 	if !previous.capturedAt.IsZero() {
 		gap = fmt.Sprintf(" %.1fs apart.", time.Since(previous.capturedAt).Seconds())
 	}
-	// 分两档说，因为**证据强度不同**：应用自报在忙是一条正面证据，可以据此
-	// 说"再等等"；没有这条证据时只能说"我不知道"，不能反过来断言操作失败。
+	// Report two tiers because the evidence differs in strength: an app that
+	// reports busy is positive evidence for waiting, while its absence only
+	// means "unknown" and never proves that the action failed.
 	if current.Busy.busy() {
 		notes = append(notes, fmt.Sprintf(
 			"SNAPSHOT UNCHANGED, APP REPORTS BUSY: the current state is identical to the "+
@@ -1051,9 +1037,10 @@ func continuityNotes(previous, current *appSnapshot) []string {
 }
 
 func (s *service) refreshSnapshot(app string, request axServiceRequest) (*appSnapshot, []string, toolCallResult) {
-	// 先扣住上一份快照：continuity 的全部信息量都来自「这次和上次的关系」。
-	// 它只挂在刷新路径上——只读的 readSnapshot 不写缓存，也就不该讲连续性，
-	// 否则独立 GUI 观察会凭空产生一段关于它自己没有参与的 A11Y 历史叙述。
+	// Capture the previous snapshot first: continuity is defined by the
+	// relation between this snapshot and the last one. Only the refresh path
+	// reports continuity; readSnapshot does not write the cache, and an
+	// independent read must not narrate AX history it took no part in.
 	internalPrevious := s.currentSnapshot(app)
 	if internalPrevious != nil && request.Operation != axServiceObserve {
 		applyProjection(&request, internalPrevious.projection)
@@ -1198,27 +1185,3 @@ func (s *service) rememberSnapshot(query string, snapshot *appSnapshot) {
 		}
 	}
 }
-
-// toolError 按 Playwright 的错误形态组装：**事实链在前，建议在后**。
-//
-// Playwright 的动作超时错误长这样（1.55.1，issue #37695）：
-//
-//	Error: locator.click: Test timeout of 30000ms exceeded.
-//	Call log:
-//	  - waiting for getByText('Get started')
-//	    - locator resolved to <a href="/docs/intro">Get started</a>
-//	  - attempting click action
-//	    - waiting for element to be visible, enabled and stable
-//
-// 它给的不是建议，是**事实链**：我在等什么、解析到了什么、检查到哪一步、
-// 失败在哪个状态。我全量查过它的源码，连 "Consider using force: true" 这种
-// 建议串都不存在。
-//
-// **唯一的例外恰好在它的 MCP 层**——因为消费者是 LLM 不是人：
-//
-//	Ref e3 not found in the current page snapshot. Try capturing new snapshot.
-//
-// 这条**点名了下一步该调哪个工具**。我们的消费者同样是 LLM，所以两者都要：
-// 事实链 + 明确的下一步，但**分开标注**，别把推测混进 call log。
-//
-// 替换掉的是 `unknown element_index "128"` 这种 27 个字符、零指引的报错。

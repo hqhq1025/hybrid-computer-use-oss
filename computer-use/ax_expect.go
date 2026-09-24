@@ -8,6 +8,37 @@ import (
 	"time"
 )
 
+// ---------------------------------------------------------------------------
+// expect: act, settle and verify in one call
+//
+// AX input synthesis (key presses, typing and the coordinate fallback for
+// clicks) goes through AT-SPI generate_*_event, which is fire-and-forget: it
+// returns once the event is queued, with no way to know whether the target
+// received it, so actions can only report that delivery was not verified. A
+// separate verification call costs an extra round trip that agents rarely
+// pay; under uncertainty they re-read the whole tree or retry blindly.
+// Folding verification into the action closes that loop.
+//
+// Three boundaries hold:
+//
+//  1. predicate_verified=false is not isError. The action was sent and the
+//     expectation was not met, which is a fact about the UI rather than a
+//     call error. isError stays reserved for argument and addressing errors
+//     (unknown app, unresolvable target, malformed expect); reporting an
+//     unmet expectation as an error would make the agent change the call
+//     instead of the next action.
+//  2. Without expect, responses are unchanged; the parameter is purely
+//     additive.
+//  3. Predicates use only toolkit-independent semantics (role, name, value,
+//     state and focus). No app-specific concept is introduced and nothing
+//     branches on the app name: an app can be evidence, never a condition.
+//
+// settle polls instead of sleeping and reports the actual elapsed time. Every
+// poll is a full AT-SPI traversal, so the default budget (defaultSettleMS) is
+// short, and the first evaluation reuses the snapshot the action just built,
+// so the common case costs no extra read.
+// ---------------------------------------------------------------------------
+
 func recordHasState(record *elementRecord, state string) bool {
 	if record == nil {
 		return false
@@ -27,8 +58,8 @@ func renderedStates(record *elementRecord) string {
 	return strings.TrimSpace(record.States)
 }
 
-// splitTopLevel 按分隔符切分，但**引号内的分隔符不算**——
-// `name="Save, As"` 里的逗号属于名字，不是字段边界。
+// splitTopLevel splits text on sep, ignoring separators inside quotes: the
+// comma in `name="Save, As"` belongs to the name, not a field boundary.
 func splitTopLevel(text string, sep byte) []string {
 	parts := []string{}
 	current := strings.Builder{}
@@ -55,9 +86,10 @@ func splitTopLevel(text string, sep byte) []string {
 	return parts
 }
 
-// splitExpectField 把 `role=dialog` 拆成 ("role", "dialog")。
-// 只有等号左边是一个纯标识符时才算字段，否则整串当作值——
-// 这样 `"a=b"` 这种名字里带等号的写法不会被误读成字段。
+// splitExpectField splits `role=dialog` into ("role", "dialog"). A part is a
+// field only when the left side of `=` is a plain identifier; otherwise the
+// whole part is a value, so a quoted name containing `=`, such as `"a=b"`, is
+// not misread as a field.
 func splitExpectField(part string) (string, string, bool) {
 	for index := 0; index < len(part); index++ {
 		if part[index] == '"' {
@@ -131,13 +163,14 @@ func parseExpectTarget(raw string) (expectTarget, error) {
 		}
 		key, value, isField := splitExpectField(part)
 		if !isField {
-			// 裸下标：`42`。
+			// A bare index such as `42`.
 			if number, err := strconv.Atoi(part); err == nil {
 				target.index = number
 				continue
 			}
-			// 选择器式：`push button "Save"`。谓词后缀在这里不接受——
-			// expect 的字段式写法已经覆盖了它，两套语法叠在一起只会互相干扰。
+			// A selector such as `push button "Save"`. Predicate suffixes are
+			// rejected here: the field form of expect already covers them,
+			// and combining the two syntaxes would only make them conflict.
 			if strings.Contains(part, "\"") {
 				role, name, hasName, rest := parseSelector(part)
 				if strings.TrimSpace(rest) != "" {
@@ -194,12 +227,14 @@ func parseExpectTarget(raw string) (expectTarget, error) {
 	return target, nil
 }
 
-// focusedRecord 从**被渲染的这份树**里找焦点节点。
+// focusedRecord finds the focused node in the rendered tree of this snapshot.
 //
-// 它刻意不看 snapshot.FocusedSummary：那是运行时另一次独立的整窗扫描，
-// 不受节点预算剪枝影响，也可能属于另一个窗口。谓词的判定源是 Elements，
-// 证据源就必须也是 Elements，否则会出现"树里没有匹配项，焦点在 X"这种
-// 自己打自己脸的证据——同一句话里两个观测源。
+// It deliberately ignores snapshot.FocusedSummary, which comes from a separate
+// whole-window scan by the provider that is not subject to node-budget pruning
+// and may belong to another window. Predicates are evaluated against Elements,
+// so evidence must come from Elements too; mixing the sources produces
+// self-contradicting evidence such as "nothing in the tree matches, focus is
+// on X".
 func focusedRecord(snapshot *appSnapshot) *elementRecord {
 	if snapshot == nil {
 		return nil
@@ -212,12 +247,14 @@ func focusedRecord(snapshot *appSnapshot) *elementRecord {
 	return nil
 }
 
-// focusDescription 说清"在这份快照里，焦点到底在谁身上"。
-// focus_moves_to 失败时这是最该给的一句话：知道焦点跑到哪儿了，
-// agent 才知道该按 Tab 还是该重新点。
+// focusDescription states where focus is in this snapshot. It is the most
+// useful fact when focus_moves_to fails: knowing where focus went tells the
+// agent whether to press Tab or click again.
 //
-// 焦点节点不在这份树里时，措辞必须把"目标不匹配"与"焦点没进入本次观测"
-// **分开说**，并且明说 FocusedSummary 来自另一次扫描、不是判定所用的那份视图。
+// When the focused node is absent from this tree, the wording must keep "the
+// target does not match" apart from "focus was not observed here", and must
+// say that FocusedSummary comes from a separate scan, not from the view the
+// predicate was evaluated against.
 func focusDescription(snapshot *appSnapshot) string {
 	if snapshot == nil {
 		return "(no snapshot)"
@@ -286,11 +323,11 @@ func baselineLabel(before *appSnapshot) string {
 	return "the pre-action snapshot (" + strings.Join(parts, ", ") + ")"
 }
 
-// noBaselineEvidence 是"没有动作前快照"时的统一说法。
-//
-// 这里**不回落成存在性判定**。appears/disappears 是变化断言，没有基线就没有变化
-// 可言；用"现在存在"冒充"刚刚出现"，正是这一版要修的那个假阳性。verified=false
-// 加一句"怎么才能拿到基线"，比一个假的 true 有用得多。
+// noBaselineEvidence explains a change assertion made without a pre-action
+// snapshot. It never falls back to an existence check: appears and disappears
+// assert a change, and without a baseline there is no change to show.
+// Reporting "present now" as "just appeared" would be a false positive; an
+// unverified result that explains how to obtain a baseline is more useful.
 func noBaselineEvidence(kind, raw string, presentNow bool) string {
 	state := "no element matches it now either"
 	if presentNow {
@@ -304,16 +341,17 @@ func noBaselineEvidence(kind, raw string, presentNow bool) string {
 		kind, state, raw)
 }
 
-// evaluate 返回是否满足，以及**实际观测到了什么**。
+// evaluate reports whether the predicate holds and what was actually observed.
 //
-// 两份快照，不是一份。appears / disappears 是**变化**断言，只看动作之后那一份
-// 就只能回答"存在吗"——实测代价是 62 次 verified=true 里 16–23% 是硬假阳性，
-// 典型是把一直在那儿的顶层窗口标题判成"新出现"。存在不等于新增，所以基线是
-// 判定的一部分，不是修饰。
+// It takes two snapshots, not one. appears and disappears assert a change, and
+// the post-action snapshot alone can only say whether something exists: an
+// always-present window title would then count as newly appeared. Existence is
+// not addition, so the baseline is part of the verdict.
 //
-// 证据也必须落在**同一份**观测上。失败证据跨两个观测源会写出
-// "树里没有匹配项，焦点在 entry Address and search bar" 这种自相矛盾的话——
-// 前半句读的是剪枝后的 Elements，后半句读的是运行时另一次整窗扫描。
+// Evidence must also come from a single observation. Mixing the pruned
+// Elements with the provider's separate whole-window focus scan produces
+// self-contradicting text such as "nothing in the tree matches, focus is on
+// entry Address and search bar".
 func (p expectPredicate) evaluate(before, after *appSnapshot) (bool, string) {
 	switch p.kind {
 	case "appears":
@@ -354,8 +392,10 @@ func (p expectPredicate) evaluate(before, after *appSnapshot) (bool, string) {
 				p.target.raw, beforeCount, afterCount, renderElementAddress(record))
 		}
 		record := p.target.find(after)
-		// 证据的重点是**匹配数量增加**，不是 element_index。StableIndexer 会在路径、
-		// role、name 保持稳定时复用编号，因此编号既不是每次必变，也不能证明新增。
+		// The evidence is the increased match count, not the element index.
+		// The provider's StableIndexer reuses indices while path, role and
+		// name stay stable, so an index neither always changes nor proves
+		// that an element was added.
 		return true, fmt.Sprintf(
 			"the number of elements matching %q increased from %d in %s to %d in the post-action "+
 				"tree. A current match is %s; element_index %d is only its current address, while "+
@@ -370,7 +410,8 @@ func (p expectPredicate) evaluate(before, after *appSnapshot) (bool, string) {
 		}
 		beforeCount := p.target.countMatches(before)
 		if beforeCount == 0 {
-			// 对称于 appears：动作前就没有，那么"现在没有"什么都没证明。
+			// The mirror of appears: absent before the action, so "absent now"
+			// proves nothing.
 			return false, fmt.Sprintf(
 				"nothing matched %q in %s either, so there was nothing to disappear and this action "+
 					"proved nothing. A disappears that was never present is a vacuous truth, and "+
@@ -511,10 +552,10 @@ func (p expectPredicate) evaluate(before, after *appSnapshot) (bool, string) {
 		if record := p.target.findFocused(after); record != nil {
 			return true, fmt.Sprintf("focus is on %s", renderElementAddress(record))
 		}
-		// 判定源与证据源都是 after.Elements，一份视图从头用到尾。
-		// 先分清失败的**种类**，再说细节——"焦点节点没进入本次观测"与
-		// "焦点节点在这儿但不是你要的那个"是两件完全不同的事，
-		// 而混着说就会写出自相矛盾的证据。
+		// Both the verdict and the evidence use after.Elements. Classify the
+		// failure first: "the focused node was not observed" and "the focused
+		// node is not the target" are different facts, and mixing them yields
+		// self-contradicting evidence.
 		focused := focusedRecord(after)
 		if focused == nil {
 			return false, fmt.Sprintf(
@@ -590,10 +631,11 @@ var expectPredicateNames = []string{
 	"state_becomes", "state_is_after", "focus_moves_to", "focus_within",
 }
 
-// parseExpect 解析 expect 参数。**写错了要硬失败**（isError），
-// 因为那是调用错误，与"预期没达成"是两件完全不同的事：
-// 前者要改调用形式，后者要改下一步动作。悄悄忽略一个拼错的谓词，
-// 等于给 agent 一个永远为真的验证，比不验证更糟。
+// parseExpect parses the expect argument. Malformed input is a hard failure
+// (isError) because it is a call error, unlike an unmet expectation: the
+// former requires fixing the call, the latter changing the next action.
+// Silently ignoring a misspelled predicate would give the agent a check that
+// always passes, which is worse than none.
 func parseExpect(args map[string]any) (*expectSpec, error) {
 	raw, present := args["expect"]
 	if !present || raw == nil {
@@ -620,7 +662,7 @@ func parseExpect(args map[string]any) (*expectSpec, error) {
 		}
 	}
 	spec := &expectSpec{}
-	// 固定顺序遍历，证据串才稳定可读。
+	// Iterate in a fixed order so that evidence strings are stable.
 	for _, kind := range []string{"appears", "disappears", "exists_after", "focus_moves_to", "focus_within"} {
 		value, has := object[kind]
 		if !has || value == nil {

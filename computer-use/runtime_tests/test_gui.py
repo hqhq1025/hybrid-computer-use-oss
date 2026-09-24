@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split Linux provider tests."""
+"""Linux provider GUI lease, pixel evidence, settle wait, and input tests."""
 
 from runtime_test_support import *  # noqa: F401,F403
 
@@ -83,11 +83,11 @@ class GUILeaseTests(unittest.TestCase):
         execute.assert_not_called()
 
 class PixelEvidenceTests(unittest.TestCase):
-    """像素比对是**独立于树**的第三种效果判据。
+    """Pixel comparison is a third effect check, independent of the tree.
 
-    起因是实测过的误判：ctrl+s 之后树字节不变，工具断言"送达但被忽略"，
-    而文件其实存下来了；agent 因此多花两步自证。树看不见整类效果
-    （格式改动、文件状态、画布像素），所以"树没变"推不出"没生效"。
+    The tree misses whole classes of effects such as formatting, file state
+    and canvas pixels; after ctrl+s it can stay byte-identical although the
+    file was saved. An unchanged tree does not prove an action had no effect.
     """
 
     def _frame(self, fill, size=(80, 60)):
@@ -149,19 +149,17 @@ class PixelEvidenceTests(unittest.TestCase):
         return frame
 
     def test_flicker_is_filtered_by_requiring_the_change_to_persist(self):
-        """闪烁的东西只在其中一张动作后画面里变了，不该算作效果。
+        """A change present in only one post-action capture is flicker.
 
-        这是走过弯路才定下的判据。第一版设了个固定阈值（猜的），第二版改成
-        "动作前连抓两张测噪声底"——方向对，但两张只隔几毫秒，1Hz 的文本光标
-        根本没来得及闪，噪声底测出来是 0，于是**空操作也被判成"屏幕变了"**，
-        变化区域正是那个 8x16 的光标。
-
-        现在照 Playwright"连续两张一致再比"的思路：只认两张里都存在的变化。
+        Two pre-action captures taken milliseconds apart cannot measure the
+        noise of a 1 Hz text caret, so a no-op would report the 8x16 caret as
+        a change. Following Playwright's rule of two consecutive matching
+        screenshots, only changes present in both post-action captures count.
         """
         size = (1600, 1000)
         before = self._frame(10, size=size)
-        blink_on = self._dots(1, size)          # 光标亮
-        blink_off = self._frame(10, size=size)  # 光标灭，与动作前一致
+        blink_on = self._dots(1, size)          # caret shown
+        blink_off = self._frame(10, size=size)  # caret hidden, as before
 
         change = runtime.persistent_pixel_change(before, blink_on, blink_off)
         self.assertEqual(change["changed"], 0, "闪烁不该算作变化")
@@ -190,7 +188,7 @@ class PixelEvidenceTests(unittest.TestCase):
         self.assertIn("semantic effect are unknown", note)
 
     def test_missing_capture_never_pretends_to_have_compared(self):
-        """抓不到图就返回 None——**不许假装比过**。"""
+        """A missing capture returns None instead of pretending to compare."""
         frame = self._frame(10)
         self.assertIsNone(runtime.persistent_pixel_change(None, frame, frame))
         self.assertIsNone(runtime.persistent_pixel_change(frame, None, frame))
@@ -198,11 +196,12 @@ class PixelEvidenceTests(unittest.TestCase):
         self.assertIsNone(runtime.pixel_change_note(None))
 
 class SettleWaitTests(AtspiPatchedTestCase):
-    """动作后的安置等待。
+    """Post-action settle wait.
 
-    这一组守的是一个**静默操作错误窗口**的竞态：新窗口已经进树、但 ACTIVE
-    还挂在旧窗口上的那几十毫秒里，快照会照到旧窗口，而树本身完全自洽，
-    没有任何一处看得出不对。
+    These tests cover a race that silently targets the wrong window: for a
+    few tens of milliseconds a new window is in the tree while ACTIVE is
+    still on the old one. A snapshot taken then shows the old window, and
+    the tree is fully self-consistent, so nothing in it reveals the problem.
     """
 
     def _wait(self, app, before, clock, **kwargs):
@@ -215,7 +214,7 @@ class SettleWaitTests(AtspiPatchedTestCase):
         )
 
     def test_returns_right_after_the_minimum_wait_when_nothing_opened(self):
-        """常见路径不能变慢：窗口集合没变就只等最短安置时间。"""
+        """The common path stays fast: no window change means only the minimum wait."""
         clock = _FakeClock()
         main = _WindowNode("frame", "Inbox", active=True)
         app = _ScriptedApp(clock, [(0.0, [main])])
@@ -225,13 +224,14 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertAlmostEqual(clock.now, runtime.SETTLE_MIN_SECONDS, places=6)
 
     def test_waits_until_the_newly_opened_window_takes_focus(self):
-        """回归：实测到的 Thunderbird `Tools → Message Filters` 时序。
+        """Thunderbird opens `Tools > Message Filters` with this timing.
 
-            t=0.070  新窗口进树，ACTIVE 还在主窗口身上
-            t=0.123  ACTIVE 才转移过去
+            t=0.070  the new window enters the tree; ACTIVE stays on the main one
+            t=0.123  ACTIVE moves to the new window
 
-        原先固定 sleep(0.12) 正好压在 0.123 这个边界上，于是快照有概率照到
-        主窗口——agent 按索引点 `New…`，实际点出的是主窗口的「新建邮件」。
+        A fixed 0.12 s sleep ends just before the focus transfer, so the
+        snapshot may show the main window, and an index-based click on `New…`
+        would hit the main window's New Message button instead.
         """
         clock = _FakeClock()
         main_active = _WindowNode("frame", "Inbox", active=True)
@@ -250,12 +250,12 @@ class SettleWaitTests(AtspiPatchedTestCase):
 
         self.assertIsNone(self._wait(app, before, clock))
         self.assertGreaterEqual(clock.now, 0.123)
-        # 真正要守住的不是"等够了"，而是等完之后 main_window() 挑对了窗口。
+        # Beyond waiting long enough, main_window() must then pick the new window.
         _, chosen = runtime.main_window(app)
         self.assertEqual(runtime.node_name(chosen), "Message Filters")
 
     def test_the_old_fixed_sleep_would_have_picked_the_wrong_window(self):
-        """把旧行为钉住：这就是修之前会发生的事，不是假想出来的风险。"""
+        """With a fixed 0.12 s sleep the old window is observed; the race is real."""
         clock = _FakeClock()
         main_active = _WindowNode("frame", "Inbox", active=True)
         filters_idle = _WindowNode("frame", "Message Filters")
@@ -264,14 +264,14 @@ class SettleWaitTests(AtspiPatchedTestCase):
             [(0.0, [main_active]), (0.070, [main_active, filters_idle])],
         )
 
-        clock.sleep(0.12)  # 旧代码：动作后固定睡 0.12 就建快照
+        clock.sleep(0.12)  # fixed post-action delay before the snapshot
         _, chosen = runtime.main_window(app)
         self.assertEqual(runtime.node_name(chosen), "Inbox")
 
     def test_modal_window_counts_as_settled(self):
-        """模态框可能只报 MODAL 不报 ACTIVE，两者都算焦点已落定。
+        """A modal window may report MODAL without ACTIVE; either counts as settled.
 
-        出现时刻取实测的 LibreOffice 0.045s。
+        The 0.045 s appearance time is taken from LibreOffice.
         """
         clock = _FakeClock()
         main = _WindowNode("frame", "Writer", active=True)
@@ -284,7 +284,7 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertEqual(runtime.node_name(chosen), "Question")
 
     def test_waits_for_focus_to_come_back_after_a_window_closes(self):
-        """关窗口同样有空档：对话框没了，焦点还没回到主窗口。"""
+        """After a dialog closes, focus takes a while to return to the main window."""
         clock = _FakeClock()
         main_idle = _WindowNode("frame", "Writer")
         main_active = _WindowNode("frame", "Writer", active=True)
@@ -303,13 +303,14 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertGreaterEqual(clock.now, 0.30)
 
     def test_window_opening_after_the_minimum_wait_is_out_of_scope(self):
-        """把边界钉住，别让它变成一个被误以为已覆盖的情形。
+        """Pin the boundary so it is not mistaken for a covered case.
 
-        实测六例开窗口进树都 ≤ 0.070s，SETTLE_MIN_SECONDS=0.12 有 1.7 倍余量。
-        比这更慢的应用会漏——漏掉之后是**另一种**失败：快照照到动作前的状态，
-        新窗口根本不出现，agent 看得见。与这里修的"树自洽却照错窗口"不同。
+        Observed windows reached the tree within 0.070 s, which leaves
+        SETTLE_MIN_SECONDS=0.12 a 1.7x margin. A slower app is missed, but that
+        failure is visible: the snapshot shows the pre-action state without the
+        new window, unlike the self-consistent wrong-window snapshot above.
 
-        谁要是调小 SETTLE_MIN_SECONDS，这条会先炸。
+        Lowering SETTLE_MIN_SECONDS below 0.070 s fails this test.
         """
         clock = _FakeClock()
         main = _WindowNode("frame", "Inbox", active=True)
@@ -325,7 +326,7 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertGreaterEqual(runtime.SETTLE_MIN_SECONDS, 0.070)
 
     def test_reports_when_the_new_window_never_takes_focus(self):
-        """超时不许静默：快照可能照的不是 agent 以为的那个窗口，得说出来。"""
+        """A timeout is reported, since the snapshot may show an unexpected window."""
         clock = _FakeClock()
         main = _WindowNode("frame", "Inbox", active=True)
         tooltip = _WindowNode("window", "")
@@ -335,11 +336,11 @@ class SettleWaitTests(AtspiPatchedTestCase):
         note = self._wait(app, before, clock, timeout_seconds=0.4)
         self.assertIsNotNone(note)
         self.assertIn("target ref", note)
-        # 有界：不许把工具挂住。
+        # The wait is bounded and never hangs the tool.
         self.assertLess(clock.now, runtime.SETTLE_MIN_SECONDS + 0.4 + 0.1)
 
     def test_missing_baseline_skips_the_wait(self):
-        """取不到动作前的窗口集合时，退回旧行为，不要凭空等。"""
+        """Without a pre-action window set, the wait stops at the minimum settle time."""
         clock = _FakeClock()
         app = _ScriptedApp(clock, [(0.0, [_WindowNode("frame", "Inbox")])])
 
@@ -347,10 +348,11 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertAlmostEqual(clock.now, runtime.SETTLE_MIN_SECONDS, places=6)
 
 class ScreenshotPolicyTests(unittest.TestCase):
-    """a11y 轨带不带截图，以及哪些工具的截图不可关。
+    """Accessibility screenshot policy and the GUI screenshots it never disables.
 
-    默认改成带图，是因为"两条独立轨道"这个前提被实测推翻了：树给过两次假阴性
-    （右对齐、保存都生效了却被判成"送达但被忽略"），都是一张截图判掉的。
+    Accessibility screenshots are on by default because the tree alone gives
+    false negatives: right-aligning text or saving a file can take effect
+    while the tree suggests the input was delivered but ignored.
     """
 
     def setUp(self):
@@ -373,7 +375,7 @@ class ScreenshotPolicyTests(unittest.TestCase):
             self.assertFalse(runtime.a11y_screenshots_enabled(), value)
 
     def test_unrecognised_values_keep_screenshots_on(self):
-        """开关只认明确的关闭值。拼错了应该维持默认，而不是静默省掉截图。"""
+        """Only explicit off values disable screenshots; a typo keeps the default."""
         for value in ("1", "true", "yes", "", "maybe"):
             os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = value
             self.assertTrue(runtime.a11y_screenshots_enabled(), value)

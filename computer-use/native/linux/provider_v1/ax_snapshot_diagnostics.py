@@ -29,10 +29,10 @@ def snapshot_diagnostics(records):
     ]
 
 
-# 内容平面的角色。共同点：它们承载的是**应用的内容本身**，而不是操作内容的外壳。
-# 任何以 "document" 开头的角色（document web / document frame / document text /
-# document spreadsheet / document presentation / document email）都算，
-# 这与 is_interactive_role 的约定一致。
+# Content-plane roles carry the application's content itself rather than the
+# shell around it. Any role starting with "document" (document web, document
+# frame, document text, document spreadsheet, document presentation, document
+# email) also counts, matching the is_interactive_role convention.
 CONTENT_PLANE_ROLES = {
     "canvas",
     "drawing area",
@@ -43,8 +43,9 @@ CONTENT_PLANE_ROLES = {
     "page",
 }
 
-# 嵌入式内容的**容器**角色。它们本身不是内容，是内容可能出现的地方；
-# 空容器只能提高"当前快照没有看到内容根"的可能性，不能证明内容缺席。
+# Container roles for embedded content: places where content may appear, not
+# content themselves. An empty container only makes it more likely that the
+# snapshot missed the content root; it does not prove the content is absent.
 EMBEDDED_CONTAINER_ROLES = {
     "scroll pane",
     "viewport",
@@ -68,21 +69,23 @@ def content_host_diagnostic(records):
     The result is deliberately uncertain: a sampled/pruned tree cannot prove that
     content is absent or attribute the observation to a renderer/toolkit.
 
-    判据全部落在**角色语义**上，一个应用名/进程名都不出现——嵌入式内容宿主
-    横跨浏览器、Electron、PDF 查看器、嵌入式 webview，按名字枚举是永远维护
-    不完的表：
+    The criteria use role semantics only, never application or process names:
+    embedded content hosts span browsers, Electron, PDF viewers and embedded
+    webviews, so a name list could never be complete. A frame is flagged when
 
-      1. 存在 role=frame（顶层应用窗口；dialog/menu/popup 不在此列，
-         它们本来就不承载内容平面）；
-      2. 该 frame 的子树里没有明显的内容根角色；
-      3. 该子树里存在"可能承载内容"的结构信号，二者任一：
-         a. 标签式文档界面（page tab list / page tab）——按角色定义，
-            标签页是**文档的**标签，有标签而无文档即缺内容；
-         b. 一个渲染出来没有任何子节点的嵌入式内容容器
-            （scroll pane / viewport / embedded / internal frame …）。
+      1. its role is frame (a top-level application window; dialogs, menus
+         and popups do not host a content plane);
+      2. its subtree has no distinctive content-root role; and
+      3. its subtree shows a structural sign of hosted content, either
+         a. a tabbed document interface (page tab list or page tab): tabs
+            belong to documents, so tabs without a document mean missing
+            content; or
+         b. an embedded-content container (scroll pane, viewport, embedded,
+            internal frame, ...) that came back with no children.
 
-    第 3 条是为了信噪比：计算器、设置面板这类窗口本来就没有内容平面，
-    只有 1、2 两条会把它们一并报出来。
+    Condition 3 keeps the false-positive rate down: windows such as
+    calculators or settings panels have no content plane, and conditions 1
+    and 2 alone would flag them too.
     """
     if not records:
         return []
@@ -105,7 +108,8 @@ def content_host_diagnostic(records):
             r for r in records if r is not frame_record
         ]
         if not subtree:
-            # 一个子节点都没有 = 空壳，那是 snapshot_diagnostics 的题目。
+            # A frame with no children is an empty shell, which
+            # snapshot_diagnostics reports.
             continue
         # Only distinctive content roots can clear a frame-wide warning. Generic
         # text/table/list roles also occur in toolbars, sidebars, menus and status
@@ -151,35 +155,35 @@ def content_host_diagnostic(records):
 
 
 def is_dropdown_item(node, window):
-    """这个元素是不是"下拉列表里的一项"。
+    """Return whether ``node`` is an item inside a drop-down popup.
 
-    这类元素上的语义调用有一个特殊的坏处：**它会关掉弹窗，但不提交值**。
-    实测 LibreOffice 7.3「格式 → 段落 → 行距」下拉，点 `table cell Double`：
+    A semantic action on such an item closes the popup without committing the
+    value. In LibreOffice 7.3 drop-downs, for example, ``do_action`` on a
+    ``table cell`` item returns True and closes the popup while the control
+    keeps its old value; a coordinate click commits the new one.
 
-        do_action  -> 返回 True，下拉关闭，控件仍然显示 Single
-        坐标点击   -> 下拉关闭，控件显示 Double            （截图核实）
+    The failure cannot be detected afterwards: the popup disappears together
+    with the item, so the tree always changes and a generic "nothing changed,
+    retry" check never fires, and LibreOffice dialog combo boxes are
+    placeholder nodes with no frame or text, so the value cannot be read back.
+    The semantic route must therefore be avoided before the call.
 
-    比"不生效"更糟的是**事后无法校验**：弹窗连同那个元素一起消失了，
-    动作前后的树必然不同，通用的"什么都没变就重试"判据在这里不会触发；
-    而 LibreOffice 对话框里的 combo box 是个不上报值的幻影节点
-    （没有 frame、text 为空），想读回来确认也读不到。
-    所以只能在**调用之前**就避开语义通道。
+    The check is deliberately narrow and matches only a ``table cell`` inside
+    a popup window:
 
-    影响面不小：跨 Calc / Impress / Writer 的轨迹中，下拉和调色板提交
-    反复出现，是 LibreOffice 侧的主要阻塞之一。
-
-    判据刻意收得很窄——弹出窗口里的 `table cell`：
-    - 菜单项不在此列。Nautilus 右键菜单的 `menu item Rename…` 实测
-      do_action 完全正常，一并改掉会把好路也堵死。
-    - 主窗口里的表格单元格不在此列。Calc 的单元格用的就是这个角色，
-      它们不是下拉项，语义调用没有这个问题。
+    - Menu items are excluded: ``do_action`` works on them (for example the
+      Nautilus context-menu item "Rename…"), so matching them would block a
+      working path.
+    - Table cells in main windows are excluded; Calc cells use the same role
+      but are not drop-down items and do not have this problem.
     """
     if node is None or window is None:
         return False
     if node_role(node) != "table cell":
         return False
-    # 下拉在 X11 上是独立顶层窗口，角色 `window` 且没有标题；
-    # 应用主窗口是 `frame`，对话框是 `dialog`/`alert`，都带名字。
+    # On X11 a drop-down popup is a separate untitled top-level window with
+    # role `window`; main windows are `frame` and dialogs `dialog` or `alert`,
+    # and those have names.
     return node_role(window) == "window" and not node_name(window)
 
 

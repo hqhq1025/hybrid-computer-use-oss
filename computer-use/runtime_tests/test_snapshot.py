@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split Linux provider tests."""
+"""Linux provider snapshot rendering, pruning, indexing, and resolution tests."""
 
 import inspect
 
@@ -7,29 +7,29 @@ from runtime_test_support import *  # noqa: F401,F403
 
 class ShouldEnumerateChildrenTests(AtspiPatchedTestCase):
     def test_nautilus_style_small_managed_container_is_enumerated(self):
-        """回归：声明 MANAGES_DESCENDANTS 但很小的容器必须照常枚举。
+        """A small container that declares MANAGES_DESCENDANTS is still enumerated.
 
-        Nautilus 侧边栏（Recent/Home/Documents/…）声明了自管理，实际只有 12
-        个子节点，而且**不实现 Table 接口**——坐标寻址兜底必然失败。一律拒绝
-        枚举的旧实现让整个侧边栏对 agent 不可见：树里只留下一句
-        "contents not enumerated"，导航功能等于不存在。
+        The Nautilus sidebar (Recent, Home, Documents, ...) declares itself
+        self-managed but has only 12 children and no Table interface, so the
+        coordinate-addressing fallback cannot work. Refusing enumeration would
+        hide the whole sidebar behind one "contents not enumerated" line.
         """
         sidebar = _LyingNode(12, states=(STATE.MANAGES_DESCENDANTS, STATE.SHOWING))
 
         self.assertTrue(runtime.should_enumerate_children(sidebar))
 
     def test_calc_style_sheet_is_still_refused(self):
-        """自报 21 亿的 Calc sheet 仍然不得枚举——放宽自管理不能把它放进来。
+        """A Calc sheet reporting about 2.1 billion children is still refused.
 
-        它被 HARD_CHILD_CAP 拦下，与 MANAGES_DESCENDANTS 无关，所以即使
-        自管理这条分支整个改掉，这道守卫也依然成立。
+        HARD_CHILD_CAP rejects it independently of MANAGES_DESCENDANTS, so the
+        guard holds even if the self-managed branch changes.
         """
         sheet = _LyingNode(2147483647, states=(STATE.MANAGES_DESCENDANTS, STATE.SHOWING))
 
         self.assertFalse(runtime.should_enumerate_children(sheet))
 
     def test_managed_container_above_cap_is_refused(self):
-        """自管理且自报数量超过阈值时，回到"按契约不枚举"。"""
+        """A self-managed container above the cap keeps the no-enumeration contract."""
         big = _LyingNode(
             runtime.MANAGED_ENUMERATE_CAP + 1, states=(STATE.MANAGES_DESCENDANTS,)
         )
@@ -37,7 +37,7 @@ class ShouldEnumerateChildrenTests(AtspiPatchedTestCase):
         self.assertFalse(runtime.should_enumerate_children(big))
 
     def test_managed_container_exactly_at_cap_is_enumerated(self):
-        """阈值取闭区间：恰好等于上限仍然枚举，避免边界上少一个元素。"""
+        """The cap is inclusive, so a container exactly at the cap is enumerated."""
         edge = _LyingNode(
             runtime.MANAGED_ENUMERATE_CAP, states=(STATE.MANAGES_DESCENDANTS,)
         )
@@ -45,7 +45,7 @@ class ShouldEnumerateChildrenTests(AtspiPatchedTestCase):
         self.assertTrue(runtime.should_enumerate_children(edge))
 
     def test_huge_container_without_managed_state_is_refused(self):
-        """不声明自管理却谎报海量子节点的实现，同样要被硬上限兜住。"""
+        """The hard cap also applies to containers that are not self-managed."""
         liar = _LyingNode(runtime.HARD_CHILD_CAP + 1, states=(STATE.SHOWING,))
 
         self.assertFalse(runtime.should_enumerate_children(liar))
@@ -311,18 +311,19 @@ class RenderIndentationTests(AtspiPatchedTestCase):
         return len(line) - len(line.lstrip("\t"))
 
     def _nodes(self, lines):
-        """只取节点行。末尾可能跟一句"N node(s) omitted"提示，它不是节点。"""
+        """Return node lines only, skipping a trailing "N node(s) omitted" hint."""
         return [l for l in lines if l.strip() and l.strip()[0].isdigit()]
 
     def test_pruned_container_does_not_advance_child_indentation(self):
-        """回归：被裁掉的中间容器不得推进子节点的缩进。
+        """A pruned intermediate container does not add a level of indentation.
 
-        裁剪只丢容器自己那一行、仍然递归子节点。早先子节点沿用遍历深度做缩进，
-        于是每被裁掉一层，缩进就凭空多一格——实测 Nautilus 上从第 1 层直接
-        跳到第 6 层，中间全是空档，读起来像一棵断掉的树，agent 无法据此判断
-        父子关系（"这个按钮属于哪个面板"正是消歧无名控件的唯一线索）。
+        Pruning drops only the container's own line and still visits its
+        children. Indenting by traversal depth would add a phantom level for
+        every pruned ancestor, which in Nautilus jumps from level 1 to level 6
+        and reads like a broken tree. Parent-child structure is often the only
+        way to tell unnamed controls apart.
         """
-        # filler 无名、无动作 → 会被裁剪；button 有名字 → 会被保留
+        # The unnamed filler without actions is pruned; the named button stays.
         leaf = _TreeNode(role="push button", name="Save", x=1, y=1, w=5, h=5)
         middle = _TreeNode(role="filler", x=0, y=0, w=8, h=8, kids=(leaf,))
         root = _TreeNode(role="frame", name="Doc", w=100, h=100, kids=(middle,))
@@ -339,7 +340,7 @@ class RenderIndentationTests(AtspiPatchedTestCase):
         )
 
     def test_unpruned_tree_keeps_one_level_per_node(self):
-        """不裁剪时缩进仍与真实层级一一对应，别为了修裁剪把正常路径改坏。"""
+        """Without pruning, indentation still matches the real depth of each node."""
         leaf = _TreeNode(role="push button", name="Save", x=1, y=1, w=5, h=5)
         middle = _TreeNode(role="filler", x=0, y=0, w=8, h=8, kids=(leaf,))
         root = _TreeNode(role="frame", name="Doc", w=100, h=100, kids=(middle,))
@@ -381,12 +382,12 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
         return [l for l in lines if l.strip() and l.strip()[0].isdigit()]
 
     def test_unnamed_button_is_identified_by_its_description(self):
-        """回归：GTK 的纯图标按钮名字为空，唯一可读标识在 description 里。
+        """GTK icon-only buttons have no name; only the description identifies them.
 
-        实测 Nautilus 工具栏：`Go back` / `Go forward` / `Search` / `Show list`
-        四个按钮 name 全空。不渲染 description 的话，返回/前进这类文件管理器
-        核心操作在树里就只是一个无名 `push button`，agent 除了按像素坐标猜
-        没有别的办法——a11y 优先的路径在这里直接断掉。
+        In the Nautilus toolbar, `Go back`, `Go forward`, `Search` and
+        `Show list` all have empty names. Without the description, core file
+        manager actions render as unnamed `push button` nodes that can only be
+        reached by coordinates.
         """
         back = _TreeNode(role="push button", description="Go back", x=1, y=1, w=5, h=5)
         root = _TreeNode(role="frame", name="Files", w=100, h=100, kids=(back,))
@@ -396,7 +397,7 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
         self.assertIn('[desc="Go back"]', "\n".join(lines))
 
     def test_description_disambiguates_identically_named_buttons(self):
-        """三个都叫 Menu 的 toggle button 只能靠 description 区分。"""
+        """Toggle buttons all named Menu differ only in their description."""
         ops = _TreeNode(role="toggle button", name="Menu",
                         description="Show operations", x=1, y=1, w=5, h=5)
         view = _TreeNode(role="toggle button", name="Menu",
@@ -410,7 +411,7 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
         self.assertIn("View options", rendered[2])
 
     def test_description_equal_to_name_is_not_repeated(self):
-        """description 与 name 相同时不重复渲染，白占 token。"""
+        """A description equal to the name is not repeated, which would waste tokens."""
         node = _TreeNode(role="push button", name="Home", description="Home",
                          x=1, y=1, w=5, h=5)
         root = _TreeNode(role="frame", name="Files", w=100, h=100, kids=(node,))
@@ -420,8 +421,11 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
         self.assertNotIn("Description:", "\n".join(lines))
 
     def test_name_is_not_overwritten_by_description(self):
-        """description 不得顶替 name：轨迹回放与保留率评测都按 role+name 匹配，
-        改写 name 会让同一个元素在不同版本间对不上号。"""
+        """The description never replaces the name.
+
+        Elements are matched by role and name across snapshots and versions,
+        so rewriting the name would break that matching.
+        """
         back = _TreeNode(role="push button", description="Go back", x=1, y=1, w=5, h=5)
         root = _TreeNode(role="frame", name="Files", w=100, h=100, kids=(back,))
 
@@ -431,19 +435,20 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
         self.assertEqual(records[1]["description"], "Go back")
 
 class StaleElementIndexTests(AtspiPatchedTestCase):
-    """`runtimeId` 是位置性路径，树一变就指向别的控件。"""
+    """`runtimeId` is a positional path that points elsewhere once the tree changes."""
 
     def record(self, role, name, frame=None, path=(0, 1)):
         return {"runtimeId": list(path), "controlType": role, "name": name,
                 "automationId": "", "frame": frame}
 
     def test_rejects_node_whose_role_and_name_changed(self):
-        """回归：陈旧下标解析到的是另一个控件时必须拒绝，不能照点不误。
+        """A stale index that now resolves to a different control is rejected.
 
-        实测 Nautilus：拿右键菜单打开时的快照（`menu item Rename…`），菜单关掉后
-        同一条路径指向工具栏的 `toggle button Menu`——"重命名"变成"切换视图选项"，
-        全程 isError=False。同一份菜单里紧挨着就是 `Move to Trash`，
-        静默点错是不可接受的失败模式。
+        In Nautilus, a path recorded for `menu item Rename…` while a context
+        menu was open points at the toolbar's `toggle button Menu` once the
+        menu closes, and nothing reports an error. `Move to Trash` sits next
+        to Rename in the same menu, so silently acting on the wrong item is
+        unacceptable.
         """
         other = _TreeNode(role="toggle button", name="Menu", x=715, y=23, w=26, h=46)
 
@@ -463,7 +468,7 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
         )
 
     def test_unnamed_element_is_matched_by_position(self):
-        """对话框里大量控件没有名字，位置是唯一可用的身份线索。"""
+        """Many dialog controls are unnamed, so position is their only identity clue."""
         node = _TreeNode(role="toggle button", x=10, y=20, w=30, h=40)
         frame = {"x": 10, "y": 20, "width": 30, "height": 40}
         moved = {"x": 400, "y": 20, "width": 30, "height": 40}
@@ -476,7 +481,7 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
         )
 
     def test_named_node_does_not_satisfy_unnamed_record(self):
-        """快照里没名字、解析出来的有名字，说明换了元素。"""
+        """A named node resolved for an unnamed record means the element changed."""
         named = _TreeNode(role="toggle button", name="Menu", x=10, y=20, w=30, h=40)
         frame = {"x": 10, "y": 20, "width": 30, "height": 40}
 
@@ -485,7 +490,7 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
         )
 
     def test_accessible_id_wins_when_present(self):
-        """工具包给了稳定 id 时以它为准，名字或位置变化都不影响。"""
+        """A stable toolkit id takes precedence over changes in name or position."""
 
         class WithID(_TreeNode):
             def get_accessible_id(self):
@@ -499,10 +504,10 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
 
 
     def test_find_element_refuses_stale_path_end_to_end(self):
-        """行为级回归：陈旧下标穿过 find_element 时不得解析成另一个控件。
+        """find_element does not resolve a stale path to a different control.
 
-        这是上面那些判据真正要防住的东西——单测判据函数只能证明判据本身对，
-        证明不了调用方用上了它。
+        Unit tests of the matching predicate cannot show that callers use it,
+        so this test exercises the whole lookup.
         """
         toolbar = _TreeNode(role="toggle button", name="Menu", x=715, y=23, w=26, h=46)
         window = _TreeNode(role="frame", name="Files", w=900, h=600, kids=(toolbar,))
@@ -511,7 +516,7 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
         stale = {"runtimeId": [0, 0], "controlType": "menu item",
                  "name": "Rename…", "automationId": "", "frame": None}
 
-        # 路径本身解析得到 toolbar，但它已经不是当初那个元素
+        # The path alone reaches the toolbar, which is not the recorded element.
         self.assertIs(runtime.resolve_path(app, [0, 0]), toolbar)
         self.assertIsNone(runtime.find_element(app, stale))
 
@@ -526,13 +531,14 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
         self.assertIs(runtime.find_element(app, record), item)
 
 class ClickableMarkerTests(AtspiPatchedTestCase):
-    """agent 必须能从树里看出哪个元素可以按元素点、哪个只能坐标点。"""
+    """The tree marks which elements can be clicked without coordinates."""
 
     def make(self, actions):
         class Node(_TreeNode):
             def get_action_iface(self):
-                # 真实节点没有动作时不实现 Action 接口。运行时先问接口再问动作数，
-                # 否则 LibreOffice 的 ATK 桥会对非 ATK_ACTION 对象打断言。
+                # Real nodes without actions do not implement Action. The
+                # runtime checks the interface before the action count because
+                # LibreOffice's ATK bridge asserts on non-ATK_ACTION objects.
                 return object() if actions else None
 
             def get_n_actions(self):
@@ -547,7 +553,7 @@ class ClickableMarkerTests(AtspiPatchedTestCase):
         return Node(role="push button", name="Home", x=1, y=1, w=5, h=5)
 
     def segment(self, node):
-        """按 record_for 的真实用法：动作表只读一次，标记由它得出。"""
+        """Like record_for, read the action table once and derive the marker."""
         _, has_click = runtime.node_actions(node)
         return runtime.state_segment(node, has_click_action=has_click)
 
@@ -555,28 +561,28 @@ class ClickableMarkerTests(AtspiPatchedTestCase):
         self.assertIn("has-click-action", self.segment(self.make(["click"])))
 
     def test_element_without_any_action_is_not_marked(self):
-        """回归：Nautilus 侧边栏条目只有 component 接口，没有 Action 接口。
+        """Nautilus sidebar rows have a Component interface but no Action interface.
 
-        旧渲染里它和一个有 click 动作的 push button 长得**一模一样**——
-        action_names() 会隐藏 click 类动作，于是"有语义点击"和"根本点不了"
-        被抹成同一个样子，agent 只好一律退回坐标，恰好背离 a11y 优先。
+        action_names() hides click-like actions, so without the marker such a
+        row renders exactly like a push button with a click action, and the
+        agent has to fall back to coordinates for both.
         """
         self.assertNotIn("has-click-action", self.segment(self.make([])))
 
     def test_marker_matches_what_click_would_actually_invoke(self):
-        """标记与 click 真正调用的入口必须同源。
+        """The click marker agrees with the action that click would invoke.
 
-        两者现在是两份实现——`node_actions()` 出标记、`preferred_action_index()`
-        出调用——因为渲染时的动作表只允许读一次（LibreOffice 的 ATK 桥被反复
-        问会让应用整个退出）。既然实现分开了，就必须显式钉住它们的一致性，
-        否则标记会变成新的谎言。
+        `node_actions()` produces the marker and `preferred_action_index()`
+        picks the action, because rendering may read the action table only
+        once: repeated queries through LibreOffice's ATK bridge can make the
+        application exit. This test keeps the two implementations consistent.
         """
         cases = [
-            ["menu"],                    # 只有二级动作，click 无从下手
-            ["activate"],                # 精确命中
-            ["click", "menu"],           # 混合
-            [],                          # 完全没有动作
-            ["Press the button"],        # 只有描述式命名，靠子串兜底
+            ["menu"],                    # secondary action only, nothing to click
+            ["activate"],                # exact match
+            ["click", "menu"],           # mixed
+            [],                          # no actions at all
+            ["Press the button"],        # descriptive name, substring fallback
         ]
         for actions in cases:
             node = self.make(actions)
@@ -591,7 +597,7 @@ class ClickableMarkerTests(AtspiPatchedTestCase):
 
 
 class PlaceholderAttributeIntrospectionTests(AtspiPatchedTestCase):
-    """对象属性只应在可能携带 placeholder 的文本输入角色上读取。"""
+    """Object attributes are read only for text inputs that may carry a placeholder."""
 
     class AttributeNode(_TreeNode):
         def __init__(self, *args, attributes=None, **kwargs):
@@ -659,7 +665,7 @@ class PlaceholderAttributeIntrospectionTests(AtspiPatchedTestCase):
 
 
 class ResolveAppRetryTests(AtspiPatchedTestCase):
-    """"暂时读不到"不等于"不存在"。"""
+    """A temporarily unreadable app is not an absent app."""
 
     def setUp(self):
         super().setUp()
@@ -669,7 +675,7 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         self.addCleanup(setattr, runtime.time, "sleep", real_sleep)
 
     def patch_iter_apps(self, results):
-        """results 是每次调用的返回值；元素为异常时抛出。"""
+        """Each item is the result of one call; exception items are raised."""
         calls = {"n": 0}
 
         def fake():
@@ -686,12 +692,12 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         return calls
 
     def test_transient_empty_enumeration_is_retried(self):
-        """回归：应用忙于重建窗口时枚举可能瞬时为空，不能就此宣告不存在。
+        """An enumeration can be briefly empty while an app rebuilds its windows.
 
-        实测 LibreOffice：get_app_state 刚成功，紧接着 click 就报
-        appNotFound("soffice")，而 AT-SPI 桌面里那一条自始至终都在。
-        向 agent 谎报"应用不存在"会让它改用别的应用名、重启应用，
-        甚至判定任务无法完成——而真相只是需要再读一次。
+        LibreOffice can be missing from an enumeration right after a
+        successful observation although its AT-SPI desktop entry never goes
+        away. Reporting the app as absent would push the agent to try other
+        names, restart the app or give up, when reading again would find it.
         """
         app = _TreeNode(role="application", name="soffice")
         self.patch_iter_apps([[], [], [app]])
@@ -718,7 +724,7 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         self.assertIn("no action was attempted", message)
 
     def test_found_on_first_try_does_not_sleep(self):
-        """应用在就立刻返回，不给正常路径加延迟。"""
+        """A present app is returned immediately, without delaying the normal path."""
         app = _TreeNode(role="application", name="soffice")
         self.patch_iter_apps([[app]])
 
@@ -1404,55 +1410,63 @@ class AXDirectTargetResolutionTests(AtspiPatchedTestCase):
         self.assertEqual(response["resolvedElement"], record)
 
 class DropdownItemTests(AtspiPatchedTestCase):
-    """下拉项上的语义调用会关掉弹窗却不提交值，且事后无从校验。"""
+    """Semantic actions on dropdown items close the popup without committing.
+
+    Nothing afterwards reveals that the value was not applied.
+    """
 
     def popup(self):
         return _TreeNode(role="window", name="")
 
     def test_table_cell_in_unnamed_popup_is_a_dropdown_item(self):
-        """回归：LibreOffice 行距下拉，点 `table cell Double`。
+        """LibreOffice's line spacing dropdown exposes its items as table cells.
 
-        实测 do_action 返回 True、下拉关闭、控件仍显示 Single（截图核实）；
-        换坐标点击才真正提交。比"不生效"更糟的是事后无法校验——弹窗连同元素
-        一起消失，动作前后的树必然不同，通用的"什么都没变就重试"不会触发；
-        而对话框里的 combo box 是不上报值的幻影节点，读回来确认也读不到。
+        do_action on `table cell Double` returns True and closes the dropdown,
+        but the control still shows Single; only a coordinate click commits.
+        The failure is invisible afterwards: the popup disappears with its
+        elements, so the tree always changes and a "nothing changed, retry"
+        check never fires, and the dialog's combo box is a phantom node that
+        reports no value to read back.
         """
         cell = _TreeNode(role="table cell", name="Double", x=3, y=71, w=358, h=21)
 
         self.assertTrue(runtime.is_dropdown_item(cell, self.popup()))
 
     def test_menu_item_is_not_treated_as_dropdown_item(self):
-        """菜单项不在此列：Nautilus 右键菜单的 `Rename…` 实测 do_action 完全正常，
-        一并改掉会把好路也堵死。"""
+        """Menu items are not dropdown items.
+
+        do_action works on items such as `Rename…` in the Nautilus context
+        menu, so treating them as dropdown items would block a working path.
+        """
         item = _TreeNode(role="menu item", name="Rename…", x=7, y=189, w=304, h=25)
 
         self.assertFalse(runtime.is_dropdown_item(item, self.popup()))
 
     def test_table_cell_in_main_frame_is_not_a_dropdown_item(self):
-        """Calc 的单元格用的就是 table cell 这个角色，它们不是下拉项。"""
+        """Calc sheet cells also use the table cell role but are not dropdown items."""
         cell = _TreeNode(role="table cell", name="A1", x=10, y=10, w=80, h=20)
         frame = _TreeNode(role="frame", name="untitled - Calc", w=900, h=600)
 
         self.assertFalse(runtime.is_dropdown_item(cell, frame))
 
     def test_table_cell_in_named_dialog_is_not_a_dropdown_item(self):
-        """对话框有标题、角色是 dialog；下拉是无名的 window。"""
+        """A dialog has a title and the dialog role; a dropdown is an unnamed window."""
         cell = _TreeNode(role="table cell", name="calc-test.csv", x=41, y=157, w=332, h=21)
         dialog = _TreeNode(role="dialog", name="Document Recovery", w=578, h=406)
 
         self.assertFalse(runtime.is_dropdown_item(cell, dialog))
 
 class EmptyCellOmissionTests(AtspiPatchedTestCase):
-    """Calc 视口里绝大多数是空单元格，全渲染等于把配额烧在没有信息的格子上。"""
+    """Most cells in a Calc viewport are empty, and rendering them wastes budget."""
 
     def test_notice_states_the_verified_path_only(self):
-        """回归：给 agent 的替代路径必须是实测过的那一条。
+        """The omission notice suggests only the route that works.
 
-        空单元格不进树之后就没有 element_index 了，提示必须说清楚怎么够到它们。
-        最初写的是"用名称框输入引用再回车"——看起来更直接，但实测**没通过**：
-        `set_value` 能改名称框的文本却不触发跳转（控件变了、应用没照做，
-        与下拉提交同一族），`click` 也没能让它获得键盘焦点。
-        实测能走通的是"press_key 移动单元格光标 + type_text"。
+        Omitted empty cells have no element index, so the notice must say how
+        to reach them. Typing a reference into the Name Box does not work:
+        set_value changes its text without navigating, like the dropdown commit
+        above, and click does not give it keyboard focus. Moving the cell
+        cursor with press_key and then calling type_text does work.
         """
         source = effective_runtime_source()
 
@@ -1461,7 +1475,7 @@ class EmptyCellOmissionTests(AtspiPatchedTestCase):
         self.assertNotIn("Name Box and press", source)
 
     def test_empty_cells_are_skipped_before_costing_a_record(self):
-        """空单元格要在建 record 之前就跳过，否则配额照样被吃掉。"""
+        """Empty cells are skipped before record_for, which would still spend budget."""
         body = inspect.getsource(runtime.render_visible_cells)
 
         skip = body.index("if not value:")
@@ -1469,7 +1483,7 @@ class EmptyCellOmissionTests(AtspiPatchedTestCase):
         self.assertLess(skip, build, "跳过判断必须在 record_for 之前")
 
 class ElectronActionNamesTests(AtspiPatchedTestCase):
-    """Chromium/Electron 用自己的一套动作名，两个方向都会出错。"""
+    """Chromium and Electron action names cause both missed and false click entries."""
 
     def make(self, actions):
         class Node(_TreeNode):
@@ -1488,11 +1502,12 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
         return Node(role="section", x=1, y=1, w=5, h=5)
 
     def test_do_default_is_the_click_entry(self):
-        """回归：VS Code 19 个节点的动作表是 ('doDefault', 'showContextMenu')。
+        """`doDefault` is Chromium's default action and serves as the click entry.
 
-        `doDefault` 就是 Chromium 的默认动作。不认这个名字，这些元素既拿不到
-        `[has-click-action]`，`click_method:"accessibility"` 也会直接失败——
-        整个 Electron 系应用在语义通道上等于不可点。
+        VS Code nodes expose ('doDefault', 'showContextMenu'). Without this name
+        they get no `[has-click-action]` marker and
+        `click_method:"accessibility"` fails, so Electron apps could not be
+        clicked through the semantic channel at all.
         """
         node = self.make(["doDefault", "showContextMenu"])
         names, has_click = runtime.node_actions(node)
@@ -1503,11 +1518,12 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
                          "它就是 click 本身，不该再列进 More actions")
 
     def test_click_ancestor_is_not_this_element_s_click(self):
-        """回归：`clickAncestor` 含 click，会被子串兜底匹中——但它点的是**祖先**。
+        """`clickAncestor` contains "click" but clicks an ancestor element.
 
-        VS Code 实测有 14 个节点是 ('clickAncestor', 'showContextMenu')。
-        把它当成本元素的点击入口，agent 会以为点中了目标而实际点在别处，
-        且从返回值和树里都看不出来——这是最坏的一类失败。
+        VS Code nodes expose ('clickAncestor', 'showContextMenu'), which the
+        substring fallback would otherwise match. Treating it as this
+        element's click would act elsewhere while neither the result nor the
+        tree shows it, the worst class of failure.
         """
         node = self.make(["clickAncestor", "showContextMenu"])
         _, has_click = runtime.node_actions(node)
@@ -1516,11 +1532,11 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
         self.assertIsNone(runtime.preferred_action_index(node))
 
     def test_gecko_spells_it_with_a_space(self):
-        """回归：同一语义在不同工具包里拼法不同。
+        """Toolkits spell the same action differently.
 
-        Chromium/Electron 叫 `clickAncestor`，Gecko/Thunderbird 叫
-        `click ancestor`（带空格）。只排掉其中一种，另一种照样被子串兜底匹中，
-        agent 又去点了祖先节点。实测两者都出现过。
+        Chromium and Electron use `clickAncestor`, while Gecko (Thunderbird)
+        uses `click ancestor` with a space. Excluding only one spelling lets
+        the other match the substring fallback and click the ancestor again.
         """
         node = self.make(["click ancestor"])
         _, has_click = runtime.node_actions(node)
@@ -1536,11 +1552,12 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
             self.assertFalse(has_click, "{!r} 应当被判为非本元素动作".format(spelling))
 
     def test_gecko_checkbox_state_named_actions_are_click_entries(self):
-        """回归：Gecko 用结果状态命名复选框动作——勾上时是 `uncheck`、
-        没勾时是 `check`，任一时刻只暴露适用的那个，调用它就等于 toggle。
+        """Gecko names checkbox actions after the resulting state.
 
-        不认这两个名字，Gecko 的复选框全部退回坐标点击，而设置类界面几乎
-        全是复选框（Thunderbird 5/14 个任务是账户设置、3/14 是消息过滤器）。
+        A checked box exposes only `uncheck` and an unchecked one only
+        `check`; invoking it toggles the box. Without these names every Gecko
+        checkbox falls back to coordinate clicks, and settings screens consist
+        mostly of checkboxes.
         """
         for spelling in ("check", "uncheck"):
             node = self.make([spelling])
@@ -1556,7 +1573,7 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
         self.assertIsNotNone(runtime.preferred_action_index(node))
 
     def test_covered_set_has_a_single_source_of_truth(self):
-        """判据只许有一份。抄成两处必然分歧——本轮加 doDefault 时就漏了副本。"""
+        """The click-covered action set is defined once, since copies drift apart."""
         source = effective_runtime_source()
 
         self.assertEqual(source.count('"default.activate",'), 1,
@@ -1564,10 +1581,11 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
 
 class ObjectReplacementTests(AtspiPatchedTestCase):
     def test_object_replacement_placeholder_is_stripped(self):
-        """回归：Chromium 用 U+FFFC 给嵌入对象占位，渲染出来是 `Value: ￼￼￼`。
+        """Chromium marks embedded objects with U+FFFC, rendered as `Value: ￼￼￼`.
 
-        它零信息量，更糟的是**看起来像内容**——agent 会以为这个控件已经有值。
-        VS Code 欢迎页实测 186 个占位符散布在 115 行里。
+        The placeholder carries no information yet looks like content, which
+        suggests that the control already has a value. Pages such as the
+        VS Code welcome page contain many of them.
         """
         self.assertEqual(runtime.limit_text("￼"), "")
         self.assertEqual(runtime.limit_text("a￼￼b"), "ab")
@@ -1592,13 +1610,13 @@ class FocusDiagnosticTests(AtspiPatchedTestCase):
         self.assertIn("gnome-terminal", str(caught.exception))
 
     def test_no_accessible_window_active_points_at_the_screenshot_channel(self):
-        """回归：焦点被无障碍树看不见的东西拿着时，必须说出来。
+        """Focus held by something invisible to the accessibility tree is reported.
 
-        实测 VS Code：改完 settings.json 弹出原生对话框
-        「A setting has changed that requires a restart to take effect.」，
-        与 VS Code 同进程、锁住整个应用，**AT-SPI 里完全不存在**。
-        此时 agent 看到一棵正常的树、每个动作都被正确拒绝，却无从知道原因——
-        a11y 通道在这里是瞎的，只有截图能回答。
+        After settings.json changes, VS Code can show a native "A setting has
+        changed that requires a restart to take effect." dialog. It belongs to
+        the same process and locks the app, yet does not exist in AT-SPI. The
+        agent sees a normal tree while every action is rejected for no visible
+        reason; only a screenshot can explain it.
         """
         original = runtime.iter_apps
         runtime.iter_apps = lambda: []
@@ -1613,7 +1631,7 @@ class FocusDiagnosticTests(AtspiPatchedTestCase):
         self.assertIn("gui", message)
 
     def test_diagnostic_never_turns_a_clear_error_into_a_crash(self):
-        """诊断代码枚举失败时必须安静退场，错误本身仍要抛出来。"""
+        """If the diagnostic enumeration fails, the original error is still raised."""
 
         def boom():
             raise RuntimeError("a11y bus went away")
@@ -1630,10 +1648,11 @@ class FocusDiagnosticTests(AtspiPatchedTestCase):
 
 class QtRichTextTests(AtspiPatchedTestCase):
     def test_qt_tooltip_html_is_reduced_to_its_message(self):
-        """回归：Qt 把 tooltip 存成整段 HTML，CSS 也在里面。
+        """Qt stores tooltips as whole HTML documents, CSS included.
 
-        VLC 首选项实测 19 段这样的 HTML 合计 9149 字符，占整次观测的 56%，
-        而真正的信息往往只有一句话。不处理的话 `Description:` 会把观测预算吃光。
+        In VLC's preferences such HTML took more than half of an observation
+        while the message is usually one sentence, so an unprocessed
+        `Description:` would exhaust the observation budget.
         """
         blob = (
             '<html><head><meta name="qrichtext" content="1" />'
@@ -1652,8 +1671,10 @@ class QtRichTextTests(AtspiPatchedTestCase):
         self.assertEqual(runtime.plain_text_from_rich_text(blob), "one two")
 
     def test_plain_text_with_angle_brackets_is_untouched(self):
-        """不对普通文本动手：真实内容里完全可能有尖括号（代码、模板、数学式），
-        剥它们等于篡改 agent 读到的数据。"""
+        """Plain text is untouched, since code, templates and math use angle brackets.
+
+        Stripping them would alter the data the agent reads.
+        """
         for text in ("a < b and c > d", "List<String> items", "if x<3: pass"):
             self.assertEqual(runtime.plain_text_from_rich_text(text), text)
 
@@ -1662,16 +1683,15 @@ class QtRichTextTests(AtspiPatchedTestCase):
         self.assertEqual(runtime.plain_text_from_rich_text(""), "")
 
 class PruneCostTests(AtspiPatchedTestCase):
-    """裁剪判据必须**先只读它用到的字段**，不能先建整条记录。
+    """Pruning reads only the fields it needs before building a full record.
 
-    实测 GIMP（GAIL）：完整的 record_for 是 8.45ms/节点，而一次 render_tree
-    调用它 3162 次却只产出 157 条记录——**95% 的开销当场丢弃**，占渲染耗时的
-    87%，整棵树 38.4s，超过 Go 层 30s 的超时。也就是说 a11y 通道在 GIMP 上
-    **默认根本用不了**，而原因只是取数顺序。改完 17.5s，行数一字不差。
+    In GIMP (GAIL) a full record_for costs about 8 ms per node, and pruning
+    discards most records a render would build. Building them eagerly pushes
+    a whole-tree render past the server-side request timeout.
     """
 
     def test_pruned_nodes_never_pay_for_a_full_record(self):
-        # 一堆会被裁掉的无名 filler，外加一个留得下的按钮。
+        # Unnamed fillers that pruning removes, plus one button that is kept.
         fillers = [_TreeNode(role="filler", name="", x=1, y=1, w=5, h=5)
                    for _ in range(30)]
         keeper = _TreeNode(role="push button", name="OK", x=1, y=1, w=5, h=5)
@@ -1690,16 +1710,17 @@ class PruneCostTests(AtspiPatchedTestCase):
 
         records, _ = runtime.render_tree(window, {"x": 0, "y": 0, "width": 100, "height": 100}, [0])
 
-        # 只有窗口自身与幸存的按钮该付全量代价。
+        # Only the window and the surviving button pay for a full record.
         self.assertEqual(len(records), 2, [r["name"] for r in records])
         self.assertEqual(len(calls), 2,
                          "被裁掉的节点不该走 record_for，实际调用了 {} 次".format(len(calls)))
 
     def test_prune_decision_still_keeps_named_containers(self):
-        """省开销不许省掉正确性：有名字的容器仍然要留住。
+        """Named containers are still kept.
 
-        实测教训——行距 combo 的 toggle button 本身没有名字，agent 只能靠父节点
-        `panel Line Spacing` 指认它。裁掉这个 panel，目标虽在树里却没法被指认。
+        The toggle button of the line spacing combo box is unnamed and can
+        only be identified through its parent `panel Line Spacing`. Pruning
+        the panel would leave the target in the tree but unidentifiable.
         """
         inner = _TreeNode(role="toggle button", name="", x=2, y=2, w=4, h=4)
         named_panel = _TreeNode(role="panel", name="Line Spacing", x=1, y=1, w=8, h=8,
@@ -1762,23 +1783,25 @@ class PruneCostTests(AtspiPatchedTestCase):
         self.assertEqual(records[-1]["controlType"], "push button")
 
 class StateReadbackTests(unittest.TestCase):
-    """动作声明了目标状态时，动作后回读校验。
+    """Actions that declare a target state are verified by reading it back.
 
-    照抄 Playwright 的 `_setChecked`（dom.ts）：
+    Modeled on Playwright's `_setChecked` (dom.ts):
 
         const finalState = await isChecked(progress);
         if (finalState.matches !== state)
           throw new NonRecoverableDOMError('Clicking the checkbox did not change its state');
 
-    注意它抛的是 **NonRecoverable**——不重试。重复同一个动作不会有不同结果。
+    The error is non-recoverable and not retried: repeating the same action
+    cannot give a different result.
     """
 
     def test_action_names_come_from_measurement_not_from_playwright(self):
-        """第一版这张表照 Playwright 的语义写（check/uncheck/expand/collapse），
-        实测六个应用**一个都没有**，整张表是死代码。
+        """ACTION_MUST_FLIP lists action names observed in real applications.
 
-        真实存在的是 `expand or contract`(119)、`toggle`(2) 这些，
-        而且它们是**翻转**语义不是"设成某值"。
+        Playwright's set-state names (check, uncheck, expand, collapse) do not
+        describe AT-SPI flip actions. Observed names such as
+        `expand or contract` and `toggle` flip a state instead of setting a
+        value.
         """
         for dead in ("check", "uncheck", "expand", "collapse", "select", "deselect"):
             self.assertNotIn(dead, runtime.ACTION_MUST_FLIP, dead)
@@ -1792,11 +1815,11 @@ class StateReadbackTests(unittest.TestCase):
         self.assertIn("CHECKED flipped False -> True", note)
 
     def test_boundary_is_stated_not_hidden(self):
-        """**状态到位 ≠ 行为发生。**
+        """A reached state does not prove that the intended behavior happened.
 
-        本仓库实测过反例：VLC 首选项里那颗单选按钮，Toggle 之后 CHECKED 真的
-        翻转了，面板却不切换。这条判据接不住那一类，措辞里必须讲明白——
-        不然它就成了新的假阳性来源。
+        In VLC's preferences, toggling a radio button flips CHECKED without
+        switching the panel. This check cannot detect that, so the note says
+        so instead of becoming a source of false positives.
         """
         note, _ = runtime.state_transition_note(
             "toggle", {"CHECKED": False}, {"CHECKED": True})
@@ -1808,14 +1831,16 @@ class StateReadbackTests(unittest.TestCase):
             "expand or contract", {"EXPANDED": False}, {"EXPANDED": False})
         self.assertTrue(failed)
         self.assertIn("promises to flip it", note)
-        # 必须明说"别重试"，并给出下一条可走的路。
+        # The note must say not to retry and name the next route to try.
         self.assertIn("Repeating the same call will not help", note)
         self.assertIn("gui", note)
 
     def test_actions_that_declare_nothing_are_not_judged(self):
-        """`click` / `menu` 这类动作没声明目标状态，回读无从谈起——
-        **判不了就别判**，硬判会制造假阳性。"""
-        # 这些是实测里最常见的动作名，它们都不承诺改变任何可读状态。
+        """Actions such as `click` and `menu` declare no target state to verify.
+
+        Judging them anyway would produce false positives.
+        """
+        # Common action names that promise no readable state change.
         for action in ("click", "menu", "activate", "press", "open", "dodefault", ""):
             note, failed = runtime.state_transition_note(
                 action, {"CHECKED": False}, {"CHECKED": True})
@@ -1831,11 +1856,10 @@ class StateReadbackTests(unittest.TestCase):
         self.assertFalse(failed)
 
 class StableIndexTests(unittest.TestCase):
-    """编号要跨快照存活。照抄 Playwright 的 ariaSnapshot.ts。
+    """Indices survive across snapshots, following Playwright's ariaSnapshot.ts.
 
-    修的是实测踩过的最贵一类失败：F4 打开对话框后索引全部重排，用旧下标调
-    click 时工具照点不误——本想点 Position Y，实际点到菜单，把对象高度误改成
-    16.26cm，**全程零报错**。
+    If opening a dialog renumbered every element, a click with an index from
+    the previous snapshot would silently hit a different control.
     """
 
     def test_same_element_keeps_its_number(self):
@@ -1844,8 +1868,10 @@ class StableIndexTests(unittest.TestCase):
         self.assertEqual(indexer.index_for([0, 1], "push button", "Save"), 7)
 
     def test_role_or_name_change_invalidates_the_number(self):
-        """失效条件照抄 Playwright：role 或 name 变了就重新发号——
-        因为它已经不是"同一个东西"了。"""
+        """As in Playwright, a changed role or name gets a new index.
+
+        The element is no longer the same thing.
+        """
         known = {"0.1": {"index": 7, "role": "push button", "name": "Save"}}
         self.assertNotEqual(
             runtime.StableIndexer(known).index_for([0, 1], "push button", "Saved"), 7)
@@ -1881,7 +1907,7 @@ class StableIndexTests(unittest.TestCase):
         )
 
     def test_inserting_an_element_does_not_shift_the_others(self):
-        """这是遍历序号最致命的毛病：插一个元素，它后面所有编号全推走。"""
+        """With traversal order, one insertion would shift every later index."""
         known = {
             "0.0": {"index": 0, "role": "frame", "name": "W"},
             "0.1": {"index": 1, "role": "push button", "name": "A"},
@@ -1889,14 +1915,14 @@ class StableIndexTests(unittest.TestCase):
         }
         indexer = runtime.StableIndexer(known)
         self.assertEqual(indexer.index_for([0, 0], "frame", "W"), 0)
-        # 中间插进来一个新元素——它拿新号，不占用别人的
+        # A newly inserted element gets a fresh index instead of taking another's.
         fresh = indexer.index_for([0, 1, 5], "push button", "NEW")
         self.assertEqual(indexer.index_for([0, 1], "push button", "A"), 1)
         self.assertEqual(indexer.index_for([0, 2], "push button", "B"), 2)
         self.assertGreaterEqual(fresh, 3)
 
     def test_numbers_are_never_reused_within_one_snapshot(self):
-        """同一份快照里两个元素拿到同一个号 = 静默指错对象。"""
+        """Reusing an index within one snapshot would silently target the wrong node."""
         known = {"0.1": {"index": 3, "role": "text", "name": ""},
                  "0.2": {"index": 3, "role": "text", "name": ""}}
         indexer = runtime.StableIndexer(known)
@@ -1910,25 +1936,24 @@ class StableIndexTests(unittest.TestCase):
         self.assertEqual(indexer.index_for([0, 0], "push button", "A"), 1)
 
 class DenseIndexTests(AtspiPatchedTestCase):
-    """被裁掉的节点**不能先领号再被丢掉**。
+    """Pruned nodes do not consume an index before being dropped.
 
-    必须继承 AtspiPatchedTestCase：裸 TestCase 下 relative_frame 全返回 None，
-    于是 depth>0 的节点一律被判成不可见而裁光，树里只剩根节点——
-    那种 fixture 测不出任何裁剪行为。这一条是写测试时当场踩到的。
+    This must be an AtspiPatchedTestCase: under a bare TestCase relative_frame
+    returns None, so every node below the root is pruned as invisible and the
+    fixture exercises no pruning at all.
     """
 
     def test_pruned_nodes_do_not_consume_numbers(self):
-        """被裁掉的节点**不能先领号再被丢掉**。
+        """Indices stay dense when nodes are pruned.
 
-        原来发号在裁剪判断之前，于是号被消耗、节点却不进 records/refs：
-        打印出来的下标稀疏带洞。实测 Nautilus 一次快照 91 个元素、
-        下标散布在 0..670——7.4 倍膨胀。而且被裁节点不在 known 里，
-        每次快照都重新领一批新号，号会随会话单调涨下去。
-
-        判据只看**稠密**：树里有 N 个元素，下标就该落在 0..N-1。
+        Assigning an index before the prune decision spends numbers on nodes
+        that never reach the records, leaving gaps. Pruned nodes are also
+        missing from the known map, so each snapshot would claim new numbers
+        and indices would keep growing during a session. With N elements in
+        the tree, indices must fall in 0..N-1.
         """
-        # 一堆无名 panel（会被角色裁剪丢掉）夹着两个有名按钮。
-        # 几何必须显式给，裁剪判据的第一关就是 frame 不为 None。
+        # Unnamed panels, pruned by role, surround two named buttons. Geometry
+        # is explicit because the first prune check requires a non-None frame.
         filler = [_TreeNode(role="panel", x=1, y=1, w=5, h=5)
                   for _ in range(8)]
         keep_a = _TreeNode(role="push button", name="Save", x=2, y=2, w=5, h=5)
@@ -1937,8 +1962,8 @@ class DenseIndexTests(AtspiPatchedTestCase):
                            kids=tuple(filler[:4]) + (keep_a,)
                                 + tuple(filler[4:]) + (keep_b,))
 
-        # 必须传 indexer——不传的话 index 退回 len(records)，那本来就是稠密的，
-        # 测不出任何东西。
+        # Pass an indexer: without one the index falls back to len(records),
+        # which is dense by construction and would prove nothing.
         records, _lines = runtime.render_tree(
             window, None, [0], indexer=runtime.StableIndexer({}), prune=True)
         indices = sorted(r["index"] for r in records)
@@ -1946,14 +1971,12 @@ class DenseIndexTests(AtspiPatchedTestCase):
                          "下标应当稠密，实际 {}".format(indices))
 
 class TruncatedNameIdentityTests(AtspiPatchedTestCase):
-    """name 被 text_limit 截断之后，元素身份**不能悄悄退化**。
+    """Truncating a name with text_limit does not weaken element identity.
 
-    实测复现：同一个节点、同一个名字，text_limit 从 500 调到 40，
-    record_still_matches 就从 True 翻成 False——因为它拿实时的完整 name
-    去比 record 里已截断的 name。失配之后静默退到最弱的"role + 屏幕位置"判据。
-
-    也就是说：**agent 为省 token 调低 text_limit，会悄悄削弱元素身份**。
-    阈值是每次请求可传的参数，所以比较时不能假定它等于默认值。
+    Comparing the live full name with a record's truncated name fails once
+    text_limit drops from 500 to 40, and matching silently falls back to the
+    weakest role-plus-position check. text_limit is a per-request parameter,
+    so comparisons cannot assume the default value.
     """
 
     LONG = "Manage — Settings and keyboard shortcuts, and more actions for the editor"
@@ -1967,11 +1990,11 @@ class TruncatedNameIdentityTests(AtspiPatchedTestCase):
                 "text_limit={} 时同一个节点没认出来".format(limit))
 
     def test_a_different_element_sharing_the_prefix_is_not_confused(self):
-        """修截断不能换来一个静默误判。
+        """Two elements sharing a truncated prefix are not confused.
 
-        只按截断后的前缀比的话，两个前缀相同的不同元素会被判成同一个——
-        那等于把一个静默失配换成一个静默误判，更糟。所以截断的记录
-        随身带完整名字的指纹，判定回到"完整名字精确相等"。
+        Comparing only the truncated prefix would trade a silent mismatch for a
+        worse silent false match. Truncated records therefore carry a
+        fingerprint of the full name, and matching compares full names exactly.
         """
         node = _TreeNode(role="push button", name=self.LONG)
         sibling = _TreeNode(
@@ -1984,7 +2007,7 @@ class TruncatedNameIdentityTests(AtspiPatchedTestCase):
                 "text_limit={} 时前缀相同的另一个元素被误判成同一个".format(limit))
 
     def test_short_truncation_margins_always_carry_a_fingerprint(self):
-        """省略号会让渲染名比阈值多 3 个字符，不能拿长度关系判断是否截断。"""
+        """The ellipsis adds 3 characters, so length alone cannot reveal truncation."""
         prefix = "abcdefghij"
         for suffix in ("k", "kl", "klm"):
             node = _TreeNode(role="push button", name=prefix + suffix)
@@ -2018,18 +2041,19 @@ class TruncatedNameIdentityTests(AtspiPatchedTestCase):
             )
 
     def test_short_names_carry_no_fingerprint(self):
-        """没截断就不该多带字段——指纹只为截断的记录存在。"""
+        """Only truncated records carry a name fingerprint."""
         node = _TreeNode(role="push button", name="Save")
         record = runtime.record_for(node, 0, [0], None, text_limit=500)
         self.assertNotIn("nameHash", record)
 
 class SnapshotGrammarTests(unittest.TestCase):
-    """快照文法。借鉴 Playwright 的 aria snapshot（`- role "name" [attr=value]`）。
+    """Snapshot line grammar, modeled on Playwright's aria snapshot format.
 
-    最要紧的一条是**自由文本必须加引号**。旧格式是
-    `<idx> <role> <name> Description: <desc>`，而名字本身可以含冒号——
-    实测 LibreOffice Impress 里就有 `panel PageShape: Weekday in school`。
-    于是"名字"与"字段分隔符"在词法上无法区分，我们发出去的是一种歧义文法。
+    Playwright writes `- role "name" [attr=value]`. Free text must be quoted:
+    names can contain colons, such as `panel PageShape: Weekday in school` in
+    LibreOffice Impress, so an unquoted
+    `<idx> <role> <name> Description: <desc>` line cannot separate the name
+    from the field delimiters.
     """
 
     def _line(self, **overrides):
@@ -2042,7 +2066,7 @@ class SnapshotGrammarTests(unittest.TestCase):
         return runtime.render_element_line(record, 0)
 
     def test_name_containing_a_colon_stays_unambiguous(self):
-        """回归：这正是旧格式解析不了的那一行。"""
+        """This line is ambiguous unless the name is quoted."""
         line = self._line(name="PageShape: Weekday in school",
                           description="Slide")
         self.assertIn('"PageShape: Weekday in school"', line)
@@ -2053,36 +2077,37 @@ class SnapshotGrammarTests(unittest.TestCase):
         self.assertIn(r'"say \"hi\""', line)
 
     def test_geometry_is_compact(self):
-        """`Frame: {x: 687, y: 23, width: 64, height: 46}` 45 字符 → 14 字符。
+        """Geometry shrinks from 45 characters to 14 without losing information.
 
-        实测几何占整棵树的 35–50%，压缩后全树省约 30%，信息不少一个字。
+        `Frame: {x: 687, y: 23, width: 64, height: 46}` becomes
+        `{687,23,64,46}`. Geometry makes up 35-50% of a tree, so this saves
+        about 30% of the whole tree.
         """
         line = self._line(frame={"x": 687.0, "y": 23.0, "width": 64.0, "height": 46.0})
         self.assertIn("{687,23,64,46}", line)
         self.assertNotIn("Frame:", line)
 
     def test_value_goes_last_after_a_colon(self):
-        """对齐 aria 的 `- textbox: Enter your name`。"""
+        """Matches the aria snapshot form `- textbox: Enter your name`."""
         line = self._line(localizedControlType="text", value="baseline-marker",
                           states="[focused]")
         self.assertTrue(line.rstrip().endswith(': "baseline-marker"'), line)
 
     def test_empty_segments_are_omitted(self):
-        """空的段不留空壳——否则每行都拖一串没有信息的字节。"""
+        """Empty segments leave no placeholder bytes on the line."""
         self.assertEqual(self._line(name="OK"), '\t7 push button "OK"')
 
     def test_index_stays_at_the_head(self):
-        """我们没有 selector，下标是唯一的引用手段，必须好取。"""
+        """The index leads the line so it is easy to extract as a reference."""
         line = self._line(name="OK").strip()
         self.assertTrue(line.startswith("7 "), line)
 
 class ElementReferenceTests(unittest.TestCase):
-    """元素指称只有一个渲染出口，输出必须能被 expect 的 target 解析器原样回读。
+    """Element references have one renderer whose output parses as a target.
 
-    起因是焦点摘要走的是另一套渲染：`role + " " + name`，无引号。于是我们
-    一边告诉 agent 焦点在 `entry Address and search bar`，一边在它把这串贴回
-    `expect` 时判它不匹配——裸串横跨 role 与 name 两个字段，结构性必假。
-    实测 focus_moves_to 的 4 次使用全部 verified=false，其中 3 次证据自相矛盾。
+    A separate unquoted `role + " " + name` rendering, such as
+    `entry Address and search bar`, cannot be pasted back into `expect`: the
+    bare string spans the role and name fields, so it never matches.
     """
 
     def test_named_element_is_quoted_like_a_tree_line(self):
@@ -2092,7 +2117,10 @@ class ElementReferenceTests(unittest.TestCase):
         )
 
     def test_unnamed_element_uses_the_field_form(self):
-        """`an unnamed separator` 是散文，回读不了；`role="separator"` 才回读得了。"""
+        """Unnamed elements render as `role="separator"`, which parses back.
+
+        Prose such as `an unnamed separator` cannot be read back as a target.
+        """
         self.assertEqual(runtime.element_reference("separator", ""), 'role="separator"')
 
     def test_quotes_inside_a_name_are_escaped(self):
@@ -2101,7 +2129,7 @@ class ElementReferenceTests(unittest.TestCase):
         )
 
     def test_focused_summary_uses_the_shared_renderer(self):
-        """判定源与证据源要同步，先得让证据本身可回读。"""
+        """Focus evidence uses the shared renderer so it reads back as a target."""
         node = object()
         with mock.patch.object(runtime, "iter_apps", return_value=[node]), \
                 mock.patch.object(runtime, "node_pid", return_value=42), \

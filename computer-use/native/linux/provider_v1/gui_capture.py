@@ -1,4 +1,4 @@
-"""Linux provider module: gui capture."""
+"""Screen capture, pixel comparison and screenshot encoding."""
 
 from .foundation import (
     Atspi,
@@ -15,17 +15,19 @@ from .foundation import (
 )
 
 def capture_window_pixels(bounds):
-    """抓指定屏幕区域的原始像素，用于**前后比对**（不是给 agent 看的图）。
+    """Capture raw pixels of a screen region for before/after comparison.
 
-    存在的理由：树接不住整类效果。实测 LibreOffice Impress 上，右对齐生效、
-    文件保存成功，**a11y 树都字节不变**，于是两个真的生效了的动作被判成
-    "送达但被忽略"，agent 多花两步去自证（占那次 12 步的 17%）。
+    The result is not an image for the model. The accessibility tree misses
+    whole classes of effects; saving a file in LibreOffice Impress, for
+    example, can leave it byte-for-byte unchanged. Pixels are evidence
+    independent of the tree: an unchanged tree with a changed screen means
+    the effect is real but invisible to the tree, and only an unchanged tree
+    together with an unchanged screen is strong evidence that nothing
+    happened.
 
-    像素是**独立于树**的第三种判据：树没变而屏幕变了，说明效果真实存在、
-    只是树看不见；树没变屏幕也没变，才是"确实什么都没发生"的强证据。
-
-    注意 `read_pixel_bytes()` 而不是 `get_pixels()`——后者在 PyGObject 上
-    返回的是截断数据（实测 1850x1053 只拿到不到 100KB，正确值 5.85MB）。
+    Use ``read_pixel_bytes()`` rather than ``get_pixels()``: under PyGObject
+    the latter returns truncated data (under 100 KB instead of 5.85 MB for a
+    1850x1053 capture).
     """
     if Gdk is None or bounds is None:
         return None
@@ -51,12 +53,17 @@ def capture_window_pixels(bounds):
 
 
 def pixel_change(before, after):
-    """比出变化比例与变化区域；比不了就返回 None（**不假装比过**）。"""
+    """Return the changed fraction and region between two captures.
+
+    Returns None when the captures cannot be compared, rather than reporting
+    a comparison that did not happen.
+    """
     if not before or not after:
         return None
     if (before["width"] != after["width"] or before["height"] != after["height"]
             or before["stride"] != after["stride"]):
-        # 窗口尺寸变了本身就是一种变化，但无法逐点比对——如实说明。
+        # A resize is itself a change but rules out a pixel-by-pixel
+        # comparison; report it as such.
         return {"resized": True}
     a, b = before["data"], after["data"]
     stride, channels = before["stride"], before["channels"]
@@ -104,31 +111,21 @@ def pixel_buffers_identical(before, after):
         return None
 
 
-# 动作前后要比对的文本属性。**只挑格式类**，不是全量——全量里大半是
-# writing-mode / variant 这种恒定值，比了也没信息。
-#
-# 这条能力是查 Playwright 时反推出来的：它的 aria snapshot 只渲染一小撮语义属性
-# （[checked] [level=1]），而"查任意样式属性"是 `toHaveCSS` 这类**断言**的事——
-# **快照是给 agent 看的摘要，断言是精确查询，两者不必是同一套字段。**
-#
-# 顺着这个思路回头查 AT-SPI，才发现 `Atspi.Text.get_default_attributes()`
-# 一直都能读到 justification / size / weight / fg-color 这些东西。
-# 我此前写进文档的"改段落对齐后 a11y 树字节不变"**是错的**——
-# 树不变是因为**我们没渲染这些字段**，不是信息不存在。
-# 实测取一次 0.10–0.41ms/节点（对比 record_for 在 GIMP 上是 8.45ms），近乎免费。
 def persistent_pixel_change(before, after_one, after_two):
-    """只认**在两张动作后画面里都存在**的变化。
+    """Count only changes present in both post-action captures.
 
-    这是 Playwright 那条"反复截图直到连续两张一致再比"在桌面上的等价物。
-    它解决的是我第一版栽的跟头：动作前连抓两张测噪声，但两张只隔几毫秒，
-    1Hz 的文本光标根本没来得及闪，噪声底测出来是 0——于是**空操作的
-    第二次 Ctrl+L 也被判成"屏幕变了"**，变化区域正是那个 8x16 的光标。
+    This is the desktop equivalent of Playwright's "capture until two
+    consecutive screenshots match, then compare". Two pre-action captures
+    cannot measure noise: they are milliseconds apart, so a 1 Hz text caret
+    never blinks between them, the noise floor reads as zero, and a no-op
+    keystroke is reported as a screen change located exactly at the caret. A
+    blinking element differs between the two post-action captures (on in one,
+    off in the other), so requiring both to differ from the pre-action capture
+    filters it out, while a real UI change appears in both.
 
-    闪烁的东西在两张动作后画面里状态不同（一亮一灭），所以"两张都相对
-    动作前有差异"这个条件会把它滤掉；真正的界面变化则两张都在。
-
-    两张之间的间隔由**建快照的时间**填上（resolve_app 自己就要 0.15–0.3s），
-    所以除了多抓一张图（23ms）几乎不额外增加延迟。
+    Building the snapshot fills the gap between the two captures (resolve_app
+    alone takes 0.15-0.3 s), so the extra capture (about 23 ms) adds almost
+    no latency.
     """
     if not before or not after_one or not after_two:
         return None
@@ -155,7 +152,7 @@ def persistent_pixel_change(before, after_one, after_two):
                 two = (abs(base[0] - c[offset]) + abs(base[1] - c[offset + 1])
                        + abs(base[2] - c[offset + 2])) > PIXEL_DIFF_THRESHOLD
                 if not two:
-                    # 只在其中一张里变了——闪烁，不是效果。
+                    # Changed in only one capture: flicker, not an effect.
                     continue
                 changed += 1
                 min_x = min(min_x, x)
@@ -175,7 +172,7 @@ def persistent_pixel_change(before, after_one, after_two):
 
 
 def pixel_change_note(change, screenshot_scope="window"):
-    """把比对结果写成一句给 agent 看的话。`[pixels]` 前缀便于机器识别。"""
+    """Describe a pixel comparison for the model, prefixed with `[pixels]`."""
     if change is None:
         return None
     full_screen = screenshot_scope == SCREENSHOT_SCOPE_SCREEN
@@ -317,7 +314,7 @@ def capture_gui_image(bounds):
 
 
 def capture_window_png(bounds):
-    """Compatibility wrapper for older tests and direct callers."""
+    """Return only the base64 image data from capture_window_image()."""
     image = capture_window_image(bounds)
     return image.get("data") if image else None
 

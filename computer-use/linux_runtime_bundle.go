@@ -42,8 +42,9 @@ var linuxProviderPaths = []string{
 //go:embed runtime.py native/__init__.py native/linux/__init__.py native/linux/provider_v1/*.py
 var linuxRuntimeFS embed.FS
 
-// linuxRuntimeScript remains a searchable effective source for source-contract
-// tests. Production execution materializes and imports the provider package.
+// linuxRuntimeScript is the concatenated provider source that source-contract
+// tests search. Production execution materializes and imports the provider
+// package instead.
 var linuxRuntimeScript = linuxProviderSource()
 
 func linuxProviderSource() string {

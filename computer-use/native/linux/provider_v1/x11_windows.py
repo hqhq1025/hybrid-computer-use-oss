@@ -1,4 +1,4 @@
-"""Linux provider module: x11 windows."""
+"""X11 desktop layout, native window identity and window selection."""
 
 from .foundation import (
     AX_WINDOW_ROLES,
@@ -342,7 +342,7 @@ def x11_window_inventory_for_pid(pid):
 
 
 def x11_windows_for_pid(pid):
-    """Compatibility list view of the native-window inventory."""
+    """Return the native-window inventory for ``pid`` as a plain list."""
     return list(x11_window_inventory_for_pid(pid))
 
 
@@ -553,17 +553,17 @@ def app_windows(app):
 
 
 def x11_active_client_size():
-    """X11 认定的活动窗口，去掉不可见阴影之后的真实尺寸。
+    """Return the X11 active window's size without its invisible shadow.
 
-    用来在 AT-SPI 分不出高下时做**裁决**。返回 (宽, 高)，拿不到就 None。
+    Used to arbitrate when AT-SPI states cannot tell windows apart. Returns
+    ``(width, height)``, or None when unavailable.
 
-    为什么用尺寸而不是位置或标题：
-      - 位置不行：GTK4 的 a11y 窗口把 extents 报成 (0,0) 起点，和屏幕坐标对不上；
-      - 标题不行：挡在最前面的那个二级对话框**没有标题**；
-      - 尺寸行，而且精确：X11 的窗口尺寸包含 GTK 画的不可见阴影边框，
-        减掉 `_GTK_FRAME_EXTENTS` 之后与 a11y 报的尺寸**逐像素相等**。
-        实测：X11 827x291，阴影 (61,61,55,67)，相减 705x169，
-        与那个无名确认框的 a11y 尺寸完全一致。
+    Size is the criterion because position and title are unreliable: GTK4
+    reports accessibility extents with a (0,0) origin that does not match
+    screen coordinates, and the secondary dialog in front may have no title.
+    The X11 size includes the invisible shadow border drawn by GTK; after
+    subtracting ``_GTK_FRAME_EXTENTS`` it matches the accessibility size
+    exactly (for example 827x291 minus (61,61,55,67) gives 705x169).
     """
     try:
         active = subprocess.run(["xdotool", "getactivewindow"],
@@ -591,20 +591,18 @@ def x11_active_client_size():
 
 
 def x11_preferred_window(candidates):
-    """在多个候选里挑出 X11 认为在最前面的那个。唯一命中才返回。
+    """Return the one candidate that X11 considers frontmost, or None.
 
-    这条判据修的是一个**根因**，不是症状：GNOME 门户的文件对话框和它的二级
-    确认框（"文件已存在，是否替换？"）是同一个应用下的两个窗口，
-    状态位**完全相同**（MODAL + VISIBLE，都没有 ACTIVE / SHOWING）。
-    原来的顺序取"第一个模态"，于是永远拿到文件选择器，
-    而真正挡在前面、握着焦点的是那个无名确认框。
+    The GNOME portal file dialog and its secondary confirmation ("file exists,
+    replace?") are two windows of the same application with identical
+    AT-SPI states: MODAL and VISIBLE, neither ACTIVE nor SHOWING. Taking the
+    first modal window always yields the file chooser while the untitled
+    confirmation in front holds focus, which stalls nested save and overwrite
+    flows. The confirmation is present in the accessibility tree; only the
+    window choice is wrong.
 
-    实测代价：嵌套的保存/覆盖确认流程会因此卡死。
-    一度以为"那个确认框根本不在 a11y 树里"——**那个结论是错的**，
-    它在树里，只是我们选错了窗口。
-
-    命中不唯一时返回 None、让原有顺序接管：一个裁决判据在自己也含糊时
-    不该硬裁。
+    Without a unique match this returns None and the regular order applies:
+    an ambiguous arbiter must not force a decision.
     """
     target = x11_active_client_size()
     if target is None:
@@ -735,35 +733,36 @@ def select_window_by_handle(app, target_window_handle):
 
 
 def main_window(app):
-    """挑出当前真正该操作的顶层窗口。
+    """Return ``(index, window)`` for the top-level window to operate on.
 
-    顺序：可见的模态对话框 > ACTIVE > SHOWING > 第一个。
+    Order: an active modal window; with several windows, a unique X11
+    active-window size match (see x11_preferred_window()); a showing modal
+    window; ACTIVE; SHOWING; and finally the first window.
 
-    模态对话框必须排在 ACTIVE 前面。macOS 侧可以直接问
-    `kAXFocusedWindowAttribute`，AT-SPI 没有等价属性，只能从状态推断；而
-    LibreOffice 这类应用的 frame 和 dialog **都不上报 ACTIVE**，于是判据会一路
-    落到 SHOWING，模态对话框就因为在子节点顺序里排得靠后而输给主窗口——
-    结果是只要弹出对话框，agent 拿到的就是主窗口的树，**完全看不见对话框**。
-    而对话框恰恰是桌面交互里最主要的操作对象之一。
+    Modal windows rank above ACTIVE. AT-SPI has no equivalent of macOS's
+    kAXFocusedWindowAttribute, so the window must be inferred from states,
+    and applications such as LibreOffice report ACTIVE on neither frames nor
+    dialogs. Selection would then fall through to SHOWING, where a modal
+    dialog later in child order loses to the main window and the caller never
+    sees the dialog. MODAL is the strongest signal: by definition it blocks
+    interaction with the rest of the application.
 
-    模态状态本身就是最强判据：MODAL 按定义阻塞了应用其余部分的交互，
-    它就是此刻唯一可操作的窗口。
-
-    但模态窗口可能同时存在多个：combo box 的下拉在 LibreOffice 里是一个独立的
-    顶层 window，状态为 MODAL + SHOWING + **ACTIVE**，而它下面的对话框只有
-    MODAL + SHOWING。只按"第一个模态"取会拿到对话框，下拉里的选项仍然看不见。
-    所以模态候选里再按 ACTIVE 细分一次，取最上层的那个。
+    Several modal windows can coexist: a LibreOffice combo-box drop-down is a
+    separate top-level window with MODAL, SHOWING and ACTIVE, above a dialog
+    that is only MODAL and SHOWING. ACTIVE therefore breaks the tie among
+    modal candidates so the drop-down options stay visible.
     """
     index, window, _selection = select_main_window(app)
     return index, window
 
 
 def window_identity_set(app):
-    """当前顶层窗口的身份集合，用来判断一次动作有没有开出或关掉窗口。
+    """Return the identities of the application's current top-level windows.
 
-    身份取 (索引, 角色, 标题)。刚映射出来的窗口可能先是空标题、稍后才拿到
-    真正的标题，这会让同一个窗口在集合里换一个身份——**这不影响判据**：
-    它照样落在"新出现"那一侧，而这里要的正是"有东西变了"这个事实。
+    Used to detect whether an action opened or closed a window. An identity
+    is ``(index, role, title)``. A newly mapped window may receive its real
+    title later and so change identity; that does not affect the check,
+    because it still counts as newly appeared and only the change matters.
     """
     identity = set()
     for index, window in app_windows(app):

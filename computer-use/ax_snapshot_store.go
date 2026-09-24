@@ -15,9 +15,9 @@ func (s *service) getAppState(
 	observationRoot map[string]any,
 	targetWindowHandle ...string,
 ) toolCallResult {
-	// app 留空是**合法**的，表示"当前前台那个应用"。
-	// 13 条真实轨迹里 12 条的开局是 `list_apps → get_app_state`——它们想问的
-	// 是同一件事"我现在面前是什么"，而那此前要两次调用外加一次猜名字。
+	// An empty app is valid and selects the current foreground application.
+	// Sessions usually begin by asking what is on screen, which would
+	// otherwise take an app listing, a guessed name and a second call.
 	request := axServiceRequest{
 		Operation:       axServiceObserve,
 		App:             app,
@@ -38,7 +38,8 @@ func (s *service) getAppState(
 		request.MaxTreeDepth = *maxTreeDepth
 	}
 	request.Prune = prune
-	// A11Y 默认只回语义树。窗口截图是显式选择的视觉证据，不是 GUI 坐标源。
+	// AX returns only the semantic tree by default. A window screenshot is
+	// opt-in visual evidence, never a source of GUI coordinates.
 	if includeScreenshot == nil {
 		off := false
 		request.IncludeScreenshot = &off
@@ -54,8 +55,9 @@ func (s *service) getAppState(
 		notes = append([]string{note}, notes...)
 		followsFailedAction = true
 	}
-	// get_app_state 也要带上诊断：应用可能活着但 a11y 是空壳，
-	// 不说明的话 agent 会把"我看不见"误读成"界面是空的"。
+	// Observations carry diagnostics too: an app can be alive while exposing
+	// an empty accessibility tree, and without a note the agent would read
+	// "nothing visible" as "the UI is empty".
 	return withFailedActionContinuity(s.getAppStateResult(
 		snapshot,
 		notes,

@@ -15,20 +15,24 @@ from .foundation import (
 from .ax_node_properties import text_value_with_status
 from .ax_records import record_for
 
-# 自管理表格容器一次最多渲染多少单元格。典型视口约 37 行 × 21 列 = 777 个，
-# 实测取回（含文本）0.12s，0.2ms/cell。设上限兜住超宽表格。
+# Maximum cells rendered per self-managed table container. A typical viewport
+# is about 37 rows x 21 columns = 777 cells, fetched with text in about 0.12 s
+# (under 0.2 ms per cell). The cap bounds very wide tables.
 MAX_TABLE_CELLS = int(os.environ.get("COMPUTER_USE_MAX_TABLE_CELLS", "1200"))
 
 
 def visible_cell_range(node):
-    """探测自管理表格容器当前视口对应的 (row0, row1, col0, col1)。
+    """Return the visible ``(row0, row1, col0, col1)`` of a self-managed table.
 
-    MANAGES_DESCENDANTS 容器不能枚举子节点（Calc 的 sheet 谎报 10.7 亿个），
-    但可以按坐标寻址。做法是用 Component.get_accessible_at_point 打容器矩形的
-    两个对角，反解出可见的行列范围——在 Calc 里这是 O(1) 的像素→行列换算
-    （ScAccessibleSpreadsheet::getAccessibleAtPoint 走 GetPosFromPixel）。
+    MANAGES_DESCENDANTS containers cannot be enumerated (a Calc sheet reports
+    about 1.07 billion children) but can be addressed by coordinates. This
+    hit-tests two opposite corners of the container rectangle with
+    Component.get_accessible_at_point and maps the hits back to row and
+    column ranges; in Calc that is an O(1) pixel-to-cell conversion
+    (ScAccessibleSpreadsheet::getAccessibleAtPoint uses GetPosFromPixel).
 
-    返回 None 表示探测失败，调用方应回退到"不枚举"。
+    Returns None when probing fails, in which case the caller must not
+    enumerate the cells.
     """
     table = safe(node.get_table_iface)
     component = safe(node.get_component_iface)
@@ -74,10 +78,11 @@ def render_visible_cells(
     text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, indexer=None,
     boxes=False, annotations=None,
 ):
-    """把自管理表格容器当前视口内的单元格渲染进树，返回渲染数量。
+    """Render the cells in a self-managed table's viewport; return the count.
 
-    这是 should_enumerate_children() 拒绝枚举之后的替代路径：枚举会掉进
-    Calc 谎报的 10.7 亿子节点，而按 (row, col) 寻址在 Calc 里是 O(1) 查表。
+    This replaces child enumeration once should_enumerate_children() refuses
+    it: enumeration would walk the roughly 1.07 billion children a Calc sheet
+    reports, whereas (row, col) addressing is an O(1) lookup in Calc.
     """
     def record_omission(reason, count=1):
         if annotations is None:
@@ -116,9 +121,10 @@ def render_visible_cells(
             if cell is None:
                 missing += 1
                 continue
-            # 只取文本，不回退到 numeric_value：Calc 的空单元格 Value 接口
-            # 返回 0.0，会让空白单元格看起来像是填了 0 —— 对"找出空单元格"
-            # 这类任务是致命的误导。
+            # Read text only, without falling back to numeric_value: Calc's
+            # Value interface returns 0.0 for empty cells, which would make
+            # blank cells look like they contain 0 and defeat any search for
+            # empty cells.
             value, text_complete = text_value_with_status(
                 cell, text_limit=text_limit
             )
@@ -126,23 +132,25 @@ def render_visible_cells(
                 text_unavailable += 1
                 continue
             if not value:
-                # 空单元格不进树。实测一张只有 3 列 4 行数据的表：视口里
-                # 1081 个单元格中 1069 个是空的，占掉 19971 / 23182 token（86%）。
-                # 空格子除了坐标不携带任何信息，而坐标本身就是 RxCy，
-                # 从下面那行范围说明里可以直接推出来。
+                # Empty cells are left out of the tree. In one measured sheet
+                # with 3 columns x 4 rows of data, 1069 of the 1081 cells in
+                # view were empty and took 19971 of 23182 tokens (86%). An
+                # empty cell carries nothing but its RxCy coordinate, which
+                # the range summary below already implies.
                 #
-                # 代价是空单元格拿不到 element_index。范围说明里给出的替代
-                # 路径是**实测过的那一条**：用 press_key 把单元格光标移过去，
-                # 再 type_text，内容会落进当前光标所在的格子。
+                # Omitted cells get no ref, so the summary names the verified
+                # alternative: move the cell cursor with press_key, then
+                # type_text, which lands in the cell holding the cursor.
                 #
-                # 名称框（树里的 `text Value: A1`）看起来更直接，但**没验证通过**：
-                # set_value 能改它的文本却不触发跳转（控件变了、应用没照做，
-                # 与下拉提交同一族），而 click 也没能让它获得键盘焦点。
-                # 没验证通过的操作不写进给 agent 的提示里。
+                # The Name Box (`text Value: A1` in the tree) looks more
+                # direct but failed verification: set_value changes its text
+                # without navigating (the control changes but the application
+                # does not act, as with drop-down commits), and click does not
+                # give it keyboard focus. Unverified paths are not suggested.
                 empty += 1
                 continue
-            # 单元格用 (行, 列) 当路径后缀——它比遍历序号稳，滚动之后同一个格子
-            # 还是同一个号。
+            # Use (row, col) as the path suffix: unlike traversal order, it
+            # stays the same for a given cell after scrolling.
             cell_path = path + [row, col]
             index = (indexer.index_for(cell_path, node_role(cell), "")
                      if indexer is not None else len(records))
@@ -157,11 +165,10 @@ def render_visible_cells(
             record["providerObjectPath"] = provider_object_path(node)
             record["processGeneration"] = process_generation(node_pid(node))
             records.append(record)
-            # 必须带上 Frame。这些单元格是**屏幕上真实可见**的（它们正是坐标
-            # 寻址取到的当前视口内容），漏掉 Frame 会让任何"只保留可见节点"的
-            # 裁剪把整个下拉/表格内容判成不可见并全部丢掉——实测中行距下拉的
-            # `cell R3C0 Double` 就是这么被三种裁剪策略同时丢掉的，
-            # 而它恰恰是任务必须点中的那个元素。
+            # The record keeps the cell frame. These cells are genuinely
+            # visible (they are the viewport content found by coordinate
+            # addressing); without a frame, visible-only pruning would treat
+            # the whole drop-down or table as invisible and discard it.
             cell_frame = record.get("frame")
             frame_segment = ""
             if boxes and cell_frame is not None:
@@ -171,9 +178,9 @@ def render_visible_cells(
                     round(cell_frame["width"]),
                     round(cell_frame["height"]),
                 )
-            # 用节点真实的 AT-SPI 角色，不要硬编码成 "cell"。角色保真度会影响
-            # 任何按角色做的裁剪都依赖角色保真；实测中整批下拉选项曾因
-            # table-cell 被硬编码成 cell 而判成无关角色丢掉。
+            # Use the node's real AT-SPI role rather than a hard-coded "cell":
+            # role-based pruning depends on it and would otherwise discard
+            # drop-down options as irrelevant.
             cell_role = record["localizedControlType"] or record["controlType"] or "table cell"
             a1 = spreadsheet_a1(row, col)
             lines.append(

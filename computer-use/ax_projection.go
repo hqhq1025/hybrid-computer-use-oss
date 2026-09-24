@@ -16,25 +16,26 @@ const (
 	settlePollMS    = 200
 )
 
-// expectTarget 是一个**与 toolkit 无关**的元素描述。
-// 写法两种，都从快照行里抄得出来：
-//   - 字段式：`role=dialog`、`name=Save`、`element_index=42`，逗号相连表示"与"
-//   - 选择器式：`push button "Save"`，与 click / verify 的选择器逐字一致
+// expectTarget is a toolkit-independent element description. Both spellings
+// can be copied from snapshot lines:
+//   - field form: `role=dialog`, `name=Save`, `element_index=42`, joined by
+//     commas for AND
+//   - selector form: `push button "Save"`, the same syntax as AX selectors
 type expectTarget struct {
 	raw       string
-	index     int // -1 表示没有按下标定位
+	index     int // -1 when the target is not addressed by index
 	role      string
 	name      string
 	exactRole bool
 	exactName bool
 	text      string
 	state     string
-	// loose 是"一个裸词"的兜底：名字、描述、值、占位符里任意一处命中即可。
-	// 桌面上同一句话落在哪个**文本**字段极不稳定，所以裸词不该被硬绑到某一个
-	// 文本字段上——但**角色不在其列**。角色曾经也参与裸串命中，实测代价是
-	// `expect={"appears":"menu"}` 被 `push button "Back"` 判成命中（某个字段
-	// 恰好含 "menu"），把一个假的确定性交给了 agent。角色必须用显式的 `role=`
-	// 限定，那是一个封闭的词表，本来就不需要模糊命中。
+	// loose is the fallback for a bare word: a match in the name,
+	// description, value or placeholder suffices, because toolkits disagree
+	// on which text field holds a phrase. Roles are excluded: matching a bare
+	// word against roles let {"appears": "menu"} match an unrelated push
+	// button, a false certainty for the agent. Roles need an explicit role=,
+	// a closed vocabulary that needs no fuzzy matching.
 	loose string
 }
 
@@ -69,8 +70,8 @@ func (t expectTarget) matches(record *elementRecord) bool {
 		return false
 	}
 	if t.loose != "" {
-		// 只扫文本字段。ControlType / LocalizedControlType **刻意不在这里**——
-		// 见 loose 字段上的注释：裸串命中角色是 appears 假阳性的来源之一。
+		// Scan text fields only; ControlType and LocalizedControlType are
+		// excluded on purpose (see the loose field).
 		if !containsFold(record.Name, t.loose) &&
 			!containsFold(record.Description, t.loose) &&
 			!containsFold(record.Value, t.loose) &&
@@ -157,8 +158,9 @@ func (t expectTarget) findFocused(snapshot *appSnapshot) *elementRecord {
 }
 
 func runtimePathContains(ancestor, descendant []int) bool {
-	// runtime.py uses [] for the accessibility root path. JSON omits that empty
-	// slice, but it still semantically contains every non-root descendant.
+	// The provider uses [] for the accessibility root path. JSON omits that
+	// empty slice, but it still semantically contains every non-root
+	// descendant.
 	if len(ancestor) == 0 {
 		return len(descendant) > 0
 	}

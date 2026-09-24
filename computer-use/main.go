@@ -209,9 +209,9 @@ type axProviderAnnotation struct {
 	Detail          string `json:"detail,omitempty"`
 }
 
-// elementRef 是一个元素的稳定编号及其失效条件。
-// 照 Playwright 的 ariaSnapshot.ts：role 或 name 变了就重新发号，
-// 因为它已经不是"同一个东西"了。
+// elementRef is an element's stable ref together with the fields that
+// invalidate it. As in Playwright's ariaSnapshot.ts, a change of role or name
+// issues a new ref, because the element is no longer the same object.
 type elementRef struct {
 	Index    int    `json:"index"`
 	Role     string `json:"role"`
@@ -219,8 +219,9 @@ type elementRef struct {
 	NameHash string `json:"nameHash,omitempty"`
 }
 
-// busySignal 是"这个应用还在干活"的证据。见 runtime.py 的 busy_signal：
-// 异步操作未完成与信息被预算裁掉，在返回文本上原本完全同形。
+// busySignal is evidence that the application is still working, computed by
+// busy_signal in the Linux provider. Without it, an unfinished asynchronous
+// operation and budget-truncated output look identical in the returned text.
 type busySignal struct {
 	WindowBusy       bool `json:"windowBusy"`
 	ProgressElements int  `json:"progressElements"`
@@ -301,13 +302,15 @@ type appSnapshot struct {
 	Refs                map[string]elementRef  `json:"refs,omitempty"`
 	Annotations         []axProviderAnnotation `json:"annotations,omitempty"`
 
-	// 下面几个字段由 Go 侧在缓存时补上，不来自 Python。
-	// 快照有多旧是**我们特有的必需信息**：浏览器里 DOM 变化通常伴随可观测事件，
-	// 桌面上快照可能已经陈旧几十秒而 agent 毫无察觉。
+	// The fields below are set by the Go service when the snapshot is cached;
+	// the provider does not send them. Snapshot age matters on the desktop:
+	// unlike DOM changes in a browser, desktop UI changes raise no observable
+	// event, so a snapshot can be stale for tens of seconds unnoticed.
 	capturedAt time.Time
 	sourceApp  string
-	// 与上一份快照的关系。Python 每次独立成像，"这次和上次一样吗"只能在
-	// 持有历史的一侧回答——运行时是一次性进程，历史在这里。
+	// Relation to the previous snapshot. The provider captures each snapshot
+	// independently in a one-shot process, so only this side, which holds the
+	// history, can tell whether a snapshot matches the previous one.
 	comparedToPrevious        bool
 	identicalToPrevious       bool
 	previousSnapshotID        string
@@ -558,28 +561,18 @@ func (s *appSnapshot) renderedText() string {
 	return strings.Join(lines, "\n")
 }
 
-// 大输出落盘、响应里只回路径——照抄 playwright-mcp 的 `--output-mode file|stdout`：
+// outputMode reports whether large outputs are written to files ("file") or
+// returned inline ("stdout"). File mode mirrors playwright-mcp's --output-mode
+// option: instead of compressing a large output, it writes the output to a
+// file and returns only the path, and the agent reads the detail when needed.
+// Desktop accessibility trees can reach tens of thousands of characters while
+// the agent usually needs one or two elements.
 //
-//	--output-mode <mode>   whether to save snapshots, console messages, network
-//	                       logs to a file or to the standard output.
-//	                       Can be "file" or "stdout". Default is "stdout".
-//
-// 它的响应里长这样：
-//
-//	### Snapshot
-//	[Snapshot](.playwright-cli/page-2026-02-14T19-22-42-679Z.yml)
-//
-// **它的解法不是压缩内容，是把大输出写文件、只回一个路径**，agent 需要细节时
-// 自己去读。对我们尤其有价值：LibreOffice 的树 17694 字符、VS Code 24731 字符，
-// 而 agent 通常只关心其中一两个元素。
-//
-// 默认仍然是 stdout，有两个原因，第二个更硬：
-//  1. 落盘把"一次调用拿到全部信息"变成"两次调用"，对小树是净损失
-//     （gedit 的树只有 659 字符，写出去再读回来纯属折腾）。
-//  2. **它要求 agent 有读文件的能力。** 受限客户端可能不暴露本机文件，
-//     或要求交互经过桌面；那种配置下落盘模式会让树**根本读不到**。
-//     所以这是一个部署方决定的开关，
-//     不能默认打开。
+// The default is stdout for two reasons:
+//  1. File output turns one call into two, a net loss for small trees.
+//  2. File output requires the agent to read local files. Restricted clients
+//     may not expose them, and the tree would then be unreachable, so only
+//     the deployment can enable it.
 func outputMode() string {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("COMPUTER_USE_OUTPUT_MODE")))
 	if mode == "file" {
@@ -595,9 +588,8 @@ func outputDir() string {
 	return filepath.Join(os.TempDir(), "computer-use")
 }
 
-// outputThreshold 小于这个字符数的输出不落盘。
-// 落盘把一次调用变成两次，对小树是净损失——gedit 的树只有 659 字符，
-// 写出去再读回来纯属折腾。
+// outputThreshold is the size, in characters, below which output is never
+// written to a file: for small trees, turning one call into two is a net loss.
 func outputThreshold() int {
 	if raw := strings.TrimSpace(os.Getenv("COMPUTER_USE_OUTPUT_THRESHOLD")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
@@ -607,8 +599,10 @@ func outputThreshold() int {
 	return 4000
 }
 
-// spillToFile 把大文本写进输出目录，返回给 agent 看的替代文本。
-// 写不成就返回空串——**落盘失败绝不能让工具失败**，原样回文本即可。
+// spillToFile writes large text to the output directory and returns the
+// replacement text shown to the agent. It returns "" when file output does not
+// apply or the write fails; a spill failure must never fail the tool, so the
+// caller then returns the text inline.
 func spillToFile(kind, text string) string {
 	if outputMode() != "file" || len(text) < outputThreshold() {
 		return ""
@@ -639,7 +633,8 @@ func (s *appSnapshot) result() toolCallResult {
 	return s.resultWithNotes(nil)
 }
 
-// resultWithTreeOverride 用给定的行替代 treeLines 渲染，用于增量视图。
+// resultWithTreeOverride renders the given lines in place of TreeLines, for
+// incremental views.
 func (s *appSnapshot) resultWithTreeOverride(notes, lines []string) toolCallResult {
 	if s == nil {
 		return s.resultWithNotes(notes)
@@ -649,24 +644,24 @@ func (s *appSnapshot) resultWithTreeOverride(notes, lines []string) toolCallResu
 	return clone.resultWithNotes(notes)
 }
 
-// resultWithNotes 在 accessibility tree 前面先说清楚这次动作实际做了什么、
-// 结果有没有被确认过。只返回一棵新树很容易被读成"动作成功了"，但它只是快照。
+// resultWithNotes puts notes on what the action actually did, and whether its
+// result was confirmed, before the accessibility tree. A new tree alone is
+// easily misread as "the action succeeded", but it is only a snapshot.
 func (s *appSnapshot) resultWithNotes(notes []string) toolCallResult {
 	return s.textWithNotes(s.renderedText(), notes)
 }
 
-// notesOnlyResult 只回诊断 Note，不回树、不回截图。
+// notesOnlyResult returns only diagnostic notes, without a tree or screenshot.
 //
-// 为什么需要它：量过 67 条真实轨迹，**87% 的观测开销是动作的副产品**——
-// 每个 click/press_key 都把整棵树重渲一遍再附一张图，平均 13640 字符 + 92%
-// 带图，比 get_app_state 本身还大。而调用方连打三四个已知动作时，
-// 中间那几棵树它根本没读。
+// Most observation cost is a by-product of actions: re-rendering the full tree
+// and attaching a screenshot after every action can cost more than an explicit
+// observation, and a caller chaining several known actions does not read the
+// intermediate trees.
 //
-// 但树不能默认砍掉：动作后的树正是"这一步到底生效没有"的证据，
-// 砍了就等于让调用方盲着走。所以这是**调用方自己选**的，默认仍是全量。
-//
-// 即便只回 Note，证据也没丢干净：解析到了哪个元素、像素变了百分之几并且
-// 跨两帧仍然保持、有没有弹出模态框——这些都在 Note 里。丢的是"完整现状"。
+// The tree is not dropped by default, because the post-action tree is the
+// evidence of whether the step took effect; the caller must opt in. The notes
+// still report the resolved element, visual change evidence and any modal
+// dialog; only the complete current state is omitted.
 func (s *appSnapshot) notesOnlyResult(notes []string) toolCallResult {
 	notes = modelFacingAXNotes(notes)
 	lines := make([]string, 0, len(notes)+1)
@@ -683,8 +678,10 @@ func (s *appSnapshot) notesOnlyResult(notes []string) toolCallResult {
 	}}
 }
 
-// withoutScreenshot 复制一份不带图的快照，用于 observe 只要树的那两档。
-// 复制而不是就地清空：缓存里的那份还要留给下一次动作做 before 比对。
+// withoutScreenshot returns a copy of the snapshot without the image, for
+// observation modes that return only the tree. It copies rather than clearing
+// in place because the cached snapshot remains the before-state for the next
+// action.
 func (s *appSnapshot) withoutScreenshot() *appSnapshot {
 	if s == nil {
 		return nil
@@ -703,11 +700,12 @@ func (s *appSnapshot) screenshotMimeType() string {
 	return "image/png"
 }
 
-// screenshotOnlyResult 只回像素与证据 Note，不回树。
+// screenshotOnlyResult returns only pixels and evidence notes, without the tree.
 //
-// 这一档存在的理由是实测的：格式类改动与文件状态**根本不进 a11y 树**
-// （LibreOffice Impress 上右对齐生效而树字节不变，ctrl+s 存盘成功而树字节不变），
-// 那时树是纯开销，图才是唯一可判之处。
+// Formatting changes and file state often never reach the accessibility tree:
+// right-aligning text in LibreOffice Impress or saving with Ctrl+S can leave
+// the tree bytes unchanged. The tree is then pure overhead and the image is
+// the only evidence.
 func (s *appSnapshot) screenshotOnlyResult(notes []string) toolCallResult {
 	notes = modelFacingAXNotes(notes)
 	lines := make([]string, 0, len(notes)+1)
@@ -734,26 +732,10 @@ func (s *appSnapshot) screenshotOnlyResult(notes []string) toolCallResult {
 	}}
 }
 
-// textWithNotes 走和整棵树完全相同的出口：诊断在前、正文在后、超阈值落盘。
-// find 的输出必须和 get_app_state 共用这条路径，否则"树太大"这个问题
-// 会在 find 上原样复发一遍——命中 300 个元素时它一样是一份大输出。
-// maxInlineChars 一次工具响应的内联字符上限。
-//
-// **这不是省 token，是防止整块丢失。** 实测 26 条真实 agent 轨迹：60 次观测类
-// 调用里有 **8 次（13%）**的响应达到 114–119KB，被 MCP 客户端整块换成了一句
-//
-//	<persisted-output> Output too large (118.1KB). Full output saved to: …
-//
-// 而有些客户端不暴露文件读取，于是调用方**什么都拿不到**——它花了一次调用，
-// 换回一个读不了的
-// 文件指针，然后只能靠坐标乱试。
-//
-// `--output-mode file` 救不了这一条：那同样是一个读不了的指针。唯一有效的
-// 办法是让内容**本来就装得下**。
-//
-// 24000 字符保留实测的小型和中型工作树（gedit 659、Thunderbird 7153、
-// VS Code 15342），同时阻止 4 万到 11 万字符的树反复进入对话历史。需要更深
-// 的局部信息时使用 find；需要调试完整祖先结构时可由部署方显式提高环境变量。
+// textWithNotes is the shared output path for trees and other text: notes
+// first, then the body, spilled to a file above the threshold and capped
+// inline. find results must use the same path, or a query with hundreds of
+// matches would reproduce the oversized-output problem.
 func (s *appSnapshot) textWithNotes(text string, notes []string) toolCallResult {
 	notes = modelFacingAXNotes(notes)
 	if len(notes) > 0 {
@@ -871,27 +853,32 @@ func newServiceWithBackend(backend PlatformBackend) *service {
 	}
 }
 
-// errorContextEnabled 失败时落一份现场文件，默认**开**。
-//
-// 和 --output-mode file 相反的默认值，理由也相反：那个改变的是成功路径上每次
-// 调用的形态（会把"一次拿到全部"变成"两次"），这个只在失败时触发，而失败时
-// 没有任何别的手段能事后复盘——响应里只剩一行错误，现场早就没了。
+// errorContextEnabled reports whether failures write an error-context file.
+// It defaults to on, unlike file output mode, for the opposite reason: file
+// output changes the shape of every successful call, while error context is
+// written only on failure, when nothing else allows a post-mortem because the
+// response holds one error line and the UI has already moved on.
 func errorContextEnabled() bool {
 	return !strings.EqualFold(
 		strings.TrimSpace(os.Getenv("COMPUTER_USE_ERROR_CONTEXT")), "off")
 }
 
-// writeErrorContext 在失败时把**失败当时**的现场写到磁盘，返回可读的说明。
+// writeErrorContext writes the UI state at the time of a failure to disk. It
+// returns a note describing the files and whether fresh UI was sampled.
 //
-// 照 Playwright 的 error-context.md：失败时它会连同页面快照一起落盘，
-// 因为一行错误信息没法复盘。桌面上更是如此——界面下一秒就变了，
-// 而我们连"当时树长什么样"都没有留。
+// This follows Playwright's error-context.md, which saves a page snapshot with
+// each failure because a one-line error cannot be diagnosed afterwards. On the
+// desktop the UI changes a moment later, and no tree from the failure would
+// survive otherwise.
 //
-// 现场是**重新抓的**，不是缓存里那份：失败往往正是因为界面已经不是快照里的
-// 样子了，拿缓存去当现场等于把要查的东西本身丢掉。代价只在失败路径上付。
+// The state is re-captured rather than taken from the cache: failures often
+// happen because the UI no longer matches the snapshot, so the cached copy
+// would discard the very evidence being sought. The cost is paid only on the
+// failure path.
 //
-// 抓现场自己也可能失败（应用已经退出、a11y 总线断了）。那种情况下**不做任何
-// 补救**，直接返回空串——一个诊断设施不该在诊断失败时再制造一层新错误。
+// Capturing can itself fail (the app exited, or the accessibility bus
+// disconnected). It then attempts no recovery and returns an empty note: a
+// diagnostic facility must not add a new error when diagnosis fails.
 func (s *service) writeErrorContext(app, tool, message string) (string, bool) {
 	if !errorContextEnabled() || strings.TrimSpace(app) == "" {
 		return "", false
@@ -983,7 +970,8 @@ func (s *service) callTool(
 			toolEvidenceScope(internalName, args),
 		)
 	}
-	// 失败现场统一在这里落盘：错误从十几个地方返回，逐个去加只会漏。
+	// Capture error context in one place: errors are returned from many call
+	// sites, and adding the capture to each would miss some.
 	if result.IsError && internalName != "gui" {
 		app := requiredString(args, "app")
 		recoveryObservationAttempted := result.StructuredContent != nil &&
@@ -1044,8 +1032,8 @@ func (s *service) callTool(
 				message += item.Text
 			}
 		}
-		// The accessibility bridge itself timed out. Re-running get_app_state to
-		// capture error context would hit the same bridge and double the delay.
+		// The accessibility bridge itself timed out. Re-observing the app for
+		// error context would hit the same bridge and double the delay.
 		if strings.Contains(message, "runtime_timeout=true") {
 			return result
 		}
@@ -1711,22 +1699,26 @@ func persistAXTelemetry(
 
 func (s *service) dispatch(name string, args map[string]any) toolCallResult {
 	if !toolIsEnabled(name) {
-		// 工具已经从 tools/list 里摘掉了，但硬调仍然要拒——而且要说清是**通道被
-		// 关掉了**，不是工具不存在。含糊的报错会让 agent 去猜是不是名字写错了。
+		// The tool is already absent from tools/list, but a direct call must
+		// still be rejected, and the error must say that the channel is
+		// disabled rather than that the tool does not exist. An ambiguous
+		// error makes the agent suspect a misspelled name.
 		return textResult(fmt.Sprintf(
 			"tool %q belongs to the %s channel, which is disabled by COMPUTER_USE_CHANNELS. Enabled channels: %s.",
 			name, toolChannel[name], strings.Join(sortedChannels(), ", ")), true)
 	}
-	// 观测预算对**所有动作工具**统一解析：参数的语义与默认值不该因工具而异，
-	// 那样调用方就得逐工具记规则。read-only 工具不在此列，它们本来就自带旋钮。
+	// The observation budget is parsed the same way for every action tool, so
+	// callers need not learn per-tool semantics or defaults. Read-only tools
+	// are exempt because they have their own options.
 	obs, obsErr := parseObservation(args)
 	if obsErr != nil && isActionTool(name) {
 		return textResult(obsErr.Error(), true)
 	}
-	// 验证意图与观测预算在同一处解析，理由相同：两个参数都对**全部动作工具**
-	// 一视同仁。它们互相正交——obs 决定回多少，plan 决定验什么——所以解析也各
-	// 走各的。expect / settle_ms 写错了走 isError，与 "expect 没达成" 分得干干
-	// 净净：前者是调用错误，后者是关于界面的事实。
+	// The verification plan is parsed next to the observation budget for the
+	// same reason. The two are orthogonal (obs decides how much to return,
+	// plan decides what to verify), so each is parsed separately. An invalid
+	// expect or settle_ms is a call error (isError), distinct from an unmet
+	// expect, which is a fact about the UI.
 	plan, planErr := parseSettlePlan(args)
 	if planErr != nil && isActionTool(name) {
 		return textResult(planErr.Error(), true)
