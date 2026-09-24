@@ -719,3 +719,19 @@ func DecodeProviderWireRequest(data []byte) (ProviderWireRequest, error) {
 	}
 	return request, nil
 }
+
+func TestProviderDesktopSettleBound(t *testing.T) {
+	valid := ProviderDesktopRequest{
+		ProtocolVersion: providerProtocolV2,
+		Actions:         []ProviderDesktopAction{{Type: "screenshot"}},
+		SettleMS:        guiMaxSettleMS,
+	}
+	if err := validateProviderDesktopRequest(valid); err != nil {
+		t.Fatalf("provider settle_ms=%d should be accepted: %v", guiMaxSettleMS, err)
+	}
+	valid.SettleMS++
+	if err := validateProviderDesktopRequest(valid); err == nil ||
+		!strings.Contains(err.Error(), "between 0 and 3000") {
+		t.Fatalf("provider settle_ms above limit error = %v", err)
+	}
+}

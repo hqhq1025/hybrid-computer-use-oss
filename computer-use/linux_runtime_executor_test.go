@@ -642,3 +642,41 @@ func processPIDExists(pid int, procRoot string) bool {
 	state := processPIDState(pid, procRoot)
 	return state != "missing" && state != "zombie" && state != "exited"
 }
+
+func TestRuntimeStderrIsOperatorOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "operator.jsonl")
+	t.Setenv("COMPUTER_USE_TRACE_FILE", path)
+	request := newProviderWireRequest("req-secret", ProviderWireObserve)
+	diagnostic := "Traceback (most recent call last):\n  File \"/secret/runtime.py\""
+	writeLinuxRuntimeDiagnostic(request, "stderr", diagnostic)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(data), &record); err != nil {
+		t.Fatalf("operator trace must contain valid JSONL: %v: %q", err, data)
+	}
+	if record["diagnostic"] != diagnostic ||
+		record["kind"] != "linux_provider_diagnostic" {
+		t.Fatalf("operator trace must retain the full diagnostic: %#v", record)
+	}
+
+	sourceBytes, err := os.ReadFile("linux_runtime_executor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, forbidden := range []string{
+		"response.Accessibility.Notes = append",
+		"response.Desktop.Notes = append",
+		"response.Window.Notes = append",
+		"Linux runtime failed: %s",
+		"invalid V2 JSON: %w: %s",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("runtime stderr can still cross the model boundary through %q", forbidden)
+		}
+	}
+}
