@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from hcu.osworld import run_batch
+from hcu.osworld.batch_config import runner_command, validate_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +22,7 @@ def require_osworld_checkout() -> Path:
 
 
 def test_v1_batch_selects_qemu_runner_and_domain(tmp_path):
-    command = run_batch.command_for(
+    command = runner_command(
         {
             "benchmark_version": "v1",
             "agent": "codex",
@@ -43,14 +43,14 @@ def test_v1_batch_selects_qemu_runner_and_domain(tmp_path):
 
 
 def test_v2_batch_defaults_to_v2(tmp_path):
-    command = run_batch.command_for({}, {"id": "001"}, tmp_path)
+    command = runner_command({}, {"id": "001"}, tmp_path)
     assert command[command.index("--benchmark-version") + 1] == "v2"
     assert "--task-domain" not in command
 
 
 def test_batch_expands_environment_backed_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("TEST_GUEST_IMAGE", "/images/v2.qcow2")
-    command = run_batch.command_for(
+    command = runner_command(
         {
             "guest_image": "${TEST_GUEST_IMAGE}",
             "client_password": "osworld-public-evaluation",
@@ -86,6 +86,27 @@ def test_example_queues_bind_guest_password_and_capacity():
     assert {task["volume_size"] for task in v1["tasks"]} == {64}
     assert v2["client_password"] == "osworld-public-evaluation"
     assert {task["volume_size"] for task in v2["tasks"]} == {100}
+    validate_config(v1)
+    validate_config(v2)
+
+
+def test_config_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="hybrid_skill_file"):
+        validate_config({"tasks": ["001"], "hybrid_skill_file": "/s.md"})
+    with pytest.raises(ValueError, match="flavor"):
+        validate_config({"tasks": [{"id": "001", "flavor": "x"}]})
+
+
+def test_task_level_resources_override_config_defaults(tmp_path):
+    command = runner_command(
+        {"volume_size": 64, "ram_size": "8G", "task_domain": "chrome"},
+        {"id": "a", "volume_size": 100, "task_domain": "gimp"},
+        tmp_path / "a",
+    )
+    assert command[command.index("--volume-size") + 1] == "100"
+    assert command[command.index("--ram-size") + 1] == "8G"
+    assert command[command.index("--task-domain") + 1] == "gimp"
+    assert command[command.index("--result-dir") + 1] == str(tmp_path / "a")
 
 
 @pytest.mark.parametrize(

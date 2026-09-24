@@ -8,8 +8,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 
+from hcu.osworld.batch_config import (
+    normalized_tasks,
+    runner_command,
+    validate_config,
+)
 from hcu.paths import REPO_ROOT, results_root
 
 
@@ -29,83 +33,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def normalized_tasks(config: dict) -> list[dict]:
-    tasks = []
-    for entry in config.get("tasks") or []:
-        task = {"id": entry} if isinstance(entry, str) else dict(entry)
-        task_id = str(task.get("id") or "").strip()
-        if not task_id:
-            raise ValueError("every task must have a non-empty id")
-        task["id"] = task_id
-        tasks.append(task)
-    if not tasks:
-        raise ValueError("config.tasks must not be empty")
-    return tasks
-
-
-def append_option(command: list[str], config: dict, key: str, flag: str) -> None:
-    value = config.get(key)
-    if value not in (None, ""):
-        command.extend((flag, os.path.expandvars(str(value))))
-
-
-def command_for(config: dict, task: dict, output_root: Path) -> list[str]:
-    command = [
-        sys.executable,
-        "-m",
-        "hcu.osworld.run_task",
-        "--task-id",
-        task["id"],
-        "--benchmark-version",
-        str(config.get("benchmark_version") or "v2"),
-        "--agent",
-        str(config.get("agent") or "codex"),
-        "--model",
-        str(config.get("model") or ""),
-        "--effort",
-        str(config.get("effort") or "xhigh"),
-        "--volume-size",
-        str(task.get("volume_size", config.get("volume_size", 40))),
-        "--ram-size",
-        str(task.get("ram_size", config.get("ram_size", "4G"))),
-        "--max-model-calls",
-        str(config.get("max_model_calls", 200)),
-        "--timeout",
-        str(config.get("timeout_seconds", 0)),
-        "--result-dir",
-        str(output_root / task["id"]),
-    ]
-    for key, flag in (
-        ("gateway_base", "--gateway-base"),
-        ("claude_gateway_base", "--claude-gateway-base"),
-        ("guest_image", "--guest-image"),
-        ("artifact_dir", "--artifact-dir"),
-        ("codex_binary", "--codex-binary"),
-        ("claude_code_binary", "--claude-code-binary"),
-        ("mcp_binary", "--mcp-binary"),
-        ("skill_file", "--skill-file"),
-        ("base_instructions_file", "--base-instructions-file"),
-        ("client_password", "--client-password"),
-        ("judge_model", "--judge-model"),
-        ("judge_effort", "--judge-effort"),
-        ("judge_timeout", "--judge-timeout"),
-        ("judge_tool_limit", "--judge-tool-limit"),
-        ("judge_retry_tool_limit", "--judge-retry-tool-limit"),
-        ("token_log", "--token-log"),
-    ):
-        append_option(command, config, key, flag)
-    task_domain = task.get("task_domain", config.get("task_domain"))
-    if task_domain:
-        command.extend(("--task-domain", str(task_domain)))
-    if config.get("retain_containers"):
-        command.append("--retain-container")
-    if config.get("enable_vnc"):
-        command.append("--enable-vnc")
-    if config.get("enable_recording"):
-        command.append("--enable-recording")
-    return command
-
-
 def run_task(
     config: dict,
     task: dict,
@@ -116,7 +43,7 @@ def run_task(
     log_path = log_root / f"{task_id}.log"
     with log_path.open("w", encoding="utf-8") as log:
         completed = subprocess.run(
-            command_for(config, task, output_root),
+            runner_command(config, task, output_root / task["id"]),
             cwd=REPO_ROOT,
             env=os.environ.copy(),
             stdout=log,
@@ -132,6 +59,7 @@ def main() -> int:
         raise SystemExit("--concurrency must be at least 1")
     config_path = args.config.expanduser().resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
+    validate_config(config)
     tasks = normalized_tasks(config)
     run_id = str(config.get("run_id") or config_path.stem)
     benchmark_version = str(config.get("benchmark_version") or "v2")
@@ -141,7 +69,7 @@ def main() -> int:
     log_root = output_root / "logs"
     if args.dry_run:
         for task in tasks:
-            print(json.dumps(command_for(config, task, output_root)))
+            print(json.dumps(runner_command(config, task, output_root / task["id"])))
         return 0
     log_root.mkdir(parents=True, exist_ok=True)
 

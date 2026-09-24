@@ -16,6 +16,11 @@ import urllib.request
 
 
 from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT, anchor_path_args
+from hcu.osworld.batch_config import (
+    normalized_tasks,
+    runner_command,
+    validate_config,
+)
 from hcu.osworld.host_pressure import (
     block_device_names_for_paths,
     sample_host_kernel_pressure,
@@ -37,36 +42,13 @@ DEFAULT_QUEUE = Path(
 OFFICIAL_OPENAI_MAX_STEPS = 200
 OFFICIAL_OPENAI_MAX_TOKENS = 8192
 OFFICIAL_OPENAI_TASK_TIMEOUT_SECONDS = 0
-# Hash-bound admission options that were removed; configs using them fail
-# fast instead of silently running without the requested check.
-REMOVED_CONFIG_KEYS = frozenset({
-    "require_implementation_binding",
-    "implementation_binding",
-    "expected_implementation_binding_sha256",
-    "expected_implementation_binding_id",
-    "precomputed_guest_image_sha256",
-    "expected_guest_image_sha256",
-    "require_benchmark_input_binding",
-    "benchmark_release_manifest",
-    "expected_benchmark_release_manifest_sha256",
-    "expected_task_tree_sha256",
-    "expected_task_file_count",
-    "expected_asset_tree_sha256",
-    "expected_asset_file_count",
-    "require_frozen_execution_snapshot",
-    "execution_snapshot_source_root",
-    "execution_snapshot_entrypoint_root",
-    "execution_snapshot_paths",
-    "expected_execution_snapshot_sha256",
-    "expected_execution_snapshot_file_count",
-    "expected_token_proxy_sha256",
-    "expected_release_manifest_sha256",
-    "expected_skill_sha256",
-    "expected_base_instructions_sha256",
-    "tool_version",
-    "release_manifest",
-    "audited_evaluator_overrides",
-})
+REQUIRED_CONFIG_KEYS = (
+    "model",
+    "effort",
+    "max_model_calls",
+    "timeout_seconds",
+    "max_active_sides",
+)
 
 
 def validate_official_openai_runner_alignment(config: dict) -> None:
@@ -212,12 +194,13 @@ class QueueRunner:
         self.queue_path = queue_path.resolve()
         self.base = self.queue_path.parent
         self.config = json.loads(self.queue_path.read_text(encoding="utf-8"))
-        removed = sorted(set(self.config) & set(REMOVED_CONFIG_KEYS))
-        if removed:
+        validate_config(self.config)
+        missing = [key for key in REQUIRED_CONFIG_KEYS if key not in self.config]
+        if missing:
             raise ValueError(
-                "Queue config uses removed hash-binding keys: "
-                + ", ".join(removed)
+                "Queue config is missing required keys: " + ", ".join(missing)
             )
+        self.config["tasks"] = normalized_tasks(self.config)
         self.execution_root = ROOT
         self.guest_image_capacity = validate_queue_guest_image_capacity(
             self.config
@@ -572,66 +555,11 @@ class QueueRunner:
 
     def command(self, task: dict, side: str) -> list[str]:
         task_id = task["id"]
+        if side == "hybrid":
+            return runner_command(self.config, task, self.hybrid / task_id)
         volume_size = str(task.get("volume_size", 40))
-        ram_size = str(task.get("ram_size", "4G"))
         model = self.config["model"]
         effort = self.config["effort"]
-        if side == "hybrid":
-            agent = str(self.config.get("agent") or "codex")
-            command = [
-                sys.executable,
-                "-m",
-                RUNNER_MODULE,
-                "--task-id",
-                task_id,
-                "--agent",
-                agent,
-                "--model",
-                model,
-                "--effort",
-                effort,
-                "--volume-size",
-                volume_size,
-                "--ram-size",
-                ram_size,
-                "--max-model-calls",
-                str(self.config["max_model_calls"]),
-                "--timeout",
-                str(self.config["timeout_seconds"]),
-                "--result-dir",
-                str(self.hybrid / task_id),
-            ]
-            optional_args = (
-                ("gateway_base", "--gateway-base"),
-                ("claude_gateway_base", "--claude-gateway-base"),
-                ("guest_image", "--guest-image"),
-                ("hybrid_codex_binary", "--codex-binary"),
-                (
-                    "hybrid_claude_code_binary",
-                    "--claude-code-binary",
-                ),
-                ("hybrid_mcp_binary", "--mcp-binary"),
-                ("hybrid_skill_file", "--skill-file"),
-                (
-                    "hybrid_base_instructions_file",
-                    "--base-instructions-file",
-                ),
-                ("judge_model", "--judge-model"),
-                ("judge_effort", "--judge-effort"),
-                ("judge_timeout_seconds", "--judge-timeout"),
-                ("judge_tool_limit", "--judge-tool-limit"),
-                ("judge_retry_tool_limit", "--judge-retry-tool-limit"),
-                ("judge_prompt_file", "--judge-prompt-file"),
-                ("judge_schema_file", "--judge-schema-file"),
-                ("token_log", "--token-log"),
-            )
-            for key, flag in optional_args:
-                value = self.config.get(key)
-                if value:
-                    command.extend([flag, str(value)])
-            if self.config.get("retain_containers", False):
-                command.append("--retain-container")
-            return command
         return [
             sys.executable,
             str(
