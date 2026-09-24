@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -9,6 +10,153 @@ import (
 	"strconv"
 	"strings"
 )
+
+const (
+	treeViewWorking  = "working"
+	treeViewFull     = "full"
+	a11yScopeWindow  = "window"
+	a11yScopeContent = "content"
+)
+
+var treeViewValues = []string{treeViewWorking, treeViewFull}
+
+var a11yScopeValues = []string{a11yScopeWindow, a11yScopeContent}
+
+func normalizedTreeView(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case treeViewFull:
+		return treeViewFull
+	default:
+		return treeViewWorking
+	}
+}
+
+func parseTreeView(args map[string]any) (string, error) {
+	raw := strings.ToLower(strings.TrimSpace(optionalString(args, "view")))
+	if raw == "" {
+		return treeViewWorking, nil
+	}
+	for _, value := range treeViewValues {
+		if raw == value {
+			return value, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"invalid view %q. Valid values are %s; omit it for %q",
+		optionalString(args, "view"),
+		strings.Join(treeViewValues, ", "),
+		treeViewWorking,
+	)
+}
+
+func normalizedA11yScope(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case a11yScopeContent:
+		return a11yScopeContent
+	default:
+		return a11yScopeWindow
+	}
+}
+
+func parseA11yScope(args map[string]any) (string, error) {
+	raw := strings.ToLower(strings.TrimSpace(optionalString(args, "scope")))
+	if raw == "" {
+		return a11yScopeWindow, nil
+	}
+	for _, value := range a11yScopeValues {
+		if raw == value {
+			return value, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"invalid scope %q. Valid values are %s; omit it for %q",
+		optionalString(args, "scope"),
+		strings.Join(a11yScopeValues, ", "),
+		a11yScopeWindow,
+	)
+}
+
+func parseObservationRoot(raw any) (map[string]any, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	root, ok := raw.(map[string]any)
+	if !ok {
+		return nil, errors.New(
+			`must be {"focused":true}, {"index":N}, {"ref":"rN"}, or {"selector":{...}}`,
+		)
+	}
+	if focused, present := root["focused"]; present {
+		if len(root) != 1 {
+			return nil, errors.New(
+				`focused root must contain only {"focused":true}`,
+			)
+		}
+		value, ok := focused.(bool)
+		if !ok || !value {
+			return nil, errors.New("focused must be true")
+		}
+		return map[string]any{"focused": true}, nil
+	}
+	if rawRef, present := root["ref"]; present {
+		if ref, ok := rawRef.(string); ok && isShortAXWindowRef(ref) {
+			return nil, errors.New(
+				"root.ref must identify an element with rN; wN is only for window activate/close",
+			)
+		}
+	}
+	if _, _, err := a11yTargetAddress(
+		map[string]any{"target": root},
+	); err != nil {
+		return nil, err
+	}
+	copy := make(map[string]any, len(root))
+	for key, value := range root {
+		copy[key] = value
+	}
+	return copy, nil
+}
+
+func observationRootKey(root map[string]any) string {
+	if len(root) == 0 {
+		return ""
+	}
+	payload, err := json.Marshal(root)
+	if err != nil {
+		return ""
+	}
+	return string(payload)
+}
+
+func projectionFromRequest(request axServiceRequest) snapshotProjection {
+	return snapshotProjection{
+		TextLimit:    request.TextLimit,
+		MaxTreeNodes: request.MaxTreeNodes,
+		MaxTreeDepth: request.MaxTreeDepth,
+		Prune:        request.Prune,
+		Boxes:        request.Boxes,
+		View:         normalizedTreeView(request.TreeView),
+		Scope:        normalizedA11yScope(request.Scope),
+		Root:         observationRootKey(request.ObservationRoot),
+	}
+}
+
+func applyProjection(request *axServiceRequest, projection snapshotProjection) {
+	if request == nil {
+		return
+	}
+	request.TextLimit = projection.TextLimit
+	request.MaxTreeNodes = projection.MaxTreeNodes
+	request.MaxTreeDepth = projection.MaxTreeDepth
+	request.Prune = projection.Prune
+	request.Boxes = projection.Boxes
+	request.TreeView = normalizedTreeView(projection.View)
+	// Scope is request-local. Persisting content scope into later action reads
+	// would make a newly opened menu or dialog disappear from the final
+	// observation. Explicit observe/find calls must request it again.
+	// ObservationRoot is request-local for the same reason: action readback
+	// must not inherit a previous diagnostic subtree.
+}
 
 const (
 	defaultSettleMS = 800

@@ -6,6 +6,18 @@ import (
 	"strings"
 )
 
+type textLimit struct {
+	max   bool
+	count int
+}
+
+func (limit textLimit) runtimeValue() any {
+	if limit.max {
+		return "max"
+	}
+	return limit.count
+}
+
 func (s *service) getAppState(
 	app string,
 	textLimit *textLimit,

@@ -173,3 +173,57 @@ func (s *service) runtimeTimeoutDiagnostic(snapshot *appSnapshot) string {
 		pid, true, true, windowKnown, windowAlive,
 	)
 }
+
+func formatZombieRuntimeDiagnostic(pid int) string {
+	return fmt.Sprintf(
+		"a11y_responsive=false cached_pid_present=zombie "+
+			"window_for_cached_pid=false cached_pid=%d. The cached process "+
+			"generation is defunct and cannot become ready; do not keep retrying "+
+			"the same PID. Re-observe application identity before any relaunch.",
+		pid)
+}
+
+func formatRuntimeTimeoutDiagnostic(
+	pid int,
+	hasProcessIdentity bool,
+	processAlive bool,
+	windowKnown bool,
+	windowAlive bool,
+) string {
+	if !hasProcessIdentity {
+		return "a11y_responsive=false cached_pid_present=unknown " +
+			"window_for_cached_pid=unknown. " +
+			"The accessibility bridge did not answer, and this MCP session has no " +
+			"cached process identity for an independent liveness check."
+	}
+	if !processAlive {
+		return fmt.Sprintf(
+			"a11y_responsive=false cached_pid_present=false "+
+				"window_for_cached_pid=false cached_pid=%d. The cached PID no longer "+
+				"exists; the application may have exited or restarted.",
+			pid)
+	}
+	if !windowKnown {
+		return fmt.Sprintf(
+			"a11y_responsive=false cached_pid_present=true "+
+				"window_for_cached_pid=unknown cached_pid=%d. The cached PID exists "+
+				"but the accessibility bridge did not answer; "+
+				"the bounded X11 window probe was unavailable.",
+			pid)
+	}
+	if windowAlive {
+		return fmt.Sprintf(
+			"a11y_responsive=false cached_pid_present=true "+
+				"window_for_cached_pid=true cached_pid=%d. The cached PID and a managed "+
+				"X11 window exist, but the accessibility "+
+				"bridge did not answer. Inspect the GUI instead of retrying the same "+
+				"A11Y call indefinitely.",
+			pid)
+	}
+	return fmt.Sprintf(
+		"a11y_responsive=false cached_pid_present=true "+
+			"window_for_cached_pid=false cached_pid=%d. The cached PID exists without "+
+			"a managed X11 window; the application may be rebuilding its UI. A bounded "+
+			"retry can be appropriate.",
+		pid)
+}

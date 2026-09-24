@@ -18575,25 +18575,6 @@ func TestContinuationTextIncludesRoute(t *testing.T) {
 }
 
 func TestPlatformNeutralModulesDoNotOwnLinuxExecution(t *testing.T) {
-	files := []string{
-		"main.go",
-		"ax_batch.go",
-		"ax_snapshot_store.go",
-		"ax_action_service.go",
-		"ax_action_evidence.go",
-		"ax_trace.go",
-		"ax_action_result.go",
-		"ax_failure_recovery.go",
-		"ax_snapshot_refresh.go",
-		"ax_lookup.go",
-		"ax_projection.go",
-		"gui_service.go",
-		"tool_contract.go",
-		"mcp_transport.go",
-		"runtime_backend.go",
-		"runtime_protocol.go",
-		"platform_contract.go",
-	}
 	forbidden := []string{
 		`"os/exec"`,
 		`"/proc/`,
@@ -18601,15 +18582,32 @@ func TestPlatformNeutralModulesDoNotOwnLinuxExecution(t *testing.T) {
 		`xprop`,
 		`wmctrl`,
 	}
-	for _, name := range files {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
 		body, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
+		// Files with a build constraint belong to one platform backend.
+		if strings.HasPrefix(string(body), "//go:build ") {
+			continue
+		}
+		checked++
 		for _, marker := range forbidden {
 			if strings.Contains(string(body), marker) {
 				t.Fatalf("%s contains platform execution marker %q", name, marker)
 			}
 		}
+	}
+	if checked == 0 {
+		t.Fatal("no platform-neutral source files were checked")
 	}
 }

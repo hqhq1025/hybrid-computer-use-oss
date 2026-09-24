@@ -787,3 +787,28 @@ func (snapshot *AXSnapshotV1) Validate() error {
 	}
 	return visit(snapshot.Roots, nil)
 }
+
+func providerAliasesForCanonicalRole(role string) []string {
+	canonical := CanonicalRole(strings.ToLower(strings.TrimSpace(role)))
+	candidates := []string{string(canonical)}
+	for _, descriptor := range roleOntology {
+		if descriptor.ModelRole != canonical {
+			continue
+		}
+		candidates = append(candidates, descriptor.ProviderAliases...)
+	}
+	if canonical == "gridcell" {
+		candidates = append(candidates, "table cell")
+	}
+	aliases := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		aliases = append(aliases, candidate)
+	}
+	return aliases
+}
