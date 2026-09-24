@@ -1,112 +1,119 @@
-#!/usr/bin/env python3
-"""Task-scoped, accounting Anthropic API proxy for guest-local Claude Code."""
+"""Task-scoped, accounting passthrough to an Anthropic-compatible API.
+
+Guest-local Claude Code sends ``/t/<task>/v1/messages`` requests; the gateway
+forwards them with the operator's upstream credential, records usage in the
+token log and enforces the per-task budget. The budget counts successful
+responses that reached the agent, so a request that failed upstream or was
+never delivered does not consume a model step.
+
+Usage::
+
+    OSW_ANTHROPIC_UPSTREAM_BASE=https://<host> \\
+    OSW_ANTHROPIC_UPSTREAM_TOKEN=<secret> \\
+    python -m hcu.gateway.anthropic_proxy --host <bridge-ip> --port 8537 \\
+        --out runs/anthropic-tokens.jsonl
+"""
 
 from __future__ import annotations
 
 import argparse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+from pathlib import Path
 import threading
 import time
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import urllib3
 
+from hcu.gateway.common import (
+    TokenLog,
+    is_budgeted_task,
+    new_stats,
+    read_log_rows,
+    relay_response,
+    send_json,
+    split_task_path,
+)
 
 REQUEST_TIMEOUT = urllib3.Timeout(connect=15, read=1800)
-LIMITED_TASK_PREFIXES = ("osw-hybrid-", "osworld-v2-hybrid-")
-_write_lock = threading.Lock()
-_request_lock = threading.Lock()
-_out_fh = None
-_completed_responses: dict[str, int] = {}
-_pool = urllib3.PoolManager(maxsize=128, block=False, retries=False)
-UPSTREAM_BASE = ""
-UPSTREAM_TOKEN = ""
-MAX_REQUESTS_PER_TASK = 0
-_stats = {
-    "calls": 0,
-    "accounted": 0,
-    "errors": 0,
-    "rate_limited": 0,
-    "budget_rejected": 0,
-}
+BUDGETED_PATH = "/v1/messages"
+UNFORWARDED_REQUEST_HEADERS = frozenset({
+    "host",
+    "connection",
+    "content-length",
+    "authorization",
+    "x-api-key",
+    "accept-encoding",
+})
 
 
-def record(row: dict) -> None:
-    with _write_lock:
-        _out_fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-        _out_fh.flush()
+class AnthropicGateway:
+    """Upstream, budget and accounting state shared by all request threads."""
 
+    def __init__(
+        self,
+        *,
+        upstream_base: str,
+        upstream_token: str,
+        token_log: TokenLog,
+        max_requests_per_task: int,
+        pool: urllib3.PoolManager | None = None,
+    ) -> None:
+        self.upstream_base = upstream_base.rstrip("/")
+        self.upstream_token = upstream_token
+        self.token_log = token_log
+        self.max_requests_per_task = max_requests_per_task
+        self.pool = pool or urllib3.PoolManager(maxsize=128, block=False, retries=False)
+        self.stats = new_stats()
+        self._budget_lock = threading.Lock()
+        self._completed: dict[str, int] = {}
 
-def split_task(path: str) -> tuple[str | None, str]:
-    task = None
-    if path.startswith("/t/"):
-        task, separator, tail = path[3:].partition("/")
-        if not separator:
-            return urllib.parse.unquote(task), "/"
-        path = "/" + tail
-        task = urllib.parse.unquote(task)
-    return task, path
+    def restore(self) -> None:
+        """Rebuild completed-response counts from the log."""
+        completed: dict[str, int] = {}
+        for row in read_log_rows(self.token_log.path):
+            task = row.get("task")
+            if (
+                isinstance(task, str)
+                and is_budgeted_task(task)
+                and row.get("path") == BUDGETED_PATH
+                and row.get("model_step_completed")
+            ):
+                completed[task] = completed.get(task, 0) + 1
+        with self._budget_lock:
+            self._completed.update(completed)
 
+    def _budgeted(self, task: str | None, path: str) -> bool:
+        return (
+            self.max_requests_per_task > 0
+            and is_budgeted_task(task)
+            and path == BUDGETED_PATH
+        )
 
-def admit_model_request(task: str | None, path: str) -> tuple[bool, int | None]:
-    if (
-        MAX_REQUESTS_PER_TASK <= 0
-        or not task
-        or not task.startswith(LIMITED_TASK_PREFIXES)
-        or path != "/v1/messages"
-    ):
-        return True, None
-    with _request_lock:
-        completed = _completed_responses.get(task, 0)
-        if completed >= MAX_REQUESTS_PER_TASK:
-            return False, completed + 1
-        return True, completed + 1
+    def admit(self, task: str | None, path: str) -> tuple[bool, int | None]:
+        if not self._budgeted(task, path):
+            return True, None
+        with self._budget_lock:
+            completed = self._completed.get(task, 0)
+            return completed < self.max_requests_per_task, completed + 1
 
+    def complete(self, task: str | None, path: str, delivered: bool) -> int | None:
+        if not delivered or not self._budgeted(task, path):
+            return None
+        with self._budget_lock:
+            completed = self._completed.get(task, 0) + 1
+            self._completed[task] = completed
+            return completed
 
-def complete_model_request(
-    task: str | None,
-    path: str,
-    delivered: bool,
-) -> int | None:
-    if (
-        MAX_REQUESTS_PER_TASK <= 0
-        or not task
-        or not task.startswith(LIMITED_TASK_PREFIXES)
-        or path != "/v1/messages"
-        or not delivered
-    ):
-        return None
-    with _request_lock:
-        completed = _completed_responses.get(task, 0) + 1
-        _completed_responses[task] = completed
-        return completed
-
-
-def restore_completed_responses(path: str) -> int:
-    restored: dict[str, int] = {}
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                task = row.get("task")
-                if (
-                    not isinstance(task, str)
-                    or not task.startswith(LIMITED_TASK_PREFIXES)
-                    or row.get("path") != "/v1/messages"
-                    or not row.get("model_step_completed")
-                ):
-                    continue
-                restored[task] = restored.get(task, 0) + 1
-    except FileNotFoundError:
-        return 0
-    with _request_lock:
-        _completed_responses.update(restored)
-    return len(restored)
+    def healthz(self) -> dict:
+        return {
+            "ok": True,
+            "max_completed_responses_per_task": self.max_requests_per_task,
+            "step_unit": "successful_task_agent_response",
+            **self.stats,
+        }
 
 
 def extract_usage(payload: dict) -> dict:
@@ -121,9 +128,7 @@ def extract_usage(payload: dict) -> dict:
         "cache_creation_input_tokens": cache_creation,
         "output_tokens": output_tokens,
         "reasoning_tokens": int(
-            (usage.get("output_tokens_details") or {}).get(
-                "thinking_tokens"
-            )
+            (usage.get("output_tokens_details") or {}).get("thinking_tokens")
             or 0
         ),
         "total_tokens": (
@@ -133,6 +138,7 @@ def extract_usage(payload: dict) -> dict:
 
 
 def parse_sse_usage(raw: bytes) -> tuple[dict | None, str | None]:
+    """Return the maximum streamed usage per field and the message ID."""
     totals = None
     response_id = None
     for line in raw.splitlines():
@@ -160,187 +166,153 @@ def parse_sse_usage(raw: bytes) -> tuple[dict | None, str | None]:
     return totals, response_id
 
 
-class Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+def make_handler(gateway: AnthropicGateway) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
 
-    def log_message(self, *_args) -> None:
-        return
-
-    def do_GET(self) -> None:
-        if self.path == "/healthz":
-            body = json.dumps({
-                "ok": True,
-                "max_completed_responses_per_task": MAX_REQUESTS_PER_TASK,
-                "step_unit": "successful_task_agent_response",
-                **_stats,
-            }).encode()
-            self.send_response(200)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+        def log_message(self, *_args) -> None:
             return
-        self.proxy("GET")
 
-    def do_POST(self) -> None:
-        self.proxy("POST")
+        def do_GET(self) -> None:
+            if self.path == "/healthz":
+                send_json(self, 200, gateway.healthz())
+                return
+            self.proxy("GET")
 
-    def fail(self, status: int, message: str, row: dict) -> None:
-        row["http_status"] = status
-        row["error"] = message
-        _stats["errors"] += 1
-        record(row)
-        body = json.dumps({
-            "type": "error",
-            "error": {
-                "type": "api_error",
-                "message": f"anthropic_proxy: {message}",
-            },
-        }).encode()
-        self.send_response(status)
-        self.send_header("content-type", "application/json")
-        self.send_header("content-length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        def do_POST(self) -> None:
+            self.proxy("POST")
 
-    def reject_budget(self, row: dict) -> None:
-        row["budget_rejected"] = True
-        _stats["budget_rejected"] += 1
-        self.fail(
-            429,
-            "task model-call budget exhausted before upstream admission",
-            row,
-        )
+        def fail(self, status: int, message: str, row: dict) -> None:
+            row["http_status"] = status
+            row["error"] = message
+            gateway.stats["errors"] += 1
+            gateway.token_log.record(row)
+            send_json(self, status, {
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": f"anthropic_proxy: {message}",
+                },
+            })
 
-    def proxy(self, method: str) -> None:
-        task, local_path = split_task(self.path)
-        parsed = urllib.parse.urlsplit(local_path)
-        body_length = int(self.headers.get("content-length") or 0)
-        body = self.rfile.read(body_length) if body_length else b""
-        row = {
-            "ts": time.time(),
-            "task": task,
-            "endpoint": UPSTREAM_BASE,
-            "path": parsed.path,
-            "model": None,
-        }
-        if body[:1] == b"{":
+        def proxy(self, method: str) -> None:
+            task, local_path = split_task_path(self.path)
+            parsed = urllib.parse.urlsplit(local_path)
+            length = int(self.headers.get("content-length") or 0)
+            body = self.rfile.read(length) if length else b""
+            row = {
+                "ts": time.time(),
+                "task": task,
+                "endpoint": gateway.upstream_base,
+                "path": parsed.path,
+                "model": None,
+            }
+            if body[:1] == b"{":
+                try:
+                    row["model"] = json.loads(body).get("model")
+                except json.JSONDecodeError:
+                    pass
+            admitted, ordinal = gateway.admit(task, parsed.path)
+            if ordinal is not None:
+                row["request_ordinal"] = ordinal
+                row["request_limit"] = gateway.max_requests_per_task
+            if not admitted:
+                row["budget_rejected"] = True
+                gateway.stats["budget_rejected"] += 1
+                self.fail(
+                    429,
+                    "task model-call budget exhausted before upstream admission",
+                    row,
+                )
+                return
+
+            upstream_url = (
+                gateway.upstream_base
+                + parsed.path
+                + (f"?{parsed.query}" if parsed.query else "")
+            )
+            headers = {
+                key: value
+                for key, value in self.headers.items()
+                if key.casefold() not in UNFORWARDED_REQUEST_HEADERS
+            }
+            headers["authorization"] = f"Bearer {gateway.upstream_token}"
+            headers["x-api-key"] = gateway.upstream_token
+            headers["accept-encoding"] = "identity"
+            headers["content-length"] = str(len(body))
+
+            started = time.monotonic()
+            gateway.stats["calls"] += 1
             try:
-                row["model"] = json.loads(body).get("model")
-            except json.JSONDecodeError:
-                pass
-        admitted, ordinal = admit_model_request(task, parsed.path)
-        if ordinal is not None:
-            row["request_ordinal"] = ordinal
-            row["request_limit"] = MAX_REQUESTS_PER_TASK
-        if not admitted:
-            self.reject_budget(row)
-            return
+                response = gateway.pool.request(
+                    method,
+                    upstream_url,
+                    body=body,
+                    headers=headers,
+                    preload_content=True,
+                    timeout=REQUEST_TIMEOUT,
+                )
+            except Exception as exc:
+                self.fail(
+                    502,
+                    f"upstream request failed: {type(exc).__name__}: {exc}",
+                    row,
+                )
+                return
 
-        upstream_url = (
-            UPSTREAM_BASE.rstrip("/")
-            + parsed.path
-            + (f"?{parsed.query}" if parsed.query else "")
-        )
-        headers = {}
-        for key, value in self.headers.items():
-            if key.casefold() in {
-                "host",
-                "connection",
-                "content-length",
-                "authorization",
-                "x-api-key",
-                "accept-encoding",
-            }:
-                continue
-            headers[key] = value
-        headers["authorization"] = f"Bearer {UPSTREAM_TOKEN}"
-        headers["x-api-key"] = UPSTREAM_TOKEN
-        headers["accept-encoding"] = "identity"
-        headers["content-length"] = str(len(body))
+            response_body = response.data
+            row["http_status"] = response.status
+            row["latency_sec"] = round(time.monotonic() - started, 3)
+            if response.status == 429:
+                row["rate_limited"] = True
+                gateway.stats["rate_limited"] += 1
+            elif response.status >= 400:
+                row["upstream_error"] = True
+                gateway.stats["errors"] += 1
 
-        started = time.monotonic()
-        _stats["calls"] += 1
-        try:
-            response = _pool.request(
-                method,
-                upstream_url,
-                body=body,
-                headers=headers,
-                preload_content=True,
-                timeout=REQUEST_TIMEOUT,
+            try:
+                if "text/event-stream" in response.headers.get("content-type", ""):
+                    usage, response_id = parse_sse_usage(response_body)
+                    row["response_id"] = response_id
+                    if usage:
+                        row.update(usage)
+                elif response_body[:1] == b"{":
+                    payload = json.loads(response_body)
+                    row["response_id"] = payload.get("id")
+                    if payload.get("usage"):
+                        row.update(extract_usage(payload))
+                if row.get("input_tokens") is not None:
+                    gateway.stats["accounted"] += 1
+            except Exception as exc:
+                row["accounting_error"] = f"{type(exc).__name__}: {exc}"
+                gateway.stats["errors"] += 1
+            delivered = relay_response(
+                self, response.status, response.headers, response_body
             )
-        except Exception as exc:
-            self.fail(
-                502,
-                f"upstream request failed: {type(exc).__name__}: {exc}",
-                row,
-            )
-            return
+            if not delivered:
+                row["client_disconnected"] = True
+            if 200 <= response.status < 300:
+                completed = gateway.complete(task, parsed.path, delivered)
+                if completed is not None:
+                    row["model_step_completed"] = True
+                    row["request_ordinal"] = completed
+            gateway.token_log.record(row)
 
-        response_body = response.data
-        row["http_status"] = response.status
-        row["latency_sec"] = round(time.monotonic() - started, 3)
-        if response.status == 429:
-            row["rate_limited"] = True
-            _stats["rate_limited"] += 1
-        elif response.status >= 400:
-            row["upstream_error"] = True
-            _stats["errors"] += 1
-
-        content_type = response.headers.get("content-type", "")
-        try:
-            payload = None
-            if "text/event-stream" in content_type:
-                usage, response_id = parse_sse_usage(response_body)
-                row["response_id"] = response_id
-                if usage:
-                    row.update(usage)
-            elif response_body[:1] == b"{":
-                payload = json.loads(response_body)
-                row["response_id"] = payload.get("id")
-                if payload.get("usage"):
-                    row.update(extract_usage(payload))
-            if row.get("input_tokens") is not None:
-                _stats["accounted"] += 1
-        except Exception as exc:
-            row["accounting_error"] = f"{type(exc).__name__}: {exc}"
-            _stats["errors"] += 1
-        delivered = True
-        try:
-            self.send_response(response.status)
-            for key, value in response.headers.items():
-                if key.casefold() in {
-                    "transfer-encoding",
-                    "content-length",
-                    "connection",
-                    "content-encoding",
-                }:
-                    continue
-                self.send_header(key, value)
-            self.send_header("content-length", str(len(response_body)))
-            self.end_headers()
-            self.wfile.write(response_body)
-        except (BrokenPipeError, ConnectionResetError):
-            row["client_disconnected"] = True
-            delivered = False
-        if 200 <= response.status < 300:
-            completed = complete_model_request(
-                task,
-                parsed.path,
-                delivered,
-            )
-            if completed is not None:
-                row["model_step_completed"] = True
-                row["request_ordinal"] = completed
-        record(row)
+    return Handler
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8613)
-    parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help=(
+            "Listen address. Guests reach the gateway through the Docker "
+            "bridge, so pass the bridge gateway IP for OSWorld runs."
+        ),
+    )
+    parser.add_argument("--port", type=int, default=8537)
+    parser.add_argument("--out", required=True, help="Token log JSONL path.")
     parser.add_argument(
         "--upstream-base",
         default=os.environ.get("OSW_ANTHROPIC_UPSTREAM_BASE", ""),
@@ -352,35 +324,31 @@ def main() -> int:
     parser.add_argument("--max-requests-per-task", type=int, default=0)
     args = parser.parse_args()
     if not args.upstream_base:
-        parser.error(
-            "set OSW_ANTHROPIC_UPSTREAM_BASE or pass --upstream-base"
-        )
+        parser.error("set OSW_ANTHROPIC_UPSTREAM_BASE or pass --upstream-base")
     if not args.upstream_token:
-        parser.error(
-            "set OSW_ANTHROPIC_UPSTREAM_TOKEN or pass --upstream-token"
-        )
+        parser.error("set OSW_ANTHROPIC_UPSTREAM_TOKEN or pass --upstream-token")
     if args.max_requests_per_task < 0:
         parser.error("--max-requests-per-task must be at least 0")
-
     parsed = urllib.parse.urlsplit(args.upstream_base)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         parser.error("--upstream-base must be an absolute HTTP(S) URL")
 
-    global _out_fh, UPSTREAM_BASE, UPSTREAM_TOKEN, MAX_REQUESTS_PER_TASK
-    UPSTREAM_BASE = args.upstream_base.rstrip("/")
-    UPSTREAM_TOKEN = args.upstream_token
-    MAX_REQUESTS_PER_TASK = args.max_requests_per_task
-    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    restore_completed_responses(args.out)
-    _out_fh = open(args.out, "a", encoding="utf-8", buffering=1)
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    token_log = TokenLog(Path(args.out))
+    gateway = AnthropicGateway(
+        upstream_base=args.upstream_base,
+        upstream_token=args.upstream_token,
+        token_log=token_log,
+        max_requests_per_task=args.max_requests_per_task,
+    )
+    gateway.restore()
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(gateway))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         return 0
     finally:
         server.server_close()
-        _out_fh.close()
+        token_log.close()
 
 
 if __name__ == "__main__":
