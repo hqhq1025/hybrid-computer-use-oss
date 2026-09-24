@@ -6,7 +6,7 @@ import pytest
 
 MODULE_PATH = (
     Path(__file__).resolve().parents[1]
-    / "integrations/osworld-v2/patches/desktop_env/cdp.py"
+    / "osworld-overlay/desktop_env/cdp.py"
 )
 SPEC = importlib.util.spec_from_file_location("hcu_cdp", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None

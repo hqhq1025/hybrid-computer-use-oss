@@ -1,44 +1,24 @@
-#!/usr/bin/env python3
+"""Start one OSWorld task guest and run task setup without an agent."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
 from pathlib import Path
-import sys
 import time
 
 
-INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(
-    os.environ.get(
-        "HYBRID_COMPUTER_USE_ROOT",
-        Path(__file__).resolve().parents[3],
-    )
-).expanduser().resolve()
-ROOT = Path(
-    os.environ.get("OSWORLD_V2_ROOT", REPO_ROOT / "external" / "OSWorld-V2")
-).expanduser().resolve()
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(INTEGRATION_ROOT))
-os.chdir(ROOT)
-
-from desktop_env.cache import run_scoped_cache_dir  # noqa: E402
-from desktop_env.desktop_env import DesktopEnv  # noqa: E402
-from desktop_env.providers.volume import (  # noqa: E402
-    validate_guest_image_capacity,
-)
-from hybrid.runtime_preflight import (  # noqa: E402
+from hcu.paths import OSWORLD_ROOT
+from hcu.osworld.preflight import (
     validate_dedicated_docker_runtime,
     validate_official_asset_runtime,
 )
-from task_loader import load_task_config  # noqa: E402
-
-
-def task_value(task, key: str, default=None):
-    if hasattr(task, "get"):
-        return task.get(key, default)
-    return getattr(task, key, default)
+from hcu.osworld.task import task_value
+from hcu.osworld.task_loader import load_task_config
+from desktop_env.cache import run_scoped_cache_dir
+from desktop_env.desktop_env import DesktopEnv
+from desktop_env.providers.volume import validate_guest_image_capacity
 
 
 def parse_evaluator_fixture(value: str) -> tuple[Path, str]:
@@ -109,6 +89,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    os.chdir(OSWORLD_ROOT)
     args = parse_args()
     if args.evaluator_fixture and not args.run_evaluator:
         raise ValueError("--evaluator-fixture requires --run-evaluator")
@@ -122,7 +103,7 @@ def main() -> int:
     task = load_task_config(
         None,
         task_id=args.task_id,
-        base_dir=str(ROOT / "evaluation_examples"),
+        base_dir=str(OSWORLD_ROOT / "evaluation_examples"),
         domain=args.task_domain,
         eval_version=args.benchmark_version,
     )

@@ -10,7 +10,8 @@ def test_no_private_absolute_paths_in_public_entrypoints():
         ROOT / "README.md",
         ROOT / "docs/OSWORLD_V1.md",
         ROOT / "docs/OSWORLD_V2.md",
-        ROOT / "integrations/osworld-v2/hybrid/run_hybrid.py",
+        ROOT / "hcu/osworld/run_task.py",
+        ROOT / "hcu/paths.py",
         ROOT / "scripts/install-osworld-v2.py",
     ]
     for path in paths:

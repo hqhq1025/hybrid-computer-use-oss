@@ -1,4 +1,16 @@
-from integrations.common.claude_mcp_schema_adapter import adapt_input_schema
+import importlib.util
+from pathlib import Path
+
+# The adapter is uploaded into the guest as a standalone script.
+ADAPTER_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "hcu/osworld/guest_files/claude_mcp_schema_adapter.py"
+)
+SPEC = importlib.util.spec_from_file_location("claude_adapter", ADAPTER_PATH)
+assert SPEC is not None and SPEC.loader is not None
+adapter = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(adapter)
+adapt_input_schema = adapter.adapt_input_schema
 
 
 def test_flattens_root_oneof_but_keeps_mode_values():

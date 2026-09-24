@@ -1,0 +1,226 @@
+"""Summaries of Codex and Claude Code JSONL traces and failure messages."""
+
+from __future__ import annotations
+
+import json
+import re
+
+from hcu.osworld.prompts import split_completion_message
+
+
+FAILURE_SUMMARY_MAX_CHARS = 4096
+
+
+def summarize_codex_trace(raw: bytes | None) -> dict:
+    summary = {
+        "events": 0,
+        "mcp_calls": 0,
+        "shell_calls": 0,
+        "tool_breakdown": {},
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "last_agent_message": "",
+        "last_substantive_message": "",
+        "completion_sentinel": None,
+        "agent_error": None,
+        "agent_error_original_chars": 0,
+        "failure_classification": None,
+    }
+    if not raw:
+        return summary
+
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        summary["events"] += 1
+        if event.get("type") == "turn.failed":
+            failure = event.get("error") or {}
+            if isinstance(failure, dict):
+                message = str(
+                    failure.get("message")
+                    or failure.get("code")
+                    or failure
+                )
+            else:
+                message = str(failure)
+            message = message or "turn failed"
+            summary["agent_error_original_chars"] = len(message)
+            summary["failure_classification"] = (
+                classify_turn_failure(message)
+            )
+            summary["agent_error"] = concise_failure_message(message)
+        if event.get("type") == "turn.completed":
+            usage = event.get("usage") or {}
+            summary["input_tokens"] += int(usage.get("input_tokens") or 0)
+            summary["cached_input_tokens"] += int(
+                usage.get("cached_input_tokens") or 0
+            )
+            summary["output_tokens"] += int(usage.get("output_tokens") or 0)
+            summary["reasoning_tokens"] += int(
+                usage.get("reasoning_output_tokens") or 0
+            )
+        if event.get("type") != "item.completed":
+            continue
+        item = event.get("item") or {}
+        item_type = item.get("type")
+        if item_type == "agent_message":
+            message = str(item.get("text") or "")
+            summary["last_agent_message"] = message
+            body, sentinel = split_completion_message(message)
+            if body:
+                summary["last_substantive_message"] = body
+            if sentinel is not None:
+                summary["completion_sentinel"] = sentinel
+        elif item_type == "mcp_tool_call":
+            summary["mcp_calls"] += 1
+            name = str(item.get("tool") or item.get("name") or "unknown")
+            summary["tool_breakdown"][name] = (
+                summary["tool_breakdown"].get(name, 0) + 1
+            )
+        elif item_type == "command_execution":
+            summary["shell_calls"] += 1
+    return summary
+
+
+def summarize_claude_trace(raw: bytes | None) -> dict:
+    summary = {
+        "events": 0,
+        "mcp_calls": 0,
+        "shell_calls": 0,
+        "tool_breakdown": {},
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "last_agent_message": "",
+        "last_substantive_message": "",
+        "completion_sentinel": None,
+        "agent_error": None,
+        "agent_error_original_chars": 0,
+        "failure_classification": None,
+    }
+    if not raw:
+        return summary
+
+    shell_tools = {"Bash", "BashOutput", "KillShell"}
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        summary["events"] += 1
+        if event.get("type") == "assistant":
+            for block in (event.get("message") or {}).get("content", []) or []:
+                block_type = block.get("type")
+                if block_type == "thinking":
+                    summary["reasoning_tokens"] += int(
+                        (block.get("usage") or {}).get("thinking_tokens") or 0
+                    )
+                elif block_type == "text":
+                    message = str(block.get("text") or "")
+                    if not message.strip():
+                        continue
+                    summary["last_agent_message"] = message
+                    body, sentinel = split_completion_message(message)
+                    if body:
+                        summary["last_substantive_message"] = body
+                    if sentinel is not None:
+                        summary["completion_sentinel"] = sentinel
+                elif block_type == "tool_use":
+                    name = str(block.get("name") or "unknown")
+                    if name in shell_tools:
+                        summary["shell_calls"] += 1
+                    elif name.startswith("mcp__"):
+                        summary["mcp_calls"] += 1
+                        short_name = name.rsplit("__", 1)[-1]
+                        summary["tool_breakdown"][short_name] = (
+                            summary["tool_breakdown"].get(short_name, 0) + 1
+                        )
+        elif event.get("type") == "result":
+            usage = event.get("usage") or {}
+            summary["input_tokens"] = int(usage.get("input_tokens") or 0)
+            summary["cached_input_tokens"] = int(
+                usage.get("cache_read_input_tokens") or 0
+            )
+            summary["output_tokens"] = int(usage.get("output_tokens") or 0)
+            summary["reasoning_tokens"] = max(
+                summary["reasoning_tokens"],
+                int(
+                    (usage.get("output_tokens_details") or {}).get(
+                        "thinking_tokens"
+                    )
+                    or 0
+                ),
+            )
+            message = str(event.get("result") or "")
+            if message.strip():
+                summary["last_agent_message"] = message
+                body, sentinel = split_completion_message(message)
+                if body:
+                    summary["last_substantive_message"] = body
+                if sentinel is not None:
+                    summary["completion_sentinel"] = sentinel
+            if event.get("is_error"):
+                error = message or str(event.get("error") or "Claude Code failed")
+                summary["agent_error_original_chars"] = len(error)
+                summary["failure_classification"] = (
+                    classify_turn_failure(error)
+                )
+                summary["agent_error"] = concise_failure_message(error)
+    return summary
+
+
+def summarize_agent_trace(raw: bytes | None, agent: str) -> dict:
+    if agent == "claude-code":
+        return summarize_claude_trace(raw)
+    return summarize_codex_trace(raw)
+
+
+def classify_turn_failure(message: str) -> str:
+    normalized = (message or "").casefold()
+    if "exceeded rate limit" in normalized or "rate_limit" in normalized:
+        return "upstream_rate_limit"
+    if (
+        "tool_argument_too_large" in normalized
+        or "argument list too long" in normalized
+        or "os error 7" in normalized
+    ):
+        return "tool_argument_too_large"
+    if "no space left on device" in normalized or "os error 28" in normalized:
+        return "disk_full"
+    if "out of memory" in normalized or "oom-kill" in normalized:
+        return "guest_oom"
+    return "unclassified_turn_failure"
+
+
+def concise_failure_message(message: str) -> str:
+    message = message or ""
+    classification = classify_turn_failure(message)
+    if classification == "tool_argument_too_large":
+        size_match = re.search(
+            r"largest argv element is (\d+) bytes and total argv size is "
+            r"(\d+) bytes",
+            message,
+            flags=re.IGNORECASE,
+        )
+        sizes = (
+            f" largest_argv_bytes={size_match.group(1)}"
+            f" total_argv_bytes={size_match.group(2)}"
+            if size_match
+            else ""
+        )
+        return (
+            "tool_argument_too_large: command was rejected before execution; "
+            "use an existing file or stream data through stdin/write_stdin."
+            f"{sizes} original_chars={len(message)}"
+        )
+    if len(message) <= FAILURE_SUMMARY_MAX_CHARS:
+        return message
+    prefix = message[:FAILURE_SUMMARY_MAX_CHARS]
+    return (
+        f"{prefix}\n[error summary truncated: original_chars={len(message)}]"
+    )

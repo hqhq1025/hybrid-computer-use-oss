@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Run a bounded rolling queue of hybrid and/or original OSWorld V2 tasks."""
 
 from __future__ import annotations
@@ -16,31 +15,18 @@ import urllib.error
 import urllib.request
 
 
-INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(
-    os.environ.get(
-        "HYBRID_COMPUTER_USE_ROOT",
-        Path(__file__).resolve().parents[3],
-    )
-).expanduser().resolve()
-ROOT = Path(
-    os.environ.get("OSWORLD_V2_ROOT", REPO_ROOT / "external" / "OSWorld-V2")
-).expanduser().resolve()
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(INTEGRATION_ROOT))
-os.chdir(ROOT)
-
-from hybrid.runtime_preflight import (  # noqa: E402
-    DEDICATED_DOCKER_HOST,
-)
-from hybrid.host_pressure import (  # noqa: E402
+from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT
+from hcu.osworld.host_pressure import (
     block_device_names_for_paths,
     sample_host_kernel_pressure,
 )
-from desktop_env.providers.volume import (  # noqa: E402
+from hcu.osworld.preflight import DEDICATED_DOCKER_HOST
+from desktop_env.providers.volume import (
     normalize_volume_size,
     validate_guest_image_capacity,
 )
+
+RUNNER_MODULE = "hcu.osworld.run_task"
 
 DEFAULT_QUEUE = Path(
     os.environ.get(
@@ -233,12 +219,6 @@ class QueueRunner:
                 + ", ".join(removed)
             )
         self.execution_root = ROOT
-        if not (
-            INTEGRATION_ROOT / "hybrid/run_hybrid.py"
-        ).is_file():
-            raise FileNotFoundError(
-                f"Hybrid runner is missing from {INTEGRATION_ROOT}"
-            )
         self.guest_image_capacity = validate_queue_guest_image_capacity(
             self.config
         )
@@ -474,7 +454,7 @@ class QueueRunner:
                 marker in argument
                 for argument in args
                 for marker in (
-                    str(INTEGRATION_ROOT / "hybrid/run_hybrid.py"),
+                    RUNNER_MODULE,
                     "scripts/python/run_multienv_gpt_response_api.py",
                 )
             ):
@@ -600,7 +580,8 @@ class QueueRunner:
             agent = str(self.config.get("agent") or "codex")
             command = [
                 sys.executable,
-                str(INTEGRATION_ROOT / "hybrid/run_hybrid.py"),
+                "-m",
+                RUNNER_MODULE,
                 "--task-id",
                 task_id,
                 "--agent",
@@ -734,7 +715,9 @@ class QueueRunner:
             env["OPENAI_BASE_URL"] = evaluator_base
         child = subprocess.Popen(
             self.command(task, side),
-            cwd=self.execution_root,
+            # The hybrid runner is a module of this repository; the upstream
+            # runner resolves its task paths relative to the OSWorld checkout.
+            cwd=REPO_ROOT if side == "hybrid" else self.execution_root,
             env=env,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
@@ -1468,6 +1451,7 @@ class QueueRunner:
 
 
 def main() -> int:
+    os.chdir(ROOT)
     args = parse_args()
     runner = QueueRunner(args.queue, args.poll_interval)
     return runner.run()

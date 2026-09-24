@@ -1,25 +1,28 @@
-import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
 
+import pytest
+
+from hcu.osworld import run_batch
+
 
 ROOT = Path(__file__).resolve().parents[1]
+OSWORLD_ROOT = Path(
+    os.environ.get("OSWORLD_V2_ROOT", ROOT / "external" / "OSWorld-V2")
+)
 
 
-def load_run_batch():
-    path = ROOT / "integrations/osworld-v2/run_batch.py"
-    spec = importlib.util.spec_from_file_location("run_batch", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+def require_osworld_checkout() -> Path:
+    python = OSWORLD_ROOT / ".venv/bin/python"
+    if not (OSWORLD_ROOT / "desktop_env").is_dir() or not python.is_file():
+        pytest.skip(f"OSWorld-V2 checkout with .venv not found at {OSWORLD_ROOT}")
+    return python
 
 
 def test_v1_batch_selects_qemu_runner_and_domain(tmp_path):
-    module = load_run_batch()
-    command = module.command_for(
+    command = run_batch.command_for(
         {
             "benchmark_version": "v1",
             "agent": "codex",
@@ -33,23 +36,21 @@ def test_v1_batch_selects_qemu_runner_and_domain(tmp_path):
         },
         tmp_path,
     )
-    assert "--benchmark-version" in command
+    assert command[1:3] == ["-m", "hcu.osworld.run_task"]
     assert command[command.index("--benchmark-version") + 1] == "v1"
     assert command[command.index("--task-domain") + 1] == "libreoffice_calc"
     assert command[command.index("--client-password") + 1] == "password"
 
 
 def test_v2_batch_defaults_to_v2(tmp_path):
-    module = load_run_batch()
-    command = module.command_for({}, {"id": "001"}, tmp_path)
+    command = run_batch.command_for({}, {"id": "001"}, tmp_path)
     assert command[command.index("--benchmark-version") + 1] == "v2"
     assert "--task-domain" not in command
 
 
 def test_batch_expands_environment_backed_paths(tmp_path, monkeypatch):
-    module = load_run_batch()
     monkeypatch.setenv("TEST_GUEST_IMAGE", "/images/v2.qcow2")
-    command = module.command_for(
+    command = run_batch.command_for(
         {
             "guest_image": "${TEST_GUEST_IMAGE}",
             "client_password": "osworld-public-evaluation",
@@ -87,64 +88,73 @@ def test_example_queues_bind_guest_password_and_capacity():
     assert {task["volume_size"] for task in v2["tasks"]} == {100}
 
 
-def test_qemu_runner_help_imports_with_pinned_osworld_checkout():
-    osworld_root = Path(
-        os.environ.get(
-            "OSWORLD_V2_ROOT",
-            "/datadrive2/repos/osw-hybrid/OSWorld-V2",
-        )
-    )
-    python = osworld_root / ".venv/bin/python"
-    if not python.is_file():
-        return
+@pytest.mark.parametrize(
+    ("module", "expected"),
+    [
+        ("hcu.osworld.run_task", ["--benchmark-version {v1,v2}"]),
+        (
+            "hcu.osworld.setup_canary",
+            ["--benchmark-version {v1,v2}", "--task-domain TASK_DOMAIN"],
+        ),
+    ],
+)
+def test_entrypoint_help_imports_with_osworld_checkout(module, expected):
+    python = require_osworld_checkout()
     result = subprocess.run(
-        [
-            str(python),
-            str(ROOT / "integrations/osworld-v2/hybrid/run_hybrid.py"),
-            "--help",
-        ],
-        env={**os.environ, "OSWORLD_V2_ROOT": str(osworld_root)},
+        [str(python), "-m", module, "--help"],
+        cwd=ROOT,
+        env={**os.environ, "OSWORLD_V2_ROOT": str(OSWORLD_ROOT)},
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    assert "--benchmark-version {v1,v2}" in result.stdout
+    for text in expected:
+        assert text in result.stdout
 
 
-def test_setup_canary_help_supports_v1_task_resolution():
-    osworld_root = Path(
-        os.environ.get(
-            "OSWORLD_V2_ROOT",
-            "/datadrive2/repos/osw-hybrid/OSWorld-V2",
-        )
-    )
-    python = osworld_root / ".venv/bin/python"
-    if not python.is_file():
-        return
+GATEWAY_AFFINITY_PROBE = """
+import argparse, json, sys
+from pathlib import Path
+from hcu.osworld import run_task
+
+root, out = Path(sys.argv[1]), Path(sys.argv[2])
+args = argparse.Namespace(
+    agent="codex", model="gpt-5.5", effort="xhigh",
+    gateway_base="http://gateway:8600",
+    claude_gateway_base="http://gateway:8537",
+    benchmark_version="v1",
+)
+run = run_task.TaskRun(
+    args=args, run_tag="RUN", result_dir=out,
+    token_log=out / "tokens.jsonl", affinity_task="osworld-v1-hybrid-RUN",
+    codex_binary=out / "codex", claude_code_binary=out / "claude",
+    mcp_binary=out / "computer-use",
+    skill_file=root / "skills/hybrid/SKILL.md",
+    base_instructions_file=root / "skills/base/CODEX_BASE_INSTRUCTIONS.md",
+    task={"instruction": "Do the task."}, phases=[],
+    instruction="Do the task.", current_date="2026-01-01",
+    run_timezone="UTC", run_started_at_utc="2026-01-01T00:00:00+00:00",
+    explicit_task_date=None, guest_image="",
+)
+run_task.stage_local_files(run)
+print(json.dumps({"claude_endpoint": run.claude_endpoint}))
+"""
+
+
+def test_gateway_affinity_names_the_selected_benchmark(tmp_path):
+    python = require_osworld_checkout()
     result = subprocess.run(
-        [
-            str(python),
-            str(
-                ROOT
-                / "integrations/osworld-v2/hybrid/run_setup_canary.py"
-            ),
-            "--help",
-        ],
-        env={**os.environ, "OSWORLD_V2_ROOT": str(osworld_root)},
+        [str(python), "-c", GATEWAY_AFFINITY_PROBE, str(ROOT), str(tmp_path)],
+        cwd=ROOT,
+        env={**os.environ, "OSWORLD_V2_ROOT": str(OSWORLD_ROOT)},
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    assert "--benchmark-version {v1,v2}" in result.stdout
-    assert "--task-domain TASK_DOMAIN" in result.stdout
-
-
-def test_qemu_runner_uses_selected_benchmark_in_gateway_affinity():
-    source = (
-        ROOT / "integrations/osworld-v2/hybrid/run_hybrid.py"
-    ).read_text(encoding="utf-8")
-    assert source.count(
-        'f"osworld-{args.benchmark_version}-hybrid"'
-    ) >= 2
+    config = (tmp_path / "guest-config.toml").read_text(encoding="utf-8")
+    assert 'base_url = "http://gateway:8600/t/osworld-v1-hybrid-RUN/v1"' in config
+    assert json.loads(result.stdout)["claude_endpoint"] == (
+        "http://gateway:8537/t/osworld-v1-hybrid-RUN"
+    )

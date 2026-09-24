@@ -136,7 +136,7 @@ def main() -> int:
     if args.agent == "codex":
         args.output.write_text(codex_config(args), encoding="utf-8")
     else:
-        adapter = ROOT / "integrations/common/claude_mcp_schema_adapter.py"
+        adapter = ROOT / "hcu/osworld/guest_files/claude_mcp_schema_adapter.py"
         payload = {
             "mcpServers": {
                 "computer_use": {

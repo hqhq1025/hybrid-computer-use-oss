@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Run a small, bounded OSWorld V1 or V2 QEMU batch."""
 
 from __future__ import annotations
@@ -11,9 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-RUNNER = REPO_ROOT / "integrations/osworld-v2/hybrid/run_hybrid.py"
+from hcu.paths import REPO_ROOT, results_root
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,7 +52,8 @@ def append_option(command: list[str], config: dict, key: str, flag: str) -> None
 def command_for(config: dict, task: dict, output_root: Path) -> list[str]:
     command = [
         sys.executable,
-        str(RUNNER),
+        "-m",
+        "hcu.osworld.run_task",
         "--task-id",
         task["id"],
         "--benchmark-version",
@@ -136,13 +134,10 @@ def main() -> int:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     tasks = normalized_tasks(config)
     run_id = str(config.get("run_id") or config_path.stem)
-    results_root = Path(
-        os.environ.get("HCU_RESULTS_DIR", REPO_ROOT / "runs")
-    ).expanduser().resolve()
     benchmark_version = str(config.get("benchmark_version") or "v2")
     if benchmark_version not in {"v1", "v2"}:
         raise ValueError("config.benchmark_version must be v1 or v2")
-    output_root = results_root / f"osworld-{benchmark_version}" / run_id
+    output_root = results_root() / f"osworld-{benchmark_version}" / run_id
     log_root = output_root / "logs"
     if args.dry_run:
         for task in tasks:

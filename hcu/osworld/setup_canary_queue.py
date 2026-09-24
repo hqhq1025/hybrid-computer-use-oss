@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+"""Run setup canaries for many OSWorld V2 tasks with bounded concurrency."""
+
 from __future__ import annotations
 
 import argparse
@@ -13,27 +14,12 @@ import threading
 import time
 
 
-INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(
-    os.environ.get(
-        "HYBRID_COMPUTER_USE_ROOT",
-        Path(__file__).resolve().parents[3],
-    )
-).expanduser().resolve()
-ROOT = Path(
-    os.environ.get("OSWORLD_V2_ROOT", REPO_ROOT / "external" / "OSWorld-V2")
-).expanduser().resolve()
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(INTEGRATION_ROOT))
-os.chdir(ROOT)
-
-from hybrid.runtime_preflight import (  # noqa: E402
+from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT
+from hcu.osworld.preflight import (
     validate_dedicated_docker_runtime,
     validate_official_asset_runtime,
 )
-from desktop_env.providers.volume import (  # noqa: E402
-    validate_guest_image_capacity,
-)
+from desktop_env.providers.volume import validate_guest_image_capacity
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,6 +103,7 @@ def load_task_resources(
 
 
 def main() -> int:
+    os.chdir(ROOT)
     args = parse_args()
     if args.concurrency <= 0:
         raise ValueError("--concurrency must be positive")
@@ -193,7 +180,8 @@ def main() -> int:
         task_result = tasks_root / task_id
         command = [
             sys.executable,
-            str(INTEGRATION_ROOT / "hybrid/run_setup_canary.py"),
+            "-m",
+            "hcu.osworld.setup_canary",
             "--task-id",
             task_id,
             "--guest-image",
@@ -212,7 +200,7 @@ def main() -> int:
         with log_path.open("wb") as log:
             process = subprocess.Popen(
                 command,
-                cwd=ROOT,
+                cwd=REPO_ROOT,
                 env=os.environ.copy(),
                 stdout=log,
                 stderr=subprocess.STDOUT,

@@ -33,21 +33,19 @@ def main() -> int:
             "Review the overlay diff, then rerun with --force."
         )
 
-    overlay = ROOT / "integrations/osworld-v2/overlay"
+    overlay = ROOT / "osworld-overlay"
     for source in overlay.rglob("*"):
-        if not source.is_file():
+        if not source.is_file() or "__pycache__" in source.parts:
             continue
         destination = checkout / source.relative_to(overlay)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-    cdp_source = (
-        ROOT / "integrations/osworld-v2/patches/desktop_env/cdp.py"
-    )
-    shutil.copy2(cdp_source, checkout / "desktop_env/cdp.py")
+    # The overlay Docker provider imports the host-pressure sampler that the
+    # queue also uses, so both read one source file.
     deploy_target = checkout / "deploy/hybrid"
     deploy_target.mkdir(parents=True, exist_ok=True)
     shutil.copy2(
-        ROOT / "integrations/osworld-v2/hybrid/host_pressure.py",
+        ROOT / "hcu/osworld/host_pressure.py",
         deploy_target / "host_pressure.py",
     )
     print(f"OSWorld V2 runtime overlay installed into {checkout}")

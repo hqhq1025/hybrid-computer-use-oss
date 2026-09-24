@@ -1,4 +1,4 @@
-from integrations.common.evaluator_channels import run_official_evaluator
+from hcu.osworld.evaluation import run_official_evaluator
 
 
 def test_numeric_result_becomes_score_payload():
