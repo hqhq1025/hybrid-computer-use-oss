@@ -103,10 +103,29 @@ Relative path arguments are resolved against your working directory.
 - V1: `scripts/fetch-osworld-v1-image.sh DIR` downloads the official
   `Ubuntu.qcow2.zip` from a pinned Hugging Face revision, verifies the archive
   checksum and extracts the image.
-- V2: download the guest image and the task asset snapshot as described in the
-  OSWorld-V2 repository. The runner requires `OSWORLD_FILE_BASE_URL` to point
-  at a local copy of the asset snapshot (a directory containing `task_001`)
-  for V1 and V2 runs alike, so that no task resolves assets online.
+- V2 task definitions: the OSWorld-V2 task classes (`task_*.py`) are gated and
+  not part of the GitHub checkout. Accept the terms of the Hugging Face
+  datasets `xlangai/osworld_v2_tasks` and `xlangai/osworld_v2_assets_gated`,
+  then run from the checkout:
+
+  ```bash
+  cd external/OSWorld-V2
+  uvx --from huggingface_hub hf auth login
+  uv run scripts/tools/download_osworld_v2_tasks.py \
+    --benchmark-release osworld-v2-2026.08.08
+  uv run scripts/tools/download_osworld_v2_assets.py \
+    --benchmark-release osworld-v2-2026.08.08 \
+    --target-dir cache/osworld_v2_assets --clean
+  ```
+
+  The first script writes `evaluation_examples/task_class/task_*.py`; without
+  it, V2 task lookup fails with a missing `examples_v2_backup/<id>.json`.
+- Task assets: the runner requires `OSWORLD_FILE_BASE_URL` to point at the
+  local asset snapshot (a directory containing `task_001`, for example
+  `external/OSWorld-V2/cache/osworld_v2_assets`) for V1 and V2 runs alike, so
+  that no task resolves assets online.
+- V2 guest image and task websites: follow the OSWorld-V2 README for the
+  guest image and for the websites that some tasks use.
 - Dependency images: [Guest dependencies](GUEST_DEPENDENCIES.md) describes how
   to derive `v1-core` and `v2-full` images that add common workstation
   packages to the official images. Never modify an official image in place.

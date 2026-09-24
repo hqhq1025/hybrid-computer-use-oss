@@ -97,7 +97,10 @@ make build
 cp configs/env.example .env   # then fill in the paths
 ```
 
-Both OSWorld and OSWorld-V2 tasks run through the same runner:
+OSWorld-V2 task classes and assets are gated on Hugging Face and have to be
+downloaded into the checkout separately; [Running OSWorld](docs/OSWORLD.md)
+lists the commands. Both OSWorld and OSWorld-V2 tasks then run through the
+same runner:
 
 ```bash
 external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_task \
