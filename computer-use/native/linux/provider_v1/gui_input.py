@@ -1,8 +1,9 @@
 """Validation and AT-SPI synthesis of GUI pointer and keyboard actions."""
 
+import math
+import time
 from .foundation import (
     Atspi,
-    FOCUS_GRAB_CANDIDATES,
     GUI_ACTION_FIELDS,
     GUI_ACTION_TYPES,
     GUI_KEYBOARD_ACTION_TYPES,
@@ -14,34 +15,17 @@ from .foundation import (
     GUI_MAX_TEXT_LENGTH,
     GUI_POINTER_ACTION_TYPES,
     MAX_CLICK_COUNT,
-    math,
-    node_name,
-    node_pid,
-    safe,
-    state_contains,
-    subprocess,
-    time,
 )
 
-from .x11_windows import (
-    app_windows,
-    iter_apps,
-)
 
-from .element_resolver import (
-    iter_all,
-)
 
 from .actionability import (
     screen_absolute_point,
 )
 from .input_primitives import (
-    InputEmissionError,
     best_effort_mouse_release,
     emit_keyboard_event,
     emit_mouse_event,
-    require_input_emission,
-    require_window_focus,
 )
 
 def mouse_button_events(button):
@@ -348,7 +332,7 @@ def validate_gui_actions(actions, bounds=None, native_bounds=None):
 
 
 def execute_gui_action(action):
-    from .ax_actions import parse_key, send_key, send_text
+    from .ax_actions import send_key, send_text
 
     """Execute one action that has already passed validate_gui_action."""
     action_type = action["type"]

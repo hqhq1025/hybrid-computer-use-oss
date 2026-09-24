@@ -1,5 +1,9 @@
 """Linux provider module: atspi inventory."""
 
+import os
+import re
+import subprocess
+import time
 from .foundation import (
     Atspi,
     OperationFailure,
@@ -11,13 +15,9 @@ from .foundation import (
     node_name,
     node_pid,
     node_role,
-    os,
     process_generation,
     provider_bus_name,
-    re,
     state_contains,
-    subprocess,
-    time,
 )
 
 from .x11_windows import (

@@ -1,76 +1,37 @@
 """Linux provider module: ax snapshot."""
 
+import time
 from .foundation import (
     Atspi,
     BUDGET_PRESSURE_RATIO,
-    CLICK_COVERED_ACTIONS,
     DEFAULT_TEXT_LIMIT,
     MAX_CHILD_FANOUT,
     MAX_DEPTH,
     MAX_ELEMENTS,
     MAX_RENDERED_CHARS,
     MENU_ROLES,
-    NON_SELF_ACTIONS,
-    PIXEL_DIFF_STRIDE,
-    PIXEL_DIFF_THRESHOLD,
-    SCREENSHOT_MAX_BASE64_CHARS,
     TREE_DEADLINE_SECONDS,
-    UNIVERSAL_ACTIONS,
-    child_count,
-    has_text_iface,
     is_interactive_role,
-    limit_text,
     node_name,
     node_pid,
     node_role,
-    normalized_action,
-    os,
     process_generation,
     provider_bus_name,
     provider_object_path,
-    re,
     safe,
     should_enumerate_children,
     state_contains,
-    state_value,
     strict_prune_probe,
-    time,
 )
 
-from .x11_windows import (
-    relative_frame,
-)
-from .primitives import name_fingerprint, quoted
 from .ax_node_properties import (
-    accessible_id,
-    action_names,
-    element_value,
-    node_actions,
-    node_description,
-    numeric_value,
-    parse_text_limit,
-    placeholder_text,
-    plain_text_from_rich_text,
-    positive_int,
     render_element_line,
-    selected_option_name,
-    state_segment,
-    state_transition_note,
-    text_attributes,
-    text_value,
-    text_value_with_status,
 )
 from .ax_records import (
-    StableIndexer,
-    effective_name,
-    labelled_by_name,
     record_for,
-    semantic_relations,
 )
 from .ax_virtual_table import (
     render_visible_cells,
-    spreadsheet_a1,
-    visible_cell_range,
 )
 
 def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
@@ -477,7 +438,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             return visit_impl(
                 node, depth, path, render_depth, parent_text
             )
-        except Exception as exc:
+        except Exception:
             # Roll back any partial records/lines from this node's subtree. Stable
             # index numbers consumed during the failed attempt may remain unused,
             # but no hidden actionable ref is published.
@@ -492,10 +453,6 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 dropped["budget"] += 1
                 return
             role = str(safe(lambda: node_role(node), "element") or "element")
-            name = limit_text(
-                str(safe(lambda: effective_name(node), "") or ""),
-                text_limit=text_limit,
-            )
             deadline_expired = (
                 deadline is not None and time.monotonic() >= deadline)
             collapsed_menu = (

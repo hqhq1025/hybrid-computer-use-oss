@@ -1,5 +1,7 @@
 """Linux GUI capture, input, settling, and response helpers."""
 
+import json
+import time
 from .foundation import (
     GUI_FRAME_GUARDED_ACTION_TYPES,
     GUI_INPUT_ACTION_TYPES,
@@ -17,8 +19,6 @@ from .foundation import (
     PIXEL_DIFF_STRIDE,
     PIXEL_DIFF_THRESHOLD,
     frame,
-    json,
-    time,
 )
 
 from .gui_capture import (
@@ -28,11 +28,11 @@ from .gui_capture import (
     pixel_change,
 )
 from .gui_input import (
-    InputEmissionError,
     execute_gui_action,
     gui_wait_metrics,
     validate_gui_actions,
 )
+from .input_primitives import InputEmissionError
 from .snapshot import build_gui_snapshot
 from .x11_windows import (
     desktop_bounds,

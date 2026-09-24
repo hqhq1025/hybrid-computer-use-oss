@@ -1,26 +1,18 @@
 """Linux provider module: ax actions."""
 
+import math
+import os
+import time
 from .foundation import (
     Atspi,
     Gdk,
-    MAX_CHILD_FANOUT,
     MAX_SCROLL_PAGES,
-    MENU_ROLES,
-    child_at,
-    child_count,
     has_editable_text_iface,
     has_text_iface,
-    math,
-    node_role,
-    os,
     safe,
     state_contains,
-    time,
 )
 
-from .actionability import (
-    do_action_by_index,
-)
 
 from .input_primitives import (
     emit_keyboard_event,
@@ -28,9 +20,7 @@ from .input_primitives import (
     require_window_focus,
 )
 
-from .element_resolver import (
-    iter_all,
-)
+from .tree_walk import iter_all
 
 KEY_ALIASES = {
     "return": "Return",

@@ -1,5 +1,9 @@
 """X11 desktop layout, native window identity and window selection."""
 
+import hashlib
+import json
+import re
+import subprocess
 from .foundation import (
     AX_WINDOW_ROLES,
     Atspi,
@@ -12,18 +16,14 @@ from .foundation import (
     enumerate_children,
     extents,
     frame,
-    hashlib,
     inventory_complete,
     inventory_errors,
-    json,
     node_name,
     node_pid,
     node_role,
     process_generation,
-    re,
     safe,
     state_contains,
-    subprocess,
 )
 from .primitives import semantic_text_key
 

@@ -1,46 +1,22 @@
 """Linux provider module: AX node properties and tree-line rendering."""
 
+import re
 from .foundation import (
     Atspi,
-    BUDGET_PRESSURE_RATIO,
     CLICK_COVERED_ACTIONS,
     DEFAULT_TEXT_LIMIT,
-    MAX_CHILD_FANOUT,
-    MAX_DEPTH,
-    MAX_ELEMENTS,
-    MAX_RENDERED_CHARS,
-    MENU_ROLES,
     NON_SELF_ACTIONS,
-    PIXEL_DIFF_STRIDE,
-    PIXEL_DIFF_THRESHOLD,
-    SCREENSHOT_MAX_BASE64_CHARS,
-    TREE_DEADLINE_SECONDS,
     UNIVERSAL_ACTIONS,
     child_count,
-    has_text_iface,
-    is_interactive_role,
     limit_text,
     node_name,
-    node_pid,
     node_role,
     normalized_action,
-    os,
-    process_generation,
-    provider_bus_name,
-    provider_object_path,
-    re,
     safe,
-    should_enumerate_children,
     state_contains,
-    state_value,
-    strict_prune_probe,
-    time,
 )
 
-from .x11_windows import (
-    relative_frame,
-)
-from .primitives import name_fingerprint, quoted
+from .primitives import quoted
 def node_actions(node):
     """Read the node's action table once and derive both rendering facts.
 

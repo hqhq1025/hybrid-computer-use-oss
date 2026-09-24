@@ -1,14 +1,14 @@
 """Low-level Linux focus and input emission primitives."""
 
+import subprocess
+import time
 from .foundation import (
-    Atspi,  # pyright: ignore[reportAttributeAccessIssue]
+    Atspi,
     FOCUS_GRAB_CANDIDATES,
     node_name,
     node_pid,
     safe,
     state_contains,
-    subprocess,
-    time,
 )
 from .tree_walk import iter_all
 from .x11_windows import app_windows, iter_apps

@@ -1,12 +1,12 @@
 """Bounded virtual-table discovery and rendering."""
 
+import os
 from .foundation import (
-    Atspi,  # pyright: ignore[reportAttributeAccessIssue]
+    Atspi,
     DEFAULT_TEXT_LIMIT,
     MAX_ELEMENTS,
     node_pid,
     node_role,
-    os,
     process_generation,
     provider_bus_name,
     provider_object_path,

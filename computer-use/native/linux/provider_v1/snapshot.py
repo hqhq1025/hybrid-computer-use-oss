@@ -1,5 +1,7 @@
 """Application and full-desktop snapshot construction."""
 
+import hashlib
+import time
 from .foundation import (
     Atspi,
     DEFAULT_TEXT_LIMIT,
@@ -8,10 +10,8 @@ from .foundation import (
     MAX_ELEMENTS,
     SCREENSHOT_SCOPE_SCREEN,
     a11y_screenshots_enabled,
-    desktop,
     extents,
     has_text_iface,
-    hashlib,
     limit_text,
     node_name,
     node_pid,
@@ -21,13 +21,10 @@ from .foundation import (
     provider_object_path,
     safe,
     state_contains,
-    time,
 )
 
-from .ax_snapshot import (
-    StableIndexer,
-    render_tree,
-)
+from .ax_snapshot import render_tree
+from .ax_records import StableIndexer
 
 from .x11_windows import (
     app_windows,
@@ -84,7 +81,6 @@ def element_reference(role, name):
 
 def focused_summary(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
     try:
-        root = desktop()
         for app in iter_apps():
             if node_pid(app) != app_pid:
                 continue

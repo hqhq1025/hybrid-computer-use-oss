@@ -1,7 +1,7 @@
 """Typed provider failure responses for the Linux Provider V2 boundary."""
 
 from . import action_evidence
-from .gui_input import InputEmissionError
+from .input_primitives import InputEmissionError
 from .recovery import bounded_recovery_context
 
 

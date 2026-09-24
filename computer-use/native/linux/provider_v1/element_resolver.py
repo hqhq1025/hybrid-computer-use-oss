@@ -2,8 +2,9 @@
 
 from typing import Any
 
+import time
 from .foundation import (
-    Atspi,  # pyright: ignore[reportAttributeAccessIssue]
+    Atspi,
     DEFAULT_TEXT_LIMIT,
     MAX_DEPTH,
     MAX_ELEMENTS,
@@ -19,19 +20,19 @@ from .foundation import (
     provider_object_path,
     safe,
     state_contains,
-    time,
 )
 from .recovery import recovery_window_candidate
 from .primitives import name_fingerprint
-from .tree_walk import find_first, iter_all
 
-from .ax_snapshot import (
-    StableIndexer,
+from .ax_snapshot import render_tree
+from .ax_node_properties import (
     accessible_id,
-    effective_name,
     parse_text_limit,
     positive_int,
-    render_tree,
+)
+from .ax_records import (
+    StableIndexer,
+    effective_name,
 )
 
 from .x11_windows import (

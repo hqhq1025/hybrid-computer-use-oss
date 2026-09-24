@@ -1,16 +1,16 @@
 """Action choice, geometry stability and coordinate-delivery checks."""
 
+import math
+import os
+import time
 from .foundation import (
     Atspi,
     CLICK_COVERED_ACTIONS,
     NON_SELF_ACTIONS,
     OperationFailure,
     frame,
-    math,
     normalized_action,
-    os,
     safe,
-    time,
 )
 
 from .x11_windows import (

@@ -2,11 +2,10 @@
 
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
-    node_name,
     node_role,
     safe,
 )
-from .ax_snapshot import effective_name
+from .ax_records import effective_name
 
 A11Y_CHANNEL = "[a11y]"
 GUI_CHANNEL = "[gui]"
@@ -97,7 +96,6 @@ def resolved_note(element, element_record):
     """
     if element is None or not element_record:
         return None
-    index = element_record.get("index")
     live_role = str(node_role(element) or "")
     live_name = str(effective_name(element) or "")
     if live_name:

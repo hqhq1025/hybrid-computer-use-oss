@@ -13,7 +13,7 @@ from .foundation import (
     safe,
     state_contains,
 )
-from .ax_snapshot import effective_name
+from .ax_records import effective_name
 from .x11_windows import app_windows
 
 

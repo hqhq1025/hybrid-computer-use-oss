@@ -1,7 +1,7 @@
 """Screen capture, pixel comparison and screenshot encoding."""
 
+import base64
 from .foundation import (
-    Atspi,
     Gdk,
     GdkPixbuf,
     GUI_MODEL_MAX_HEIGHT,
@@ -10,8 +10,6 @@ from .foundation import (
     PIXEL_DIFF_THRESHOLD,
     SCREENSHOT_SCOPE_SCREEN,
     SCREENSHOT_MAX_BASE64_CHARS,
-    base64,
-    safe,
 )
 
 def capture_window_pixels(bounds):

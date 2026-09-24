@@ -1,5 +1,7 @@
 """Linux logical/native window resolution and actions."""
 
+import subprocess
+import time
 from .foundation import (
     AX_WINDOW_ACTION_POLL_SECONDS,
     AX_WINDOW_ACTION_TIMEOUT_SECONDS,
@@ -13,8 +15,6 @@ from .foundation import (
     process_generation,
     provider_bus_name,
     provider_object_path,
-    subprocess,
-    time,
 )
 from . import action_evidence
 from .x11_windows import (
@@ -121,12 +121,6 @@ def perform_ax_window_action(tool, app, window, element_record):
             input_events_emitted=False,
             failure_subject="window",
         )
-    target_provider_identity = (
-        provider_bus_name(window),
-        provider_object_path(window),
-        process_generation(node_pid(window)),
-    )
-    target_provider_identity_complete = all(target_provider_identity)
     try:
         result = subprocess.run(
             ["wmctrl", "-ia" if tool == "activate" else "-ic", window_id],
@@ -183,22 +177,6 @@ def perform_ax_window_action(tool, app, window, element_record):
                 and len(native_app_windows) == 0
             )
             ax_complete = inventory_complete(current_windows)
-            target_still_present = False
-            if ax_complete:
-                for _, current_window in current_windows:
-                    current_identity = (
-                        provider_bus_name(current_window),
-                        provider_object_path(current_window),
-                        process_generation(node_pid(current_window)),
-                    )
-                    if current_identity == target_provider_identity:
-                        target_still_present = True
-                        break
-            ax_target_gone = (
-                ax_complete
-                and target_provider_identity_complete
-                and not target_still_present
-            )
             windowless = (
                 native_app_windowless
                 or (ax_complete and len(current_windows) == 0)

@@ -1,18 +1,14 @@
 """Dispatch of Provider V2 operations to AX and GUI handlers."""
 
+import math
+import time
 from .foundation import (
     Atspi,
     DEFAULT_TEXT_LIMIT,
-    MAX_CHILD_FANOUT,
     MAX_DEPTH,
     MAX_ELEMENTS,
     OperationFailure,
-    child_at,
-    child_count,
     extents,
-    is_interactive_role,
-    limit_text,
-    math,
     node_name,
     node_pid,
     node_role,
@@ -20,9 +16,7 @@ from .foundation import (
     provider_bus_name,
     provider_object_path,
     safe,
-    state_contains,
     state_value,
-    time,
 )
 
 from .ax_actions import (
@@ -37,17 +31,16 @@ from .ax_actions import (
     set_element_value_outcome,
 )
 
-from .gui_input import require_window_focus, send_mouse_click
+from .gui_input import send_mouse_click
+from .input_primitives import require_window_focus
 
-from .ax_snapshot import (
-    effective_name,
+from .ax_node_properties import (
     parse_text_limit,
     positive_int,
 )
 
 from .x11_windows import (
     _x11_window_inventory_cache,
-    app_windows,
     desktop_bounds,
     desktop_layout_state,
     main_window,
@@ -90,13 +83,6 @@ from .actionability import (
 from .atspi_inventory import (
     resolve_operation_app,
     wait_for_ui_to_settle,
-)
-from .window_diagnostics import (
-    accepts_user_input,
-    foreign_foreground_note,
-    is_infrastructure_window,
-    modal_diagnostic,
-    window_label,
 )
 
 A11Y_CHANNEL = "[a11y]"
@@ -150,12 +136,10 @@ from .ax_target_notes import (
     UNVERIFIED_SEMANTIC,
     UNVERIFIED_SYNTHESIS,
     addressing_channel,
-    element_at_point,
     resolved_note,
 )
 from .ax_snapshot_diagnostics import (
     content_host_diagnostic,
-    is_content_plane_role,
     is_dropdown_item,
     snapshot_diagnostics,
 )

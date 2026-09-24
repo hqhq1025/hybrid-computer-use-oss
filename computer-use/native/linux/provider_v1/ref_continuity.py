@@ -1,5 +1,6 @@
 """Linux provider ref continuity and semantic matching."""
 
+import time
 from .foundation import (
     Atspi,
     InventoryResult,
@@ -13,15 +14,16 @@ from .foundation import (
     safe,
     state_contains,
     state_value,
-    time,
 )
 
-from .ax_snapshot import (
+from .ax_node_properties import (
     accessible_id,
-    effective_name,
     node_actions,
     node_description,
     placeholder_text,
+)
+from .ax_records import (
+    effective_name,
     record_for,
 )
 
