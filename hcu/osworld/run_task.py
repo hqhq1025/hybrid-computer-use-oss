@@ -26,6 +26,7 @@ from hcu.paths import (
     DEFAULT_BASE_INSTRUCTIONS_FILE,
     DEFAULT_SKILL_FILE,
     OSWORLD_ROOT,
+    anchor_path_args,
     results_root,
 )
 from hcu.osworld.agent_loop import TurnSettings, run_agent_phase
@@ -1348,8 +1349,22 @@ def close_guest(run: TaskRun, env: DesktopEnv) -> None:
 
 
 def main() -> int:
-    os.chdir(OSWORLD_ROOT)
     args = parse_args()
+    anchor_path_args(
+        args,
+        "artifact_dir",
+        "codex_binary",
+        "claude_code_binary",
+        "mcp_binary",
+        "guest_image",
+        "skill_file",
+        "base_instructions_file",
+        "judge_prompt_file",
+        "judge_schema_file",
+        "result_dir",
+        "token_log",
+    )
+    os.chdir(OSWORLD_ROOT)
     docker_runtime = validate_dedicated_docker_runtime()
     asset_runtime = validate_official_asset_runtime()
     run = prepare_run(args)

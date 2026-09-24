@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 
-from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT
+from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT, anchor_path_args
 from hcu.osworld.host_pressure import (
     block_device_names_for_paths,
     sample_host_kernel_pressure,
@@ -1451,8 +1451,9 @@ class QueueRunner:
 
 
 def main() -> int:
-    os.chdir(ROOT)
     args = parse_args()
+    anchor_path_args(args, "queue")
+    os.chdir(ROOT)
     runner = QueueRunner(args.queue, args.poll_interval)
     return runner.run()
 

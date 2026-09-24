@@ -32,3 +32,18 @@ def results_root() -> Path:
     return Path(
         os.environ.get("HCU_RESULTS_DIR", REPO_ROOT / "runs")
     ).expanduser().resolve()
+
+
+def anchor_path_args(args, *names: str) -> None:
+    """Make path arguments absolute before an entry point changes directory.
+
+    Entry points switch into the OSWorld checkout because upstream code uses
+    checkout-relative paths; user-supplied relative paths must keep meaning
+    "relative to where the command was started".
+    """
+    for name in names:
+        value = getattr(args, name)
+        if not value:
+            continue
+        absolute = os.path.abspath(os.path.expanduser(os.fspath(value)))
+        setattr(args, name, type(value)(absolute) if isinstance(value, Path) else absolute)

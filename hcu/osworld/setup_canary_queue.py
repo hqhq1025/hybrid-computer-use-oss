@@ -14,7 +14,7 @@ import threading
 import time
 
 
-from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT
+from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT, anchor_path_args
 from hcu.osworld.preflight import (
     validate_dedicated_docker_runtime,
     validate_official_asset_runtime,
@@ -103,8 +103,9 @@ def load_task_resources(
 
 
 def main() -> int:
-    os.chdir(ROOT)
     args = parse_args()
+    anchor_path_args(args, "result_root", "guest_image", "task_profile")
+    os.chdir(ROOT)
     if args.concurrency <= 0:
         raise ValueError("--concurrency must be positive")
     if args.task_timeout <= 0:

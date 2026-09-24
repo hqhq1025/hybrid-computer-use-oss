@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 
 
-from hcu.paths import OSWORLD_ROOT
+from hcu.paths import OSWORLD_ROOT, anchor_path_args
 from hcu.osworld.preflight import (
     validate_dedicated_docker_runtime,
     validate_official_asset_runtime,
@@ -89,8 +89,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    os.chdir(OSWORLD_ROOT)
     args = parse_args()
+    anchor_path_args(args, "guest_image", "result_dir")
+    os.chdir(OSWORLD_ROOT)
     if args.evaluator_fixture and not args.run_evaluator:
         raise ValueError("--evaluator-fixture requires --run-evaluator")
     docker_runtime = validate_dedicated_docker_runtime()
