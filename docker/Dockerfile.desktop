@@ -1,7 +1,8 @@
+# check=skip=InvalidDefaultArgInFrom
 # Adds the computer-use binary, its Linux provider dependencies and the agent
 # CLIs to a desktop image that already runs the OSWorld guest server.
 # Build the binary first with `make build` and fetch the agents with
-# `make agents`.
+# `make agents`. The Makefile refuses an empty OSWORLD_BASE_IMAGE.
 ARG OSWORLD_BASE_IMAGE
 FROM ${OSWORLD_BASE_IMAGE}
 USER root
