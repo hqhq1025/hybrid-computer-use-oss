@@ -11,6 +11,7 @@ def addressing_channel(element_record):
     """Return the note channel: [a11y] for tree targets, [gui] for points."""
     return A11Y_CHANNEL if element_record else GUI_CHANNEL
 
+
 UNVERIFIED_SYNTHESIS = (
     "Delivery to the intended target was not verified: AT-SPI input synthesis is "
     "global and reports success as soon as the event is queued."
@@ -79,5 +80,3 @@ def resolved_note(element, element_record):
             "re-read the tree before trusting this action.".format("; ".join(drifted))
         )
     return note
-
-

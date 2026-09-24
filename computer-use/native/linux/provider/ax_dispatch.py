@@ -149,6 +149,7 @@ from .ax_transition_evidence import (
     public_element_record,
 )
 
+
 def perform_provider_request(operation_kind, payload):
     """Dispatch one validated Provider V2 operation."""
     if operation_kind not in {

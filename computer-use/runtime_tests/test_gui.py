@@ -3,6 +3,7 @@
 
 from runtime_test_support import *  # noqa: F401,F403
 
+
 class GUILeaseTests(unittest.TestCase):
     def setUp(self):
         self.bounds = runtime.frame(0, 0, 100, 100)
@@ -81,6 +82,7 @@ class GUILeaseTests(unittest.TestCase):
 
         self.assertFalse(response["ok"])
         execute.assert_not_called()
+
 
 class PixelEvidenceTests(unittest.TestCase):
     """Pixel comparison is a third effect check, independent of the tree.
@@ -194,6 +196,7 @@ class PixelEvidenceTests(unittest.TestCase):
         self.assertIsNone(runtime.persistent_pixel_change(frame, None, frame))
         self.assertIsNone(runtime.persistent_pixel_change(frame, frame, None))
         self.assertIsNone(runtime.pixel_change_note(None))
+
 
 class SettleWaitTests(AtspiPatchedTestCase):
     """Post-action settle wait.
@@ -347,6 +350,7 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertIsNone(self._wait(app, None, clock))
         self.assertAlmostEqual(clock.now, runtime.SETTLE_MIN_SECONDS, places=6)
 
+
 class ScreenshotPolicyTests(unittest.TestCase):
     """Accessibility screenshot policy and the GUI screenshots it never disables.
 
@@ -399,6 +403,7 @@ class ScreenshotPolicyTests(unittest.TestCase):
         )
         self.assertNotIn("settle_ms=0", response["text"])
 
+
 class AccessibilityCoordinateFallbackTests(unittest.TestCase):
     def setUp(self):
         self.window = runtime.frame(100, 100, 800, 600)
@@ -439,6 +444,7 @@ class AccessibilityCoordinateFallbackTests(unittest.TestCase):
 
         self.assertIn("element_offscreen", str(ctx.exception))
 
+
 class InputBoundTests(unittest.TestCase):
     def test_click_count_has_a_hard_limit(self):
         with self.assertRaises(RuntimeError) as ctx:
@@ -453,6 +459,7 @@ class InputBoundTests(unittest.TestCase):
                 "down", runtime.MAX_SCROLL_PAGES + 1, point=(1, 2))
 
         self.assertIn("pages", str(ctx.exception))
+
 
 class InputEmissionResultTests(unittest.TestCase):
     def test_mouse_false_return_is_an_emission_failure(self):
@@ -505,6 +512,7 @@ class InputEmissionResultTests(unittest.TestCase):
                 runtime.send_mouse_click(1, 2, "left", 1)
 
         self.assertEqual(generate.call_count, 4)
+
 
 class GUIScreenCoordinateTests(unittest.TestCase):
     def setUp(self):

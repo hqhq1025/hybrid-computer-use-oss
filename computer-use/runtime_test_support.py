@@ -81,6 +81,7 @@ PROVIDER_MODULES = (
     wire_v2,
 )
 
+
 class RuntimeTestSurface:
     """Test facade that patches a name in every provider module that imports it."""
 
@@ -125,7 +126,9 @@ class RuntimeTestSurface:
         for target, value in entries:
             setattr(target, name, value)
 
+
 runtime = RuntimeTestSurface()
+
 
 def _provider_target_for_test(target):
     if not isinstance(target, dict):
@@ -133,6 +136,7 @@ def _provider_target_for_test(target):
     result = dict(target)
     result.pop("sourceIndex", None)
     return result
+
 
 def perform_provider_operation(operation):
     """Exercise behavior cases using only Provider V2 request fields."""
@@ -232,13 +236,16 @@ def perform_provider_operation(operation):
         },
     )
 
+
 STATE = runtime.Atspi.StateType
+
 
 def effective_runtime_source():
     return "".join(
         Path(module.__file__).read_text(encoding="utf-8")
         for module in PROVIDER_MODULES
     )
+
 
 class FakeStateSet:
     def __init__(self, states):
@@ -247,10 +254,12 @@ class FakeStateSet:
     def contains(self, state):
         return state in self._states
 
+
 class FakeSpan:
     def __init__(self, start, end):
         self.start_offset = start
         self.end_offset = end
+
 
 class FakeTextIface:
     """Fake Text/EditableText interface.
@@ -292,12 +301,14 @@ class FakeTextIface:
             self.text = payload
         return True
 
+
 class FakeExtents:
     def __init__(self, x, y, width, height):
         self.x = x
         self.y = y
         self.width = width
         self.height = height
+
 
 class FakeComponent:
     def __init__(self, window=None, grabs=False, extents=None):
@@ -313,6 +324,7 @@ class FakeComponent:
         if self.window is not None:
             self.window.states.add(STATE.ACTIVE)
         return True
+
 
 class FakeNode:
     def __init__(
@@ -364,6 +376,7 @@ class FakeNode:
         # catch because it only wraps the call.
         return ""
 
+
 class FakeAtspiText:
     @staticmethod
     def get_character_count(iface):
@@ -388,6 +401,7 @@ class FakeAtspiText:
         start, end = iface.selection
         return FakeSpan(start, end)
 
+
 class FakeAtspiEditableText:
     @staticmethod
     def insert_text(iface, offset, payload, length):
@@ -401,6 +415,7 @@ class FakeAtspiEditableText:
     def set_text_contents(iface, payload):
         return iface.set_contents(payload)
 
+
 class FakeAtspiComponent:
     @staticmethod
     def grab_focus(component):
@@ -410,11 +425,13 @@ class FakeAtspiComponent:
     def get_extents(component, coord_type):
         return component.extents
 
+
 class FakeValueIface:
     def __init__(self, value, honest=True):
         self.current = float(value)
         self.honest = honest
         self.set_calls = []
+
 
 class FakeAtspiValue:
     @staticmethod
@@ -428,10 +445,13 @@ class FakeAtspiValue:
             iface.current = float(value)
         return True
 
+
 class FakeCoordType:
     SCREEN = "screen"
 
+
 RELATION = runtime.Atspi.RelationType
+
 
 class FakeAtspi:
     """Keep the real StateType enum; replace only calls that reach the a11y bus."""
@@ -446,6 +466,7 @@ class FakeAtspi:
     Component = FakeAtspiComponent
     Value = FakeAtspiValue
 
+
 class AtspiPatchedTestCase(unittest.TestCase):
     def setUp(self):
         self._real_atspi = runtime.Atspi
@@ -454,6 +475,7 @@ class AtspiPatchedTestCase(unittest.TestCase):
 
     def _restore(self):
         runtime.Atspi = self._real_atspi
+
 
 class _LyingNode(FakeNode):
     """A node whose reported child count differs from its real children.
@@ -470,6 +492,7 @@ class _LyingNode(FakeNode):
 
     def get_child_count(self):
         return self.reported
+
 
 class _TreeNode(FakeNode):
     """A node complete enough for tree rendering.
@@ -519,6 +542,7 @@ class _TreeNode(FakeNode):
     def get_process_id(self):
         return 1
 
+
 class _ProbeFailureNode(_TreeNode):
     def __init__(self, failing_field, **kwargs):
         super().__init__(**kwargs)
@@ -548,6 +572,7 @@ class _ProbeFailureNode(_TreeNode):
         self._maybe_fail("child_count")
         return super().get_child_count()
 
+
 class _FakeClock:
     """Fake clock whose sleep advances time, keeping tests deterministic and fast."""
 
@@ -560,6 +585,7 @@ class _FakeClock:
     def sleep(self, seconds):
         self.now += seconds
 
+
 class _WindowNode(_TreeNode):
     def __init__(self, role, name, active=False, modal=False):
         super().__init__(role=role, name=name)
@@ -567,6 +593,7 @@ class _WindowNode(_TreeNode):
             self.states.add(STATE.ACTIVE)
         if modal:
             self.states.add(STATE.MODAL)
+
 
 class _ScriptedApp(_TreeNode):
     """Application node whose top-level windows change as the fake clock advances.
@@ -593,6 +620,7 @@ class _ScriptedApp(_TreeNode):
     def get_child_at_index(self, index):
         return self._windows()[index]
 
+
 class _NoSleep:
     """Stand-in time module: sleep returns at once and the clock stays at zero."""
 
@@ -608,6 +636,7 @@ class _NoSleep:
     def monotonic():
         return 0.0
 
+
 class _FakeRelation:
     def __init__(self, kind, targets):
         self.kind = kind
@@ -621,6 +650,7 @@ class _FakeRelation:
 
     def get_target(self, index):
         return self.targets[index]
+
 
 class _NamedNode(FakeNode):
     """Fake node with a name and optional LABELLED_BY relations."""
@@ -646,5 +676,6 @@ class _NamedNode(FakeNode):
     def get_attributes(self):
         placeholder = getattr(self, "_placeholder", "")
         return {"placeholder-text": placeholder} if placeholder else {}
+
 
 __all__ = [name for name in globals() if not name.startswith("__")]

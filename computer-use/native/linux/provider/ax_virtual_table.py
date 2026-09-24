@@ -231,5 +231,3 @@ def spreadsheet_a1(row, col):
         number, remainder = divmod(number - 1, 26)
         letters = chr(ord("A") + remainder) + letters
     return "{}{}".format(letters, row + 1)
-
-

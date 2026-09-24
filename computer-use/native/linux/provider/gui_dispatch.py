@@ -40,6 +40,7 @@ from .x11_windows import (
     desktop_layout_state,
 )
 
+
 def wait_for_gui_settle(bounds, settle_ms, clock=None, sleep=None):
     """Wait for a sustained run of pixel-identical full-desktop samples."""
     if clock is None:
@@ -241,6 +242,8 @@ def finalize_gui_response(response):
 def normalize_gui_lease_state(value):
     state = str(value or "absent").strip().lower()
     return state if state in {"fresh", "suspect", "stale", "absent"} else "absent"
+
+
 def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
     if actions is None:
         return {
@@ -380,6 +383,7 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
         }
     current_snapshot = snapshot()
     prior_lease_state = normalize_gui_lease_state(gui_lease_state)
+
     def latest_snapshot_or_current():
         try:
             return snapshot()

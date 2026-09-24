@@ -28,6 +28,7 @@ from .x11_windows import (
     x11_window_inventory_for_pid,
 )
 
+
 def perform_ax_window_action(tool, app, window, element_record):
     role = str((element_record or {}).get("controlType") or "").strip().lower()
     path = list((element_record or {}).get("runtimeId") or [])

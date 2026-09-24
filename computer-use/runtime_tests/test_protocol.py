@@ -5,6 +5,7 @@ import io
 
 from runtime_test_support import *  # noqa: F401,F403
 
+
 class RuntimeActionEvidenceFailureTests(unittest.TestCase):
     def test_partial_failure_preserves_runtime_route(self):
         runtime._CURRENT_ACTION_EVIDENCE = {
@@ -46,6 +47,7 @@ class RuntimeActionEvidenceFailureTests(unittest.TestCase):
         ))
 
         self.assertNotIn("guiLeaseState", response)
+
 
 class CoordinateActionabilityGateTests(unittest.TestCase):
     def tearDown(self):
@@ -144,6 +146,7 @@ class CoordinateActionabilityGateTests(unittest.TestCase):
         self.assertFalse(
             runtime._CURRENT_ACTION_EVIDENCE["point_owner_verified"]
         )
+
 
 class ProviderWireV2Tests(unittest.TestCase):
     def test_observation_capture_snapshot_requires_boolean(self):
@@ -632,6 +635,7 @@ class ProviderWireV2Tests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "invalid_provider_request")
         self.assertIn("between 0 and 3000", str(raised.exception))
 
+
 class RuntimeStartupErrorBoundaryTests(unittest.TestCase):
     def test_startup_traceback_is_operator_only(self):
         completed = subprocess.run(
@@ -675,6 +679,7 @@ class RuntimeStartupErrorBoundaryTests(unittest.TestCase):
             response["accessibility"]["failure"]["code"],
             "runtime_startup_failed",
         )
+
 
 class ExternalDesktopTransitionTests(unittest.TestCase):
     def test_new_active_native_window_missing_from_ax_inventory_is_external(self):

@@ -3,6 +3,7 @@
 
 from runtime_test_support import *  # noqa: F401,F403
 
+
 class ProviderIdentityPrimitiveTests(unittest.TestCase):
     def test_process_generation_handles_spaces_and_parentheses_in_comm(self):
         with tempfile.TemporaryDirectory() as root:
@@ -40,6 +41,7 @@ class ProviderIdentityPrimitiveTests(unittest.TestCase):
         self.assertFalse(
             runtime.state_value(FakeNode(), STATE.SHOWING)
         )
+
 
 class FindEditableTextTests(AtspiPatchedTestCase):
     def test_skips_node_that_lacks_editable_state(self):
@@ -120,6 +122,7 @@ class FindEditableTextTests(AtspiPatchedTestCase):
 
         self.assertIs(runtime.find_editable_text(window), editor)
 
+
 class InsertTextTests(AtspiPatchedTestCase):
     def _window_with(self, iface):
         return FakeNode(
@@ -190,6 +193,7 @@ class InsertTextTests(AtspiPatchedTestCase):
         self.assertTrue(emitted)
         self.assertEqual(iface.inserts, [(3, "de")])
 
+
 class ExtentsTests(AtspiPatchedTestCase):
     def _node(self, x, y, width, height):
         return FakeNode(component=FakeComponent(extents=FakeExtents(x, y, width, height)))
@@ -215,6 +219,7 @@ class ExtentsTests(AtspiPatchedTestCase):
     def test_still_rejects_absurd_sizes(self):
         self.assertIsNone(runtime.extents(self._node(0, 0, 0, 40)))
         self.assertIsNone(runtime.extents(self._node(0, 0, 100, 999999)))
+
 
 class DesktopBoundsTests(unittest.TestCase):
     def test_monitor_union_preserves_negative_virtual_desktop_origin(self):
@@ -252,6 +257,7 @@ class DesktopBoundsTests(unittest.TestCase):
                 runtime.frame(-1920, -100, 3840, 1180),
             )
 
+
 class TextInsertionPointTests(AtspiPatchedTestCase):
     def test_uses_caret_offset(self):
         iface = FakeTextIface(text="abcdef", caret=3)
@@ -277,6 +283,7 @@ class TextInsertionPointTests(AtspiPatchedTestCase):
         iface = FakeTextIface(text="abc", caret=99)
 
         self.assertEqual(runtime.text_insertion_point(iface), (3, None))
+
 
 class CaretInsertionTests(AtspiPatchedTestCase):
     def _window_with(self, iface):
@@ -348,6 +355,7 @@ class CaretInsertionTests(AtspiPatchedTestCase):
 
         self.assertIn("unexpected content", str(caught.exception))
         self.assertEqual(iface.text, "abcZZ")
+
 
 class SetElementValueTests(AtspiPatchedTestCase):
     def test_numeric_value_interface_precedes_editable_text_surface(self):
@@ -427,6 +435,7 @@ class SetElementValueTests(AtspiPatchedTestCase):
                 runtime.set_element_value_outcome(node, "25"),
                 "effect_unknown",
             )
+
 
 class ChannelTaggingTests(AtspiPatchedTestCase):
     """Every action note carries a channel tag.
@@ -512,6 +521,7 @@ class ChannelTaggingTests(AtspiPatchedTestCase):
                 "[semantic] " in notes[0] or "[synthesis] " in notes[0],
                 "{} note lacks the execution-path label: {}".format(op["intent"], notes[0][:70]),
             )
+
 
 class ActionNotesTests(AtspiPatchedTestCase):
     """Action notes state which path ran and whether the result was confirmed."""
@@ -686,6 +696,7 @@ class ActionNotesTests(AtspiPatchedTestCase):
         self.assertEqual(pointer_calls, [(10, 20, "left", 2)])
         self.assertTrue(any("2 coordinate click(s)" in note for note in notes))
 
+
 class SnapshotDiagnosticsTests(AtspiPatchedTestCase):
     """An app whose accessibility tree holds only its window frame is flagged.
 
@@ -757,6 +768,7 @@ class SnapshotDiagnosticsTests(AtspiPatchedTestCase):
         self.assertEqual(len(response["notes"]), 1)
         self.assertIn("ACCESSIBILITY CONTENT UNCERTAIN", response["notes"][0])
 
+
 class ContentHostDiagnosticTests(unittest.TestCase):
     def test_generic_text_table_or_list_does_not_clear_host_uncertainty(self):
         for generic_role in ("text", "table", "list"):
@@ -825,6 +837,7 @@ class ContentHostDiagnosticTests(unittest.TestCase):
         self.assertIn("uncertain diagnostic", notes[0])
         self.assertIn("renderer does not export accessibility", notes[0])
         self.assertNotIn("The content is on screen", notes[0])
+
 
 class MainWindowSelectionTests(AtspiPatchedTestCase):
     """An open modal dialog is observed instead of the main window.
@@ -931,6 +944,7 @@ class MainWindowSelectionTests(AtspiPatchedTestCase):
         self.addCleanup(setattr, runtime, "extents", original_ext)
         runtime.extents = lambda node: None
 
+
 class FocusWindowTests(AtspiPatchedTestCase):
     def test_active_window_needs_no_grab(self):
         component = FakeComponent(grabs=True)
@@ -995,6 +1009,7 @@ class FocusWindowTests(AtspiPatchedTestCase):
     def test_none_window_is_not_focusable(self):
         self.assertFalse(runtime.focus_window(None))
 
+
 class RequireWindowFocusTests(AtspiPatchedTestCase):
     def test_passes_through_when_window_is_active(self):
         window = FakeNode(states=(STATE.ACTIVE,))
@@ -1012,6 +1027,7 @@ class RequireWindowFocusTests(AtspiPatchedTestCase):
         message = str(ctx.exception)
         self.assertIn("press_key", message)
         self.assertIn("foreground", message)
+
 
 class TargetedKeyboardFocusTests(AtspiPatchedTestCase):
     def test_already_focused_target_needs_no_grab(self):
@@ -1165,6 +1181,7 @@ class TargetedKeyboardFocusTests(AtspiPatchedTestCase):
         self.assertEqual(len(focus_checks), 2)
         self.assertEqual(sent, [])
 
+
 class KeySyntaxTests(unittest.TestCase):
     def test_accepts_common_gtk_and_x11_key_spellings(self):
         self.assertEqual(
@@ -1179,6 +1196,7 @@ class KeySyntaxTests(unittest.TestCase):
         self.assertEqual(runtime.KEY_ALIASES["pagedown"], "Page_Down")
         self.assertEqual(runtime.KEY_ALIASES["slash"], "slash")
         self.assertEqual(runtime.KEY_ALIASES["forward_slash"], "slash")
+
 
 class PerformOperationGuardTests(AtspiPatchedTestCase):
     """The focus guard stays wired into the dispatch path."""

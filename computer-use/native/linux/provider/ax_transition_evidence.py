@@ -2,6 +2,7 @@
 
 from .x11_windows import desktop_layout_state
 
+
 def gui_lease_after_ax_mutation(before_layout, bounds):
     if before_layout is None or bounds is None:
         return "suspect"
@@ -35,8 +36,6 @@ def external_desktop_transition_after_ax_mutation(
     return app_windows_before == app_windows_after
 
 
-
-
 def public_element_record(record):
     if not isinstance(record, dict):
         return record
@@ -45,5 +44,3 @@ def public_element_record(record):
         for key, value in record.items()
         if not str(key).startswith("_")
     }
-
-

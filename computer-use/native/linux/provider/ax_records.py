@@ -25,6 +25,7 @@ from .ax_node_properties import (
     text_attributes,
 )
 
+
 class StableIndexer:
     """Assign element indices that survive across snapshots.
 
@@ -129,6 +130,7 @@ def effective_name(node):
     if str(own or "").strip():
         return own
     return labelled_by_name(node)
+
 
 def semantic_relations(node, text_limit=DEFAULT_TEXT_LIMIT):
     """Return bounded relation facts for retained nodes only.

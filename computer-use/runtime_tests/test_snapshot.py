@@ -5,6 +5,7 @@ import inspect
 
 from runtime_test_support import *  # noqa: F401,F403
 
+
 class ShouldEnumerateChildrenTests(AtspiPatchedTestCase):
     def test_nautilus_style_small_managed_container_is_enumerated(self):
         """A small container that declares MANAGES_DESCENDANTS is still enumerated.
@@ -54,6 +55,7 @@ class ShouldEnumerateChildrenTests(AtspiPatchedTestCase):
         ordinary = FakeNode(children=(FakeNode(), FakeNode()))
 
         self.assertTrue(runtime.should_enumerate_children(ordinary))
+
 
 class NodeRenderIsolationTests(AtspiPatchedTestCase):
     def test_node_budget_stops_before_fetching_the_next_child(self):
@@ -306,6 +308,7 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
         self.assertEqual(len(failure_lines), 1)
         self.assertLessEqual(len(failure_lines[0]), 180)
 
+
 class RenderIndentationTests(AtspiPatchedTestCase):
     def _indent(self, line):
         return len(line) - len(line.lstrip("\t"))
@@ -353,6 +356,7 @@ class RenderIndentationTests(AtspiPatchedTestCase):
             [self._indent(l) - self._indent(rendered[0]) for l in rendered], [0, 1, 2]
         )
 
+
 class TreeOmissionTests(AtspiPatchedTestCase):
     def test_depth_limit_is_counted_and_names_the_real_cause(self):
         leaf = _TreeNode(
@@ -376,6 +380,7 @@ class TreeOmissionTests(AtspiPatchedTestCase):
         self.assertIn("server-owned depth budget (1) was reached", text)
         self.assertIn("descendants are absent from this snapshot", text)
         self.assertIn("cannot discover nodes the provider did not expose", text)
+
 
 class NodeDescriptionTests(AtspiPatchedTestCase):
     def _nodes(self, lines):
@@ -433,6 +438,7 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
 
         self.assertEqual(records[1]["name"], "")
         self.assertEqual(records[1]["description"], "Go back")
+
 
 class StaleElementIndexTests(AtspiPatchedTestCase):
     """`runtimeId` is a positional path that points elsewhere once the tree changes."""
@@ -502,7 +508,6 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
 
         self.assertTrue(runtime.record_still_matches(node, record, None))
 
-
     def test_find_element_refuses_stale_path_end_to_end(self):
         """find_element_at_snapshot_path does not resolve a stale path to a different control.
 
@@ -529,6 +534,7 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
                   "name": "Rename…", "automationId": "", "frame": None}
 
         self.assertIs(runtime.find_element_at_snapshot_path(app, record), item)
+
 
 class ClickableMarkerTests(AtspiPatchedTestCase):
     """The tree marks which elements can be clicked without coordinates."""
@@ -903,6 +909,7 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
             runtime.resolve_app("Simple Preferences")
         self.assertEqual(caught.exception.failure_code, "ax_app_unavailable")
 
+
 class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
     def test_lists_other_top_level_windows(self):
         main = _TreeNode(
@@ -1010,6 +1017,7 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
         self.assertEqual(result["apps"][0]["displayText"], result["text"])
         self.assertTrue(result["apps"][0]["inputCapable"])
 
+
 class ProviderInventoryCompletenessTests(AtspiPatchedTestCase):
     def test_desktop_child_count_failure_is_incomplete_not_empty(self):
         root = _TreeNode(role="desktop", name="Desktop")
@@ -1044,6 +1052,7 @@ class ProviderInventoryCompletenessTests(AtspiPatchedTestCase):
 
         self.assertEqual(list(inventory), [])
         self.assertFalse(inventory.complete)
+
 
 class AXWindowCloseEvidenceTests(AtspiPatchedTestCase):
     def setUp(self):
@@ -1228,6 +1237,7 @@ class AXWindowCloseEvidenceTests(AtspiPatchedTestCase):
         self.assertTrue(response["input_events_emitted"])
         self.assertTrue(response["mutation_unknown"])
 
+
 class AXDirectTargetResolutionTests(AtspiPatchedTestCase):
     def setUp(self):
         super().setUp()
@@ -1409,6 +1419,7 @@ class AXDirectTargetResolutionTests(AtspiPatchedTestCase):
         self.assertTrue(response["ok"])
         self.assertEqual(response["resolvedElement"], record)
 
+
 class DropdownItemTests(AtspiPatchedTestCase):
     """Semantic actions on dropdown items close the popup without committing.
 
@@ -1456,6 +1467,7 @@ class DropdownItemTests(AtspiPatchedTestCase):
 
         self.assertFalse(runtime.is_dropdown_item(cell, dialog))
 
+
 class EmptyCellOmissionTests(AtspiPatchedTestCase):
     """Most cells in a Calc viewport are empty, and rendering them wastes budget."""
 
@@ -1481,6 +1493,7 @@ class EmptyCellOmissionTests(AtspiPatchedTestCase):
         skip = body.index("if not value:")
         build = body.index("record = record_for(")
         self.assertLess(skip, build, "the skip decision must happen before record_for")
+
 
 class ElectronActionNamesTests(AtspiPatchedTestCase):
     """Chromium and Electron action names cause both missed and false click entries."""
@@ -1579,6 +1592,7 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
         self.assertEqual(source.count('"default.activate",'), 1,
                          "CLICK_COVERED_ACTIONS must not be duplicated")
 
+
 class ObjectReplacementTests(AtspiPatchedTestCase):
     def test_object_replacement_placeholder_is_stripped(self):
         """Chromium marks embedded objects with U+FFFC, rendered as `Value: ￼￼￼`.
@@ -1592,6 +1606,7 @@ class ObjectReplacementTests(AtspiPatchedTestCase):
 
     def test_real_text_is_untouched(self):
         self.assertEqual(runtime.limit_text("Save As…"), "Save As…")
+
 
 class FocusDiagnosticTests(AtspiPatchedTestCase):
     def test_names_the_window_that_actually_holds_focus(self):
@@ -1646,6 +1661,7 @@ class FocusDiagnosticTests(AtspiPatchedTestCase):
 
         self.assertIn("Refusing to synthesize", str(caught.exception))
 
+
 class QtRichTextTests(AtspiPatchedTestCase):
     def test_qt_tooltip_html_is_reduced_to_its_message(self):
         """Qt stores tooltips as whole HTML documents, CSS included.
@@ -1681,6 +1697,7 @@ class QtRichTextTests(AtspiPatchedTestCase):
     def test_empty_and_none_are_safe(self):
         self.assertEqual(runtime.plain_text_from_rich_text(None), "")
         self.assertEqual(runtime.plain_text_from_rich_text(""), "")
+
 
 class PruneCostTests(AtspiPatchedTestCase):
     """Pruning reads only the fields it needs before building a full record.
@@ -1782,6 +1799,7 @@ class PruneCostTests(AtspiPatchedTestCase):
         self.assertEqual(len(records), 5)
         self.assertEqual(records[-1]["controlType"], "push button")
 
+
 class StableIndexTests(unittest.TestCase):
     """Indices survive across snapshots, following Playwright's ariaSnapshot.ts.
 
@@ -1862,6 +1880,7 @@ class StableIndexTests(unittest.TestCase):
         self.assertEqual(indexer.index_for([0], "frame", "W"), 0)
         self.assertEqual(indexer.index_for([0, 0], "push button", "A"), 1)
 
+
 class DenseIndexTests(AtspiPatchedTestCase):
     """Pruned nodes do not consume an index before being dropped.
 
@@ -1896,6 +1915,7 @@ class DenseIndexTests(AtspiPatchedTestCase):
         indices = sorted(r["index"] for r in records)
         self.assertEqual(indices, list(range(len(records))),
                          "indices must be dense, got {}".format(indices))
+
 
 class TruncatedNameIdentityTests(AtspiPatchedTestCase):
     """Truncating a name with text_limit does not weaken element identity.
@@ -1973,6 +1993,7 @@ class TruncatedNameIdentityTests(AtspiPatchedTestCase):
         record = runtime.record_for(node, 0, [0], None, text_limit=500)
         self.assertNotIn("nameHash", record)
 
+
 class SnapshotGrammarTests(unittest.TestCase):
     """Snapshot line grammar, modeled on Playwright's aria snapshot format.
 
@@ -2028,6 +2049,7 @@ class SnapshotGrammarTests(unittest.TestCase):
         """The index leads the line so it is easy to extract as a reference."""
         line = self._line(name="OK").strip()
         self.assertTrue(line.startswith("7 "), line)
+
 
 class ElementReferenceTests(unittest.TestCase):
     """Element references have one renderer whose output parses as a target.

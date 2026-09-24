@@ -12,6 +12,7 @@ from .foundation import (
     SCREENSHOT_MAX_BASE64_CHARS,
 )
 
+
 def capture_window_pixels(bounds):
     """Capture raw pixels of a screen region for before/after comparison.
 

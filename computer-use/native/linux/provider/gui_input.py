@@ -18,7 +18,6 @@ from .foundation import (
 )
 
 
-
 from .actionability import (
     screen_absolute_point,
 )
@@ -27,6 +26,7 @@ from .input_primitives import (
     emit_keyboard_event,
     emit_mouse_event,
 )
+
 
 def mouse_button_events(button):
     normalized = (button or "left").lower()
@@ -39,26 +39,6 @@ def mouse_button_events(button):
     if normalized == "forward":
         return "b9p", "b9r"
     return "b1p", "b1r"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def send_mouse_click(x, y, button, count):

@@ -3,6 +3,7 @@
 
 from runtime_test_support import *  # noqa: F401,F403
 
+
 class SemanticRuntimeResolutionTests(AtspiPatchedTestCase):
     def setUp(self):
         super().setUp()

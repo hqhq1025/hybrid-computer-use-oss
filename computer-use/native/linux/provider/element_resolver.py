@@ -55,6 +55,7 @@ from .ref_continuity import (
 )
 from .primitives import semantic_text_key
 
+
 def resolve_path(app, path):
     if not path:
         return None
@@ -187,8 +188,6 @@ def find_element_at_snapshot_path_with_bounds(app, record, window_bounds):
             ):
                 return node
     return None
-
-
 
 
 def resolve_semantic_target(

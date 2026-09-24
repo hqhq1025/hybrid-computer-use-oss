@@ -34,6 +34,7 @@ from .ax_virtual_table import (
     render_visible_cells,
 )
 
+
 def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 boxes=True, indexer=None,
                 max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, prune=True,

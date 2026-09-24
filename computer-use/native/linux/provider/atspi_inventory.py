@@ -27,6 +27,7 @@ from .x11_windows import (
 from .primitives import quoted
 from .window_diagnostics import accepts_user_input
 
+
 def wait_for_ui_to_settle(
     app,
     before,

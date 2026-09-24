@@ -2,6 +2,7 @@
 
 from .foundation import node_name, node_role
 
+
 def snapshot_diagnostics(records):
     """Detect a snapshot that contains only top-level/container structure.
 
@@ -185,7 +186,3 @@ def is_dropdown_item(node, window):
     # role `window`; main windows are `frame` and dialogs `dialog` or `alert`,
     # and those have names.
     return node_role(window) == "window" and not node_name(window)
-
-
-
-

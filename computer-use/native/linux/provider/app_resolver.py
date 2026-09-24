@@ -12,6 +12,7 @@ from .snapshot import snapshot_digest, utc_timestamp
 from .x11_windows import app_windows, iter_apps, window_instance_handle
 from .window_diagnostics import accepts_user_input
 
+
 def list_apps_inventory():
     entries = []
     seen_identities = set()

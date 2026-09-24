@@ -57,6 +57,7 @@ from .window_diagnostics import (
     window_label,
 )
 
+
 def element_reference(role, name):
     """Render an element reference; the single renderer for this form.
 

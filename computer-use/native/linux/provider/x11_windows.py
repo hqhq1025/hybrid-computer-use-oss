@@ -27,6 +27,7 @@ from .foundation import (
 )
 from .primitives import semantic_text_key
 
+
 def desktop_bounds():
     """Return the full virtual desktop in X root coordinates.
 

@@ -17,6 +17,8 @@ from .foundation import (
 )
 
 from .primitives import quoted
+
+
 def node_actions(node):
     """Read the node's action table once and derive both rendering facts.
 

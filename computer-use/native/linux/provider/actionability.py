@@ -31,6 +31,7 @@ from .element_resolver import (
     same_frame,
 )
 
+
 def preferred_action_index(node):
     # Use CLICK_COVERED_ACTIONS directly rather than a local copy: the same
     # set decides which action a click invokes and which actions are hidden

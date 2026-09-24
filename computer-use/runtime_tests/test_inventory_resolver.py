@@ -3,6 +3,7 @@
 
 from runtime_test_support import *  # noqa: F401,F403
 
+
 class VirtualTableCellResolutionTests(AtspiPatchedTestCase):
     def test_snapshot_virtual_cell_path_resolves_through_table_api(self):
         cell = _NamedNode(name="B2", role="table cell")
@@ -43,6 +44,7 @@ class VirtualTableCellResolutionTests(AtspiPatchedTestCase):
             resolved = runtime.find_element_at_snapshot_path(FakeNode(), record)
 
         self.assertIs(resolved, cell)
+
 
 class LabelledByTests(AtspiPatchedTestCase):
     """Unnamed controls borrow their name through LABELLED_BY.
@@ -96,6 +98,7 @@ class LabelledByTests(AtspiPatchedTestCase):
         self.assertIn("labelled", marks)
         self.assertNotIn("labelled", runtime.state_segment(FakeNode()))
 
+
 class ModalDiagnosticTests(AtspiPatchedTestCase):
     """A dialog in front is reported at one of two levels of evidence."""
 
@@ -145,6 +148,7 @@ class ModalDiagnosticTests(AtspiPatchedTestCase):
         only = self._window("Preferences", "dialog", [STATE.SHOWING, STATE.ACTIVE])
         self.assertEqual(runtime.modal_diagnostic(only, self._app(only)), [])
 
+
 class InfrastructureWindowTests(AtspiPatchedTestCase):
     def test_named_desktop_role_without_input_content_is_infrastructure(self):
         desktop_window = _NamedNode(
@@ -184,6 +188,7 @@ class InfrastructureWindowTests(AtspiPatchedTestCase):
                 return_value=runtime.frame(0, 0, 1920, 1080)):
             self.assertFalse(runtime.is_infrastructure_window(dialog))
 
+
 class ResolvedNoteTests(AtspiPatchedTestCase):
     """Action notes name the element the target resolved to."""
 
@@ -220,6 +225,7 @@ class ResolvedNoteTests(AtspiPatchedTestCase):
         self.assertIsNone(runtime.resolved_note(None, {"index": 1}))
         self.assertIsNone(runtime.resolved_note(_NamedNode(), None))
 
+
 class SnapshotDigestTests(unittest.TestCase):
     def test_document_state_is_not_part_of_ax_snapshot_identity(self):
         first = runtime.snapshot_digest(
@@ -235,6 +241,7 @@ class SnapshotDigestTests(unittest.TestCase):
             "",
         )
         self.assertEqual(first, second)
+
 
 class ProcessNameAliasTests(unittest.TestCase):
     """Apps can be matched by process name, but URLs never become names.
@@ -335,6 +342,7 @@ class ProcessNameAliasTests(unittest.TestCase):
         )
         self.assertNotIn("google", names)
 
+
 class HiddenMenuItemsTests(AtspiPatchedTestCase):
     """A menu whose children were all pruned says so on its own line.
 
@@ -393,6 +401,7 @@ class HiddenMenuItemsTests(AtspiPatchedTestCase):
 
         self.assertIn("Export As...", text)
         self.assertNotIn("hidden-items=", text)
+
 
 class AppNotFoundListsWindowsTests(AtspiPatchedTestCase):
     """An app lookup failure lists the window titles each candidate owns.
@@ -488,6 +497,7 @@ class AppNotFoundListsWindowsTests(AtspiPatchedTestCase):
             ["Tip of the Day", "Quarterly Review - LibreOffice Impress"],
         )
 
+
 class ExactLogicalWindowReadTests(AtspiPatchedTestCase):
     def test_window_handle_selects_the_requested_sibling(self):
         first = _NamedNode(name="Document", role="frame")
@@ -546,6 +556,7 @@ class ExactLogicalWindowReadTests(AtspiPatchedTestCase):
                 runtime.select_window_by_handle(app, "w2:1")
         self.assertEqual(caught.exception.failure_code, "stale_window_ref")
         self.assertEqual(caught.exception.failure_phase, "precondition")
+
 
 class VisibleCellsIndexerTests(AtspiPatchedTestCase):
     """render_visible_cells receives the indexer explicitly.
@@ -737,6 +748,7 @@ class VisibleCellsIndexerTests(AtspiPatchedTestCase):
         self.assertEqual(runtime.spreadsheet_a1(0, 25), "Z1")
         self.assertEqual(runtime.spreadsheet_a1(0, 26), "AA1")
         self.assertEqual(runtime.spreadsheet_a1(2, 3), "D3")
+
 
 class SemanticRoleAliasTests(unittest.TestCase):
     def test_standard_and_provider_roles_both_match(self):
