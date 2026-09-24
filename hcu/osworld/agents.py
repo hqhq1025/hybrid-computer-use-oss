@@ -273,7 +273,7 @@ PY
         agent_environment = f"""\
 export CLAUDE_CONFIG_DIR={shlex.quote(GUEST_CLAUDE_CONFIG_DIR)}
 export ANTHROPIC_BASE_URL={shlex.quote(claude_gateway_base)}
-export ANTHROPIC_AUTH_TOKEN=osw-hybrid-task-proxy
+export ANTHROPIC_AUTH_TOKEN=hcu-task-gateway
 export CLAUDE_CODE_SKIP_AUTH_LOGIN=true
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1

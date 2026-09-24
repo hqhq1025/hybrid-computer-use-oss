@@ -72,7 +72,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=(
             ROOT
-            / "guest-images/workstation-deps-v014-beta1/profiles/v2-full/verify-guest.sh"
+            / "guest-images/workstation-deps/profiles/v2-full/verify-guest.sh"
         ),
     )
     return parser.parse_args()
@@ -96,7 +96,7 @@ def main() -> int:
 
     mcp_smoke = (
         ROOT
-        / "guest-images/workstation-deps-v014-beta1/guest-mcp-smoke.py"
+        / "guest-images/workstation-deps/guest-mcp-smoke.py"
     )
     summary = {
         "label": args.label,
