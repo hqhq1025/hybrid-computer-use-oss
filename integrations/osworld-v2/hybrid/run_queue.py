@@ -4,17 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-from importlib import metadata
 import json
 import os
 from pathlib import Path
 import platform
 import signal
-import shutil
 import subprocess
 import sys
-import sysconfig
 import time
 import urllib.error
 import urllib.request
@@ -52,29 +48,39 @@ DEFAULT_QUEUE = Path(
         REPO_ROOT / "configs" / "osworld-v2-queue.example.json",
     )
 )
-DEFAULT_EXECUTION_SNAPSHOT_PATHS = (
-    "assets",
-    "benchmark_releases",
-    "deploy",
-    "desktop_env",
-    "evaluation_examples",
-    "mm_agents",
-    "scripts",
-    "lib_results_logger.py",
-    "lib_run_single.py",
-    "run.py",
-    "task_loader.py",
-)
 OFFICIAL_OPENAI_MAX_STEPS = 200
 OFFICIAL_OPENAI_MAX_TOKENS = 8192
 OFFICIAL_OPENAI_TASK_TIMEOUT_SECONDS = 0
-SNAPSHOT_IGNORED_NAMES = {
-    ".git",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    "__pycache__",
-}
+# Hash-bound admission options that were removed; configs using them fail
+# fast instead of silently running without the requested check.
+REMOVED_CONFIG_KEYS = frozenset({
+    "require_implementation_binding",
+    "implementation_binding",
+    "expected_implementation_binding_sha256",
+    "expected_implementation_binding_id",
+    "precomputed_guest_image_sha256",
+    "expected_guest_image_sha256",
+    "require_benchmark_input_binding",
+    "benchmark_release_manifest",
+    "expected_benchmark_release_manifest_sha256",
+    "expected_task_tree_sha256",
+    "expected_task_file_count",
+    "expected_asset_tree_sha256",
+    "expected_asset_file_count",
+    "require_frozen_execution_snapshot",
+    "execution_snapshot_source_root",
+    "execution_snapshot_entrypoint_root",
+    "execution_snapshot_paths",
+    "expected_execution_snapshot_sha256",
+    "expected_execution_snapshot_file_count",
+    "expected_token_proxy_sha256",
+    "expected_release_manifest_sha256",
+    "expected_skill_sha256",
+    "expected_base_instructions_sha256",
+    "tool_version",
+    "release_manifest",
+    "audited_evaluator_overrides",
+})
 
 
 def validate_official_openai_runner_alignment(config: dict) -> None:
@@ -103,14 +109,10 @@ def validate_token_proxy_binding(config: dict) -> dict | None:
         return None
     gateway_base = str(config.get("gateway_base") or "").rstrip("/")
     token_log_value = str(config.get("token_log") or "").strip()
-    expected_source_sha256 = str(
-        config.get("expected_token_proxy_sha256") or ""
-    ).strip().lower()
     expected_limit = int(config.get("max_model_calls") or 0)
-    if not gateway_base or not token_log_value or not expected_source_sha256:
+    if not gateway_base or not token_log_value:
         raise RuntimeError(
-            "Token proxy binding requires gateway_base, token_log, "
-            "and expected_token_proxy_sha256"
+            "Token proxy binding requires gateway_base and token_log"
         )
     try:
         with urllib.request.urlopen(
@@ -142,14 +144,6 @@ def validate_token_proxy_binding(config: dict) -> dict | None:
         mismatches["max_requests_per_task"] = {
             "expected": expected_limit,
             "actual": actual_limit,
-        }
-    actual_source_sha256 = str(
-        payload.get("source_sha256") or ""
-    ).strip().lower()
-    if actual_source_sha256 != expected_source_sha256:
-        mismatches["source_sha256"] = {
-            "expected": expected_source_sha256,
-            "actual": actual_source_sha256 or None,
         }
     if mismatches:
         raise RuntimeError(
@@ -209,301 +203,6 @@ def judge_score_status(result_payload: dict | None) -> tuple[float | None, str]:
     return None, "error"
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def python_environment_identity() -> dict[str, object]:
-    package_search_paths = sorted({
-        str(Path(path).resolve())
-        for key in ("purelib", "platlib")
-        if (path := sysconfig.get_path(key))
-    })
-    packages = sorted(
-        (
-            str(distribution.metadata.get("Name") or "").strip().lower(),
-            str(distribution.version),
-        )
-        for distribution in metadata.distributions(path=package_search_paths)
-        if str(distribution.metadata.get("Name") or "").strip()
-    )
-    digest = hashlib.sha256()
-    for name, version in packages:
-        digest.update(name.encode())
-        digest.update(b"==")
-        digest.update(version.encode())
-        digest.update(b"\n")
-    return {
-        "python_executable": str(Path(sys.executable).resolve()),
-        "python_prefix": str(Path(sys.prefix).resolve()),
-        "python_version": platform.python_version(),
-        "package_search_paths": package_search_paths,
-        "package_inventory_sha256": digest.hexdigest(),
-        "package_count": len(packages),
-    }
-
-
-def sha256_bound_tree(root: Path, pattern: str) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    files = sorted(
-        path
-        for path in root.rglob(pattern)
-        if path.is_file()
-        and not any(
-            part in SNAPSHOT_IGNORED_NAMES or part == ".cache"
-            for part in path.parts
-        )
-    )
-    for path in files:
-        relative = path.relative_to(root).as_posix().encode()
-        digest.update(relative)
-        digest.update(b"\0")
-        digest.update(bytes.fromhex(sha256_file(path)))
-    return digest.hexdigest(), len(files)
-
-
-def execution_snapshot_files(
-    source_root: Path,
-    relative_paths: tuple[str, ...],
-) -> list[tuple[str, Path]]:
-    files: list[tuple[str, Path]] = []
-    for relative in relative_paths:
-        source = source_root / relative
-        if not source.exists():
-            raise FileNotFoundError(source)
-        if source.is_file():
-            files.append((Path(relative).as_posix(), source))
-            continue
-        for path in source.rglob("*"):
-            if (
-                not path.is_file()
-                or any(part in SNAPSHOT_IGNORED_NAMES for part in path.parts)
-                or path.suffix in {".pyc", ".pyo"}
-            ):
-                continue
-            files.append((path.relative_to(source_root).as_posix(), path))
-    relative_names = [relative for relative, _path in files]
-    if len(relative_names) != len(set(relative_names)):
-        raise RuntimeError("Execution snapshot paths overlap")
-    return sorted(files)
-
-
-def execution_snapshot_hash(
-    source_root: Path,
-    relative_paths: tuple[str, ...],
-) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    files = execution_snapshot_files(source_root, relative_paths)
-    for relative, path in files:
-        digest.update(relative.encode())
-        digest.update(b"\0")
-        digest.update(bytes.fromhex(sha256_file(path)))
-    return digest.hexdigest(), len(files)
-
-
-def make_tree_read_only(root: Path) -> None:
-    for path in sorted(root.rglob("*"), reverse=True):
-        if path.is_symlink():
-            raise RuntimeError(
-                f"Execution snapshot contains a symlink: {path}"
-            )
-        path.chmod(0o555 if path.is_dir() else 0o444)
-    root.chmod(0o555)
-
-
-def validate_implementation_binding(
-    config: dict,
-    source_override: tuple[Path, Path] | None = None,
-) -> dict | None:
-    if not config.get("require_implementation_binding", False):
-        return None
-    raw_path = str(config.get("implementation_binding") or "").strip()
-    expected_sha256 = str(
-        config.get("expected_implementation_binding_sha256") or ""
-    ).strip().lower()
-    if not raw_path or not expected_sha256:
-        raise RuntimeError(
-            "Formal queue requires implementation_binding and "
-            "expected_implementation_binding_sha256"
-        )
-    path = Path(raw_path).resolve()
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    actual_sha256 = sha256_file(path)
-    if actual_sha256 != expected_sha256:
-        raise RuntimeError(
-            "Implementation binding SHA-256 mismatch: "
-            f"expected={expected_sha256}, actual={actual_sha256}"
-        )
-    binding = json.loads(path.read_text(encoding="utf-8"))
-    if not binding.get("queue_ready", False):
-        raise RuntimeError(
-            "Implementation binding is not queue-ready: "
-            f"{binding.get('status')!r}"
-        )
-    expected_id = str(
-        config.get("expected_implementation_binding_id") or ""
-    ).strip()
-    if expected_id and binding.get("binding_id") != expected_id:
-        raise RuntimeError(
-            "Implementation binding ID mismatch: "
-            f"expected={expected_id!r}, actual={binding.get('binding_id')!r}"
-        )
-    def bound_path(raw_path: str, validation_scope: str) -> Path:
-        original = Path(raw_path).resolve()
-        if validation_scope == "host":
-            return original
-        if validation_scope != "execution_snapshot":
-            raise RuntimeError(
-                "Implementation binding validation_scope must be "
-                f"'execution_snapshot' or 'host', got {validation_scope!r}"
-            )
-        if source_override is None:
-            return original
-        source_root, snapshot_root = source_override
-        try:
-            relative = original.relative_to(source_root)
-        except ValueError:
-            return original
-        return snapshot_root / relative
-
-    for row in binding.get("file_bindings") or []:
-        original_path = Path(str(row["path"])).resolve()
-        file_path = bound_path(
-            str(row["path"]),
-            str(row.get("validation_scope") or "execution_snapshot"),
-        )
-        expected = str(row["sha256"]).lower()
-        if not file_path.is_file():
-            raise FileNotFoundError(file_path)
-        actual = sha256_file(file_path)
-        if actual != expected:
-            raise RuntimeError(
-                "Implementation file SHA-256 mismatch: "
-                f"path={original_path}, validated_path={file_path}, "
-                f"expected={expected}, actual={actual}"
-            )
-    for row in binding.get("tree_bindings") or []:
-        original_root = Path(str(row["root"])).resolve()
-        tree_root = bound_path(
-            str(row["root"]),
-            str(row.get("validation_scope") or "execution_snapshot"),
-        )
-        pattern = str(row["pattern"])
-        expected = str(row["sha256"]).lower()
-        expected_count = int(row["file_count"])
-        actual, count = sha256_bound_tree(tree_root, pattern)
-        if actual != expected or count != expected_count:
-            raise RuntimeError(
-                "Implementation tree mismatch: "
-                f"root={original_root}, validated_root={tree_root}, "
-                f"pattern={pattern!r}, "
-                f"expected_sha256={expected}, actual_sha256={actual}, "
-                f"expected_count={expected_count}, actual_count={count}"
-            )
-    bound_environment = binding.get("host_python_environment")
-    if bound_environment is not None:
-        if not isinstance(bound_environment, dict):
-            raise RuntimeError(
-                "Implementation binding host_python_environment must be an "
-                "object"
-            )
-        actual_environment = python_environment_identity()
-        identity_keys = [
-            "python_executable",
-            "python_prefix",
-            "python_version",
-            "package_inventory_sha256",
-            "package_count",
-        ]
-        if "package_search_paths" in bound_environment:
-            identity_keys.append("package_search_paths")
-        mismatches = {
-            key: {
-                "expected": bound_environment.get(key),
-                "actual": actual_environment.get(key),
-            }
-            for key in identity_keys
-            if bound_environment.get(key) != actual_environment.get(key)
-        }
-        if mismatches:
-            raise RuntimeError(
-                "Host Python environment differs from the implementation "
-                f"binding: {json.dumps(mismatches, sort_keys=True)}"
-            )
-    return {
-        "path": str(path),
-        "sha256": actual_sha256,
-        "binding_id": binding.get("binding_id"),
-        "guest_image": binding.get("guest_image"),
-        "host_python_environment": bound_environment,
-    }
-
-
-def validate_precomputed_guest_image(
-    config: dict,
-    implementation_binding: dict | None,
-) -> str | None:
-    precomputed = str(
-        config.get("precomputed_guest_image_sha256") or ""
-    ).strip().lower()
-    if not precomputed:
-        return None
-    expected = str(
-        config.get("expected_guest_image_sha256") or ""
-    ).strip().lower()
-    image_path = Path(str(config.get("guest_image") or "")).resolve()
-    if not expected or precomputed != expected:
-        raise RuntimeError(
-            "Precomputed guest image digest must equal the queue's expected "
-            "guest image digest"
-        )
-    if implementation_binding is None:
-        raise RuntimeError(
-            "Precomputed guest image digest requires an implementation binding"
-        )
-    bound = implementation_binding.get("guest_image")
-    if not isinstance(bound, dict):
-        raise RuntimeError(
-            "Implementation binding has no guest image identity"
-        )
-    if Path(str(bound.get("path") or "")).resolve() != image_path:
-        raise RuntimeError(
-            "Queue guest image path differs from the implementation binding"
-        )
-    if str(bound.get("sha256") or "").strip().lower() != precomputed:
-        raise RuntimeError(
-            "Queue guest image digest differs from the implementation binding"
-        )
-    if not image_path.is_file():
-        raise FileNotFoundError(image_path)
-    stat = image_path.stat()
-    expected_identity = {
-        "size_bytes": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-        "device": stat.st_dev,
-        "inode": stat.st_ino,
-    }
-    mismatches = {
-        key: {
-            "expected": int(bound.get(key, -1)),
-            "actual": actual,
-        }
-        for key, actual in expected_identity.items()
-        if int(bound.get(key, -1)) != actual
-    }
-    if mismatches:
-        raise RuntimeError(
-            "Guest image filesystem identity differs from the immutable "
-            f"binding: {json.dumps(mismatches, sort_keys=True)}"
-        )
-    return precomputed
-
-
 def validate_queue_guest_image_capacity(config: dict) -> dict | None:
     raw_image = str(config.get("guest_image") or "").strip()
     if not raw_image:
@@ -527,44 +226,19 @@ class QueueRunner:
         self.queue_path = queue_path.resolve()
         self.base = self.queue_path.parent
         self.config = json.loads(self.queue_path.read_text(encoding="utf-8"))
-        self.execution_source_root = Path(
-            str(
-                self.config.get("execution_snapshot_source_root")
-                or ROOT
-            )
-        ).resolve()
-        self.execution_snapshot_root = self.prepare_execution_snapshot()
-        raw_entrypoint_root = str(
-            self.config.get("execution_snapshot_entrypoint_root") or "."
-        )
-        entrypoint_root = Path(raw_entrypoint_root)
-        if (
-            entrypoint_root.is_absolute()
-            or ".." in entrypoint_root.parts
-        ):
+        removed = sorted(set(self.config) & set(REMOVED_CONFIG_KEYS))
+        if removed:
             raise ValueError(
-                "execution_snapshot_entrypoint_root must be a relative "
-                "path within the frozen snapshot"
+                "Queue config uses removed hash-binding keys: "
+                + ", ".join(removed)
             )
-        self.execution_root = (
-            self.execution_snapshot_root / entrypoint_root
-        ).resolve()
+        self.execution_root = ROOT
         if not (
             INTEGRATION_ROOT / "hybrid/run_hybrid.py"
         ).is_file():
             raise FileNotFoundError(
                 f"Hybrid runner is missing from {INTEGRATION_ROOT}"
             )
-        self.implementation_binding = validate_implementation_binding(
-            self.config,
-            self.execution_source_override(),
-        )
-        self.precomputed_guest_image_sha256 = (
-            validate_precomputed_guest_image(
-                self.config,
-                self.implementation_binding,
-            )
-        )
         self.guest_image_capacity = validate_queue_guest_image_capacity(
             self.config
         )
@@ -621,7 +295,6 @@ class QueueRunner:
             token_log.parent.mkdir(parents=True, exist_ok=True)
             token_log.touch(exist_ok=True)
         self.token_proxy_binding = validate_token_proxy_binding(self.config)
-        self.benchmark_input_binding = self.validate_benchmark_inputs()
         self.children: dict[tuple[str, str], subprocess.Popen] = {}
         self.adopted_pids: dict[tuple[str, str], int] = {}
         self.failures: dict[tuple[str, str], str] = {}
@@ -726,149 +399,6 @@ class QueueRunner:
                         "attempt directory exists without a result or live process"
                     )
 
-    def prepare_execution_snapshot(self) -> Path:
-        if not self.config.get(
-            "require_frozen_execution_snapshot",
-            False,
-        ):
-            return ROOT
-        source_root = self.execution_source_root
-        relative_paths = tuple(
-            str(value)
-            for value in (
-                self.config.get("execution_snapshot_paths")
-                or DEFAULT_EXECUTION_SNAPSHOT_PATHS
-            )
-        )
-        expected_sha256 = str(
-            self.config.get("expected_execution_snapshot_sha256") or ""
-        ).strip().lower()
-        expected_count = int(
-            self.config.get("expected_execution_snapshot_file_count") or 0
-        )
-        if not expected_sha256 or expected_count <= 0:
-            raise RuntimeError(
-                "Frozen execution requires "
-                "expected_execution_snapshot_sha256 and "
-                "expected_execution_snapshot_file_count"
-            )
-        snapshot_root = self.base / "implementation-snapshot"
-        manifest_path = self.base / "EXECUTION_SNAPSHOT.json"
-        if snapshot_root.exists() or manifest_path.exists():
-            if not snapshot_root.is_dir() or not manifest_path.is_file():
-                raise RuntimeError(
-                    "Incomplete existing execution snapshot"
-                )
-            manifest = json.loads(
-                manifest_path.read_text(encoding="utf-8")
-            )
-            copied_sha256, copied_count = execution_snapshot_hash(
-                snapshot_root,
-                relative_paths,
-            )
-            if (
-                manifest.get("sha256") != expected_sha256
-                or int(manifest.get("file_count") or 0) != expected_count
-                or copied_sha256 != expected_sha256
-                or copied_count != expected_count
-            ):
-                raise RuntimeError(
-                    "Existing execution snapshot does not match queue binding"
-                )
-            return snapshot_root
-
-        actual_sha256, actual_count = execution_snapshot_hash(
-            source_root,
-            relative_paths,
-        )
-        if (
-            actual_sha256 != expected_sha256
-            or actual_count != expected_count
-        ):
-            raise RuntimeError(
-                "Execution snapshot source mismatch: "
-                f"expected_sha256={expected_sha256}, "
-                f"actual_sha256={actual_sha256}, "
-                f"expected_count={expected_count}, "
-                f"actual_count={actual_count}"
-            )
-
-        temp_root = self.base / (
-            f".implementation-snapshot.tmp-{os.getpid()}"
-        )
-        if temp_root.exists():
-            shutil.rmtree(temp_root)
-        temp_root.mkdir()
-        try:
-            for relative, source in execution_snapshot_files(
-                source_root,
-                relative_paths,
-            ):
-                destination = temp_root / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, destination, follow_symlinks=True)
-            copied_sha256, copied_count = execution_snapshot_hash(
-                temp_root,
-                relative_paths,
-            )
-            if (
-                copied_sha256 != expected_sha256
-                or copied_count != expected_count
-            ):
-                raise RuntimeError(
-                    "Copied execution snapshot failed hash verification"
-                )
-            make_tree_read_only(temp_root)
-            temp_root.replace(snapshot_root)
-            atomic_write(
-                manifest_path,
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "created_at_utc": time.strftime(
-                            "%Y-%m-%dT%H:%M:%SZ",
-                            time.gmtime(),
-                        ),
-                        "source_root": str(source_root),
-                        "snapshot_root": str(snapshot_root),
-                        "paths": list(relative_paths),
-                        "sha256": copied_sha256,
-                        "file_count": copied_count,
-                        "read_only": True,
-                    },
-                    indent=2,
-                )
-                + "\n",
-            )
-        except Exception:
-            if temp_root.exists():
-                shutil.rmtree(temp_root)
-            raise
-        return snapshot_root
-
-    def execution_source_override(
-        self,
-    ) -> tuple[Path, Path] | None:
-        if self.execution_snapshot_root == ROOT:
-            return None
-        return self.execution_source_root, self.execution_snapshot_root
-
-    def frozen_path(self, raw_path: object) -> str:
-        path = Path(str(raw_path)).resolve()
-        if self.execution_snapshot_root == ROOT:
-            return str(path)
-        try:
-            relative = path.relative_to(self.execution_source_root)
-        except ValueError:
-            return str(path)
-        frozen = self.execution_snapshot_root / relative
-        if not frozen.exists():
-            raise FileNotFoundError(
-                "Configured workspace path is outside the frozen execution "
-                f"snapshot: source={path}, expected_snapshot={frozen}"
-            )
-        return str(frozen)
-
     def load_child_environment(self) -> dict[str, str]:
         env = os.environ.copy()
         raw_env_file = self.config.get("environment_file")
@@ -918,96 +448,6 @@ class QueueRunner:
                     f"Configured Docker socket does not exist: {socket_path}"
                 )
         return env
-
-    def validate_benchmark_inputs(self) -> dict | None:
-        if not self.config.get("require_benchmark_input_binding", False):
-            return None
-        release_path = Path(
-            self.frozen_path(self.config["benchmark_release_manifest"])
-        )
-        expected_release_sha = str(
-            self.config["expected_benchmark_release_manifest_sha256"]
-        ).removeprefix("sha256:").lower()
-        actual_release_sha = sha256_file(release_path)
-        if actual_release_sha != expected_release_sha:
-            raise RuntimeError(
-                "Benchmark release manifest SHA-256 mismatch: "
-                f"expected={expected_release_sha}, actual={actual_release_sha}"
-            )
-
-        task_root = self.execution_root / "evaluation_examples/task_class"
-        task_sha, task_count = sha256_bound_tree(task_root, "task_*.py")
-        expected_task_sha = str(
-            self.config["expected_task_tree_sha256"]
-        ).lower()
-        expected_task_count = int(self.config["expected_task_file_count"])
-        if task_sha != expected_task_sha or task_count != expected_task_count:
-            raise RuntimeError(
-                "Task/evaluator tree mismatch: "
-                f"expected_sha256={expected_task_sha}, actual_sha256={task_sha}, "
-                f"expected_count={expected_task_count}, actual_count={task_count}"
-            )
-
-        asset_root = Path(self.child_env["OSWORLD_FILE_BASE_URL"]).resolve()
-        asset_sha, asset_count = sha256_bound_tree(asset_root, "*")
-        expected_asset_sha = str(
-            self.config["expected_asset_tree_sha256"]
-        ).lower()
-        expected_asset_count = int(self.config["expected_asset_file_count"])
-        if asset_sha != expected_asset_sha or asset_count != expected_asset_count:
-            raise RuntimeError(
-                "Task asset tree mismatch: "
-                f"root={asset_root}, expected_sha256={expected_asset_sha}, "
-                f"actual_sha256={asset_sha}, expected_count={expected_asset_count}, "
-                f"actual_count={asset_count}"
-            )
-        return {
-            "benchmark_release_manifest": str(release_path),
-            "benchmark_release_manifest_sha256": actual_release_sha,
-            "task_tree_sha256": task_sha,
-            "task_file_count": task_count,
-            "asset_root": str(asset_root),
-            "asset_tree_sha256": asset_sha,
-            "asset_file_count": asset_count,
-        }
-
-    def assert_implementation_binding_unchanged(self) -> None:
-        if self.implementation_binding is None:
-            return
-        relative_paths = tuple(
-            str(value)
-            for value in (
-                self.config.get("execution_snapshot_paths")
-                or DEFAULT_EXECUTION_SNAPSHOT_PATHS
-            )
-        )
-        if self.execution_snapshot_root != ROOT:
-            expected_sha256 = str(
-                self.config["expected_execution_snapshot_sha256"]
-            ).lower()
-            expected_count = int(
-                self.config["expected_execution_snapshot_file_count"]
-            )
-            actual_sha256, actual_count = execution_snapshot_hash(
-                self.execution_snapshot_root,
-                relative_paths,
-            )
-            if (
-                actual_sha256 != expected_sha256
-                or actual_count != expected_count
-            ):
-                raise RuntimeError(
-                    "Frozen execution snapshot changed after queue startup"
-                )
-        current = validate_implementation_binding(
-            self.config,
-            self.execution_source_override(),
-        )
-        if current != self.implementation_binding:
-            raise RuntimeError(
-                "Implementation binding identity changed after queue startup: "
-                f"initial={self.implementation_binding}, current={current}"
-            )
 
     def adopt_live_attempts(self) -> None:
         roots = {
@@ -1183,21 +623,7 @@ class QueueRunner:
             optional_args = (
                 ("gateway_base", "--gateway-base"),
                 ("claude_gateway_base", "--claude-gateway-base"),
-                ("tool_version", "--tool-version"),
-                ("release_manifest", "--release-manifest"),
-                (
-                    "expected_release_manifest_sha256",
-                    "--expected-release-manifest-sha256",
-                ),
                 ("guest_image", "--guest-image"),
-                (
-                    "expected_guest_image_sha256",
-                    "--expected-guest-image-sha256",
-                ),
-                (
-                    "precomputed_guest_image_sha256",
-                    "--precomputed-guest-image-sha256",
-                ),
                 ("hybrid_codex_binary", "--codex-binary"),
                 (
                     "hybrid_claude_code_binary",
@@ -1209,14 +635,6 @@ class QueueRunner:
                     "hybrid_base_instructions_file",
                     "--base-instructions-file",
                 ),
-                (
-                    "expected_base_instructions_sha256",
-                    "--expected-base-instructions-sha256",
-                ),
-                (
-                    "expected_skill_sha256",
-                    "--expected-skill-sha256",
-                ),
                 ("judge_model", "--judge-model"),
                 ("judge_effort", "--judge-effort"),
                 ("judge_timeout_seconds", "--judge-timeout"),
@@ -1226,21 +644,10 @@ class QueueRunner:
                 ("judge_schema_file", "--judge-schema-file"),
                 ("token_log", "--token-log"),
             )
-            frozen_path_keys = {
-                "release_manifest",
-                "hybrid_skill_file",
-                "hybrid_base_instructions_file",
-                "judge_prompt_file",
-                "judge_schema_file",
-            }
             for key, flag in optional_args:
                 value = self.config.get(key)
                 if value:
-                    if key in frozen_path_keys:
-                        value = self.frozen_path(value)
                     command.extend([flag, str(value)])
-            if self.config.get("audited_evaluator_overrides", False):
-                command.append("--audited-evaluator-overrides")
             if self.config.get("retain_containers", False):
                 command.append("--retain-container")
             return command
@@ -1313,7 +720,6 @@ class QueueRunner:
         return f"{gateway}/t/{affinity}/v1"
 
     def launch(self, task: dict, side: str) -> None:
-        self.assert_implementation_binding_unchanged()
         task_id = task["id"]
         key = (task_id, side)
         log_path = self.logs / f"{side}-{task_id}.log"
@@ -2024,21 +1430,8 @@ class QueueRunner:
             "host_pressure": self.host_pressure(),
             "host_kernel_release": platform.release(),
             "stop_reason": self.stop_reason,
-            "implementation_binding": self.implementation_binding,
             "guest_image_capacity": self.guest_image_capacity,
             "token_proxy_binding": self.token_proxy_binding,
-            "benchmark_input_binding": self.benchmark_input_binding,
-            "execution_snapshot": (
-                {
-                    "root": str(self.execution_snapshot_root),
-                    "entrypoint_root": str(self.execution_root),
-                    "manifest": str(
-                        self.base / "EXECUTION_SNAPSHOT.json"
-                    ),
-                }
-                if self.execution_snapshot_root != ROOT
-                else None
-            ),
         }
         atomic_write(
             self.base / "QUEUE_STATE.json",

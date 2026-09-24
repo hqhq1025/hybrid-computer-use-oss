@@ -75,16 +75,3 @@ docker run --rm \
         --no-audit \
         --no-fund \
         "${node_packages[@]}"
-
-find "${cache_root}/debs" -maxdepth 1 -type f -name '*.deb' -print0 \
-    | sort -z | xargs -0 sha256sum >"${cache_root}/apt-debs.sha256"
-(
-    cd "${cache_root}/debs"
-    sha256sum Packages Packages.gz >"${cache_root}/apt-repository.sha256"
-)
-find "${cache_root}/wheelhouse" -maxdepth 1 -type f -print0 \
-    | sort -z | xargs -0 sha256sum >"${cache_root}/python-wheelhouse.sha256"
-find "${cache_root}/node-runtime" -type f -print0 \
-    | sort -z | xargs -0 sha256sum >"${cache_root}/node-runtime.sha256"
-sha256sum "${cache_root}/${node_archive}" \
-    >"${cache_root}/${node_archive}.sha256"

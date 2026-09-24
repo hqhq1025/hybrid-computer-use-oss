@@ -6,7 +6,6 @@ ARCHIVE_NAME="Ubuntu.qcow2.zip"
 IMAGE_NAME="Ubuntu.qcow2"
 ARCHIVE_SIZE="12273896463"
 ARCHIVE_SHA256="b795b6cd4c69b252c1b4f10150a347795555032501b60fd031751ed09b896712"
-IMAGE_SHA256="6bf667a852b3c307f61d9f09c42559351f45e0607e428b4997becf534cf4d313"
 URL="https://huggingface.co/datasets/xlangai/ubuntu_osworld/resolve/${REVISION}/${ARCHIVE_NAME}"
 
 if [[ $# -ne 1 ]]; then
@@ -47,12 +46,12 @@ fi
 echo "${ARCHIVE_SHA256}  ${archive}" | sha256sum --check
 unzip -t "$archive"
 
-if [[ ! -f "$image" ]] || ! echo "${IMAGE_SHA256}  ${image}" | sha256sum --check --status; then
+# Re-extract when the image is missing or truncated by an interrupted unzip.
+expected_image_size="$(unzip -Zl "$archive" "$IMAGE_NAME" | awk '{print $4}')"
+if [[ ! -f "$image" ]] || [[ "$(stat -c %s "$image")" != "$expected_image_size" ]]; then
     unzip -o "$archive" -d "$destination"
 fi
 
-echo "${IMAGE_SHA256}  ${image}" | sha256sum --check
 qemu-img info "$image"
 
 printf 'export OSWORLD_V1_GUEST_IMAGE=%q\n' "$image"
-printf 'export OSWORLD_V1_GUEST_IMAGE_SHA256=%q\n' "$IMAGE_SHA256"

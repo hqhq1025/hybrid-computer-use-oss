@@ -25,7 +25,6 @@ def test_v1_batch_selects_qemu_runner_and_domain(tmp_path):
             "agent": "codex",
             "model": "gpt-5.4",
             "effort": "xhigh",
-            "tool_version": "v0.14",
             "client_password": "password",
         },
         {
@@ -37,7 +36,6 @@ def test_v1_batch_selects_qemu_runner_and_domain(tmp_path):
     assert "--benchmark-version" in command
     assert command[command.index("--benchmark-version") + 1] == "v1"
     assert command[command.index("--task-domain") + 1] == "libreoffice_calc"
-    assert command[command.index("--tool-version") + 1] == "v0.14"
     assert command[command.index("--client-password") + 1] == "password"
 
 

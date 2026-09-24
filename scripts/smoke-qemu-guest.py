@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import json
 import os
@@ -17,14 +16,6 @@ from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def screenshot_is_nonblack(data: bytes | None) -> bool:
@@ -62,18 +53,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", required=True)
     parser.add_argument("--image", type=Path, required=True)
-    parser.add_argument("--expected-sha256", required=True)
     parser.add_argument("--volume-size", type=int, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--osworld-root",
         type=Path,
-        default=Path("/datadrive2/repos/osw-hybrid/OSWorld-V2"),
+        default=Path(
+            os.environ.get("OSWORLD_V2_ROOT", ROOT / "external" / "OSWorld-V2")
+        ),
     )
     parser.add_argument(
         "--mcp-binary",
         type=Path,
-        default=ROOT / "artifacts/releases/v0.14/computer-use",
+        default=ROOT / "artifacts/computer-use",
     )
     parser.add_argument(
         "--dependency-smoke",
@@ -94,11 +86,8 @@ def main() -> int:
     dependency_smoke = args.dependency_smoke.resolve()
     output_dir.mkdir(parents=True, exist_ok=False)
 
-    actual_sha256 = sha256_file(image)
-    if actual_sha256 != args.expected_sha256.lower():
-        raise ValueError(
-            f"image SHA-256 mismatch: {actual_sha256} != {args.expected_sha256}"
-        )
+    if not image.is_file():
+        raise FileNotFoundError(f"guest image not found: {image}")
 
     osworld_root = args.osworld_root.resolve()
     sys.path.insert(0, str(osworld_root))
@@ -112,10 +101,8 @@ def main() -> int:
     summary = {
         "label": args.label,
         "image": str(image),
-        "image_sha256": actual_sha256,
         "volume_size_gib": args.volume_size,
         "mcp_binary": str(mcp_binary),
-        "mcp_sha256": sha256_file(mcp_binary),
         "status": "ERROR",
     }
     env = None
@@ -153,7 +140,6 @@ def main() -> int:
         summary["desktop_screenshot"] = {
             "path": str(screenshot_path),
             "bytes": len(desktop_screenshot),
-            "sha256": hashlib.sha256(desktop_screenshot).hexdigest(),
         }
 
         env.setup_controller._upload_file_setup(

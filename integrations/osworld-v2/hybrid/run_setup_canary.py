@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -34,37 +33,6 @@ from hybrid.runtime_preflight import (  # noqa: E402
     validate_official_asset_runtime,
 )
 from task_loader import load_task_config  # noqa: E402
-
-
-def evaluate_channels(*, task_id, evaluate):
-    result = evaluate()
-    payload = dict(result) if isinstance(result, dict) else {"score": float(result)}
-    return {
-        "official": {
-            "status": "completed",
-            "result": payload,
-            "error": None,
-            "traceback": None,
-        },
-        "audited": None,
-        "override_installation": {
-            "installed": False,
-            "task_id": task_id,
-            "reason": "not_packaged_in_oss",
-            "modules": [],
-        },
-        "official_score": float(payload.get("score", 0.0)),
-        "audited_score": None,
-        "official_score_replaced": False,
-    }
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def task_value(task, key: str, default=None):
@@ -105,14 +73,6 @@ def parse_args() -> argparse.Namespace:
         help="Optional V1 task domain; UUID lookup is automatic when unique.",
     )
     parser.add_argument("--guest-image", type=Path, required=True)
-    parser.add_argument("--expected-guest-image-sha256", required=True)
-    parser.add_argument(
-        "--precomputed-guest-image-sha256",
-        help=(
-            "Trusted digest computed by a parent queue for the same image. "
-            "When set, the child avoids hashing the multi-gigabyte image again."
-        ),
-    )
     parser.add_argument("--result-dir", type=Path, required=True)
     parser.add_argument("--health-url", action="append", default=[])
     parser.add_argument(
@@ -129,14 +89,6 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Verifier-only file upload performed after setup and before the "
             "evaluator. Requires --run-evaluator."
-        ),
-    )
-    parser.add_argument(
-        "--audited-evaluator-overrides",
-        action="store_true",
-        help=(
-            "Seal the official evaluator result or exception, then run a "
-            "registered verifier-only copied evaluator in a separate channel."
         ),
     )
     parser.add_argument("--volume-size", type=int, default=40)
@@ -164,17 +116,8 @@ def main() -> int:
     asset_runtime = validate_official_asset_runtime()
     image = args.guest_image.resolve()
     result_dir = args.result_dir.resolve()
-    actual_image_sha256 = (
-        args.precomputed_guest_image_sha256.lower()
-        if args.precomputed_guest_image_sha256
-        else sha256_file(image)
-    )
-    if actual_image_sha256 != args.expected_guest_image_sha256.lower():
-        raise ValueError(
-            "Guest image SHA-256 mismatch: "
-            f"expected {args.expected_guest_image_sha256}, "
-            f"got {actual_image_sha256}"
-        )
+    if not image.is_file():
+        raise FileNotFoundError(f"Guest image not found: {image}")
 
     task = load_task_config(
         None,
@@ -201,20 +144,15 @@ def main() -> int:
         "benchmark_version": args.benchmark_version,
         "task_domain": args.task_domain,
         "guest_image": str(image),
-        "guest_image_sha256": actual_image_sha256,
         "guest_image_virtual_size_gib": image_virtual_size_gib,
         "volume_size_gb": volume_size,
         "ram_size": args.ram_size,
         "health_urls": args.health_url,
         "run_evaluator": args.run_evaluator,
-        "audited_evaluator_overrides": bool(
-            args.audited_evaluator_overrides
-        ),
         "evaluator_fixtures": [
             {
                 "local_path": str(local_path),
                 "guest_path": guest_path,
-                "sha256": sha256_file(local_path),
             }
             for local_path, guest_path in args.evaluator_fixture
         ],
@@ -279,28 +217,10 @@ def main() -> int:
                     for local_path, guest_path in args.evaluator_fixture
                 ])
             evaluator_started = time.monotonic()
-            if args.audited_evaluator_overrides:
-                channels = evaluate_channels(
-                    task_id=args.task_id,
-                    evaluate=lambda: task.evaluate(env),
-                )
-                report["evaluator_channels"] = json.loads(
-                    json.dumps(channels, default=str)
-                )
-                official_ok = channels["official"]["status"] == "completed"
-                audited_ok = (
-                    channels["audited"] is not None
-                    and channels["audited"]["status"] == "completed"
-                )
-                if not official_ok and not audited_ok:
-                    raise RuntimeError(
-                        "Both official and audited evaluator channels failed"
-                    )
-            else:
-                evaluator_result = task.evaluate(env)
-                report["evaluator_result"] = json.loads(
-                    json.dumps(evaluator_result, default=str)
-                )
+            evaluator_result = task.evaluate(env)
+            report["evaluator_result"] = json.loads(
+                json.dumps(evaluator_result, default=str)
+            )
             report["evaluator_duration_sec"] = round(
                 time.monotonic() - evaluator_started,
                 1,

@@ -48,15 +48,7 @@ def install_agent(name: str, config: dict, temp_dir: Path) -> None:
             | stat.S_IXGRP
             | stat.S_IXOTH
         )
-
-    actual_binary = sha256(target)
-    if actual_binary != config["binary_sha256"]:
-        target.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"{name} binary SHA-256 mismatch: "
-            f"expected {config['binary_sha256']}, got {actual_binary}"
-        )
-    print(f"{name}: {config['version']} {actual_binary}")
+    print(f"{name}: {config['version']} -> {target}")
 
 
 def main() -> int:

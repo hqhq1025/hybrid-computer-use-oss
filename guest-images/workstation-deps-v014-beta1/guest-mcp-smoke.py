@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import subprocess
 from io import BytesIO
@@ -120,7 +119,6 @@ def main() -> int:
                     "tools": tool_names,
                     "ax_text_bytes": len(text_content(ax).encode()),
                     "gui_screenshot_bytes": len(screenshot),
-                    "gui_screenshot_sha256": hashlib.sha256(screenshot).hexdigest(),
                     "gui_screenshot_size": list(image.size),
                 },
                 sort_keys=True,

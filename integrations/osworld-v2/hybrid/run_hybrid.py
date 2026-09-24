@@ -21,7 +21,6 @@ import shlex
 import shutil
 import signal
 import sys
-import tarfile
 import time
 import traceback
 import urllib.parse
@@ -49,32 +48,13 @@ sys.path.insert(0, str(WORKSPACE_ROOT))
 DEFAULT_ARTIFACT_DIR = Path(
     os.environ.get("HCU_ARTIFACT_DIR", REPO_ROOT / "artifacts")
 ).expanduser()
-DEFAULT_TOOL_VERSION = "v0.14"
-DEFAULT_RELEASE_DIR = DEFAULT_ARTIFACT_DIR / "releases" / DEFAULT_TOOL_VERSION
-DEFAULT_RELEASE_MANIFEST = DEFAULT_RELEASE_DIR / "release.json"
-DEFAULT_RELEASE_MANIFEST_SHA256 = (
-    "bb83e49ca8c23047e8fc5458d8afb5f2859c9f52f3a6d0988facaf07fdf2e4c0"
-)
 DEFAULT_SKILL_FILE = (
     WORKSPACE_ROOT / "skills/hybrid/SKILL.md"
-)
-DEFAULT_SKILL_SHA256 = (
-    "61777e8101103cba07be3eacf26fc745a6c5bc94cbd1707ca194050f1f993d16"
 )
 DEFAULT_BASE_INSTRUCTIONS_FILE = (
     WORKSPACE_ROOT / "skills/base/CODEX_BASE_INSTRUCTIONS.md"
 )
-DEFAULT_BASE_INSTRUCTIONS_SHA256 = (
-    "2db42251f92d78881226342d36eb7a269f58cc63442915e2fa224dcbe14346af"
-)
-DEFAULT_AGENT_ARTIFACT_LOCK = (
-    WORKSPACE_ROOT / "configs/agent-artifacts.lock.json"
-)
-_AGENT_ARTIFACTS = json.loads(
-    DEFAULT_AGENT_ARTIFACT_LOCK.read_text(encoding="utf-8")
-)["agents"]
-DEFAULT_CODEX_SHA256 = _AGENT_ARTIFACTS["codex"]["binary_sha256"]
-DEFAULT_CLAUDE_CODE_SHA256 = _AGENT_ARTIFACTS["claude_code"]["binary_sha256"]
+MCP_PUBLIC_TOOLS = ("AX", "GUI")
 
 from desktop_env.cache import run_scoped_cache_dir  # noqa: E402
 from desktop_env.desktop_env import DesktopEnv  # noqa: E402
@@ -85,28 +65,9 @@ from hybrid.runtime_preflight import (  # noqa: E402
 from runner_overrides.control_retry import bounded_control_retry  # noqa: E402
 from runner_overrides.judge_budget import completed_tool_events  # noqa: E402
 from task_loader import load_task_config  # noqa: E402
-
-try:
-    from evaluator_overrides.channels import evaluate_channels  # noqa: E402
-    from evaluator_overrides.artifacts import (  # noqa: E402
-        capture_postrun_artifacts,
-    )
-    from evaluator_overrides.postrun import run_postrun_replay  # noqa: E402
-    AUDITED_OVERRIDES_AVAILABLE = True
-except ModuleNotFoundError:
-    AUDITED_OVERRIDES_AVAILABLE = False
-    from integrations.common.evaluator_channels import (  # noqa: E402
-        evaluate_official_only as evaluate_channels,
-    )
-
-    def capture_postrun_artifacts(**_kwargs):
-        return {
-            "status": "not_run",
-            "reason": "task-specific audited evaluator overrides are not packaged",
-        }
-
-    def run_postrun_replay(**_kwargs):
-        return None
+from integrations.common.evaluator_channels import (  # noqa: E402
+    evaluate_official_only,
+)
 
 
 COMPLETE_SENTINEL = "TASK_COMPLETE"
@@ -122,7 +83,6 @@ GUEST_CODEX = "/home/user/.local/bin/codex"
 GUEST_CLAUDE_CODE = "/home/user/.local/bin/claude"
 GUEST_MCP = "/home/user/.local/bin/computer-use"
 GUEST_MCP_RUNTIME_ROOT = "/opt/osw-runtime/mcp"
-GUEST_CUA_DRIVER_ROOT = f"{GUEST_MCP_RUNTIME_ROOT}/cua-driver-0.22.0"
 GUEST_CODEX_HOME = "/opt/osw-runtime/codex-task"
 GUEST_CLAUDE_CONFIG_DIR = "/opt/osw-runtime/claude-task"
 GUEST_CLAUDE_MCP_ADAPTER = (
@@ -282,33 +242,6 @@ JUDGE_RETRYABLE_FAILURES = {
     "judge_tool_budget_exhausted",
 }
 CLAUDE_BUILTIN_TOOLS = "Bash,Edit,Read"
-CLAUDE_MCP_TOOLS = "mcp__computer_use__AX,mcp__computer_use__GUI"
-CUA_DRIVER_ARCHIVE = (
-    WORKSPACE_ROOT
-    / "build/cua-driver-comparison/"
-    "cua-driver-rs-0.22.0-linux-x86_64-binary.tar.gz"
-)
-CUA_DRIVER_ARCHIVE_SHA256 = (
-    "eff649dc75420f2fef2ee9306213b495be96218c0ce9f2f5ea2df086e83682cc"
-)
-CUA_DRIVER_BINARY_SHA256 = (
-    "faddfd50590f0e2c53f4627d0fb2bf520fea627f83de9ab3e5a67a68e5ca9e08"
-)
-CUA_DRIVER_REQUIRED_RUNTIME_FILES = (
-    "cua-driver",
-    "cua-cursor-theme",
-    "libcua_driver_sdk.so",
-    "cua_driver_node_runtime.node",
-    "cua_driver_abi.h",
-    "wayland-helper/install.sh",
-    "wayland-helper/README.md",
-    "wayland-helper/winrects@cua/extension.js",
-    "wayland-helper/winrects@cua/metadata.json",
-)
-CUA_DRIVER_CONTRACT_MANIFEST = (
-    WORKSPACE_ROOT
-    / "tool_candidates/v014-cua-full-browser-comparison-beta1.json"
-)
 LIVE_JUDGE_TRACE_EVIDENCE_ITEM_TYPES = {
     "command_execution",
     "file_change",
@@ -450,11 +383,6 @@ def parse_args() -> argparse.Namespace:
         help="Explicit Codex executable; otherwise use artifact-dir/codex.",
     )
     parser.add_argument(
-        "--expected-codex-sha256",
-        default=DEFAULT_CODEX_SHA256,
-        help="Exact Codex artifact binding for the task agent or Judge.",
-    )
-    parser.add_argument(
         "--claude-code-binary",
         default="",
         help=(
@@ -463,96 +391,34 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--expected-claude-code-sha256",
-        default=DEFAULT_CLAUDE_CODE_SHA256,
-        help="Exact Claude Code artifact binding for the task agent.",
-    )
-    parser.add_argument(
         "--claude-gateway-base",
         default=os.environ.get(
             "HCU_ANTHROPIC_GATEWAY",
             "http://172.17.0.1:8537",
         ),
         help=(
-            "Anthropic-compatible coproxy base reachable from the QEMU guest. "
+            "Anthropic-compatible gateway base reachable from the QEMU guest. "
             "Claude Code appends /v1/messages."
-        ),
-    )
-    parser.add_argument(
-        "--mcp-profile",
-        choices=("computer-use", "cua-driver"),
-        default="computer-use",
-        help=(
-            "MCP runtime profile. cua-driver selects the pinned 0.22.0 "
-            "bundle, desktop-session launcher, and 60-tool contract."
         ),
     )
     parser.add_argument(
         "--mcp-binary",
         default="",
-        help="Explicit MCP executable. Overrides the selected profile artifact.",
-    )
-    parser.add_argument(
-        "--mcp-contract-manifest",
-        default="",
-        help=(
-            "Optional JSON manifest whose contract.public_tools array defines "
-            "the selected MCP surface. Required for non-Computer-Use MCPs "
-            "such as CUA Driver so Claude Code receives the complete allowlist."
-        ),
+        help="Explicit MCP executable; otherwise use artifact-dir/computer-use.",
     )
     parser.add_argument(
         "--guest-image",
         default="",
-        help=(
-            "Optional QCOW2 override for the evaluated guest. An override "
-            "requires --expected-guest-image-sha256."
-        ),
-    )
-    parser.add_argument(
-        "--expected-guest-image-sha256",
-        default="",
-        help="Required SHA-256 binding when --guest-image is set.",
-    )
-    parser.add_argument(
-        "--precomputed-guest-image-sha256",
-        default="",
-        help=(
-            "Trusted digest already validated by the parent queue against its "
-            "immutable implementation binding. Standalone runs omit this and "
-            "hash the image locally."
-        ),
+        help="Optional QCOW2 override for the evaluated guest.",
     )
     parser.add_argument(
         "--skill-file",
         default=str(DEFAULT_SKILL_FILE),
     )
     parser.add_argument(
-        "--expected-skill-sha256",
-        default=DEFAULT_SKILL_SHA256,
-        help="Optional exact run-config binding for the injected benchmark skill.",
-    )
-    parser.add_argument(
         "--base-instructions-file",
         default=str(DEFAULT_BASE_INSTRUCTIONS_FILE),
         help="Compact model base instructions copied into the guest.",
-    )
-    parser.add_argument(
-        "--expected-base-instructions-sha256",
-        default=DEFAULT_BASE_INSTRUCTIONS_SHA256,
-        help=(
-            "Optional exact run-config binding for the injected base "
-            "instructions."
-        ),
-    )
-    parser.add_argument("--tool-version", default=DEFAULT_TOOL_VERSION)
-    parser.add_argument(
-        "--release-manifest",
-        default=str(DEFAULT_RELEASE_MANIFEST),
-    )
-    parser.add_argument(
-        "--expected-release-manifest-sha256",
-        default=DEFAULT_RELEASE_MANIFEST_SHA256,
     )
     parser.add_argument("--judge-model", default="")
     parser.add_argument("--judge-effort", default="xhigh")
@@ -611,7 +477,6 @@ def parse_args() -> argparse.Namespace:
             "per-phase model-call budget, matching the upstream step loop."
         ),
     )
-    parser.add_argument("--provider-name", default="docker", choices=["docker"])
     parser.add_argument("--client-password", default="osworld-public-evaluation")
     parser.add_argument(
         "--volume-size",
@@ -626,241 +491,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--enable-vnc", action="store_true")
     parser.add_argument("--enable-recording", action="store_true")
-    parser.add_argument(
-        "--audited-evaluator-overrides",
-        action="store_true",
-        help=(
-            "After sealing the official evaluator result or exception, run "
-            "a registered verifier-only copied evaluator in a separate "
-            "audited channel. Never replaces official RAW."
-        ),
-    )
     args = parser.parse_args()
-    if args.audited_evaluator_overrides and not AUDITED_OVERRIDES_AVAILABLE:
-        parser.error(
-            "--audited-evaluator-overrides requires the private optional "
-            "evaluator_overrides package; the OSS runner intentionally ships "
-            "only the official OSWorld evaluator path"
-        )
-    if args.mcp_profile == "cua-driver" and args.mcp_binary:
-        parser.error(
-            "--mcp-profile cua-driver uses the pinned runtime bundle; "
-            "do not combine it with --mcp-binary"
-        )
     if not args.model:
         args.model = (
             "claude-opus-5"
             if args.agent == "claude-code"
             else "gpt-5.5"
         )
-    if not any((
-        args.mcp_binary,
-        args.mcp_profile != "computer-use",
-        args.tool_version,
-        args.release_manifest,
-        args.expected_release_manifest_sha256,
-    )):
-        args.tool_version = DEFAULT_TOOL_VERSION
-        args.release_manifest = str(DEFAULT_RELEASE_MANIFEST)
-        args.expected_release_manifest_sha256 = (
-            DEFAULT_RELEASE_MANIFEST_SHA256
-        )
-        if Path(args.skill_file).resolve() == DEFAULT_SKILL_FILE.resolve():
-            args.expected_skill_sha256 = DEFAULT_SKILL_SHA256
-        if (
-            Path(args.base_instructions_file).resolve()
-            == DEFAULT_BASE_INSTRUCTIONS_FILE.resolve()
-        ):
-            args.expected_base_instructions_sha256 = (
-                DEFAULT_BASE_INSTRUCTIONS_SHA256
-            )
     return args
 
 
 def safe_tag(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in value)
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def validate_release_binding(
-    *,
-    tool_version: str,
-    release_manifest: Path,
-    expected_manifest_sha256: str,
-    mcp_binary: Path,
-    skill_file: Path,
-    run_skill_sha256: str = "",
-) -> dict:
-    if not tool_version:
-        raise ValueError("--tool-version is required with --release-manifest")
-    if not release_manifest.is_file():
-        raise FileNotFoundError(release_manifest)
-    manifest_sha256 = sha256_file(release_manifest)
-    if (
-        expected_manifest_sha256
-        and manifest_sha256 != expected_manifest_sha256
-    ):
-        raise ValueError(
-            "Release manifest SHA-256 mismatch: "
-            f"expected {expected_manifest_sha256}, got {manifest_sha256}"
-        )
-    manifest = json.loads(release_manifest.read_text(encoding="utf-8"))
-    if manifest.get("tool_version") != tool_version:
-        raise ValueError(
-            f"Release manifest binds {manifest.get('tool_version')}, "
-            f"not {tool_version}"
-        )
-    implementation = manifest.get("implementation") or {}
-    expected_mcp = (
-        (implementation.get("mcp_binary") or {}).get("sha256") or ""
-    )
-    expected_skill = (
-        (implementation.get("benchmark_skill") or {}).get("sha256") or ""
-    )
-    actual_mcp = sha256_file(mcp_binary)
-    actual_skill = sha256_file(skill_file)
-    if actual_mcp != expected_mcp:
-        raise ValueError(
-            f"MCP binary SHA-256 mismatch: expected {expected_mcp}, "
-            f"got {actual_mcp}"
-        )
-    run_skill_sha256 = run_skill_sha256.strip().lower()
-    skill_binding = "release"
-    if expected_skill and actual_skill != expected_skill:
-        if run_skill_sha256 != actual_skill:
-            raise ValueError(
-                "Benchmark skill SHA-256 mismatch: release binds "
-                f"{expected_skill}, selected skill is {actual_skill}, and no "
-                "matching run-config skill hash was supplied"
-            )
-        skill_binding = "run_configuration"
-    elif run_skill_sha256 and run_skill_sha256 != actual_skill:
-        raise ValueError(
-            "Benchmark skill SHA-256 mismatch: run configuration binds "
-            f"{run_skill_sha256}, got {actual_skill}"
-        )
-    return {
-        "manifest": manifest,
-        "manifest_sha256": manifest_sha256,
-        "mcp_sha256": actual_mcp,
-        "skill_sha256": actual_skill,
-        "release_skill_sha256": expected_skill or None,
-        "skill_binding": skill_binding,
-    }
-
-
-def load_mcp_contract_manifest(path: Path) -> dict:
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    manifest = json.loads(path.read_text(encoding="utf-8"))
-    contract = manifest.get("contract") or {}
-    public_tools = contract.get("public_tools")
-    if (
-        not isinstance(public_tools, list)
-        or not public_tools
-        or any(
-            not isinstance(name, str)
-            or not name.strip()
-            or "," in name
-            for name in public_tools
-        )
-    ):
-        raise ValueError(
-            "MCP contract manifest must define a non-empty "
-            "contract.public_tools string array"
-        )
-    public_tools = [name.strip() for name in public_tools]
-    if len(set(public_tools)) != len(public_tools):
-        raise ValueError("MCP contract public tool names must be unique")
-    expected_count = contract.get("public_tool_count")
-    if expected_count is not None and expected_count != len(public_tools):
-        raise ValueError(
-            "MCP contract public_tool_count does not match public_tools"
-        )
-    return {
-        "path": str(path),
-        "sha256": sha256_file(path),
-        "public_tools": public_tools,
-    }
-
-
-def materialize_cua_driver_runtime(artifact_dir: Path) -> tuple[Path, list[Path]]:
-    if sha256_file(CUA_DRIVER_ARCHIVE) != CUA_DRIVER_ARCHIVE_SHA256:
-        raise ValueError("CUA Driver archive SHA-256 mismatch")
-    runtime_dir = artifact_dir / "cua-driver-0.22.0"
-    binary = runtime_dir / "cua-driver"
-    runtime_complete = all(
-        (runtime_dir / relative).is_file()
-        for relative in CUA_DRIVER_REQUIRED_RUNTIME_FILES
-    )
-    if (
-        not runtime_complete
-        or not binary.is_file()
-        or sha256_file(binary) != CUA_DRIVER_BINARY_SHA256
-    ):
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(CUA_DRIVER_ARCHIVE, "r:gz") as archive:
-            members = archive.getmembers()
-            for member in members:
-                target = (runtime_dir / member.name).resolve()
-                if (
-                    runtime_dir.resolve() not in target.parents
-                    and target != runtime_dir.resolve()
-                ):
-                    raise ValueError(
-                        f"unsafe CUA Driver archive member: {member.name}"
-                    )
-            archive.extractall(runtime_dir, members=members, filter="data")
-    if sha256_file(binary) != CUA_DRIVER_BINARY_SHA256:
-        raise ValueError("CUA Driver binary SHA-256 mismatch")
-    files = sorted(path for path in runtime_dir.rglob("*") if path.is_file())
-    return binary, files
-
-
-def cua_driver_guest_launcher() -> str:
-    return f"""\
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ ! -r /home/user/a11y-env.sh ]]; then
-  echo "missing required OSWorld desktop environment: /home/user/a11y-env.sh" >&2
-  exit 78
-fi
-while IFS= read -r line; do
-  [[ "$line" == export\\ * ]] || continue
-  [[ "$line" == *"/proc/"* ]] && continue
-  eval "$line"
-done < /home/user/a11y-env.sh
-xfwm_pid="$(pgrep -f xfwm4 | head -1 || true)"
-if [[ -n "$xfwm_pid" && -r "/proc/${{xfwm_pid}}/environ" ]]; then
-  dbus_entry="$(
-    tr "\\0" "\\n" < "/proc/${{xfwm_pid}}/environ" |
-      grep -m1 "^DBUS_SESSION_BUS_ADDRESS=" || true
-  )"
-  if [[ -n "$dbus_entry" ]]; then
-    export "$dbus_entry"
-  fi
-fi
-export CUA_DRIVER_RS_TELEMETRY_ENABLED=false
-export CUA_DRIVER_RS_UPDATE_CHECK=false
-exec {shlex.quote(GUEST_CUA_DRIVER_ROOT + "/cua-driver")} "$@"
-"""
-
-
-def validate_expected_sha256(path: Path, expected: str, label: str) -> str:
-    actual = sha256_file(path)
-    normalized = str(expected or "").strip().lower()
-    if normalized and actual != normalized:
-        raise ValueError(
-            f"{label} SHA-256 mismatch: expected {normalized}, got {actual}"
-        )
-    return actual
 
 
 def task_value(task, key: str, default=None):
@@ -894,34 +536,15 @@ def judge_user_context(task, phase_details: list[dict]) -> dict | None:
     return json.loads(json.dumps(context, ensure_ascii=False, default=str))
 
 
-def resolve_guest_image(task, args) -> tuple[str, str | None]:
+def resolve_guest_image(task, args) -> str:
     task_image = str(task_value(task, "image", "") or "")
     if not args.guest_image:
-        return task_image, None
+        return task_image
 
     image = Path(args.guest_image).expanduser().resolve()
     if not image.is_file():
         raise FileNotFoundError(f"Guest image not found: {image}")
-    expected = str(args.expected_guest_image_sha256 or "").strip().lower()
-    if not expected:
-        raise ValueError(
-            "--guest-image requires --expected-guest-image-sha256"
-        )
-    precomputed = str(
-        getattr(args, "precomputed_guest_image_sha256", "") or ""
-    ).strip().lower()
-    if precomputed and precomputed != expected:
-        raise ValueError(
-            "Precomputed guest image SHA-256 mismatch: "
-            f"expected {expected}, got {precomputed}"
-        )
-    actual = precomputed or sha256_file(image)
-    if actual != expected:
-        raise ValueError(
-            "Guest image SHA-256 mismatch: "
-            f"expected {expected}, got {actual}"
-        )
-    return str(image), actual
+    return str(image)
 
 
 def task_phases(task) -> list[dict]:
@@ -1591,9 +1214,9 @@ def judge_answer_score_eligibility(
     truncated: bool,
     delivery: dict,
     final_message: str,
-    done_payload: Optional[dict],
+    done_payload: dict | None,
     official_evaluator_errors: list[dict],
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     if official_evaluator_errors:
         return (
             False,
@@ -2457,22 +2080,12 @@ def run_live_judge(
             f"{GUEST_JUDGE_ROOT}/task_agent_execution_evidence.jsonl"
         ),
         "execution_event_count": execution_event_count,
-        "execution_evidence_sha256": hashlib.sha256(
-            execution_evidence_path.read_bytes()
-        ).hexdigest(),
         "prior_judge_execution_evidence_file": (
             GUEST_PRIOR_JUDGE_EVIDENCE
             if prior_judge_evidence_path is not None
             else None
         ),
         "prior_judge_execution_event_count": prior_judge_event_count,
-        "prior_judge_execution_evidence_sha256": (
-            hashlib.sha256(
-                prior_judge_evidence_path.read_bytes()
-            ).hexdigest()
-            if prior_judge_evidence_path is not None
-            else None
-        ),
         "uploaded_files": [
             Path(row["path"]).name
             for row in upload_rows
@@ -2529,7 +2142,6 @@ def run_live_judge(
         f"> {shlex.quote(GUEST_JUDGE_STATUS)}; "
         "echo $rc"
     )
-    execution = None
     execution_error = None
     monitor = {
         "status": None,
@@ -2545,7 +2157,7 @@ def run_live_judge(
     artifact_fetch_errors = {}
     judge_unit_name = f"osw-judge-{run_tag}"
     try:
-        execution = request_execute(
+        request_execute(
             base_url,
             transient_workload_command(
                 ["bash", "-lc", command],
@@ -2999,7 +2611,6 @@ def summarize_trace(raw: bytes | None) -> dict:
         "completion_sentinel": None,
         "agent_error": None,
         "agent_error_original_chars": 0,
-        "agent_error_sha256": None,
         "failure_classification": None,
     }
     if not raw:
@@ -3023,9 +2634,6 @@ def summarize_trace(raw: bytes | None) -> dict:
                 message = str(failure)
             message = message or "turn failed"
             summary["agent_error_original_chars"] = len(message)
-            summary["agent_error_sha256"] = hashlib.sha256(
-                message.encode("utf-8", errors="replace")
-            ).hexdigest()
             summary["failure_classification"] = (
                 classify_codex_turn_failure(message)
             )
@@ -3078,7 +2686,6 @@ def summarize_claude_trace(raw: bytes | None) -> dict:
         "completion_sentinel": None,
         "agent_error": None,
         "agent_error_original_chars": 0,
-        "agent_error_sha256": None,
         "failure_classification": None,
     }
     if not raw:
@@ -3145,9 +2752,6 @@ def summarize_claude_trace(raw: bytes | None) -> dict:
             if event.get("is_error"):
                 error = message or str(event.get("error") or "Claude Code failed")
                 summary["agent_error_original_chars"] = len(error)
-                summary["agent_error_sha256"] = hashlib.sha256(
-                    error.encode("utf-8", errors="replace")
-                ).hexdigest()
                 summary["failure_classification"] = (
                     classify_codex_turn_failure(error)
                 )
@@ -3344,23 +2948,16 @@ def concise_failure_message(message: str) -> str:
             if size_match
             else ""
         )
-        digest = hashlib.sha256(
-            message.encode("utf-8", errors="replace")
-        ).hexdigest()
         return (
             "tool_argument_too_large: command was rejected before execution; "
             "use an existing file or stream data through stdin/write_stdin."
-            f"{sizes} original_chars={len(message)} sha256={digest}"
+            f"{sizes} original_chars={len(message)}"
         )
     if len(message) <= FAILURE_SUMMARY_MAX_CHARS:
         return message
-    digest = hashlib.sha256(
-        message.encode("utf-8", errors="replace")
-    ).hexdigest()
     prefix = message[:FAILURE_SUMMARY_MAX_CHARS]
     return (
-        f"{prefix}\n[error summary truncated: original_chars={len(message)} "
-        f"sha256={digest}]"
+        f"{prefix}\n[error summary truncated: original_chars={len(message)}]"
     )
 
 
@@ -4221,16 +3818,9 @@ def main() -> int:
     claude_code_binary = Path(
         args.claude_code_binary or artifact_dir / "claude-code"
     ).resolve()
-    cua_runtime_files = []
-    if args.mcp_profile == "cua-driver":
-        default_mcp_binary, cua_runtime_files = materialize_cua_driver_runtime(
-            artifact_dir
-        )
-    else:
-        default_mcp_binary = (
-            artifact_dir / "releases" / args.tool_version / "computer-use"
-        )
-    mcp_binary = Path(args.mcp_binary or default_mcp_binary).resolve()
+    mcp_binary = Path(
+        args.mcp_binary or artifact_dir / "computer-use"
+    ).resolve()
     skill_file = Path(args.skill_file).resolve()
     base_instructions_file = Path(
         args.base_instructions_file
@@ -4248,28 +3838,6 @@ def main() -> int:
     for required in required_files:
         if not required.is_file():
             raise FileNotFoundError(required)
-    if args.agent == "codex" or args.judge_model:
-        validate_expected_sha256(
-            codex_binary,
-            args.expected_codex_sha256,
-            "Codex artifact",
-        )
-    if args.agent == "claude-code":
-        validate_expected_sha256(
-            claude_code_binary,
-            args.expected_claude_code_sha256,
-            "Claude Code artifact",
-        )
-    skill_sha256 = validate_expected_sha256(
-        skill_file,
-        args.expected_skill_sha256,
-        "Benchmark skill",
-    )
-    base_instructions_sha256 = validate_expected_sha256(
-        base_instructions_file,
-        args.expected_base_instructions_sha256,
-        "Base instructions",
-    )
     if args.judge_model:
         for required in (
             Path(args.judge_prompt_file).resolve(),
@@ -4277,40 +3845,7 @@ def main() -> int:
         ):
             if not required.is_file():
                 raise FileNotFoundError(required)
-    release_binding = None
-    if args.release_manifest:
-        release_binding = validate_release_binding(
-            tool_version=args.tool_version,
-            release_manifest=Path(args.release_manifest).resolve(),
-            expected_manifest_sha256=args.expected_release_manifest_sha256,
-            mcp_binary=mcp_binary,
-            skill_file=skill_file,
-            run_skill_sha256=args.expected_skill_sha256,
-        )
-    elif args.tool_version:
-        raise ValueError("--tool-version requires --release-manifest")
-    mcp_contract_binding = None
-    if args.mcp_profile == "cua-driver" and not args.mcp_contract_manifest:
-        args.mcp_contract_manifest = str(CUA_DRIVER_CONTRACT_MANIFEST)
-    if args.mcp_contract_manifest:
-        mcp_contract_binding = load_mcp_contract_manifest(
-            Path(args.mcp_contract_manifest).resolve()
-        )
-    release_public_tools = (
-        ((release_binding or {}).get("manifest") or {})
-        .get("contract", {})
-        .get("public_tools")
-    )
-    if mcp_contract_binding and release_public_tools:
-        if mcp_contract_binding["public_tools"] != release_public_tools:
-            raise ValueError(
-                "MCP contract manifest conflicts with release manifest"
-            )
-    mcp_public_tools = (
-        mcp_contract_binding["public_tools"]
-        if mcp_contract_binding
-        else release_public_tools or ["AX", "GUI"]
-    )
+    mcp_public_tools = list(MCP_PUBLIC_TOOLS)
 
     task = load_task_config(
         None,
@@ -4341,7 +3876,7 @@ def main() -> int:
     )
     bind_task_runtime_timezone(task, run_timezone)
     instruction = str(task_value(task, "instruction", ""))
-    guest_image, guest_image_sha256 = resolve_guest_image(task, args)
+    guest_image = resolve_guest_image(task, args)
     if not instruction:
         raise ValueError(f"Task {args.task_id} has no instruction")
 
@@ -4352,7 +3887,6 @@ def main() -> int:
     )
     prompt_path = result_dir / "prompt.txt"
     launcher_path = result_dir / "guest-launcher.sh"
-    mcp_launcher_path = result_dir / "mcp-launcher.sh"
     skill_copy = result_dir / "AGENTS.md"
     base_instructions_copy = result_dir / "agent-base-instructions.md"
     if args.agent == "codex":
@@ -4370,8 +3904,6 @@ def main() -> int:
         )
     else:
         write_local(config_path, claude_mcp_config())
-    if args.mcp_profile == "cua-driver":
-        write_local(mcp_launcher_path, cua_driver_guest_launcher())
     write_local(
         prompt_path,
         task_prompt(
@@ -4436,33 +3968,10 @@ def main() -> int:
         ),
         "affinity_task": affinity_task,
         "token_log": str(token_log),
-        "provider": args.provider_name,
+        "provider": "docker",
         "guest_image": guest_image,
-        "guest_image_sha256": guest_image_sha256,
-        "tool_version": args.tool_version or None,
-        "release_manifest": args.release_manifest or None,
-        "release_manifest_sha256": (
-            release_binding["manifest_sha256"]
-            if release_binding
-            else None
-        ),
-        "release_promotion_skill_sha256": (
-            release_binding["release_skill_sha256"]
-            if release_binding
-            else None
-        ),
-        "skill_binding": (
-            release_binding["skill_binding"]
-            if release_binding
-            else "run_configuration"
-        ),
         "codex_binary": (
             str(codex_binary)
-            if args.agent == "codex" or args.judge_model
-            else None
-        ),
-        "codex_sha256": (
-            sha256_file(codex_binary)
             if args.agent == "codex" or args.judge_model
             else None
         ),
@@ -4471,45 +3980,15 @@ def main() -> int:
             if args.agent == "claude-code"
             else None
         ),
-        "claude_code_sha256": (
-            sha256_file(claude_code_binary)
-            if args.agent == "claude-code"
-            else None
-        ),
         "claude_mcp_adapter": (
             str(claude_mcp_adapter)
             if args.agent == "claude-code"
             else None
         ),
-        "claude_mcp_adapter_sha256": (
-            sha256_file(claude_mcp_adapter)
-            if args.agent == "claude-code"
-            else None
-        ),
         "mcp_binary": str(mcp_binary),
-        "mcp_sha256": sha256_file(mcp_binary),
-        "mcp_profile": args.mcp_profile,
         "mcp_public_tools": mcp_public_tools,
-        "mcp_contract_manifest": (
-            mcp_contract_binding["path"]
-            if mcp_contract_binding
-            else None
-        ),
-        "mcp_contract_manifest_sha256": (
-            mcp_contract_binding["sha256"]
-            if mcp_contract_binding
-            else None
-        ),
         "skill_file": str(skill_file),
-        "skill_sha256": skill_sha256,
-        "expected_skill_sha256": (
-            args.expected_skill_sha256 or None
-        ),
         "base_instructions_file": str(base_instructions_file),
-        "base_instructions_sha256": base_instructions_sha256,
-        "expected_base_instructions_sha256": (
-            args.expected_base_instructions_sha256 or None
-        ),
         "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "judge_model": args.judge_model or None,
         "judge_effort": args.judge_effort if args.judge_model else None,
@@ -4521,9 +4000,6 @@ def main() -> int:
         ),
         "judge_retry_tool_limit": (
             args.judge_retry_tool_limit if args.judge_model else None
-        ),
-        "audited_evaluator_overrides": bool(
-            args.audited_evaluator_overrides
         ),
         "judge_prompt_file": (
             str(Path(args.judge_prompt_file).resolve())
@@ -4562,35 +4038,10 @@ def main() -> int:
             {"local_path": str(prompt_path), "path": GUEST_PROMPT},
             {"local_path": str(launcher_path), "path": GUEST_LAUNCHER},
         ]
-        if args.mcp_profile == "cua-driver":
-            runtime_upload_rows.append(
-                {"local_path": str(mcp_launcher_path), "path": GUEST_MCP}
-            )
-            runtime_dir = mcp_binary.parent
-            for runtime_file in cua_runtime_files:
-                relative = runtime_file.relative_to(runtime_dir)
-                runtime_upload_rows.append(
-                    {
-                        "local_path": str(runtime_file),
-                        "path": f"{GUEST_CUA_DRIVER_ROOT}/{relative.as_posix()}",
-                    }
-                )
-            executable_paths = [
-                GUEST_MCP,
-                GUEST_CUA_DRIVER_ROOT + "/cua-driver",
-                GUEST_LAUNCHER,
-            ]
-            executable_paths.extend(
-                f"{GUEST_CUA_DRIVER_ROOT}/"
-                f"{path.relative_to(runtime_dir).as_posix()}"
-                for path in cua_runtime_files
-                if path != mcp_binary and os.access(path, os.X_OK)
-            )
-        else:
-            runtime_upload_rows.append(
-                {"local_path": str(mcp_binary), "path": GUEST_MCP}
-            )
-            executable_paths = [GUEST_MCP, GUEST_LAUNCHER]
+        runtime_upload_rows.append(
+            {"local_path": str(mcp_binary), "path": GUEST_MCP}
+        )
+        executable_paths = [GUEST_MCP, GUEST_LAUNCHER]
         if args.agent == "codex":
             runtime_upload_rows.extend([
                 {"local_path": str(codex_binary), "path": GUEST_CODEX},
@@ -4630,7 +4081,7 @@ def main() -> int:
             )
 
         env = DesktopEnv(
-            provider_name=args.provider_name,
+            provider_name="docker",
             path_to_vm=guest_image,
             action_space="pyautogui",
             cache_dir=run_scoped_cache_dir(result_dir, "desktop-env"),
@@ -4643,11 +4094,10 @@ def main() -> int:
             force_disable_recording=not args.enable_recording,
             before_task_setup=bootstrap_runtime,
         )
-        if args.provider_name == "docker":
-            meta["provider_mounts"] = validate_provider_mount_isolation(
-                env.provider.container,
-                guest_image,
-            )
+        meta["provider_mounts"] = validate_provider_mount_isolation(
+            env.provider.container,
+            guest_image,
+        )
         meta["container_name"] = env.provider.container.name
         meta["vm_startup_attempts"] = getattr(
             env.provider,
@@ -4776,11 +4226,7 @@ def main() -> int:
         phase_results = []
         phase_details = []
         total_score = 0.0
-        audited_total_score = 0.0
         official_evaluator_errors = []
-        audited_evaluator_errors = []
-        audited_phase_results = []
-        audited_override_installed = False
         truncated = False
         budget_exhausted = False
         truncated_phases = []
@@ -4877,23 +4323,10 @@ def main() -> int:
                     before_eval
                 )
 
-            evaluate_current_phase = lambda: phase["evaluate"](env)
-            if args.audited_evaluator_overrides:
-                channels = evaluate_channels(
-                    task_id=args.task_id,
-                    evaluate=evaluate_current_phase,
-                )
-            else:
-                channels = evaluate_channels(
-                    task_id=args.task_id,
-                    evaluate=evaluate_current_phase,
-                    installer=lambda task_id: {
-                        "installed": False,
-                        "task_id": task_id,
-                        "reason": "audited_overrides_disabled",
-                        "modules": [],
-                    },
-                )
+            channels = evaluate_official_only(
+                task_id=args.task_id,
+                evaluate=lambda: phase["evaluate"](env),
+            )
             official_channel = channels["official"]
             official_completed = (
                 official_channel["status"] == "completed"
@@ -4920,50 +4353,8 @@ def main() -> int:
                     "error": official_channel["error"],
                     "traceback": official_channel["traceback"],
                 })
-
-            audited_channel = channels["audited"]
-            installation = channels["override_installation"]
-            audited_override_installed = (
-                audited_override_installed
-                or bool(installation.get("installed"))
-            )
-            if installation.get("error"):
-                audited_evaluator_errors.append({
-                    "phase_index": phase_index,
-                    "phase_name": phase_name,
-                    "stage": "installation",
-                    "error": installation["error"],
-                    "traceback": installation.get("traceback"),
-                })
-            if (
-                audited_channel is not None
-                and audited_channel["status"] == "completed"
-            ):
-                audited_phase_score = float(
-                    audited_channel["result"]["score"]
-                )
-                audited_phase_payload = audited_channel["result"]
-            elif audited_channel is not None:
-                audited_phase_score = 0.0
-                audited_phase_payload = {
-                    "status": "error",
-                    "score": None,
-                    "error": audited_channel["error"],
-                    "traceback": audited_channel["traceback"],
-                }
-                audited_evaluator_errors.append({
-                    "phase_index": phase_index,
-                    "phase_name": phase_name,
-                    "stage": "evaluation",
-                    "error": audited_channel["error"],
-                    "traceback": audited_channel["traceback"],
-                })
-            else:
-                audited_phase_score = phase_score
-                audited_phase_payload = None
             evaluator_payload = phase_evaluator_payload
             total_score += phase_score
-            audited_total_score += audited_phase_score
 
             after_eval = env.controller.get_screenshot()
             if after_eval is not None:
@@ -4984,26 +4375,10 @@ def main() -> int:
             phase_detail = {
                 **phase_result,
                 "evaluator": phase_evaluator_payload,
-                "audited_evaluator": audited_phase_payload,
-                "audited_score": audited_phase_score,
-                "override_installation": installation,
                 "agent": agent_phase,
             }
             phase_results.append(phase_result)
             phase_details.append(phase_detail)
-            audited_phase_results.append({
-                "phase_index": phase_index,
-                "phase_name": phase_name,
-                "score": audited_phase_score,
-                "status": (
-                    audited_channel["status"]
-                    if audited_channel is not None
-                    else official_channel["status"]
-                ),
-                "override_installed": bool(
-                    installation.get("installed")
-                ),
-            })
             gate_min_score = phase.get("gate_min_score")
             if not official_completed:
                 phase_detail["gate_stop"] = "official_evaluator_error"
@@ -5039,19 +4414,8 @@ def main() -> int:
                 break
 
         score = round(max(0.0, min(1.0, total_score)), 4)
-        audited_score = round(
-            max(0.0, min(1.0, audited_total_score)),
-            4,
-        )
         raw_evaluator_status = (
             "error" if official_evaluator_errors else "completed"
-        )
-        audited_evaluator_status = (
-            "error"
-            if audited_evaluator_errors
-            else "completed"
-            if audited_override_installed
-            else "not_run"
         )
         if phases:
             result_payload = {
@@ -5066,13 +4430,6 @@ def main() -> int:
         result_payload.update({
             "raw_evaluator_status": raw_evaluator_status,
             "official_evaluator_errors": official_evaluator_errors,
-            "audited_evaluator_status": (
-                audited_evaluator_status
-            ),
-            "audited_score": (
-                audited_score if audited_override_installed else None
-            ),
-            "audited_evaluator_errors": audited_evaluator_errors,
         })
         write_local(result_dir / "final.txt", final_message + "\n")
         write_local(
@@ -5089,37 +4446,9 @@ def main() -> int:
                 indent=2,
             ),
         )
-        if audited_override_installed or audited_evaluator_errors:
-            write_local(
-                result_dir / "audited_evaluator.json",
-                json.dumps(
-                    {
-                        "score": audited_score,
-                        "status": audited_evaluator_status,
-                        "errors": audited_evaluator_errors,
-                        "official_score_replaced": False,
-                        "phase_results": audited_phase_results,
-                        "phase_details": phase_details,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-            )
 
         delivery = phase_delivery_status(phases, phase_details)
         result_payload["phase_delivery"] = delivery
-        audited_artifact_capture = None
-        if args.audited_evaluator_overrides:
-            audited_artifact_capture = capture_postrun_artifacts(
-                task_id=args.task_id,
-                task_dir=result_dir,
-                base_url=base_url,
-                execute=request_execute,
-                fetch=fetch_guest_file,
-            )
-            result_payload["audited_artifact_capture"] = (
-                audited_artifact_capture
-            )
         live_judge = None
         if args.judge_model:
             meta["status"] = "judge_running"
@@ -5208,9 +4537,6 @@ def main() -> int:
             )
             proxy_evidence_path.write_bytes(frozen_proxy_rows)
             proxy_usage["evidence_file"] = proxy_evidence_path.name
-            proxy_usage["evidence_sha256"] = hashlib.sha256(
-                frozen_proxy_rows
-            ).hexdigest()
         summary = reconcile_trace_and_proxy_usage(
             summary,
             proxy_usage,
@@ -5248,42 +4574,6 @@ def main() -> int:
         )
         write_local(result_dir / "result.txt", f"{score}\n")
 
-        postrun_audited = None
-        if args.audited_evaluator_overrides:
-            postrun_audited = run_postrun_replay(
-                task_id=args.task_id,
-                task_dir=result_dir,
-                official_result_path=result_dir / "raw_evaluator.json",
-                asset_root=Path(asset_runtime["asset_root"]),
-            )
-        if postrun_audited is not None:
-            audited_evaluator_status = postrun_audited["status"]
-            audited_score = postrun_audited["score"]
-            audited_evaluator_errors.extend(postrun_audited["errors"])
-            result_payload["audited_evaluator_status"] = (
-                audited_evaluator_status
-            )
-            result_payload["audited_score"] = audited_score
-            result_payload["audited_evaluator_errors"] = (
-                audited_evaluator_errors
-            )
-            write_local(
-                result_dir / "audited_evaluator.json",
-                json.dumps(
-                    postrun_audited,
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-            )
-            write_local(
-                result_dir / "result.json",
-                json.dumps(
-                    result_payload,
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-            )
-
         meta.update({
             "status": (
                 "truncated"
@@ -5295,14 +4585,6 @@ def main() -> int:
             "score": score,
             "raw_evaluator_status": raw_evaluator_status,
             "official_evaluator_errors": official_evaluator_errors,
-            "audited_score": (
-                audited_score
-                if audited_override_installed or postrun_audited is not None
-                else None
-            ),
-            "audited_evaluator_status": audited_evaluator_status,
-            "audited_evaluator_errors": audited_evaluator_errors,
-            "audited_artifact_capture": audited_artifact_capture,
             "end_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "duration_sec": result_payload["duration_sec"],
             "agent_returncode": result_payload["agent_returncode"],

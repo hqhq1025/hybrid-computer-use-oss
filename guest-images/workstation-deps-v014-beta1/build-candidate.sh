@@ -42,4 +42,3 @@ sudo env LIBGUESTFS_MEMSIZE=4096 virt-customize \
     --run-command '/bin/bash /tmp/osw-customize-guest.sh'
 
 qemu-img check "${candidate_image}"
-sha256sum "${candidate_image}" >"${candidate_image}.sha256"

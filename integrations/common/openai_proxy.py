@@ -28,7 +28,6 @@
 """
 
 import argparse
-import hashlib
 import json
 import os
 import socketserver
@@ -58,9 +57,6 @@ REQUEST_TIMEOUT = urllib3.Timeout(connect=15, read=1800)
 _write_lock = threading.Lock()
 _out_fh = None
 OUTPUT_PATH = None
-PROXY_SOURCE_SHA256 = hashlib.sha256(
-    open(__file__, "rb").read()
-).hexdigest()
 _stats = {
     "calls": 0,
     "accounted": 0,
@@ -299,7 +295,6 @@ class Handler(BaseHTTPRequestHandler):
                     "tasks": len(_affinity),
                     "out": OUTPUT_PATH,
                     "max_requests_per_task": MAX_REQUESTS_PER_TASK,
-                    "source_sha256": PROXY_SOURCE_SHA256,
                     **_stats,
                 }
             ).encode()
