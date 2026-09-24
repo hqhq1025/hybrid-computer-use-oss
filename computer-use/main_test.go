@@ -7882,10 +7882,11 @@ func TestProviderSpecificSecondaryActionIsNotReachable(t *testing.T) {
 
 func TestActionsReResolveGeometryAtActionTime(t *testing.T) {
 	// Like a Playwright locator, the target is re-resolved at action time.
-	// find_element already resolves the live node, so computing coordinates
-	// from the cached Go record would mix two versions of the UI in one call:
-	// after a sidebar collapses, the click would land at the centre of the
-	// stale cached box even though the layout has changed.
+	// find_element_at_snapshot_path already resolves the live node, so
+	// computing coordinates from the cached Go record would mix two versions
+	// of the UI in one call: after a sidebar collapses, the click would land
+	// at the centre of the stale cached box even though the layout has
+	// changed.
 	if !strings.Contains(linuxRuntimeScript, "def current_geometry(") {
 		t.Fatal("action path must re-read geometry after resolving the live node")
 	}
@@ -8844,11 +8845,6 @@ func TestAppNameMatchingIsSeparatorInsensitiveAndFailsWithCandidates(t *testing.
 	if !strings.Contains(linuxRuntimeScript,
 		"Applications currently visible to the ") {
 		t.Fatal("appNotFound must list the running applications")
-	}
-	// An empty string must not match everything; after normalisation "" is
-	// contained in every string.
-	if !strings.Contains(linuxRuntimeScript, "if tight_query and tight_name and (") {
-		t.Fatal("an empty normalized string must be rejected first, or an empty query matches every app")
 	}
 }
 

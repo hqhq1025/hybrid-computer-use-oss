@@ -474,17 +474,6 @@ def set_element_value_outcome(node, value):
     return "no_change"
 
 
-def set_element_value(node, value):
-    outcome = set_element_value_outcome(node, value)
-    if outcome == "effect_unknown":
-        raise RuntimeError(
-            "AT-SPI value write indicates the control changed, but the result was "
-            "unexpected or exact readback was unavailable; refusing automatic "
-            "keyboard fallback"
-        )
-    return outcome == "verified"
-
-
 # Retry count and interval for application resolution; see resolve_app().
 # Enumeration can fail transiently while an application rebuilds its
 # windows, and treating "unreadable" as "absent" sends the agent down an

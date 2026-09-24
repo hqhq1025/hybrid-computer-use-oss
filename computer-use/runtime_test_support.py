@@ -235,7 +235,6 @@ def perform_provider_operation(operation):
 STATE = runtime.Atspi.StateType
 
 def effective_runtime_source():
-    parts_dir = Path(__file__).resolve().parent / "native" / "linux" / "provider"
     return "".join(
         Path(module.__file__).read_text(encoding="utf-8")
         for module in PROVIDER_MODULES

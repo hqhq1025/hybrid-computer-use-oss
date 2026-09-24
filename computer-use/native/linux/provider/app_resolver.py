@@ -95,10 +95,6 @@ def list_apps_inventory():
     }
 
 
-def list_apps_text():
-    return list_apps_inventory()["text"]
-
-
 def app_window_inventory(query, app_identity=None, target_window_handle=None):
     """Return every current top-level window title for one resolved AX app."""
     app = (

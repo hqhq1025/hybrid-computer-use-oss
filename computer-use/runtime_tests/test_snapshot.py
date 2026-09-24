@@ -504,7 +504,7 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
 
 
     def test_find_element_refuses_stale_path_end_to_end(self):
-        """find_element does not resolve a stale path to a different control.
+        """find_element_at_snapshot_path does not resolve a stale path to a different control.
 
         Unit tests of the matching predicate cannot show that callers use it,
         so this test exercises the whole lookup.
@@ -518,7 +518,7 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
 
         # The path alone reaches the toolbar, which is not the recorded element.
         self.assertIs(runtime.resolve_path(app, [0, 0]), toolbar)
-        self.assertIsNone(runtime.find_element(app, stale))
+        self.assertIsNone(runtime.find_element_at_snapshot_path(app, stale))
 
     def test_find_element_still_resolves_valid_path(self):
         item = _TreeNode(role="menu item", name="Rename…", x=7, y=189, w=304, h=25)
@@ -528,7 +528,7 @@ class StaleElementIndexTests(AtspiPatchedTestCase):
         record = {"runtimeId": [0, 0], "controlType": "menu item",
                   "name": "Rename…", "automationId": "", "frame": None}
 
-        self.assertIs(runtime.find_element(app, record), item)
+        self.assertIs(runtime.find_element_at_snapshot_path(app, record), item)
 
 class ClickableMarkerTests(AtspiPatchedTestCase):
     """The tree marks which elements can be clicked without coordinates."""
@@ -563,7 +563,7 @@ class ClickableMarkerTests(AtspiPatchedTestCase):
     def test_element_without_any_action_is_not_marked(self):
         """Nautilus sidebar rows have a Component interface but no Action interface.
 
-        action_names() hides click-like actions, so without the marker such a
+        node_actions() hides click-like actions, so without the marker such a
         row renders exactly like a push button with a click action, and the
         agent has to fall back to coordinates for both.
         """
@@ -923,7 +923,7 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
             setattr, runtime, "accepts_user_input", original_accepts
         )
 
-        text = runtime.list_apps_text()
+        text = runtime.list_apps_inventory()["text"]
 
         self.assertIn('window="VLC media player"', text)
         self.assertIn("other_windows=Simple Preferences", text)
@@ -949,7 +949,7 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
             setattr, runtime, "accepts_user_input", original_accepts
         )
 
-        text = runtime.list_apps_text()
+        text = runtime.list_apps_inventory()["text"]
 
         self.assertIn("pid=101", text)
         self.assertIn("pid=202", text)
@@ -1781,79 +1781,6 @@ class PruneCostTests(AtspiPatchedTestCase):
 
         self.assertEqual(len(records), 5)
         self.assertEqual(records[-1]["controlType"], "push button")
-
-class StateReadbackTests(unittest.TestCase):
-    """Actions that declare a target state are verified by reading it back.
-
-    Modeled on Playwright's `_setChecked` (dom.ts):
-
-        const finalState = await isChecked(progress);
-        if (finalState.matches !== state)
-          throw new NonRecoverableDOMError('Clicking the checkbox did not change its state');
-
-    The error is non-recoverable and not retried: repeating the same action
-    cannot give a different result.
-    """
-
-    def test_action_names_come_from_measurement_not_from_playwright(self):
-        """ACTION_MUST_FLIP lists action names observed in real applications.
-
-        Playwright's set-state names (check, uncheck, expand, collapse) do not
-        describe AT-SPI flip actions. Observed names such as
-        `expand or contract` and `toggle` flip a state instead of setting a
-        value.
-        """
-        for dead in ("check", "uncheck", "expand", "collapse", "select", "deselect"):
-            self.assertNotIn(dead, runtime.ACTION_MUST_FLIP, dead)
-        self.assertIn("expand or contract", runtime.ACTION_MUST_FLIP)
-        self.assertIn("toggle", runtime.ACTION_MUST_FLIP)
-
-    def test_state_flipped_as_promised(self):
-        note, failed = runtime.state_transition_note(
-            "toggle", {"CHECKED": False}, {"CHECKED": True})
-        self.assertFalse(failed)
-        self.assertIn("CHECKED flipped False -> True", note)
-
-    def test_boundary_is_stated_not_hidden(self):
-        """A reached state does not prove that the intended behavior happened.
-
-        In VLC's preferences, toggling a radio button flips CHECKED without
-        switching the panel. This check cannot detect that, so the note says
-        so instead of becoming a source of false positives.
-        """
-        note, _ = runtime.state_transition_note(
-            "toggle", {"CHECKED": False}, {"CHECKED": True})
-        self.assertIn("proves the CONTROL changed", note)
-        self.assertIn("VLC", note)
-
-    def test_state_did_not_change_is_a_hard_failure(self):
-        note, failed = runtime.state_transition_note(
-            "expand or contract", {"EXPANDED": False}, {"EXPANDED": False})
-        self.assertTrue(failed)
-        self.assertIn("promises to flip it", note)
-        # The note must say not to retry and name the next route to try.
-        self.assertIn("Repeating the same call will not help", note)
-        self.assertIn("gui", note)
-
-    def test_actions_that_declare_nothing_are_not_judged(self):
-        """Actions such as `click` and `menu` declare no target state to verify.
-
-        Judging them anyway would produce false positives.
-        """
-        # Common action names that promise no readable state change.
-        for action in ("click", "menu", "activate", "press", "open", "dodefault", ""):
-            note, failed = runtime.state_transition_note(
-                action, {"CHECKED": False}, {"CHECKED": True})
-            self.assertIsNone(note, action)
-            self.assertFalse(failed, action)
-
-    def test_unreadable_state_is_not_treated_as_failure(self):
-        note, failed = runtime.state_transition_note("toggle", None, {"CHECKED": True})
-        self.assertIsNone(note)
-        self.assertFalse(failed)
-        note, failed = runtime.state_transition_note("toggle", {"CHECKED": False}, {})
-        self.assertIsNone(note)
-        self.assertFalse(failed)
 
 class StableIndexTests(unittest.TestCase):
     """Indices survive across snapshots, following Playwright's ariaSnapshot.ts.

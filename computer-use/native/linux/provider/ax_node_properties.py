@@ -72,18 +72,6 @@ def node_actions(node):
     return names, has_click_entry
 
 
-def action_names(node):
-    """List the node's semantic actions that the click tool does not cover.
-
-    Actions that preferred_action_index() would pick (click, press,
-    activate, ...) must be filtered out. Otherwise every clickable node
-    shows a secondary `click` action, which is exactly what the click tool
-    invokes; the model then reads it as an alternative path and alternates
-    between semantic clicks and coordinate fallbacks.
-    """
-    return node_actions(node)[0]
-
-
 def accessible_id(node):
     getter = getattr(node, "get_accessible_id", None)
     return str(safe(getter, "") or "") if callable(getter) else ""
@@ -207,57 +195,6 @@ NOTABLE_STATES = (
     ("SELECTED", "selected"),
     ("FOCUSED", "focused"),
 )
-
-
-# Action name -> the state it promises to change.
-#
-# The approach is adapted from Playwright's `_setChecked`
-# (packages/playwright-core/src/server/dom.ts, Apache-2.0): Playwright reads
-# the checkbox state back after clicking and throws a non-recoverable error
-# ("Clicking the checkbox did not change its state") without retrying,
-# because repeating the same action will not give a different result.
-#
-# The names come from action tables observed in gedit, Nautilus, VLC,
-# VS Code, GIMP and Thunderbird. `expand or contract` and `toggle` flip a
-# state rather than set a value, so the check is that the state flipped, not
-# that it equals a target value.
-ACTION_MUST_FLIP = {
-    "expand or contract": "EXPANDED",
-    "expandorcontract": "EXPANDED",
-    "toggle": "CHECKED",
-}
-
-
-def state_transition_note(action, before, after):
-    """Verify, after an action that promises a state change, that it happened.
-
-    Return (note, failed). failed=True marks a failure that must not be
-    retried: repeating the same action will not produce a different result.
-
-    A flipped state proves that the control changed, not that the
-    application acted on it. In VLC's preferences a radio button's CHECKED
-    state flipped after `Toggle` while the panel did not switch. This check
-    catches only one case, an action that promised a flip and did not flip;
-    treating it as general verification would produce false positives.
-    """
-    name = ACTION_MUST_FLIP.get(str(action).strip().lower())
-    if name is None or not before or not after:
-        return None, False
-    was, now = before.get(name), after.get(name)
-    if was is None or now is None:
-        return None, False
-    if was != now:
-        return ("[state] {} flipped {} -> {}, which is what the '{}' action promises. "
-                "Note the limit: this proves the CONTROL changed, not that the "
-                "application acted on it — measured on VLC, a radio button's CHECKED "
-                "flipped while the panel it selects did not switch. Confirm the actual "
-                "effect before treating this as done."
-                .format(name, was, now, action), False)
-    return ("The '{}' action reported success, but {} is still {} — that action promises "
-            "to flip it, so nothing happened. Repeating the same call will not help; "
-            "the toolkit accepted it without acting. Reach the element with a coordinate "
-            "click instead (gui, or click with click_method \"global\")."
-            .format(action, name, now), True)
 
 
 def plain_text_from_rich_text(value):
@@ -460,7 +397,7 @@ def state_segment(node, has_click_action=False, borrowed_name=False):
     # in the same group: the agent should see at a glance whether the element
     # can be clicked semantically.
     #
-    # The mark is needed because action_names() hides click-like actions
+    # The mark is needed because node_actions() hides click-like actions
     # (otherwise every clickable node would list `click` as another action,
     # and the model would alternate between two tools). With them hidden, a
     # node with a semantic click and a node without an Action interface

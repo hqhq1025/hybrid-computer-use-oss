@@ -356,7 +356,7 @@ class SetElementValueTests(AtspiPatchedTestCase):
         node = FakeNode(
             states=(STATE.EDITABLE,), text=text, value=value)
 
-        self.assertTrue(runtime.set_element_value(node, "-25"))
+        self.assertEqual(runtime.set_element_value_outcome(node, "-25"), "verified")
         self.assertEqual(value.current, -25.0)
         self.assertEqual(value.set_calls, [-25.0])
         self.assertEqual(text.set_calls, [])
@@ -367,7 +367,7 @@ class SetElementValueTests(AtspiPatchedTestCase):
         node = FakeNode(
             states=(STATE.EDITABLE,), text=text, value=value)
 
-        self.assertTrue(runtime.set_element_value(node, "-25"))
+        self.assertEqual(runtime.set_element_value_outcome(node, "-25"), "verified")
         self.assertEqual(value.current, 0.0)
         self.assertEqual(text.text, "-25")
 
@@ -382,14 +382,14 @@ class SetElementValueTests(AtspiPatchedTestCase):
         self.addCleanup(
             setattr, FakeAtspi.Value, "set_current_value", original)
 
-        self.assertTrue(runtime.set_element_value(node, "-25"))
+        self.assertEqual(runtime.set_element_value_outcome(node, "-25"), "verified")
         self.assertEqual(text.text, "-25")
 
     def test_confirms_the_write_landed(self):
         iface = FakeTextIface(text="old")
         node = FakeNode(states=(STATE.EDITABLE,), text=iface)
 
-        self.assertTrue(runtime.set_element_value(node, "new"))
+        self.assertEqual(runtime.set_element_value_outcome(node, "new"), "verified")
         self.assertEqual(iface.text, "new")
 
     def test_rejects_a_control_that_reports_success_without_changing(self):
@@ -397,7 +397,7 @@ class SetElementValueTests(AtspiPatchedTestCase):
         iface = FakeTextIface(text="old", honest=False)
         node = FakeNode(states=(STATE.EDITABLE,), text=iface)
 
-        self.assertFalse(runtime.set_element_value(node, "new"))
+        self.assertEqual(runtime.set_element_value_outcome(node, "new"), "no_change")
 
     def test_rejects_a_control_that_changes_to_a_different_value(self):
         """A change to some other value does not prove the requested value landed."""
@@ -411,10 +411,8 @@ class SetElementValueTests(AtspiPatchedTestCase):
         iface.set_contents = normalize
         node = FakeNode(states=(STATE.EDITABLE,), text=iface)
 
-        with self.assertRaises(RuntimeError) as caught:
-            runtime.set_element_value(node, " new ")
-
-        self.assertIn("control changed", str(caught.exception))
+        self.assertEqual(
+            runtime.set_element_value_outcome(node, " new "), "effect_unknown")
         self.assertEqual(iface.text, "NEW")
 
     def test_accepted_numeric_write_without_readback_is_unknown(self):
@@ -452,7 +450,6 @@ class ChannelTaggingTests(AtspiPatchedTestCase):
             ("send_key", lambda k: None),
             ("send_text", lambda t: None),
             ("send_mouse_click", lambda *a: None),
-            ("send_drag", lambda *a: None),
             # Match scroll_element's signature: it takes an optional element
             # point and returns the route used, which the note text reports.
             ("scroll_element", lambda d, p, point=None: "keys"),
@@ -1088,7 +1085,6 @@ class TargetedKeyboardFocusTests(AtspiPatchedTestCase):
         }
 
         self.assertIsNone(runtime.find_element_at_snapshot_path(app, record))
-        self.assertIsNone(runtime.find_element(app, record))
 
     def test_targeted_type_text_uses_the_resolved_node(self):
         target = FakeNode(states=(STATE.EDITABLE, STATE.FOCUSED))
@@ -1194,7 +1190,6 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
         self.sent_keys = []
         self.sent_text = []
         self.clicks = []
-        self.drags = []
 
         def fake_require(window, what):
             self.focus_calls.append(what)
@@ -1213,7 +1208,6 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
         self._patch(
             "send_mouse_click", lambda x, y, b, c: self.clicks.append((x, y, b, c))
         )
-        self._patch("send_drag", lambda *a: self.drags.append(a))
         self._patch("time", _NoSleep())
 
     def _patch(self, name, value):

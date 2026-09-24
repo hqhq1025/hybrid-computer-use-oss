@@ -83,26 +83,6 @@ def send_mouse_click(x, y, button, count):
         time.sleep(0.05)
 
 
-def send_drag(from_x, from_y, to_x, to_y):
-    emitted = False
-    pressed = False
-    try:
-        emitted = emit_mouse_event(from_x, from_y, "abs", emitted)
-        emitted = emit_mouse_event(from_x, from_y, "b1p", emitted)
-        pressed = True
-        steps = 12
-        for step in range(1, steps + 1):
-            x = from_x + ((to_x - from_x) * step / steps)
-            y = from_y + ((to_y - from_y) * step / steps)
-            emitted = emit_mouse_event(x, y, "abs", emitted)
-            time.sleep(0.02)
-        emitted = emit_mouse_event(to_x, to_y, "b1r", emitted)
-        pressed = False
-    finally:
-        if pressed:
-            best_effort_mouse_release(to_x, to_y, "b1r")
-
-
 def send_drag_path(points):
     if len(points) < 2:
         raise RuntimeError("gui drag requires path with at least two points")

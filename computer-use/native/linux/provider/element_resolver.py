@@ -132,11 +132,6 @@ def record_still_matches(node, record, window_bounds):
     return same_frame(record.get("frame"), relative_frame(node, window_bounds))
 
 
-def find_element(app, record):
-    """Resolve only the snapshot path; stale refs never rebind to a peer."""
-    return find_element_at_snapshot_path(app, record)
-
-
 def find_element_at_snapshot_path(app, record):
     """Resolve only the original snapshot path; never rebind to a same-name peer."""
     if not record:

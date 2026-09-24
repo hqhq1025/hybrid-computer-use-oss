@@ -1,49 +1,10 @@
-"""Target hit-test and model-facing action notes."""
+"""Model-facing action notes: channel tags and target resolution."""
 
-from .foundation import (
-    Atspi,  # pyright: ignore[reportAttributeAccessIssue]
-    node_role,
-    safe,
-)
+from .foundation import node_role
 from .ax_records import effective_name
 
 A11Y_CHANNEL = "[a11y]"
 GUI_CHANNEL = "[gui]"
-# Maximum descent depth for coordinate hit testing. AT-SPI
-# get_accessible_at_point returns only a direct child, so reaching a leaf
-# requires recursion; the bound stops loops on cyclic structures.
-HIT_TEST_MAX_DEPTH = 25
-
-
-def element_at_point(window, x, y):
-    """Return the accessible element at screen point (x, y), as a hint only.
-
-    A bare coordinate click cannot otherwise say what it hit; this lets the
-    caller compare the intended target with where the click landed.
-
-    Accuracy depends on the toolkit. Measured by recursing to a leaf and
-    hit-testing each element's own centre:
-        gedit (GTK) 11/11         Nautilus (GTK) 19/25
-        LibreOffice (VCL) 12/25   VLC (Qt) 2/25
-    VCL and Qt often resolve only to a container, so the result must be
-    presented as a hint, never as proof that the intended element was hit.
-    """
-    node = window
-    for _ in range(HIT_TEST_MAX_DEPTH):
-        component = safe(node.get_component_iface)
-        if component is None:
-            break
-        child = safe(
-            lambda: Atspi.Component.get_accessible_at_point(
-                component, int(round(x)), int(round(y)), Atspi.CoordType.SCREEN
-            )
-        )
-        if child is None:
-            break
-        node = child
-    if node is window:
-        return None
-    return node
 
 
 def addressing_channel(element_record):
