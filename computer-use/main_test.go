@@ -1356,7 +1356,7 @@ func TestObservationChannelsAreComplementary(t *testing.T) {
 		t.Fatal("gui must expose the independent full-desktop track")
 	}
 	if !strings.Contains(serverInstructions, "two complementary tools") {
-		t.Fatal("server instructions 必须把两条通道讲成互补而不是主备")
+		t.Fatal("server instructions must present the two channels as complementary, not as primary and fallback")
 	}
 	for _, fragment := range []string{
 		"AX is app-scoped semantic observation and action",
@@ -1368,7 +1368,7 @@ func TestObservationChannelsAreComplementary(t *testing.T) {
 		}
 	}
 	if !strings.Contains(linuxRuntimeScript, "def a11y_screenshots_enabled():") {
-		t.Fatal("截图策略必须集中在一个可开关的判据里，供 #29 做 A/B")
+		t.Fatal("screenshot policy must be decided by one switchable predicate so both setups can be compared")
 	}
 	if !strings.Contains(linuxRuntimeScript, "Every call") &&
 		!strings.Contains(gui.Description, "returns one final screenshot") {
@@ -1393,11 +1393,11 @@ func TestLinuxClickMethodSafetyAndPlatformSupport(t *testing.T) {
 	x, y := 10.0, 20.0
 	result = service.click("Text Editor", "7", "", &x, &y, 1, "left", "auto", observation{}, settlePlan{})
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "use GUI") {
-		t.Fatalf("click 收到 x/y 应当指向 gui: %#v", result)
+		t.Fatalf("click with x/y must point to GUI: %#v", result)
 	}
 	result = service.click("Text Editor", "", "", nil, nil, 1, "left", "auto", observation{}, settlePlan{})
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "click requires target.ref") {
-		t.Fatalf("click 缺 target.ref 应当明确报错: %#v", result)
+		t.Fatalf("click without target.ref must fail with an explicit error: %#v", result)
 	}
 
 	// Coordinate input is not gated by COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS,
@@ -1406,7 +1406,7 @@ func TestLinuxClickMethodSafetyAndPlatformSupport(t *testing.T) {
 	// unchanged, rejected when out of bounds, and never offset by a window
 	// origin or silently adjusted.
 	if strings.Contains(serverInstructions, "COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS") {
-		t.Fatal("闸门已移除，instructions 不该再提它")
+		t.Fatal("instructions must not mention the removed pointer-fallback gate")
 	}
 	for _, fragment := range []string{
 		"def screen_absolute_point(",
@@ -1414,7 +1414,7 @@ func TestLinuxClickMethodSafetyAndPlatformSupport(t *testing.T) {
 		"normalized[\"x\"], normalized[\"y\"] = screen_absolute_point(",
 	} {
 		if !strings.Contains(linuxRuntimeScript, fragment) {
-			t.Fatalf("GUI 通道必须原样使用并校验屏幕绝对坐标: 缺 %q", fragment)
+			t.Fatalf("GUI channel must validate and use absolute screen coordinates unchanged: missing %q", fragment)
 		}
 	}
 
@@ -1815,19 +1815,19 @@ func TestIncrementalTreeOnlyWhenSafeAndCheaper(t *testing.T) {
 
 	unchanged, ok := incrementalTree(base("a", "b", "c"), base("a", "b", "c"))
 	if !ok || len(unchanged) != 1 || !strings.Contains(unchanged[0], "0 changes") {
-		t.Fatalf("完全相同的树应只返回零变化摘要，得到 ok=%v diff=%v", ok, unchanged)
+		t.Fatalf("identical trees must yield only a zero-change summary, got ok=%v diff=%v", ok, unchanged)
 	}
 
 	diff, ok := incrementalTree(base("a", "b", "c", "d", "e", "f"),
 		base("a", "b", "X", "d", "e", "f"))
 	if !ok {
-		t.Fatal("只有一行变化时应该走增量")
+		t.Fatal("a single changed line should use the incremental diff")
 	}
 	if len(diff) != 3 || diff[1] != "-c" || diff[2] != "+X" {
-		t.Fatalf("一行被替换时应给出 -旧 +新，得到 %v", diff)
+		t.Fatalf("a replaced line should yield -old +new, got %v", diff)
 	}
 	if !strings.Contains(diff[0], "Existing rN refs remain bound") {
-		t.Fatal("表头必须说明未失效的短 ref 仍保持绑定")
+		t.Fatal("diff header must state that unaffected short refs remain bound")
 	}
 
 	// Pure insertion: the most common change after an action, which a
@@ -1835,27 +1835,27 @@ func TestIncrementalTreeOnlyWhenSafeAndCheaper(t *testing.T) {
 	diff, ok = incrementalTree(base("a", "b", "c", "d", "e", "f", "g"),
 		base("a", "b", "NEW", "c", "d", "e", "f", "g"))
 	if !ok {
-		t.Fatal("插入一行应该走增量——老判据在这里退回全量，占了绝大多数动作")
+		t.Fatal("pure insertion should use the incremental diff, not fall back to the full tree")
 	}
 	if len(diff) != 2 || diff[1] != "+NEW" {
-		t.Fatalf("纯插入应只给出 +新行，得到 %v", diff)
+		t.Fatalf("pure insertion should yield only +new, got %v", diff)
 	}
 
 	// Pure deletion.
 	diff, ok = incrementalTree(base("a", "b", "GONE", "c", "d", "e", "f"),
 		base("a", "b", "c", "d", "e", "f"))
 	if !ok {
-		t.Fatal("删除一行应该走增量")
+		t.Fatal("pure deletion should use the incremental diff")
 	}
 	if len(diff) != 2 || diff[1] != "-GONE" {
-		t.Fatalf("纯删除应只给出 -旧行，得到 %v", diff)
+		t.Fatalf("pure deletion should yield only -old, got %v", diff)
 	}
 
 	if _, ok := incrementalTree(base("a", "b", "c"), base("X", "Y", "c")); ok {
-		t.Fatal("变化占比过大时增量不划算，应回退全量")
+		t.Fatal("when most lines change, the diff should fall back to the full tree")
 	}
 	if _, ok := incrementalTree(nil, base("a")); ok {
-		t.Fatal("没有前一份快照时不能走增量")
+		t.Fatal("without a previous snapshot there must be no incremental diff")
 	}
 }
 
@@ -2702,7 +2702,7 @@ func TestSourceDoesNotReplaySuccessfulSemanticClicks(t *testing.T) {
 		"shouldRetryWithSynthesis",
 	} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("语义调用已返回成功时不得因观测盲区自动再点一次: %q", forbidden)
+			t.Fatalf("a successful semantic click must not be replayed because its effect went unobserved: %q", forbidden)
 		}
 	}
 }
@@ -2719,14 +2719,14 @@ func TestSourceDoesNotReplaySuccessfulSemanticClicks(t *testing.T) {
 // is known to be fragile.
 func TestTreeRenderingReadsActionTableOnce(t *testing.T) {
 	if !strings.Contains(linuxRuntimeScript, "def node_actions(") {
-		t.Fatal("动作表必须有一个一次读完的入口 node_actions()")
+		t.Fatal("the action table must be read through a single entry point, node_actions()")
 	}
 	// record_for must not read the action table a second time.
 	if strings.Contains(linuxRuntimeScript, "state_segment(node)\n") {
-		t.Fatal("state_segment 不应自己再去问一次动作表，标记要由 record_for 传入")
+		t.Fatal("state_segment must not query the action table again; record_for must pass the mark in")
 	}
 	if !strings.Contains(linuxRuntimeScript, "actions, has_click_action = node_actions(node)") {
-		t.Fatal("record_for 应当一次读完动作表，两个字段共用")
+		t.Fatal("record_for must read the action table once and share it between both fields")
 	}
 }
 
@@ -2744,20 +2744,20 @@ func TestSynthesisOnlyToolsConfirmOnlyWindowFocus(t *testing.T) {
 			request.Action = axScrollCommand{Direction: "down", Pages: 1}
 		}
 		if !windowFocusWasConfirmed(request) {
-			t.Fatalf("%s 走 require_window_focus，窗口焦点应当可确认", tool)
+			t.Fatalf("%s uses require_window_focus, so window focus should be confirmed", tool)
 		}
 	}
 	if windowFocusWasConfirmed(axServiceRequest{Action: axClickCommand{}}) {
-		t.Fatal("click 可能走语义通道，不得声称确认过窗口焦点")
+		t.Fatal("click may use the semantic channel and must not claim confirmed window focus")
 	}
 	if !strings.Contains(
 		findToolDefinition(t, "AX").Description,
 		"resolve live",
 	) {
-		t.Fatal("instructions 应当仍然引导优先走元素定向")
+		t.Fatal("instructions should still steer toward element-targeted actions first")
 	}
 	if !strings.Contains(linuxRuntimeScript, "Delivery to the intended target was not verified") {
-		t.Fatal("合成通道仍应声明目标控件级别的不确定性")
+		t.Fatal("synthesis channel should still declare control-level delivery uncertainty")
 	}
 }
 
@@ -2769,10 +2769,10 @@ func TestSynthesisOnlyToolsConfirmOnlyWindowFocus(t *testing.T) {
 // on content-rich applications.
 func TestInstructionsDoNotClaimScreenshotsAreAlwaysCostlier(t *testing.T) {
 	if !strings.Contains(serverInstructions, "Use AX for named controls") {
-		t.Fatal("应当把语义定位讲成 AX 优先的理由")
+		t.Fatal("instructions should give semantic targeting as the reason to prefer AX")
 	}
 	if strings.Contains(serverInstructions, "it is cheap, precise") {
-		t.Fatal("不得再声称 a11y 树总是更便宜——实测在文件管理器上不成立")
+		t.Fatal("instructions must not claim the a11y tree is always cheaper than a screenshot")
 	}
 }
 
@@ -2792,11 +2792,11 @@ func TestElementIntentCrossCheck(t *testing.T) {
 	// Insert menu.
 	mismatch := elementIntentMismatch(menu, "Position Y spin button")
 	if mismatch == "" {
-		t.Fatal("下标解析到完全不同的控件时必须拒绝")
+		t.Fatal("an index that resolves to an entirely different control must be rejected")
 	}
 	for _, fragment := range []string{`menu "Insert"`, "Position Y spin button", "earlier snapshot"} {
 		if !strings.Contains(mismatch, fragment) {
-			t.Fatalf("拒绝信息要把两边都说清并给出原因，缺 %q: %s", fragment, mismatch)
+			t.Fatalf("rejection must describe both sides and the cause, missing %q: %s", fragment, mismatch)
 		}
 	}
 
@@ -2805,20 +2805,20 @@ func TestElementIntentCrossCheck(t *testing.T) {
 	// would let "the Save button" pass against the New button.
 	if elementIntentMismatch(&elementRecord{Index: 8, ControlType: "push button", Name: "New",
 		Description: "Create a new document"}, "the Save button") == "" {
-		t.Fatal("通用词 button 不得让校验失效")
+		t.Fatal("the generic word button must not defeat the check")
 	}
 
 	// An unnamed element usually takes its identity from a nearby label and has
 	// nothing of its own to compare; the spin buttons in LibreOffice's Position
 	// and Size dialog have no names at all. Skip the check rather than guess.
 	if got := elementIntentMismatch(spin, "Position Y spin button"); got != "" {
-		t.Fatalf("无名元素不该校验（否则纯误伤）: %s", got)
+		t.Fatalf("unnamed elements must skip the check, which could only reject falsely: %s", got)
 	}
 
 	// The same declaration must pass against the matching element.
 	if got := elementIntentMismatch(&elementRecord{ControlType: "push button", Name: "Save",
 		Description: "Save the current file"}, "the Save button"); got != "" {
-		t.Fatalf("声明与元素相符不该拒绝: %s", got)
+		t.Fatalf("a declaration matching the element must not be rejected: %s", got)
 	}
 
 	// A false rejection is worse than a miss, because a rejected agent concludes
@@ -2828,17 +2828,17 @@ func TestElementIntentCrossCheck(t *testing.T) {
 		declared string
 		why      string
 	}{
-		{menu, "", "没声明就是没开启这个校验，维持旧行为"},
-		{menu, "插入菜单", "非 ASCII 声明比不了英文 role/name，判不了就别拒"},
-		{menu, "the", "只有虚词，没有可比对的实词"},
-		{&elementRecord{ControlType: "push button", Name: "OK"}, "OK", "名字完全命中"},
-		{&elementRecord{ControlType: "push button", Name: "Save"}, "save button", "大小写不敏感"},
-		{&elementRecord{ControlType: "table cell", Name: "A1"}, "the A1 cell", "虚词之外有实词命中"},
-		{&elementRecord{ControlType: "spin button"}, "spin button with no name", "无名元素跳过校验"},
-		{&elementRecord{ControlType: "push button", Name: "OK"}, "the button", "只有通用词，没有区分性实词"},
+		{menu, "", "no declared intent disables the check"},
+		{menu, "插入菜单", "a non-ASCII intent cannot be compared with an English role or name"},
+		{menu, "the", "only stop words, nothing to compare"},
+		{&elementRecord{ControlType: "push button", Name: "OK"}, "OK", "exact name match"},
+		{&elementRecord{ControlType: "push button", Name: "Save"}, "save button", "case-insensitive"},
+		{&elementRecord{ControlType: "table cell", Name: "A1"}, "the A1 cell", "a content word matches besides stop words"},
+		{&elementRecord{ControlType: "spin button"}, "spin button with no name", "unnamed elements skip the check"},
+		{&elementRecord{ControlType: "push button", Name: "OK"}, "the button", "only generic words, no distinguishing content word"},
 	} {
 		if got := elementIntentMismatch(ok.record, ok.declared); got != "" {
-			t.Fatalf("误拒（%s）: declared=%q -> %s", ok.why, ok.declared, got)
+			t.Fatalf("false rejection (%s): declared=%q -> %s", ok.why, ok.declared, got)
 		}
 	}
 }
@@ -2858,7 +2858,7 @@ func TestNotesLearnedFromTheRealAgentRun(t *testing.T) {
 		"that is not control-delivery evidence",
 	} {
 		if !strings.Contains(unchangedSynthesisNote(), fragment) {
-			t.Fatalf("送达但无变化的 Note 不得断言失败，缺 %q", fragment)
+			t.Fatalf("note after input with no observed change must not claim failure: missing %q", fragment)
 		}
 	}
 
@@ -2868,7 +2868,7 @@ func TestNotesLearnedFromTheRealAgentRun(t *testing.T) {
 	snapshot := &appSnapshot{Elements: []elementRecord{{Index: 0}, {Index: 59}}}
 	_, err := lookupElement(snapshot, "128")
 	if err == nil {
-		t.Fatal("下标不存在时必须报错")
+		t.Fatal("a missing index must be an error")
 	}
 	// Follows Playwright's error shape: tool prefix, structured fields, a call
 	// log and the next step.
@@ -2881,13 +2881,13 @@ func TestNotesLearnedFromTheRealAgentRun(t *testing.T) {
 		"returned rN ref",
 	} {
 		if !strings.Contains(err.Error(), fragment) {
-			t.Fatalf("下标不存在的报错要给出完整事实链与出路，缺 %q:\n%s", fragment, err)
+			t.Fatalf("missing-index error must give the full chain of facts and the next step, missing %q:\n%s", fragment, err)
 		}
 	}
 	// Snapshot age is a desktop-specific addition: a snapshot can be tens of
 	// seconds stale without the agent noticing.
 	if !strings.Contains(err.Error(), "Snapshot:") {
-		t.Fatalf("报错要说清快照有多旧:\n%s", err)
+		t.Fatalf("error must state the snapshot age:\n%s", err)
 	}
 }
 
@@ -2919,10 +2919,10 @@ func TestSelectorLookup(t *testing.T) {
 	} {
 		record, err := lookupElement(snapshot, ok.selector)
 		if err != nil {
-			t.Fatalf("%s 应当命中: %v", ok.selector, err)
+			t.Fatalf("%s should match: %v", ok.selector, err)
 		}
 		if record.Index != ok.want {
-			t.Fatalf("%s 命中了 %d，期望 %d", ok.selector, record.Index, ok.want)
+			t.Fatalf("%s matched %d, want %d", ok.selector, record.Index, ok.want)
 		}
 	}
 
@@ -2930,14 +2930,14 @@ func TestSelectorLookup(t *testing.T) {
 	// exactly the kind of error these checks exist to prevent.
 	_, err := lookupElement(snapshot, `"Save"`)
 	if err == nil {
-		t.Fatal(`"Save" 同时命中 push button 与 menu，必须报歧义`)
+		t.Fatal(`"Save" matches both a push button and a menu and must be reported as ambiguous`)
 	}
 	// Candidate lines follow Playwright's strict-mode violation error: index,
 	// description, and an `aka` selector that can be used directly.
 	for _, fragment := range []string{"ambiguous", "matches 2 elements",
 		`4    push button "Save"`, `9    menu "Save"`, "aka", "adding the role"} {
 		if !strings.Contains(err.Error(), fragment) {
-			t.Fatalf("歧义报错要列出候选与收敛办法，缺 %q: %s", fragment, err)
+			t.Fatalf("ambiguity error must list the candidates and how to narrow them, missing %q: %s", fragment, err)
 		}
 	}
 
@@ -2945,22 +2945,22 @@ func TestSelectorLookup(t *testing.T) {
 	// should be told to add the name, not the role it already has.
 	_, err = lookupElement(snapshot, "push button")
 	if err == nil {
-		t.Fatal("只给 role 且命中多个时必须报歧义")
+		t.Fatal("a role-only selector with several matches must be reported as ambiguous")
 	}
 	if !strings.Contains(err.Error(), `adding the name in quotes`) ||
 		!strings.Contains(err.Error(), "push button \"Save\"") {
-		t.Fatalf("只给 role 时应当建议补名字: %s", err)
+		t.Fatalf("a role-only selector should be told to add the name: %s", err)
 	}
 
 	// A selector without a match must be reported explicitly.
 	_, err = lookupElement(snapshot, `push button "Nope"`)
 	if err == nil || !strings.Contains(err.Error(), "no element matches") {
-		t.Fatalf("找不到时要明确报出来: %v", err)
+		t.Fatalf("a selector without a match must be reported explicitly: %v", err)
 	}
 
 	// Numeric indices keep working.
 	if record, err := lookupElement(snapshot, "8"); err != nil || record.Index != 8 {
-		t.Fatalf("数字下标不得失效: %v", err)
+		t.Fatalf("numeric indices must keep working: %v", err)
 	}
 }
 
@@ -2982,18 +2982,18 @@ func TestChannelCapabilitySwitch(t *testing.T) {
 	all := names()
 	for _, tool := range []string{"AX", "GUI"} {
 		if !all[tool] {
-			t.Fatalf("默认应当三条通道全开，缺 %s", tool)
+			t.Fatalf("all channels should be enabled by default, missing %s", tool)
 		}
 	}
 
 	t.Setenv("COMPUTER_USE_CHANNELS", "a11y,keyboard")
 	without := names()
 	if without["GUI"] {
-		t.Fatal("关掉 gui 通道后 GUI 不该还在 tools/list 里")
+		t.Fatal("GUI must not remain in tools/list after the gui channel is disabled")
 	}
 	for _, kept := range []string{"AX"} {
 		if !without[kept] {
-			t.Fatalf("关掉 gui 不该波及 %s", kept)
+			t.Fatalf("disabling gui must not affect %s", kept)
 		}
 	}
 
@@ -3002,7 +3002,7 @@ func TestChannelCapabilitySwitch(t *testing.T) {
 	service := newService()
 	result := service.callTool("gui", map[string]any{"actions": []any{}})
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "channel, which is disabled") {
-		t.Fatalf("被关通道的工具硬调要说清原因: %#v", result)
+		t.Fatalf("a direct call to a disabled channel's tool must explain the refusal: %#v", result)
 	}
 }
 
@@ -3171,23 +3171,23 @@ func TestPreflightOnlyErrorsDoNotCaptureFreshUIContext(t *testing.T) {
 func TestUnchangedNotesReportOnlyObservedChange(t *testing.T) {
 	changed := strings.Join(unchangedNotes(true, pixelsChanged, false), " ")
 	if !strings.Contains(changed, "visual change observed") {
-		t.Fatalf("屏幕变化只能报告 visual change observed: %s", changed)
+		t.Fatalf("a screen change must be reported only as visual change observed: %s", changed)
 	}
 
 	identical := strings.Join(unchangedNotes(true, pixelsIdentical, false), " ")
 	if !strings.Contains(identical, "no observed change") ||
 		!strings.Contains(identical, "control delivery and semantic effect remain unknown") {
-		t.Fatalf("屏幕不变只能报告 no observed change，并保留送达不确定性: %s", identical)
+		t.Fatalf("an unchanged screen must be reported only as no observed change, keeping delivery uncertain: %s", identical)
 	}
 	weaker := strings.Join(unchangedNotes(false, pixelsIdentical, false), " ")
 	if !strings.Contains(weaker, "no observed change") {
-		t.Fatalf("无窗口焦点证据时仍只报告观测结果: %s", weaker)
+		t.Fatalf("without window-focus evidence the note must still report only the observation: %s", weaker)
 	}
 
 	unknown := strings.Join(unchangedNotes(true, pixelsUnknown, false), " ")
 	if !strings.Contains(unknown, "No accessibility change observed") ||
 		!strings.Contains(unknown, "not control-delivery evidence") {
-		t.Fatalf("像素比不了时只报告 a11y 观测和窗口焦点边界: %s", unknown)
+		t.Fatalf("without a pixel comparison the note must report only the a11y observation and the window-focus boundary: %s", unknown)
 	}
 	for name, note := range map[string]string{
 		"changed": changed, "identical": identical, "unknown": unknown,
@@ -3202,7 +3202,7 @@ func TestUnchangedNotesReportOnlyObservedChange(t *testing.T) {
 	}
 	if attrsChanged := strings.Join(unchangedNotes(true, pixelsChanged, true), " "); !strings.Contains(attrsChanged, "text attributes changed") ||
 		!strings.Contains(attrsChanged, "visual change observed") {
-		t.Fatalf("属性与屏幕变化应分别报告，不得由一个分支吞掉另一个: %s", attrsChanged)
+		t.Fatalf("attribute and screen changes must be reported separately, not one swallowed by the other's branch: %s", attrsChanged)
 	}
 
 	for _, c := range []struct {
@@ -3591,7 +3591,7 @@ func TestSelectorFallsBackToDescription(t *testing.T) {
 	// A button without a name is identified by its description.
 	record, err := lookupElement(snapshot, `push button "Go back"`)
 	if err != nil || record.Index != 3 {
-		t.Fatalf("应当按 description 命中 3：%v %v", record, err)
+		t.Fatalf("description should match element 3: %v %v", record, err)
 	}
 
 	// A name match must not be diluted into ambiguity by description matches.
@@ -3599,7 +3599,7 @@ func TestSelectorFallsBackToDescription(t *testing.T) {
 	// two levels were merged, an exact name match could become ambiguous.
 	record, err = lookupElement(snapshot, `push button "Save"`)
 	if err != nil || record.Index != 4 {
-		t.Fatalf("name 命中优先，不该报歧义：%v %v", record, err)
+		t.Fatalf("a name match takes precedence and must not be ambiguous: %v %v", record, err)
 	}
 
 	// The description level must also report ambiguity instead of silently
@@ -3610,7 +3610,7 @@ func TestSelectorFallsBackToDescription(t *testing.T) {
 	}}
 	if _, err := lookupElement(ambiguous, `"Close"`); err == nil ||
 		!strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("description 命中多个也要报歧义：%v", err)
+		t.Fatalf("multiple description matches must also be reported as ambiguous: %v", err)
 	}
 }
 
@@ -5513,44 +5513,44 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 	// The predicate narrows the candidates: without it the selector is
 	// ambiguous, with it the match is unique.
 	if _, err := lookupElement(snapshot, `check menu item "Ruler"`); err == nil {
-		t.Fatal("两个同名 Ruler，本该报歧义")
+		t.Fatal("two elements named Ruler should be ambiguous")
 	}
 	record, err := lookupElement(snapshot, `check menu item "Ruler" [checked]`)
 	if err != nil || record.Index != 1 {
-		t.Fatalf("[checked] 应当筛出 1 号：%v %v", record, err)
+		t.Fatalf("[checked] should narrow to element 1: %v %v", record, err)
 	}
 
 	// Snapshots print several states inside one bracket, so a group splits
 	// into several constraints; this is the shape an agent copies from a line.
 	if record, err = lookupElement(snapshot, `list item "Row" [selected focused]`); err != nil ||
 		record.Index != 11 {
-		t.Fatalf("一组多词应当逐词匹配：%v %v", record, err)
+		t.Fatalf("a multi-word group should match word by word: %v %v", record, err)
 	}
 	if _, err = lookupElement(snapshot, `list item "Row" [selected expanded]`); err == nil {
-		t.Fatal("组里有一个词对不上就不该命中")
+		t.Fatal("a group with one unmatched word must not match")
 	}
 
 	// Elements sharing role and name can only be told apart by desc, as with
 	// the three "Menu" toggle buttons in Nautilus.
 	if record, err = lookupElement(snapshot, `toggle button "Menu" [desc="View options"]`); err != nil ||
 		record.Index != 5 {
-		t.Fatalf("[desc=…] 应当筛出 5 号：%v %v", record, err)
+		t.Fatalf("[desc=…] should narrow to element 5: %v %v", record, err)
 	}
 	// desc alone, without a quoted name, must also work as an identity.
 	if record, err = lookupElement(snapshot, `toggle button [desc="Show operations"]`); err != nil ||
 		record.Index != 6 {
-		t.Fatalf("只给 role + desc 也该唯一：%v %v", record, err)
+		t.Fatalf("role plus desc alone should be unique: %v %v", record, err)
 	}
 	if record, err = lookupElement(snapshot, `[placeholder="Search files"]`); err != nil ||
 		record.Index != 9 {
-		t.Fatalf("只给 placeholder 也该唯一：%v %v", record, err)
+		t.Fatalf("placeholder alone should be unique: %v %v", record, err)
 	}
 	if _, err = lookupElement(snapshot, `push button "Go" [actions=press]`); err == nil {
 		t.Fatal("legacy [actions=…] selector must be rejected")
 	}
 	if record, err = lookupElement(snapshot, `push button "Go" [a=press]`); err != nil ||
 		record.Index != 8 {
-		t.Fatalf("[a=…] 应当命中 8 号：%v %v", record, err)
+		t.Fatalf("[a=…] should match element 8: %v %v", record, err)
 	}
 
 	// Anything unrecognised is an error that names the unread remainder.
@@ -5565,11 +5565,11 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 	} {
 		_, err := lookupElement(snapshot, selector)
 		if err == nil {
-			t.Fatalf("%q 应当报错，而不是静默丢弃约束", selector)
+			t.Fatalf("%q should fail instead of silently dropping a constraint", selector)
 		}
 		if !strings.Contains(err.Error(), "trailing part I cannot read") &&
 			!strings.Contains(err.Error(), "no element matches") {
-			t.Fatalf("%q 的错误没说清是尾部读不懂：%v", selector, err)
+			t.Fatalf("error for %q does not say the trailing part is unreadable: %v", selector, err)
 		}
 	}
 
@@ -5579,7 +5579,7 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 	_, err = lookupElement(snapshot, `push button "OK" >> nth=0`)
 	for _, want := range []string{"[checked]", "desc=", "nth=", ">>", ":right-of"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("错误里缺少 %q：%v", want, err)
+			t.Fatalf("error is missing %q: %v", want, err)
 		}
 	}
 
@@ -5587,12 +5587,12 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 	// state change rather than a mistyped name, so the hint says that first.
 	_, err = lookupElement(snapshot, `check menu item "Ruler" [expanded]`)
 	if err == nil || !strings.Contains(err.Error(), "may have changed since the snapshot") {
-		t.Fatalf("筛空时应当提示状态可能已变：%v", err)
+		t.Fatalf("when predicates filter out every candidate, the hint should say the state may have changed: %v", err)
 	}
 	// The parsed predicates are echoed so the caller sees how the selector was
 	// read.
 	if !strings.Contains(err.Error(), "predicates [expanded]") {
-		t.Fatalf("Call log 里没回显解析到的谓词：%v", err)
+		t.Fatalf("call log does not echo the parsed predicates: %v", err)
 	}
 }
 
@@ -5603,26 +5603,26 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 func TestSelectorFindsTheRealClosingQuote(t *testing.T) {
 	role, name, hasName, rest := parseSelector(`toggle button "Menu" [desc="View options"]`)
 	if role != "toggle button" || name != "Menu" || !hasName {
-		t.Fatalf("配对引号找错了：role=%q name=%q", role, name)
+		t.Fatalf("wrong closing quote: role=%q name=%q", role, name)
 	}
 	if rest != `[desc="View options"]` {
-		t.Fatalf("残串不对：%q", rest)
+		t.Fatalf("wrong remainder: %q", rest)
 	}
 
 	// The renderer's quoted() escapes quotes as \", so parsing must unescape
 	// them.
 	_, name, _, rest = parseSelector(`static "say \"hi\"" [focused]`)
 	if name != `say "hi"` {
-		t.Fatalf("转义还原错了：%q", name)
+		t.Fatalf("escapes were not restored: %q", name)
 	}
 	if rest != "[focused]" {
-		t.Fatalf("带转义时残串不对：%q", rest)
+		t.Fatalf("wrong remainder with escapes: %q", rest)
 	}
 
 	// A `]` inside a desc value must not end the predicate.
 	preds, err := parsePredicates(`[desc="a] b"]`)
 	if err != nil || len(preds) != 1 || preds[0].value != "a] b" {
-		t.Fatalf("引号内的 ] 不该当成收尾：%v %v", preds, err)
+		t.Fatalf("a ] inside quotes must not end the predicate: %v %v", preds, err)
 	}
 }
 
@@ -5648,14 +5648,14 @@ func TestTextAttributeChanges(t *testing.T) {
 
 	changes := textAttributeChanges(before, after)
 	if len(changes) != 1 {
-		t.Fatalf("只有段落变了，应当只报一条：%v", changes)
+		t.Fatalf("only the paragraph changed, so exactly one change should be reported: %v", changes)
 	}
 	if !strings.Contains(changes[0], "justification: left -> right") {
-		t.Fatalf("要说出什么变成了什么：%s", changes[0])
+		t.Fatalf("change must state the old and new values: %s", changes[0])
 	}
 	// Unchanged attributes must not be included.
 	if strings.Contains(changes[0], "weight") {
-		t.Fatalf("没变的属性不该出现：%s", changes[0])
+		t.Fatalf("unchanged attributes must not be reported: %s", changes[0])
 	}
 
 	// Regression: elements are paired by runtime ID path, not by role and name.
@@ -5675,7 +5675,7 @@ func TestTextAttributeChanges(t *testing.T) {
 			TextAttributes: map[string]string{"bg-color": "b"}},
 	}}
 	if got := textAttributeChanges(collide, same); len(got) != 0 {
-		t.Fatalf("同名无名节点不得互相串味：%v", got)
+		t.Fatalf("unnamed nodes with the same role must not borrow each other's attributes: %v", got)
 	}
 
 	replaced := &appSnapshot{Elements: []elementRecord{
@@ -5687,7 +5687,7 @@ func TestTextAttributeChanges(t *testing.T) {
 			TextAttributes: map[string]string{"family-name": "Söhne"}},
 	}}
 	if got := textAttributeChanges(replaced, replacement); len(got) != 0 {
-		t.Fatalf("同一路径换成另一个 role/name 后不得错配属性: %v", got)
+		t.Fatalf("attributes must not be paired across a role/name change at the same path: %v", got)
 	}
 
 	implausible := &appSnapshot{Elements: []elementRecord{
@@ -5699,7 +5699,7 @@ func TestTextAttributeChanges(t *testing.T) {
 			TextAttributes: map[string]string{"family-name": "Söhne"}},
 	}}
 	if got := textAttributeChanges(implausible, plausibleAfter); len(got) != 0 {
-		t.Fatalf("单元格范围不得冒充字体族参与属性证据: %v", got)
+		t.Fatalf("a cell range must not pass as a font family in attribute evidence: %v", got)
 	}
 
 	uiBefore := &appSnapshot{Elements: []elementRecord{
@@ -5742,7 +5742,7 @@ func TestTextAttributeChanges(t *testing.T) {
 
 	// Without a snapshot from before the action, no change may be invented.
 	if got := textAttributeChanges(nil, after); got != nil {
-		t.Fatalf("没有动作前的快照就不该报变化：%v", got)
+		t.Fatalf("without a pre-action snapshot no change may be reported: %v", got)
 	}
 }
 
@@ -5761,40 +5761,40 @@ func TestOutputSpillsToFileOnlyWhenAskedAndOnlyWhenBig(t *testing.T) {
 	// The default stdout mode writes nothing to disk.
 	t.Setenv("COMPUTER_USE_OUTPUT_MODE", "")
 	if got := spillToFile("snapshot", big); got != "" {
-		t.Fatalf("默认不该落盘：%s", got[:60])
+		t.Fatalf("default mode must not spill to disk: %s", got[:60])
 	}
 
 	// In file mode, output below the threshold stays inline: spilling turns one
 	// call into two, a net loss for small trees.
 	t.Setenv("COMPUTER_USE_OUTPUT_MODE", "file")
 	if got := spillToFile("snapshot", "short tree"); got != "" {
-		t.Fatalf("小输出不该落盘：%s", got)
+		t.Fatalf("small output must not spill to disk: %s", got)
 	}
 
 	replacement := spillToFile("snapshot", big)
 	if replacement == "" {
-		t.Fatal("大输出应当落盘")
+		t.Fatal("large output should spill to disk")
 	}
 	for _, fragment := range []string{dir, "characters", "lines", "Read that file"} {
 		if !strings.Contains(replacement, fragment) {
-			t.Fatalf("替代文本要说清写到哪、有多大、怎么读，缺 %q：%s", fragment, replacement)
+			t.Fatalf("replacement must say where the output went, how large it is and how to read it, missing %q: %s", fragment, replacement)
 		}
 	}
 	// The replacement must be far smaller than the original, or the mechanism
 	// is pointless.
 	if len(replacement) >= len(big)/4 {
-		t.Fatalf("替代文本没省下东西：%d vs %d", len(replacement), len(big))
+		t.Fatalf("replacement saves too little: %d vs %d", len(replacement), len(big))
 	}
 
 	// The file must hold the original byte for byte, since the agent reads it
 	// to get the full output.
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 {
-		t.Fatalf("应当只写出一个文件：%v %v", entries, err)
+		t.Fatalf("exactly one file should be written: %v %v", entries, err)
 	}
 	written, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
 	if err != nil || string(written) != big {
-		t.Fatalf("落盘内容与原文不一致")
+		t.Fatalf("spilled file differs from the original output")
 	}
 }
 
@@ -5804,7 +5804,7 @@ func TestSpillFailureFallsBackToInlineText(t *testing.T) {
 	t.Setenv("COMPUTER_USE_OUTPUT_MODE", "file")
 	t.Setenv("COMPUTER_USE_OUTPUT_DIR", "/proc/definitely-not-writable")
 	if got := spillToFile("snapshot", strings.Repeat("x", 9000)); got != "" {
-		t.Fatalf("写不成时应当退回内联，而不是给出一个不存在的路径：%s", got[:60])
+		t.Fatalf("a failed spill should fall back to inline text, not return a path that does not exist: %s", got[:60])
 	}
 }
 
@@ -5831,10 +5831,10 @@ func TestFindFiltersAreAndedAndReuseTheRenderedLines(t *testing.T) {
 
 	lines := linesByIndex(snapshot)
 	if len(lines) != 4 {
-		t.Fatalf("行索引应跳过非数字开头的截断提示行，得到 %d 条", len(lines))
+		t.Fatalf("line index should skip truncation notices that do not start with a number, got %d lines", len(lines))
 	}
 	if lines[5] != "  5 toggle button \"Bold\" [enabled checked]" {
-		t.Fatalf("行必须原样取自渲染结果，得到 %q", lines[5])
+		t.Fatalf("lines must be taken verbatim from the rendered tree, got %q", lines[5])
 	}
 
 	cases := []struct {
@@ -5860,11 +5860,11 @@ func TestFindFiltersAreAndedAndReuseTheRenderedLines(t *testing.T) {
 			}
 		}
 		if len(got) != len(c.want) {
-			t.Fatalf("查询 %+v 期望 %v，得到 %v", c, c.want, got)
+			t.Fatalf("query %+v: want %v, got %v", c, c.want, got)
 		}
 		for i := range got {
 			if got[i] != c.want[i] {
-				t.Fatalf("查询 %+v 期望 %v，得到 %v", c, c.want, got)
+				t.Fatalf("query %+v: want %v, got %v", c, c.want, got)
 			}
 		}
 	}
@@ -5877,30 +5877,30 @@ func TestVerifyReportsWhatItActuallySawNotJustFailure(t *testing.T) {
 
 	ok, observed := verifyGoal{state: "checked"}.check(record, nil)
 	if ok {
-		t.Fatal("元素没有 checked，断言不该通过")
+		t.Fatal("assertion must fail when the element is not checked")
 	}
 	if !strings.Contains(observed, "enabled focused") {
-		t.Fatalf("失败时必须回报实际观测到的状态，得到 %q", observed)
+		t.Fatalf("failure must report the observed states, got %q", observed)
 	}
 
 	if ok, _ := (verifyGoal{state: "!checked"}).check(record, nil); !ok {
-		t.Fatal("!checked 对一个未选中的元素应当通过")
+		t.Fatal("!checked should pass for an unchecked element")
 	}
 
 	// exists:false expresses "wait for the dialog to disappear": it passes only
 	// when the element is absent.
 	no := false
 	if ok, _ := (verifyGoal{exists: &no}).check(nil, nil); !ok {
-		t.Fatal("元素不存在时 exists:false 应当通过")
+		t.Fatal("exists:false should pass when the element is absent")
 	}
 	if ok, _ := (verifyGoal{exists: &no}).check(record, nil); ok {
-		t.Fatal("元素还在时 exists:false 不该通过")
+		t.Fatal("exists:false must not pass while the element is present")
 	}
 
 	// With the default timeout, asserting a state on a missing element must
 	// return an actionable reason, not an empty failure.
 	if ok, observed := (verifyGoal{state: "checked"}).check(nil, nil); ok || observed == "" {
-		t.Fatalf("找不到元素时要给出理由，得到 ok=%v observed=%q", ok, observed)
+		t.Fatalf("a missing element must fail with a reason, got ok=%v observed=%q", ok, observed)
 	}
 }
 
@@ -6031,7 +6031,7 @@ func TestVerifyDoesNotDoubleWrapTheStates(t *testing.T) {
 	record := &elementRecord{Index: 1, ControlType: "push button", Name: "Search", States: " [has-click-action]"}
 	_, observed := verifyGoal{state: "checked"}.check(record, nil)
 	if strings.Contains(observed, "[ [") || strings.Contains(observed, "]]") {
-		t.Fatalf("states 不该被二次加括号，得到 %q", observed)
+		t.Fatalf("states must not be wrapped in brackets twice, got %q", observed)
 	}
 }
 
@@ -6044,10 +6044,10 @@ func TestVerifyAcceptsNumericIndicesNotJustSelectors(t *testing.T) {
 	}}
 	record, err := lookupElementFor(snapshot, "62", "", "verify")
 	if err != nil || record == nil {
-		t.Fatalf("数字下标必须能解析，得到 record=%v err=%v", record, err)
+		t.Fatalf("numeric index must resolve, got record=%v err=%v", record, err)
 	}
 	if ok, _ := (verifyGoal{textContains: "baseline"}).check(record, nil); !ok {
-		t.Fatal("解析到的记录应当满足 text_contains")
+		t.Fatal("resolved record should satisfy text_contains")
 	}
 }
 
@@ -6058,7 +6058,7 @@ func TestCoordinateNotesDeclareTheirExplicitSpace(t *testing.T) {
 	// point back to window-relative coordinates before reporting; GUI uses
 	// screen_absolute_point and does not share the window-offset convention.
 	if !strings.Contains(linuxRuntimeScript, "def window_relative(") {
-		t.Fatal("需要一个把绝对坐标换回窗口相对的转换函数")
+		t.Fatal("runtime needs a function that converts absolute coordinates back to window-relative ones")
 	}
 	for _, fragment := range []string{
 		// The AX element coordinate fallback stays window-relative.
@@ -6066,7 +6066,7 @@ func TestCoordinateNotesDeclareTheirExplicitSpace(t *testing.T) {
 		"window-relative pixels after bringing the window to the foreground",
 	} {
 		if !strings.Contains(linuxRuntimeScript, fragment) {
-			t.Fatalf("a11y 坐标 Note 必须声明窗口相对空间：缺 %q", fragment)
+			t.Fatalf("a11y coordinate note must declare the window-relative space: missing %q", fragment)
 		}
 	}
 	for _, fragment := range []string{
@@ -6076,13 +6076,13 @@ func TestCoordinateNotesDeclareTheirExplicitSpace(t *testing.T) {
 		"screen_absolute_point(",
 	} {
 		if !strings.Contains(linuxRuntimeScript, fragment) {
-			t.Fatalf("GUI 坐标必须是无隐式偏移的屏幕绝对空间：缺 %q", fragment)
+			t.Fatalf("GUI coordinates must be absolute screen coordinates without implicit offsets: missing %q", fragment)
 		}
 	}
 	// Every reported coordinate must go through the conversion instead of
 	// printing screen_point's return value directly.
 	if strings.Contains(linuxRuntimeScript, `"{}".format(action, x, y, UNVERIFIED_SYNTHESIS)`) {
-		t.Fatal("menu 兜底仍在直接打印屏幕绝对坐标")
+		t.Fatal("menu fallback still prints absolute screen coordinates directly")
 	}
 }
 
@@ -6094,7 +6094,7 @@ func TestGUISurfaceUsesFullDesktopImageCoordinates(t *testing.T) {
 		"AX target-window screenshot coordinates are never GUI coordinates",
 	} {
 		if !strings.Contains(serverInstructions, fragment) {
-			t.Fatalf("下发给客户端的说明缺少 GUI/a11y 分叉：%q", fragment)
+			t.Fatalf("client instructions are missing the GUI/a11y split: %q", fragment)
 		}
 	}
 	for _, stale := range []string{
@@ -6102,14 +6102,14 @@ func TestGUISurfaceUsesFullDesktopImageCoordinates(t *testing.T) {
 		"GUI addresses a target by window-relative pixel coordinates",
 	} {
 		if strings.Contains(serverInstructions, stale) {
-			t.Fatalf("下发说明仍含旧坐标约定：%q", stale)
+			t.Fatalf("client instructions still contain the old coordinate convention: %q", stale)
 		}
 	}
 
 	gui := findToolDefinition(t, "GUI")
 	if !strings.Contains(gui.Description, "Full-desktop") ||
 		!strings.Contains(gui.Description, "returns one final screenshot") {
-		t.Fatal("gui 必须声明全桌面图像坐标和每次返回截图")
+		t.Fatal("GUI must declare full-desktop image coordinates and a screenshot on every call")
 	}
 	for _, removed := range []string{"get_screenshot", "click_xy", "drag_xy"} {
 		if strings.Contains(gui.Description, removed) {
@@ -7645,7 +7645,7 @@ func TestVerifyPreservesProjectionWithoutReplacingActionCache(t *testing.T) {
 		`StructuredContent["auto_unpruned_retry"]`,
 	} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("v53 find must not auto-escalate or report rejected metadata %q", forbidden)
+			t.Fatalf("find must not auto-escalate or report rejected metadata %q", forbidden)
 		}
 	}
 }
@@ -8087,15 +8087,15 @@ func TestActionsReResolveGeometryAtActionTime(t *testing.T) {
 	// after a sidebar collapses, the click would land at the centre of the
 	// stale cached box even though the layout has changed.
 	if !strings.Contains(linuxRuntimeScript, "def current_geometry(") {
-		t.Fatal("动作路径必须在解析出活节点之后重新取一次几何")
+		t.Fatal("action path must re-read geometry after resolving the live node")
 	}
 	if !strings.Contains(linuxRuntimeScript, "element_record, moved_note = current_geometry(") {
-		t.Fatal("重算的几何必须真的被后续动作使用，而不是算完丢掉")
+		t.Fatal("recomputed geometry must be used by the action, not discarded")
 	}
 	// A move must be reported: it is the agent's only way to know whether the
 	// coordinates it read are still valid.
 	if !strings.Contains(linuxRuntimeScript, "The element MOVED since the snapshot") {
-		t.Fatal("元素移动过要如实告知，否则 agent 会继续用快照里的旧坐标")
+		t.Fatal("a moved element must be reported, or the agent keeps using stale snapshot coordinates")
 	}
 	// All element-targeted paths share resolveActionElement. A uniquely named
 	// current index is promoted to a same-window semantic target so the runtime
@@ -8195,7 +8195,7 @@ func mainGoSource(t *testing.T) string {
 	t.Helper()
 	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("读不到 Go source directory: %v", err)
+		t.Fatalf("read Go source directory: %v", err)
 	}
 	names := make([]string, 0)
 	for _, entry := range entries {
@@ -8211,7 +8211,7 @@ func mainGoSource(t *testing.T) string {
 	for _, name := range names {
 		data, readErr := os.ReadFile(name)
 		if readErr != nil {
-			t.Fatalf("读不到 %s: %v", name, readErr)
+			t.Fatalf("read %s: %v", name, readErr)
 		}
 		source.Write(data)
 		source.WriteByte('\n')
@@ -8804,15 +8804,15 @@ func TestErrorContextIsOnByDefaultAndDisableable(t *testing.T) {
 	// the scene for later diagnosis and the response holds a single error line.
 	t.Setenv("COMPUTER_USE_ERROR_CONTEXT", "")
 	if !errorContextEnabled() {
-		t.Fatal("失败现场默认要落盘")
+		t.Fatal("error context should be written to disk by default")
 	}
 	t.Setenv("COMPUTER_USE_ERROR_CONTEXT", "off")
 	if errorContextEnabled() {
-		t.Fatal("显式关掉时必须真的关掉")
+		t.Fatal("an explicit off must disable error context")
 	}
 	t.Setenv("COMPUTER_USE_ERROR_CONTEXT", "OFF")
 	if errorContextEnabled() {
-		t.Fatal("开关取值不该区分大小写")
+		t.Fatal("switch value must be case-insensitive")
 	}
 }
 
@@ -8822,12 +8822,12 @@ func TestErrorContextNeedsAnAppAndNeverMasksTheOriginalError(t *testing.T) {
 	// Without an app there is nothing to capture. This also keeps app-less
 	// operations such as list_apps from taking a pointless snapshot on failure.
 	if note, sampled := service.writeErrorContext("", "click", "boom"); note != "" || sampled {
-		t.Fatalf("没有 app 时不该采样或落盘，得到 note=%q sampled=%v", note, sampled)
+		t.Fatalf("without an app nothing should be sampled or written, got note=%q sampled=%v", note, sampled)
 	}
 	// If capturing the context fails, the result is an empty string and never a
 	// second error, which would only bury the original one.
 	if note, sampled := service.writeErrorContext("no-such-app-xyzzy", "click", "boom"); note != "" || sampled {
-		t.Fatalf("抓不到现场时要静默放弃，得到 note=%q sampled=%v", note, sampled)
+		t.Fatalf("a failed capture should be dropped silently, got note=%q sampled=%v", note, sampled)
 	}
 }
 
@@ -8836,7 +8836,7 @@ func TestTraceIsOffUnlessGivenAPath(t *testing.T) {
 	// caller's decision, and a diagnostic facility should not pick a directory.
 	t.Setenv("COMPUTER_USE_TRACE_FILE", "")
 	if tracePath() != "" {
-		t.Fatal("没给路径就不该开 trace")
+		t.Fatal("tracing must stay off without a path")
 	}
 	service := newService()
 	// While tracing is off, appending must have no side effects.
@@ -8862,40 +8862,40 @@ func TestTraceRecordsOneLinePerActionIncludingFailures(t *testing.T) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("trace 文件没写出来: %v", err)
+		t.Fatalf("trace file was not written: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 2 {
-		t.Fatalf("两次动作应当有两行，得到 %d", len(lines))
+		t.Fatalf("two actions should produce two lines, got %d", len(lines))
 	}
 	var first map[string]any
 	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatalf("第一行不是合法 JSON: %v", err)
+		t.Fatalf("first line is not valid JSON: %v", err)
 	}
 	beforeMap, _ := first["before"].(map[string]any)
 	afterMap, _ := first["after"].(map[string]any)
 	if beforeMap["window"] != "VLC media player" || afterMap["window"] != "Simple Preferences" {
-		t.Fatalf("前后状态要能读出这次动作把界面带到了哪里，得到 %v -> %v", beforeMap, afterMap)
+		t.Fatalf("before/after state must show where the action took the UI, got %v -> %v", beforeMap, afterMap)
 	}
 	if beforeMap["elements"].(float64) != 92 || afterMap["elements"].(float64) != 61 {
-		t.Fatal("元素数量是判断树是否重排的最便宜的信号，必须记")
+		t.Fatal("trace must record element counts, the cheapest signal that the tree was rebuilt")
 	}
 	args, _ := first["args"].(map[string]any)
 	if args["element_name"] != "Preferences" {
-		t.Fatalf("动作参数要记下作用在谁身上，得到 %v", args)
+		t.Fatalf("action args must record the target element, got %v", args)
 	}
 	// The full record must not be copied, though: with whole trees the trace
 	// would outgrow the transcript. Error context provides detail when needed.
 	if strings.Contains(lines[0], "runtimeId") || strings.Contains(lines[0], "treeLines") {
-		t.Fatal("trace 只记摘要，不记整棵树")
+		t.Fatal("trace must record a summary, not the whole tree")
 	}
 
 	var second map[string]any
 	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
-		t.Fatalf("第二行不是合法 JSON: %v", err)
+		t.Fatalf("second line is not valid JSON: %v", err)
 	}
 	if second["failed"] != true {
-		t.Fatal("失败的动作要标出来")
+		t.Fatal("failed actions must be marked")
 	}
 }
 
@@ -8904,11 +8904,11 @@ func TestUnnamedWindowsStillGetAUsableLabel(t *testing.T) {
 	// `Window: ""`, yet the window title is the agent's first cue for where it
 	// is. Unnamed windows therefore need a substitute label.
 	if !strings.Contains(linuxRuntimeScript, "def window_label(") {
-		t.Fatal("无名窗口要有可用的替代标题")
+		t.Fatal("unnamed windows need a usable substitute label")
 	}
 	if !strings.Contains(linuxRuntimeScript, "(unnamed {} containing {!r})") {
-		t.Fatal("退而求其次要带上第一个有名字的子节点——无名 menu 下面第一项常常" +
-			"就足以认出这是什么菜单")
+		t.Fatal("the substitute label should include the first named child; the first item " +
+			"of an unnamed menu is often enough to identify the menu")
 	}
 }
 
@@ -8923,10 +8923,10 @@ func TestComboBoxSelectionIsVisibleInTheTree(t *testing.T) {
 	// item, which is readable even while the drop-down is closed, so no
 	// drop-down has to be expanded first.
 	if !strings.Contains(linuxRuntimeScript, "def selected_option_name(") {
-		t.Fatal("下拉框的当前选中项要能读出来")
+		t.Fatal("the current selection of a combo box must be readable")
 	}
 	if !strings.Contains(linuxRuntimeScript, `role in ("combo box", "list box")`) {
-		t.Fatal("这次扫描只该对下拉类角色做，别的角色不付这个代价")
+		t.Fatal("selection scan must run only for combo and list box roles so other roles do not pay for it")
 	}
 }
 
@@ -8937,18 +8937,18 @@ func TestFocusGuardHasAnX11FallbackForWindowsThatNeverGoActive(t *testing.T) {
 	// guard that trusts only ACTIVE would make synthesized input unusable on
 	// these dialogs.
 	if !strings.Contains(linuxRuntimeScript, "def x11_holds_focus(") {
-		t.Fatal("AT-SPI 说不出话时要有一层 X11 旁证")
+		t.Fatal("focus guard needs X11 corroboration when AT-SPI cannot tell")
 	}
 	// The criterion must be the owning process: the secondary dialog has no
 	// title and is not the target window itself.
 	if !strings.Contains(linuxRuntimeScript, "_NET_WM_PID") {
-		t.Fatal("旁证要比 pid，不能比标题——那个挡路的对话框没有标题")
+		t.Fatal("X11 check must compare the PID, not the title; the blocking dialog has no title")
 	}
 	// The X11 check is only a fallback and must not replace the AT-SPI check.
 	shim := strings.Index(linuxRuntimeScript, "def x11_holds_focus(")
 	active := strings.Index(linuxRuntimeScript, "if window_is_active(window):")
 	if active < 0 || shim < 0 {
-		t.Fatal("AT-SPI 的 ACTIVE 判断要保留在前面")
+		t.Fatal("the AT-SPI ACTIVE check must stay in front of the X11 fallback")
 	}
 }
 
@@ -8957,10 +8957,10 @@ func TestForeignForegroundAppIsCalledOutByName(t *testing.T) {
 	// separate process, so observing Chrome never shows it and the agent would
 	// conclude that clicking Save did nothing.
 	if !strings.Contains(linuxRuntimeScript, "ANOTHER APP IS IN FRONT") {
-		t.Fatal("前台窗口属于别的进程时要指名道姓地说出来")
+		t.Fatal("a foreground window owned by another process must be called out by name")
 	}
 	if !strings.Contains(linuxRuntimeScript, "Call AX mode=observe with app=") {
-		t.Fatal("光说『不是你』没用，要直接给出该问哪个 app")
+		t.Fatal("saying another app is in front is not enough; the note must name the app to observe")
 	}
 }
 
@@ -8972,13 +8972,13 @@ func TestSetValueFallsBackToSynthesisWhenTheApiRefuses(t *testing.T) {
 	// Like click and type_text, set_value must fall back to synthesis when the
 	// semantic path refuses; otherwise a ubiquitous control type is unusable.
 	if !strings.Contains(linuxRuntimeScript, "The AT-SPI value API refused this element") {
-		t.Fatal("语义写值被拒时要降级到 聚焦→全选→打字，而不是硬失败")
+		t.Fatal("a refused semantic set_value must fall back to focus, select all and type instead of failing")
 	}
 	// The fallback must state that it has no read-back confirmation. Only the
 	// semantic path reads back, and giving both paths the same assurance would
 	// mislead the agent.
 	if !strings.Contains(linuxRuntimeScript, "no read-back ") {
-		t.Fatal("降级路径要声明自己没有回读确认")
+		t.Fatal("fallback path must state that it has no read-back confirmation")
 	}
 }
 
@@ -8990,13 +8990,13 @@ func TestFocusGuardMustNotGiveFalsePositives(t *testing.T) {
 	// refusal: a refusal shows the agent an error and lets it try another way,
 	// while a false positive silently delivers input to another window.
 	if !strings.Contains(linuxRuntimeScript, `["wmctrl", "-a", title]`) {
-		t.Fatal("抢焦点失败时要向窗口管理器再请求一次激活")
+		t.Fatal("when taking focus fails, the window manager must be asked to activate the window again")
 	}
 	// A successful activation request does not mean focus arrived. It must be
 	// re-checked, or the false positive merely moves elsewhere.
 	after := linuxRuntimeScript[strings.Index(linuxRuntimeScript, `["wmctrl", "-a", title]`):]
 	if !strings.Contains(after[:600], "window_is_active(window) or x11_holds_focus(window)") {
-		t.Fatal("激活请求之后必须重新确认焦点，不能直接返回成功")
+		t.Fatal("focus must be re-checked after the activation request instead of returning success directly")
 	}
 }
 
@@ -9009,7 +9009,7 @@ func TestX11ArbitratesWhichWindowIsInFrontWhenAtspiCannotTell(t *testing.T) {
 	// is present in the accessibility tree; the root cause is picking the wrong
 	// window, which X11 can arbitrate.
 	if !strings.Contains(linuxRuntimeScript, "def x11_preferred_window(") {
-		t.Fatal("AT-SPI 分不出高下时要让 X11 裁决")
+		t.Fatal("X11 must arbitrate when AT-SPI cannot tell which window is in front")
 	}
 	// The criterion must be size. Position fails because GTK4 reports
 	// accessibility extents with a (0,0) origin, and title fails because the
@@ -9017,17 +9017,17 @@ func TestX11ArbitratesWhichWindowIsInFrontWhenAtspiCannotTell(t *testing.T) {
 	// matches the accessibility size exactly, for example
 	// 827x291 - (61,61,55,67) = 705x169.
 	if !strings.Contains(linuxRuntimeScript, "_GTK_FRAME_EXTENTS") {
-		t.Fatal("尺寸对比必须先减掉 GTK 的不可见阴影边框")
+		t.Fatal("size comparison must first subtract GTK's invisible shadow frame")
 	}
 	// The candidate set must not depend on SHOWING: portal windows lack it, so
 	// arbitrating only among `MODAL and SHOWING` windows would never run.
 	if !strings.Contains(linuxRuntimeScript, "x11_preferred_window(windows)") {
-		t.Fatal("裁决要在全部窗口上做，不能只在 modal+showing 的子集上做")
+		t.Fatal("arbitration must consider all windows, not only the modal+showing subset")
 	}
 	// Without a unique match the original order takes over; an ambiguous
 	// criterion must not force a decision.
 	if !strings.Contains(linuxRuntimeScript, "return matched[0] if len(matched) == 1 else None") {
-		t.Fatal("命中不唯一时必须放弃裁决")
+		t.Fatal("arbitration must give up without a unique match")
 	}
 }
 
@@ -9037,18 +9037,18 @@ func TestAppNameMatchingIsSeparatorInsensitiveAndFailsWithCandidates(t *testing.
 	// matching also teaches agents to spend a step listing apps before every
 	// task instead of naming the app directly.
 	if !strings.Contains(linuxRuntimeScript, "def loose(") {
-		t.Fatal("应用名比对要对分隔符不敏感：google-chrome 应当找到 Google Chrome")
+		t.Fatal("app name matching must ignore separators: google-chrome should find Google Chrome")
 	}
 	// A failure must list candidates: a dead-end error costs the agent another
 	// round, while an error with candidates gives it the right name at once.
 	if !strings.Contains(linuxRuntimeScript,
 		"Applications currently visible to the ") {
-		t.Fatal("appNotFound 要列出当前在跑的应用")
+		t.Fatal("appNotFound must list the running applications")
 	}
 	// An empty string must not match everything; after normalisation "" is
 	// contained in every string.
 	if !strings.Contains(linuxRuntimeScript, "if tight_query and tight_name and (") {
-		t.Fatal("归一化后的空串必须先被挡掉，否则空查询会匹配所有应用")
+		t.Fatal("an empty normalized string must be rejected first, or an empty query matches every app")
 	}
 }
 
@@ -9063,7 +9063,7 @@ func TestAppArgumentHelpDefinesStrictBootstrapIdentity(t *testing.T) {
 		"app/process name", "app id", "PID",
 	} {
 		if !strings.Contains(appArgumentHelp, fragment) {
-			t.Fatalf("app 参数说明里缺少 %q", fragment)
+			t.Fatalf("app argument help is missing %q", fragment)
 		}
 	}
 	if strings.Contains(appArgumentHelp, "window-title") {
@@ -9088,7 +9088,7 @@ func TestAppArgumentHelpDefinesStrictBootstrapIdentity(t *testing.T) {
 		}
 	}
 	if used != withApp || withApp != 3 {
-		t.Fatalf("AX 的 %d/%d 个含 app 的 mode 分支使用统一说明", used, withApp)
+		t.Fatalf("%d/%d AX mode branches with app use the shared help text, want 3/3", used, withApp)
 	}
 }
 
@@ -9102,13 +9102,13 @@ func TestSnapshotCacheLookupIsAsLooseAsAppResolution(t *testing.T) {
 	service.rememberSnapshot("", &appSnapshot{App: appDescriptor{Name: "Google Chrome"}})
 	for _, spelling := range []string{"chrome", "Chrome", "google-chrome", "google chrome"} {
 		if service.currentSnapshot(spelling) == nil {
-			t.Fatalf("用 %q 应当能查到刚缓存的 Google Chrome 快照", spelling)
+			t.Fatalf("%q should find the cached Google Chrome snapshot", spelling)
 		}
 	}
 	// It must not be so loose that it matches another app, which would send
 	// actions to the wrong target.
 	if service.currentSnapshot("thunderbird") != nil {
-		t.Fatal("宽松匹配不能把无关的应用名也匹上")
+		t.Fatal("loose matching must not match an unrelated app name")
 	}
 }
 
@@ -9181,27 +9181,27 @@ func TestOversizedResponsesAreCappedInlineNotSpilled(t *testing.T) {
 	t.Setenv("COMPUTER_USE_MAX_INLINE_CHARS", "")
 	small := strings.Repeat("line\n", 100)
 	if capInline(small) != small {
-		t.Fatal("小输出不该被动")
+		t.Fatal("small output must be left untouched")
 	}
 	big := strings.Repeat("a fairly long tree line that costs bytes\n", 4000)
 	capped := capInline(big)
 	if len(capped) >= len(big) {
-		t.Fatal("超限的输出必须被裁")
+		t.Fatal("output over the limit must be capped")
 	}
 	if len(capped) > maxInlineChars()+400 {
-		t.Fatalf("裁完还是太长：%d", len(capped))
+		t.Fatalf("capped output is still too long: %d", len(capped))
 	}
 	// The notice must say how much was cut. Silent truncation makes the agent
 	// believe it saw the whole tree, which is worse than losing the data.
 	for _, fragment := range []string{"TRUNCATED", "of", "lines", "`find`"} {
 		if !strings.Contains(capped, fragment) {
-			t.Fatalf("截断说明里缺少 %q", fragment)
+			t.Fatalf("truncation notice is missing %q", fragment)
 		}
 	}
 	// The threshold is configurable because clients have different limits.
 	t.Setenv("COMPUTER_USE_MAX_INLINE_CHARS", "500")
 	if maxInlineChars() != 500 {
-		t.Fatal("上限要可以由环境变量覆盖")
+		t.Fatal("the limit must be overridable by an environment variable")
 	}
 }
 
@@ -9212,18 +9212,18 @@ func TestTreeBudgetIsMeasuredInCharactersNotOnlyNodes(t *testing.T) {
 	// 100KB with a file pointer the agent may be unable to read. Node counts do
 	// not bound bytes: 1200 short nodes are about 40KB, 1200 long ones 135KB.
 	if !strings.Contains(linuxRuntimeScript, "MAX_RENDERED_CHARS") {
-		t.Fatal("树预算要有以字符计的那一条")
+		t.Fatal("tree budget must include a character limit")
 	}
 	// The walk must stop while rendering; truncating afterwards wastes the cost
 	// (about 8.45 ms per node in GIMP, so 800 wasted nodes take 6.7 seconds).
 	if !strings.Contains(linuxRuntimeScript, `if budget["chars"] >= max_rendered_chars:`) {
-		t.Fatal("字符预算要在遍历里生效，不能事后截断")
+		t.Fatal("character budget must apply during the walk, not by truncating afterwards")
 	}
 	// Omission reasons are reported separately. A generic notice suggests that
 	// raising max_tree_nodes would show everything, but when the character
 	// budget is exhausted that only makes the client drop the whole response.
 	if !strings.Contains(linuxRuntimeScript, "character budget was exhausted") {
-		t.Fatal("字符预算耗尽要单独说明，不能和节点预算混为一谈")
+		t.Fatal("character budget exhaustion must be reported separately from the node budget")
 	}
 	// The hint must follow the cause. Pruned nodes are filtered on purpose, so
 	// a generic "raise max_tree_nodes to see them" would bring none back, and
@@ -9231,12 +9231,12 @@ func TestTreeBudgetIsMeasuredInCharactersNotOnlyNodes(t *testing.T) {
 	// up, the notice says it is a server-owned budget instead of asking the
 	// caller to guess a parameter.
 	if !strings.Contains(linuxRuntimeScript, "server-owned node budget filled up") {
-		t.Fatal("节点预算耗尽时要说明这是服务端预算，而不是让调用方猜参数")
+		t.Fatal("node budget exhaustion must say the budget is server-owned instead of asking the caller to guess a parameter")
 	}
 	// Nodes hidden by pruning must point to the current AX recovery path, not
 	// to removed parameters.
 	if !strings.Contains(linuxRuntimeScript, "AX mode=find searches canonical records") {
-		t.Fatal("被 working projection 隐藏的节点必须指向 find/root")
+		t.Fatal("nodes hidden by the working projection must point to find/root")
 	}
 	for _, removed := range []string{
 		"raising max_tree_nodes will not",
@@ -9244,7 +9244,7 @@ func TestTreeBudgetIsMeasuredInCharactersNotOnlyNodes(t *testing.T) {
 		"Pass prune=false",
 	} {
 		if strings.Contains(linuxRuntimeScript, removed) {
-			t.Fatalf("模型可见诊断仍广告已删除接口: %q", removed)
+			t.Fatalf("model-visible diagnostics still advertise a removed interface: %q", removed)
 		}
 	}
 }
@@ -9254,10 +9254,10 @@ func TestUniversalContextMenuActionIsNotAnAffordance(t *testing.T) {
 	// be right-clicked. Unless it is excluded, the "no actions" test in
 	// is_structural_filler never holds and pruning stops working.
 	if !strings.Contains(linuxRuntimeScript, "UNIVERSAL_ACTIONS") {
-		t.Fatal("人人都有的动作要单独归类并排除")
+		t.Fatal("actions that every node has must be grouped separately and excluded")
 	}
 	if !strings.Contains(linuxRuntimeScript, `UNIVERSAL_ACTIONS = {"showcontextmenu"}`) {
-		t.Fatal("showContextMenu 必须在这一类里")
+		t.Fatal("showContextMenu must be in the universal action set")
 	}
 }
 
@@ -9276,7 +9276,7 @@ func TestVerifyFailureSaysWhatDidChange(t *testing.T) {
 		"whether a prior input was emitted",
 	} {
 		if !strings.Contains(mainGoSource(t), fragment) {
-			t.Fatalf("verify 失败时要说清界面变没变：缺 %q", fragment)
+			t.Fatalf("verify failure must say whether the UI changed: missing %q", fragment)
 		}
 	}
 	if strings.Contains(mainGoSource(t), "action before this probably did not land") {
@@ -9311,18 +9311,18 @@ func TestTreeWalkHasAWallClockDeadline(t *testing.T) {
 	// Cheap probes before building records lower the usual cost, but only for
 	// one cost distribution; the deadline is a backstop that holds for any.
 	if !strings.Contains(linuxRuntimeScript, "TREE_DEADLINE_SECONDS") {
-		t.Fatal("遍历要有墙钟上限")
+		t.Fatal("tree walk needs a wall-clock deadline")
 	}
 	// The root node is exempt: an empty tree has no addressable element and
 	// cannot even tell the caller which window this is.
 	if !strings.Contains(linuxRuntimeScript,
 		"if deadline is not None and records and time.monotonic() >= deadline:") {
-		t.Fatal("超时判据要豁免根节点，否则可能返回一棵空树")
+		t.Fatal("deadline check must exempt the root node, or the walk can return an empty tree")
 	}
 	// The three omission reasons are reported separately; suggesting a larger
 	// max_tree_nodes is wrong advice when time ran out.
 	if !strings.Contains(linuxRuntimeScript, "time budget exhausted") {
-		t.Fatal("时间预算耗尽要单独说明")
+		t.Fatal("time budget exhaustion must be reported separately")
 	}
 }
 
@@ -9338,14 +9338,14 @@ func TestVerifyRedirectsTheDisappearanceIdiom(t *testing.T) {
 		"Wait for something NEW instead",
 	} {
 		if !strings.Contains(src, fragment) {
-			t.Fatalf("exists:false 超时要指出这是个坏代理：缺 %q", fragment)
+			t.Fatalf("exists:false timeout must call the check a poor proxy: missing %q", fragment)
 		}
 	}
 	// Say this only when the UI has not changed. If it changed, the agent is
 	// waiting in the right direction and candidates are more useful; wrong
 	// advice wastes more than no advice.
 	if !strings.Contains(src, "snapshot.WindowTitle == firstWindow && len(snapshot.Elements) == firstCount") {
-		t.Fatal("这条建议要限定在界面没动的情形")
+		t.Fatal("the hint must be limited to an unchanged UI")
 	}
 }
 
@@ -9358,20 +9358,20 @@ func TestIntentGuardSkipsElementsWithVeryShortNames(t *testing.T) {
 	// elements, so such names are skipped.
 	short := &elementRecord{Name: "L", ControlType: "check box"}
 	if got := elementIntentMismatch(short, "Size L checkbox"); got != "" {
-		t.Fatalf("单字符名字判不了，不该拒：%s", got)
+		t.Fatalf("a one-character name cannot be checked and must not be rejected: %s", got)
 	}
 	if got := elementIntentMismatch(short, "the Save button"); got != "" {
-		t.Fatalf("单字符名字上一律不判，包括本该不符的声明：%s", got)
+		t.Fatalf("one-character names must always skip the check, even for a mismatched declaration: %s", got)
 	}
 	// With a description the check is still possible and must still apply.
 	withDesc := &elementRecord{Name: "L", ControlType: "check box", Description: "Large size filter"}
 	if elementIntentMismatch(withDesc, "the Save button") == "" {
-		t.Fatal("有描述时仍应校验")
+		t.Fatal("an element with a description should still be checked")
 	}
 	// Names of normal length keep the usual check.
 	normal := &elementRecord{Name: "Save", ControlType: "push button"}
 	if elementIntentMismatch(normal, "the New button") == "" {
-		t.Fatal("正常名字上守卫必须照常拦截")
+		t.Fatal("guard must still reject mismatches on names of normal length")
 	}
 }
 
@@ -9384,13 +9384,13 @@ func TestScrollNoteDoesNotClaimTargetingItDidNotDo(t *testing.T) {
 	// built in Go has index 0, not null, so an `index is not None` check would
 	// still claim targeting.
 	if !strings.Contains(mainGoSource(t), "WindowCentre") {
-		t.Fatal("滚窗口中心要有显式标志，不能让运行时去猜")
+		t.Fatal("scrolling at the window centre needs an explicit flag instead of a runtime guess")
 	}
 	if !strings.Contains(linuxRuntimeScript, `action_input.get("window_centre")`) {
-		t.Fatal("Note 的措辞要按这个显式标志分支")
+		t.Fatal("note wording must branch on the explicit flag")
 	}
 	if !strings.Contains(linuxRuntimeScript, "no target ref was given, so this is the centre") {
-		t.Fatal("留空时要如实说落点是窗口中心")
+		t.Fatal("without a target the note must say the scroll point is the window centre")
 	}
 }
 
@@ -9401,7 +9401,7 @@ func TestScrollNoteDoesNotClaimTargetingItDidNotDo(t *testing.T) {
 // "Formatting changed ... direct evidence the action took effect" after an
 // unrelated keypress is worse than giving no evidence.
 func TestWithoutRepaintNoise(t *testing.T) {
-	t.Run("网页字体加载不算证据", func(t *testing.T) {
+	t.Run("web font load is not evidence", func(t *testing.T) {
 		// When the family changes, size and weight change with it; those are
 		// the new font's metrics.
 		got := withoutRepaintNoise([]string{
@@ -9410,40 +9410,40 @@ func TestWithoutRepaintNoise(t *testing.T) {
 			"weight: unset -> 700",
 		})
 		if len(got) != 0 {
-			t.Fatalf("字体替换应当被整条滤掉，却留下了 %v", got)
+			t.Fatalf("a font swap should be filtered out entirely, but %v remained", got)
 		}
 	})
 
-	t.Run("肉眼看不出的颜色变化不算证据", func(t *testing.T) {
+	t.Run("imperceptible color change is not evidence", func(t *testing.T) {
 		got := withoutRepaintNoise([]string{"bg-color: 244,248,248 -> 246,249,249"})
 		if len(got) != 0 {
-			t.Fatalf("2/255 的色差应当被滤掉，却留下了 %v", got)
+			t.Fatalf("a 2/255 color difference should be filtered out, but %v remained", got)
 		}
 	})
 
-	t.Run("真的加粗照样报得出来", func(t *testing.T) {
+	t.Run("real bold change is still reported", func(t *testing.T) {
 		// This is what the note is for: bold in LibreOffice changes formatting,
 		// not structure, so the tree looks unchanged. Noise filtering must
 		// keep such changes.
 		got := withoutRepaintNoise([]string{"weight: 400 -> 700"})
 		if len(got) != 1 {
-			t.Fatalf("真实的加粗应当保留，却得到 %v", got)
+			t.Fatalf("a real bold change should be kept, got %v", got)
 		}
 	})
 
-	t.Run("明显的颜色变化保留", func(t *testing.T) {
+	t.Run("visible color change is kept", func(t *testing.T) {
 		got := withoutRepaintNoise([]string{"fg-color: 0,0,0 -> 255,0,0"})
 		if len(got) != 1 {
-			t.Fatalf("黑变红应当保留，却得到 %v", got)
+			t.Fatalf("black to red should be kept, got %v", got)
 		}
 	})
 
-	t.Run("同一节点里字体没换时 size 变化保留", func(t *testing.T) {
+	t.Run("size change without a font swap is kept", func(t *testing.T) {
 		// fontSwap is decided per node: without evidence of a font swap, a size
 		// change may be a genuine font size change.
 		got := withoutRepaintNoise([]string{"size: 12pt -> 24pt"})
 		if len(got) != 1 {
-			t.Fatalf("没有字体替换时 size 应当保留，却得到 %v", got)
+			t.Fatalf("size should be kept without a font swap, got %v", got)
 		}
 	})
 }
@@ -9456,7 +9456,7 @@ func TestIncrementalTreeDoesNotInflateSingleHugeLine(t *testing.T) {
 
 	diff, ok := incrementalTree(before, after)
 	if !ok {
-		t.Fatal("单个巨型节点内容变化时应当能给出增量，而不是退回全量重发几千字符")
+		t.Fatal("a content change in one huge node should yield an incremental diff, not resend the full tree")
 	}
 	total := 0
 	for _, line := range diff {
@@ -9467,17 +9467,17 @@ func TestIncrementalTreeDoesNotInflateSingleHugeLine(t *testing.T) {
 		fullSize += len(line)
 	}
 	if total >= fullSize {
-		t.Fatalf("增量 %d 字符不该比全量 %d 字符更大——那正是负压缩", total, fullSize)
+		t.Fatalf("incremental diff of %d characters must be smaller than the full tree of %d characters", total, fullSize)
 	}
 	joined := strings.Join(diff, "\n")
 	if !strings.Contains(joined, "~1 terminal") {
-		t.Fatalf("摘要必须保留行首的 element_index 与 role，得到：%q", firstLine(joined))
+		t.Fatalf("summary must keep the leading element_index and role, got %q", firstLine(joined))
 	}
 	if !strings.Contains(joined, "[-tail][+TAIL-CHANGED]") {
-		t.Fatalf("摘要必须把变化写成 [-旧][+新]，得到：%v", diff)
+		t.Fatalf("summary must write the change as [-old][+new], got %v", diff)
 	}
 	if strings.Count(joined, body) != 0 {
-		t.Fatal("未变化的那几千字符正文一个字都不该重发")
+		t.Fatal("the unchanged body text must not be resent")
 	}
 }
 
@@ -9488,10 +9488,10 @@ func TestIncrementalTreeKeepsLineDiffForShortLines(t *testing.T) {
 	diff, ok := incrementalTree(base("a", "b", "c", "d", "e", "f"),
 		base("a", "b", "X", "d", "e", "f"))
 	if !ok {
-		t.Fatal("短行的单行替换仍应走增量")
+		t.Fatal("replacing one short line should still use the incremental diff")
 	}
 	if len(diff) != 3 || diff[1] != "-c" || diff[2] != "+X" {
-		t.Fatalf("短行不该被摘要化，应保持 -旧 +新，得到 %v", diff)
+		t.Fatalf("short lines must not be summarized and should stay -old +new, got %v", diff)
 	}
 }
 
@@ -9552,12 +9552,12 @@ func TestExpectTargetSyntaxIsToolkitIndependent(t *testing.T) {
 		record := target.find(snapshot)
 		if testCase.want < 0 {
 			if record != nil {
-				t.Fatalf("%q 不该命中，却命中了 %d", testCase.target, record.Index)
+				t.Fatalf("%q should not match, but matched %d", testCase.target, record.Index)
 			}
 			continue
 		}
 		if record == nil || record.Index != testCase.want {
-			t.Fatalf("%q 应当命中 %d，实际 %#v", testCase.target, testCase.want, record)
+			t.Fatalf("%q should match %d, got %#v", testCase.target, testCase.want, record)
 		}
 	}
 
@@ -9565,14 +9565,14 @@ func TestExpectTargetSyntaxIsToolkitIndependent(t *testing.T) {
 	// check pass unconditionally.
 	for _, bad := range []string{"", "rle=dialog", "element_index=abc", "  "} {
 		if _, err := parseExpectTarget(bad); err == nil {
-			t.Fatalf("parseExpectTarget(%q) 应当报错", bad)
+			t.Fatalf("parseExpectTarget(%q) should fail", bad)
 		}
 	}
 
 	// A comma inside quotes is part of the name, not a field separator.
 	target, err := parseExpectTarget(`name="Save, As"`)
 	if err != nil {
-		t.Fatalf("引号内的逗号不该被当成分隔符: %v", err)
+		t.Fatalf("a comma inside quotes must not be treated as a separator: %v", err)
 	}
 	if target.name != "Save, As" {
 		t.Fatalf("name = %q, want %q", target.name, "Save, As")
@@ -9601,28 +9601,28 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 	// appears: an element appears only when the match count increases.
 	ok, evidence := must(map[string]any{"appears": "role=dialog"}).evaluate(before, snapshot)
 	if !ok || !strings.Contains(evidence, "Save As") || !strings.Contains(evidence, "increased from 0") {
-		t.Fatalf("appears 应当命中并报出匹配数量增加: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("appears should match and report the increased match count: ok=%v evidence=%q", ok, evidence)
 	}
 	ok, evidence = must(map[string]any{"appears": "role=alert"}).evaluate(before, snapshot)
 	if ok || !strings.Contains(evidence, "did not increase") {
-		t.Fatalf("appears 落空时应当说清没有匹配: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("an unmet appears should say that nothing new matched: ok=%v evidence=%q", ok, evidence)
 	}
 
 	// disappears: present before the action and absent after it.
 	ok, _ = must(map[string]any{"disappears": "role=dialog"}).evaluate(snapshot, before)
 	if !ok {
-		t.Fatal("动作前存在、动作后不存在应当算作已消失")
+		t.Fatal("an element present before and absent after the action should count as disappeared")
 	}
 	ok, evidence = must(map[string]any{"disappears": "element_index=42"}).evaluate(before, snapshot)
 	if ok || !strings.Contains(evidence, "STILL present") {
-		t.Fatalf("元素还在时应当报 still present: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("an element that remains should be reported as still present: ok=%v evidence=%q", ok, evidence)
 	}
 
 	// exists_after: asserts presence after the action only, without claiming
 	// that the element is new and without needing a baseline.
 	ok, evidence = must(map[string]any{"exists_after": "role=dialog"}).evaluate(nil, snapshot)
 	if !ok || !strings.Contains(evidence, "exists in the post-action tree") {
-		t.Fatalf("exists_after 应当允许无 baseline 的存在性断言: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("exists_after should allow a presence assertion without a baseline: ok=%v evidence=%q", ok, evidence)
 	}
 
 	// value_becomes
@@ -9630,13 +9630,13 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		"value_becomes": map[string]any{"element_index": float64(17), "contains": "已保存"},
 	}).evaluate(before, snapshot)
 	if !ok || !strings.Contains(evidence, "已保存") {
-		t.Fatalf("value_becomes 应当读到值: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("value_becomes should read the value: ok=%v evidence=%q", ok, evidence)
 	}
 	ok, evidence = must(map[string]any{
 		"value_becomes": map[string]any{"element_index": "17", "contains": "未保存"},
 	}).evaluate(before, snapshot)
 	if ok || !strings.Contains(evidence, "does not contain") {
-		t.Fatalf("值不符时应当报出实际值: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("a mismatched value should report the actual value: ok=%v evidence=%q", ok, evidence)
 	}
 	emptyValue := &appSnapshot{Elements: []elementRecord{
 		{Index: 18, ControlType: "entry", Name: "Search", Value: ""},
@@ -9653,7 +9653,7 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		"value_becomes": map[string]any{"element_index": "12", "contains": "Save As"},
 	}).evaluate(before, snapshot)
 	if ok || !strings.Contains(evidence, `has value ""`) {
-		t.Fatalf("仅 name 命中不得满足 value_becomes: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("a name-only match must not satisfy value_becomes: ok=%v evidence=%q", ok, evidence)
 	}
 
 	// state_is_after compares whole state tokens and explains absent states.
@@ -9669,14 +9669,14 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 			"state_is_after": map[string]any{"element_index": testCase.index, "state": testCase.state},
 		}).evaluate(before, snapshot)
 		if !ok || !strings.Contains(evidence, "reports states") {
-			t.Fatalf("state_is_after(%s) 应当命中: ok=%v evidence=%q", testCase.state, ok, evidence)
+			t.Fatalf("state_is_after(%s) should match: ok=%v evidence=%q", testCase.state, ok, evidence)
 		}
 	}
 	ok, evidence = must(map[string]any{
 		"state_is_after": map[string]any{"element_index": "17", "state": "selected"},
 	}).evaluate(before, snapshot)
 	if ok || !strings.Contains(evidence, `without "selected"`) {
-		t.Fatalf("未报告的状态不得命中: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("an unreported state must not match: ok=%v evidence=%q", ok, evidence)
 	}
 
 	transitionBefore := expectSnapshot(
@@ -9686,7 +9686,7 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		"state_becomes": map[string]any{"element_index": "43", "state": "checked"},
 	}).evaluate(transitionBefore, snapshot)
 	if !ok || !strings.Contains(evidence, "reports states") {
-		t.Fatalf("state_becomes 必须识别真实状态转换: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("state_becomes must recognize a real state transition: ok=%v evidence=%q", ok, evidence)
 	}
 	alreadyChecked := expectSnapshot(
 		elementRecord{Index: 43, ControlType: "check box", Name: "Keep", States: "[checked enabled]"},
@@ -9695,7 +9695,7 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 		"state_becomes": map[string]any{"element_index": "43", "state": "checked"},
 	}).evaluate(alreadyChecked, snapshot)
 	if ok || !strings.Contains(evidence, "already satisfied") {
-		t.Fatalf("动作前已经满足时不得把 postcondition 冒充 transition: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("a state already satisfied before the action must not pass a postcondition off as a transition: ok=%v evidence=%q", ok, evidence)
 	}
 
 	ambiguousValues := expectSnapshot(
@@ -9707,7 +9707,7 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 	}).evaluate(before, ambiguousValues)
 	if ok || !strings.Contains(evidence, "2 elements match") ||
 		!strings.Contains(evidence, "ambiguous") {
-		t.Fatalf("value_becomes 不得静默选择第一个宽泛匹配: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("value_becomes must not silently pick the first broad match: ok=%v evidence=%q", ok, evidence)
 	}
 
 	ambiguousStates := expectSnapshot(
@@ -9719,23 +9719,23 @@ func TestExpectPredicatesReportWhatTheySaw(t *testing.T) {
 	}).evaluate(before, ambiguousStates)
 	if ok || !strings.Contains(evidence, "2 elements match") ||
 		!strings.Contains(evidence, "ambiguous") {
-		t.Fatalf("state_becomes 不得静默选择第一个宽泛匹配: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("state_becomes must not silently pick the first broad match: ok=%v evidence=%q", ok, evidence)
 	}
 
 	// focus_moves_to
 	ok, _ = must(map[string]any{"focus_moves_to": "role=entry"}).evaluate(before, snapshot)
 	if !ok {
-		t.Fatal("焦点在 entry 上时 focus_moves_to 应当满足")
+		t.Fatal("focus_moves_to should hold when focus is on the entry")
 	}
 	ok, evidence = must(map[string]any{"focus_moves_to": "role=push button"}).evaluate(before, snapshot)
 	if ok || !strings.Contains(evidence, "focus is on index=17") {
-		t.Fatalf("焦点不在目标上时要说清焦点在谁身上: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("when focus is not on the target, evidence must say where it is: ok=%v evidence=%q", ok, evidence)
 	}
 
 	// Multiple predicates are combined with AND.
 	spec := must(map[string]any{"appears": "role=dialog", "focus_moves_to": "role=push button"})
 	if ok, _ := spec.evaluate(before, snapshot); ok {
-		t.Fatal("多个谓词应当全部满足才算通过")
+		t.Fatal("multiple predicates should pass only when all of them hold")
 	}
 }
 
@@ -9759,7 +9759,7 @@ func TestFocusWithinAcceptsFocusedDescendants(t *testing.T) {
 	}
 	ok, evidence := spec.evaluate(nil, expectSnapshot(dialog, entry))
 	if !ok || !strings.Contains(evidence, "within index=12") {
-		t.Fatalf("焦点落在目标后代时 focus_within 应满足: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("focus_within should hold when focus is on a descendant of the target: ok=%v evidence=%q", ok, evidence)
 	}
 	root := elementRecord{Index: 0, ControlType: "frame", Name: "Editor"}
 	rootSpec, err := parseExpect(map[string]any{
@@ -9770,11 +9770,11 @@ func TestFocusWithinAcceptsFocusedDescendants(t *testing.T) {
 	}
 	ok, evidence = rootSpec.evaluate(nil, expectSnapshot(root, entry))
 	if !ok {
-		t.Fatalf("空 runtime path 表示根节点，必须包含有路径的焦点后代: %q", evidence)
+		t.Fatalf("an empty runtime path denotes the root and must contain focused descendants that have paths: %q", evidence)
 	}
 	ok, evidence = spec.evaluate(nil, expectSnapshot(dialog, outside))
 	if ok || !strings.Contains(evidence, "outside") {
-		t.Fatalf("焦点落在目标外时 focus_within 不应满足: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("focus_within must not hold when focus is outside the target: ok=%v evidence=%q", ok, evidence)
 	}
 }
 
@@ -9801,51 +9801,51 @@ func TestAppearsIsAChangeAssertionNotAPresenceCheck(t *testing.T) {
 	after := expectSnapshot(frame, dialog)
 	ok, evidence := must(map[string]any{"appears": "role=frame"}).evaluate(before, after)
 	if ok {
-		t.Fatalf("动作前已存在的元素不得判成 appears: evidence=%q", evidence)
+		t.Fatalf("an element present before the action must not count as appeared: evidence=%q", evidence)
 	}
 	if !strings.Contains(evidence, "did not increase") || !strings.Contains(evidence, "1 before, 1 after") {
-		t.Fatalf("证据必须说明匹配数量没有增加: %q", evidence)
+		t.Fatalf("evidence must say the match count did not increase: %q", evidence)
 	}
 
 	// Only a real addition counts: no dialog before the action, one after it.
 	ok, evidence = must(map[string]any{"appears": "role=dialog"}).evaluate(
 		expectSnapshot(frame), after)
 	if !ok {
-		t.Fatalf("真正的新增应当判 true: %q", evidence)
+		t.Fatalf("a real addition should evaluate to true: %q", evidence)
 	}
 	// The evidence must give the count change; the element index is only the
 	// current address.
 	if !strings.Contains(evidence, "increased from 0") {
-		t.Fatalf("appears 的证据必须以匹配数量增加为据: %q", evidence)
+		t.Fatalf("appears evidence must rest on the increased match count: %q", evidence)
 	}
 	if !strings.Contains(evidence, "only its current address") {
-		t.Fatalf("证据不得让 element_index 冒充新增的证据: %q", evidence)
+		t.Fatalf("evidence must not present element_index as proof of an addition: %q", evidence)
 	}
 
 	// Without a baseline there is no change to report. The check must not fall
 	// back to presence: verified=false is better than a false true.
 	ok, evidence = must(map[string]any{"appears": "role=dialog"}).evaluate(nil, after)
 	if ok {
-		t.Fatalf("没有动作前快照时不得判 true: %q", evidence)
+		t.Fatalf("appears must not be true without a pre-action snapshot: %q", evidence)
 	}
 	if !strings.Contains(evidence, "no pre-action snapshot") || !strings.Contains(evidence, "AX mode=observe") {
-		t.Fatalf("证据必须说清缺的是基线、以及怎么补上: %q", evidence)
+		t.Fatalf("evidence must say the baseline is missing and how to capture one: %q", evidence)
 	}
 
 	// disappears is symmetric: an element absent before the action cannot
 	// disappear, and the vacuous truth must not pass.
 	ok, evidence = must(map[string]any{"disappears": "role=alert"}).evaluate(before, after)
 	if ok {
-		t.Fatalf("从未出现过的目标不得判成 disappears: %q", evidence)
+		t.Fatalf("a target that never existed must not count as disappeared: %q", evidence)
 	}
 	if !strings.Contains(evidence, "nothing to disappear") {
-		t.Fatalf("空真命题必须被说破: %q", evidence)
+		t.Fatalf("evidence must call out the vacuous truth: %q", evidence)
 	}
 	// Only an element present before and absent after has disappeared.
 	ok, evidence = must(map[string]any{"disappears": "role=dialog"}).evaluate(
 		before, expectSnapshot(frame))
 	if !ok || !strings.Contains(evidence, "decreased from 1") {
-		t.Fatalf("真正的消失应当判 true 并给出动作前的匹配: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("a real disappearance should be true and report the pre-action matches: ok=%v evidence=%q", ok, evidence)
 	}
 }
 
@@ -9864,7 +9864,7 @@ func TestAppearsAndDisappearsUseRoleConstrainedMatchCounts(t *testing.T) {
 		expectSnapshot(menuItem, dialogA, dialogB),
 	)
 	if !ok || !strings.Contains(evidence, "increased from 1") {
-		t.Fatalf("同名 menu item 不得串入 dialog 计数，且 1->2 应满足 appears: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("a same-named menu item must not enter the dialog count, and 1->2 should satisfy appears: ok=%v evidence=%q", ok, evidence)
 	}
 
 	disappears := expectPredicate{kind: "disappears", target: target}
@@ -9873,7 +9873,7 @@ func TestAppearsAndDisappearsUseRoleConstrainedMatchCounts(t *testing.T) {
 		expectSnapshot(menuItem, dialogA),
 	)
 	if !ok || !strings.Contains(evidence, "decreased from 2") {
-		t.Fatalf("同名 menu item 不得阻止 dialog 的 2->1 disappears: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("a same-named menu item must not block the dialog's 2->1 disappears: ok=%v evidence=%q", ok, evidence)
 	}
 
 	nameOnly, err := parseExpectTarget("name=Open")
@@ -9884,7 +9884,7 @@ func TestAppearsAndDisappearsUseRoleConstrainedMatchCounts(t *testing.T) {
 		expectSnapshot(menuItem), expectSnapshot(menuItem, dialogA))
 	if !ok || !strings.Contains(evidence, "dialog elements") ||
 		!strings.Contains(evidence, "increased from 0") {
-		t.Fatalf("未指定 role 时应按 role 分组识别新 dialog: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("without a role, matches should be grouped by role to detect the new dialog: ok=%v evidence=%q", ok, evidence)
 	}
 }
 
@@ -9900,14 +9900,14 @@ func TestChangePredicatesSeparateSameTextByRole(t *testing.T) {
 	ok, evidence := appears.evaluate(expectSnapshot(menu), expectSnapshot(menu, dialog))
 	if !ok || !strings.Contains(evidence, "dialog elements") ||
 		!strings.Contains(evidence, "increased from 0") {
-		t.Fatalf("同名菜单项不得掩盖新 dialog: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("a same-named menu item must not mask a new dialog: ok=%v evidence=%q", ok, evidence)
 	}
 
 	disappears := expectPredicate{kind: "disappears", target: target}
 	ok, evidence = disappears.evaluate(expectSnapshot(menu, dialog), expectSnapshot(menu))
 	if !ok || !strings.Contains(evidence, "dialog elements") ||
 		!strings.Contains(evidence, "decreased from 1") {
-		t.Fatalf("同名菜单项不得掩盖已关闭 dialog: ok=%v evidence=%q", ok, evidence)
+		t.Fatalf("a same-named menu item must not mask a closed dialog: ok=%v evidence=%q", ok, evidence)
 	}
 }
 
@@ -9922,7 +9922,7 @@ func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 
 	if _, err := parseExpectTarget("menu"); err == nil ||
 		!strings.Contains(err.Error(), "Write role=menu") {
-		t.Fatalf("裸角色必须 fail fast 并给出 role= 写法，实际 err=%v", err)
+		t.Fatalf("a bare role must fail fast and suggest the role= form, got err=%v", err)
 	}
 	// Only an explicit role matches.
 	explicit, err := parseExpectTarget("role=menu")
@@ -9930,12 +9930,12 @@ func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 		t.Fatal(err)
 	}
 	if record := explicit.find(snapshot); record == nil || record.Index != 3 {
-		t.Fatalf("role=menu 应当命中 3，实际 %#v", record)
+		t.Fatalf("role=menu should match 3, got %#v", record)
 	}
 
 	if _, err := parseExpectTarget("dialog"); err == nil ||
 		!strings.Contains(err.Error(), "Write role=dialog") {
-		t.Fatalf("dialog 也必须显式写 role=，实际 err=%v", err)
+		t.Fatalf("dialog must also require an explicit role=, got err=%v", err)
 	}
 
 	// A bare string must not match across the role and name fields either; a
@@ -9947,7 +9947,7 @@ func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 		t.Fatal(err)
 	}
 	if record := crossField.find(snapshot); record != nil {
-		t.Fatalf("裸串不得横跨 role 与 name 匹配，却命中了 %d", record.Index)
+		t.Fatalf("a bare string must not match across role and name, but matched %d", record.Index)
 	}
 	// The canonical quoted form, which is what gets printed, must match.
 	quotedForm, err := parseExpectTarget(`entry "Address and search bar"`)
@@ -9955,7 +9955,7 @@ func TestBareExpectWordNeverMatchesARole(t *testing.T) {
 		t.Fatal(err)
 	}
 	if record := quotedForm.find(snapshot); record == nil || record.Index != 8 {
-		t.Fatalf(`entry "Address and search bar" 应当命中 8，实际 %#v`, record)
+		t.Fatalf(`entry "Address and search bar" should match 8, got %#v`, record)
 	}
 }
 
@@ -9976,11 +9976,11 @@ func TestElementReferencesRoundTripThroughTheTargetParser(t *testing.T) {
 		for _, rendered := range []string{describeRecord(&record), renderElementAddress(&record)} {
 			target, err := parseExpectTarget(rendered)
 			if err != nil {
-				t.Fatalf("渲染出去的 %q 回读失败: %v", rendered, err)
+				t.Fatalf("rendered %q does not parse back: %v", rendered, err)
 			}
 			hit := target.find(snapshot)
 			if hit == nil || hit.Index != record.Index {
-				t.Fatalf("%q 回读后应当命中 element_index %d，实际 %#v",
+				t.Fatalf("%q should resolve back to element_index %d, got %#v",
 					rendered, record.Index, hit)
 			}
 		}
@@ -9993,10 +9993,10 @@ func TestElementReferencesRoundTripThroughTheTargetParser(t *testing.T) {
 	description := focusDescription(live)
 	target, err := parseExpectTarget(description)
 	if err != nil {
-		t.Fatalf("焦点摘要 %q 回读失败: %v", description, err)
+		t.Fatalf("focus summary %q does not parse back: %v", description, err)
 	}
 	if hit := target.findFocused(live); hit == nil || hit.Index != 5 {
-		t.Fatalf("焦点摘要回读后应当仍然命中那个焦点元素: %q -> %#v", description, hit)
+		t.Fatalf("parsed focus summary should still match the focused element: %q -> %#v", description, hit)
 	}
 }
 
@@ -10045,10 +10045,10 @@ func TestExpectEvidenceNeverContradictsItself(t *testing.T) {
 	pruned.FocusedSummary = `entry "Address and search bar"`
 	ok, evidence := spec.evaluate(expectSnapshot(), pruned)
 	if ok {
-		t.Fatalf("焦点节点不在树里时不得判 true: %q", evidence)
+		t.Fatalf("must not be true when the focused node is not in the tree: %q", evidence)
 	}
 	if strings.Contains(evidence, "nothing in the tree matches") {
-		t.Fatalf("不得输出会与下半句自相矛盾的'树里没有匹配项': %q", evidence)
+		t.Fatalf("evidence must not say 'nothing in the tree matches', which its second half contradicts: %q", evidence)
 	}
 	// The evidence must separate "the target does not match" from "the focused
 	// node is not in this snapshot", and state that the summary comes from a
@@ -10059,7 +10059,7 @@ func TestExpectEvidenceNeverContradictsItself(t *testing.T) {
 		"separate whole-window scan",
 	} {
 		if !strings.Contains(evidence, fragment) {
-			t.Fatalf("证据缺少 %q，无法区分'不匹配'与'没观测到': %q", fragment, evidence)
+			t.Fatalf("evidence is missing %q and cannot tell 'no match' from 'not observed': %q", fragment, evidence)
 		}
 	}
 
@@ -10073,13 +10073,13 @@ func TestExpectEvidenceNeverContradictsItself(t *testing.T) {
 	elsewhere.FocusedSummary = `push button "Reload"`
 	ok, evidence = spec.evaluate(expectSnapshot(), elsewhere)
 	if ok {
-		t.Fatalf("焦点不在目标上时不得判 true: %q", evidence)
+		t.Fatalf("must not be true when focus is not on the target: %q", evidence)
 	}
 	if !strings.Contains(evidence, "focus is on index=2") {
-		t.Fatalf("焦点证据必须取自判定所用的那份树: %q", evidence)
+		t.Fatalf("focus evidence must come from the tree used for the decision: %q", evidence)
 	}
 	if strings.Contains(evidence, "cannot decide") {
-		t.Fatalf("焦点节点就在树里时不该说'无法判断': %q", evidence)
+		t.Fatalf("evidence must not say 'cannot decide' when the focused node is in the tree: %q", evidence)
 	}
 }
 
@@ -10088,13 +10088,13 @@ func TestExpectIsOptionalAndMisuseIsACallError(t *testing.T) {
 	// the settle path stays disabled.
 	plan, err := parseSettlePlan(map[string]any{"app": "gedit"})
 	if err != nil {
-		t.Fatalf("不传 expect 不该报错: %v", err)
+		t.Fatalf("omitting expect must not be an error: %v", err)
 	}
 	if plan.expect != nil {
-		t.Fatal("不传 expect 时必须没有验证意图")
+		t.Fatal("omitting expect must leave no verification intent")
 	}
 	if plan.settleMS != defaultSettleMS {
-		t.Fatalf("settle_ms 默认值 = %d, want %d", plan.settleMS, defaultSettleMS)
+		t.Fatalf("default settle_ms = %d, want %d", plan.settleMS, defaultSettleMS)
 	}
 
 	// A malformed expect is a call error and must fail hard, which is distinct
@@ -10114,7 +10114,7 @@ func TestExpectIsOptionalAndMisuseIsACallError(t *testing.T) {
 		{"expect": map[string]any{"appears": "role=dialog"}, "settle_ms": float64(maxSettleMS + 1)},
 	} {
 		if _, err := parseSettlePlan(bad); err == nil {
-			t.Fatalf("parseSettlePlan(%v) 应当报错", bad)
+			t.Fatalf("parseSettlePlan(%v) should fail", bad)
 		}
 	}
 
@@ -10124,7 +10124,7 @@ func TestExpectIsOptionalAndMisuseIsACallError(t *testing.T) {
 		"expect": map[string]any{"appears": "role=dialog"}, "settle_ms": 0.0,
 	})
 	if err != nil || plan.settleMS != 0 || plan.expect == nil {
-		t.Fatalf("settle_ms=0 应当合法: plan=%#v err=%v", plan, err)
+		t.Fatalf("settle_ms=0 should be accepted: plan=%#v err=%v", plan, err)
 	}
 	plan, err = parseSettlePlan(map[string]any{
 		"expect":    map[string]any{"appears": "role=dialog"},
@@ -10165,17 +10165,17 @@ func TestExpectSettlesByPollingAndReportsElapsed(t *testing.T) {
 	ready := expectSnapshot(elementRecord{Index: 12, ControlType: "dialog", Name: "Save As"})
 	outcome := svc.settle("gedit", plan, before, ready, nil, "")
 	if !outcome.verified || outcome.polls != 0 {
-		t.Fatalf("首轮命中不该再轮询: %#v", outcome)
+		t.Fatalf("a match on the first read must not poll again: %#v", outcome)
 	}
 	if outcome.elapsedMS > 50 {
-		t.Fatalf("首轮命中的耗时应当接近 0，实际 %dms", outcome.elapsedMS)
+		t.Fatalf("a match on the first read should report about 0ms elapsed, got %dms", outcome.elapsedMS)
 	}
 
 	// Unsatisfied with a zero budget: the result is verified=false at once,
 	// without blocking.
 	outcome = svc.settle("gedit", plan, before, expectSnapshot(), nil, "")
 	if outcome.verified || outcome.polls != 0 {
-		t.Fatalf("预算为 0 时应当立刻给出否定结论: %#v", outcome)
+		t.Fatalf("a zero budget should give a negative verdict at once: %#v", outcome)
 	}
 
 	// predicate_verified:false is not isError, and it must not report delivery
@@ -10188,10 +10188,10 @@ func TestExpectSettlesByPollingAndReportsElapsed(t *testing.T) {
 		!strings.Contains(note, `"settled_after_ms"`) ||
 		!strings.Contains(note, "isError is false") ||
 		!strings.Contains(note, "delivery to the intended target is unknown") {
-		t.Fatalf("否定结论的 Note 缺少必要事实: %q", note)
+		t.Fatalf("negative verdict note is missing required facts: %q", note)
 	}
 	if strings.Contains(note, "performed and delivered") {
-		t.Fatalf("动作 Note 明说 delivery 未验证时，expect 不得反向声称已送达: %q", note)
+		t.Fatalf("expect must not claim delivery when the action note says delivery was not verified: %q", note)
 	}
 	note = expectNote(
 		plan,
@@ -10207,15 +10207,15 @@ func TestExpectSettlesByPollingAndReportsElapsed(t *testing.T) {
 	if !strings.Contains(note, `"predicate_verified":true`) ||
 		!strings.Contains(note, "only the declared accessibility predicate") ||
 		!strings.Contains(note, "240") {
-		t.Fatalf("肯定结论的 Note 缺少必要事实: %q", note)
+		t.Fatalf("positive verdict note is missing required facts: %q", note)
 	}
 	if strings.Contains(note, "settled-b") ||
 		strings.Contains(note, "observed_snapshot_id") {
-		t.Fatalf("肯定结论泄漏内部 snapshot identity: %q", note)
+		t.Fatalf("positive verdict leaked the internal snapshot identity: %q", note)
 	}
 	for _, overclaim := range []string{"effect is confirmed", "do not need a follow-up"} {
 		if strings.Contains(strings.ToLower(note), overclaim) {
-			t.Fatalf("predicate_verified:true 不得升级为效果确认: %q", note)
+			t.Fatalf("predicate_verified:true must not be upgraded to a confirmed effect: %q", note)
 		}
 	}
 }
@@ -10272,17 +10272,17 @@ func TestObserveAndExpectAreOrthogonal(t *testing.T) {
 	}
 	obs, err := parseObservation(args)
 	if err != nil {
-		t.Fatalf("expect 的存在不该影响 observe 的解析: %v", err)
+		t.Fatalf("expect must not affect observe parsing: %v", err)
 	}
 	if obs.resolvedMode() != observeNone {
-		t.Fatalf("observe 应当仍是 none，得到 %q", obs.resolvedMode())
+		t.Fatalf("observe should still be none, got %q", obs.resolvedMode())
 	}
 	plan, err := parseSettlePlan(args)
 	if err != nil {
-		t.Fatalf("observe 的存在不该影响 expect 的解析: %v", err)
+		t.Fatalf("observe must not affect expect parsing: %v", err)
 	}
 	if plan.expect == nil {
-		t.Fatal("observe=none 不该把验证意图一起省掉")
+		t.Fatal("observe=none must not drop the verification intent")
 	}
 
 	// observe="none" returns notesOnlyResult and the verdict travels in the
@@ -10291,21 +10291,21 @@ func TestObserveAndExpectAreOrthogonal(t *testing.T) {
 	svc := newService()
 	outcome := svc.settle("gedit", plan, expectSnapshot(), expectSnapshot(), nil, "")
 	if outcome.verified {
-		t.Fatal("空快照上 appears 不该成立")
+		t.Fatal("appears must not hold on empty snapshots")
 	}
 	snapshot := expectSnapshot()
 	result := snapshot.notesOnlyResult([]string{
 		expectNote(plan, outcome, axServiceRequest{Action: axClickCommand{}}, nil),
 	})
 	if len(result.Content) != 1 || result.Content[0].Type != "text" {
-		t.Fatalf("observe=none 不该回树或图: %#v", result.Content)
+		t.Fatalf("observe=none must not return a tree or image: %#v", result.Content)
 	}
 	text := result.Content[0].Text
 	if !strings.Contains(text, `"predicate_verified":false`) || !strings.Contains(text, "settled_after_ms") {
-		t.Fatalf("observe=none 时验证结论仍必须返回: %q", text)
+		t.Fatalf("observe=none must still return the verification verdict: %q", text)
 	}
 	if result.IsError {
-		t.Fatal("predicate_verified:false 不是 isError")
+		t.Fatal("predicate_verified:false must not set isError")
 	}
 	if strings.Contains(text, "element_index values stay valid") {
 		t.Fatal("observe=none must not promise that removed or omitted old indices remain valid")
