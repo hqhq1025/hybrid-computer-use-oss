@@ -2,7 +2,7 @@
   {
     "name": "observe rejects zero text limit",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-observe-text-limit",
       "operation": "observe",
@@ -18,7 +18,7 @@
   {
     "name": "observe rejects string node budget",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-observe-node-budget",
       "operation": "observe",
@@ -34,7 +34,7 @@
   {
     "name": "desktop rejects scroll without delta",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-desktop-scroll",
       "operation": "desktop_execute_batch",
@@ -54,7 +54,7 @@
   {
     "name": "desktop rejects action field mixing",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-desktop-click",
       "operation": "desktop_execute_batch",
@@ -75,7 +75,7 @@
   {
     "name": "desktop rejects empty keypress",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-desktop-keypress",
       "operation": "desktop_execute_batch",
@@ -94,7 +94,7 @@
   {
     "name": "action rejects intent field mixing",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-action-type",
       "operation": "resolve_and_act",
@@ -113,7 +113,7 @@
   {
     "name": "action rejects set value without target",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-action-set-value",
       "operation": "resolve_and_act",
@@ -130,7 +130,7 @@
   {
     "name": "app identity rejects numeric provider bus",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-app-identity",
       "operation": "observe",
@@ -147,7 +147,7 @@
   {
     "name": "target rejects string has name",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-target-has-name",
       "operation": "resolve_and_act",
@@ -168,7 +168,7 @@
   {
     "name": "action rejects boolean scroll pages",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-action-scroll-pages",
       "operation": "resolve_and_act",
@@ -187,7 +187,7 @@
   {
     "name": "window action rejects missing target",
     "request": {
-      "protocol": "osw-provider-v2",
+      "protocol": "computer-use-provider-v2",
       "schema_version": 2,
       "request_id": "invalid-window-action",
       "operation": "window_action",

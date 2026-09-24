@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const providerProtocolName = "osw-provider-v2"
+const providerProtocolName = "computer-use-provider-v2"
 
 type ProviderWireOperation string
 

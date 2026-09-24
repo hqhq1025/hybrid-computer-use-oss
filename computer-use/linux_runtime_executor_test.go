@@ -41,7 +41,7 @@ with open(os.environ["FAKE_PROVIDER_STARTS"], "a", encoding="utf-8") as out:
 for line in sys.stdin:
     request = json.loads(line)
     response = {
-        "protocol": "osw-provider-v2",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -98,7 +98,7 @@ for line in sys.stdin:
         print("not-json", flush=True)
         sys.exit(0)
     print(json.dumps({
-        "protocol": "osw-provider-v2",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -153,7 +153,7 @@ for line in sys.stdin:
     if starts == 1:
         time.sleep(2)
     print(json.dumps({
-        "protocol": "osw-provider-v2",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -206,7 +206,7 @@ with open(path, "w", encoding="utf-8") as out:
 for line in sys.stdin:
     request = json.loads(line)
     print(json.dumps({
-        "protocol": "osw-provider-v2",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -261,7 +261,7 @@ for line in sys.stdin:
     with open(os.environ["FAKE_PROVIDER_REQUESTS"], "a", encoding="utf-8") as out:
         out.write(request["request_id"] + "\n")
     print(json.dumps({
-        "protocol": "osw-provider-v2",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -339,7 +339,7 @@ for line in sys.stdin:
     with open(os.environ["FAKE_PROVIDER_REQUESTS"], "a", encoding="utf-8") as out:
         out.write(request["request_id"] + "\n")
     print(json.dumps({
-        "protocol": "osw-provider-v2",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -419,7 +419,7 @@ for line in sys.stdin:
         "diagnostic": "Traceback: /secret/provider.py",
     }, separators=(",", ":")), file=sys.stderr, flush=True)
     print(json.dumps({
-        "protocol": "osw-provider-v2",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],

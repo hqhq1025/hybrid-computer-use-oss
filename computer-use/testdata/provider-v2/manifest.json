@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "protocol": "osw-provider-v2",
+  "protocol": "computer-use-provider-v2",
   "required_operations": [
     "observe_apps",
     "observe",

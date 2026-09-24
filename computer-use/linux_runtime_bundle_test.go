@@ -14,36 +14,36 @@ func TestLinuxRuntimeBundleIsCompleteAndOrdered(t *testing.T) {
 	wantPaths := []string{
 		"native/__init__.py",
 		"native/linux/__init__.py",
-		"native/linux/provider_v1/__init__.py",
-		"native/linux/provider_v1/action_evidence.py",
-		"native/linux/provider_v1/actionability.py",
-		"native/linux/provider_v1/app_resolver.py",
-		"native/linux/provider_v1/atspi_inventory.py",
-		"native/linux/provider_v1/ax_actions.py",
-		"native/linux/provider_v1/ax_dispatch.py",
-		"native/linux/provider_v1/ax_node_properties.py",
-		"native/linux/provider_v1/ax_records.py",
-		"native/linux/provider_v1/ax_snapshot.py",
-		"native/linux/provider_v1/ax_snapshot_diagnostics.py",
-		"native/linux/provider_v1/ax_target_notes.py",
-		"native/linux/provider_v1/ax_transition_evidence.py",
-		"native/linux/provider_v1/ax_virtual_table.py",
-		"native/linux/provider_v1/element_resolver.py",
-		"native/linux/provider_v1/foundation.py",
-		"native/linux/provider_v1/gui_capture.py",
-		"native/linux/provider_v1/gui_dispatch.py",
-		"native/linux/provider_v1/gui_input.py",
-		"native/linux/provider_v1/input_primitives.py",
-		"native/linux/provider_v1/primitives.py",
-		"native/linux/provider_v1/recovery.py",
-		"native/linux/provider_v1/ref_continuity.py",
-		"native/linux/provider_v1/response_builder.py",
-		"native/linux/provider_v1/snapshot.py",
-		"native/linux/provider_v1/tree_walk.py",
-		"native/linux/provider_v1/window_diagnostics.py",
-		"native/linux/provider_v1/window_resolver.py",
-		"native/linux/provider_v1/wire_v2.py",
-		"native/linux/provider_v1/x11_windows.py",
+		"native/linux/provider/__init__.py",
+		"native/linux/provider/action_evidence.py",
+		"native/linux/provider/actionability.py",
+		"native/linux/provider/app_resolver.py",
+		"native/linux/provider/atspi_inventory.py",
+		"native/linux/provider/ax_actions.py",
+		"native/linux/provider/ax_dispatch.py",
+		"native/linux/provider/ax_node_properties.py",
+		"native/linux/provider/ax_records.py",
+		"native/linux/provider/ax_snapshot.py",
+		"native/linux/provider/ax_snapshot_diagnostics.py",
+		"native/linux/provider/ax_target_notes.py",
+		"native/linux/provider/ax_transition_evidence.py",
+		"native/linux/provider/ax_virtual_table.py",
+		"native/linux/provider/element_resolver.py",
+		"native/linux/provider/foundation.py",
+		"native/linux/provider/gui_capture.py",
+		"native/linux/provider/gui_dispatch.py",
+		"native/linux/provider/gui_input.py",
+		"native/linux/provider/input_primitives.py",
+		"native/linux/provider/primitives.py",
+		"native/linux/provider/recovery.py",
+		"native/linux/provider/ref_continuity.py",
+		"native/linux/provider/response_builder.py",
+		"native/linux/provider/snapshot.py",
+		"native/linux/provider/tree_walk.py",
+		"native/linux/provider/window_diagnostics.py",
+		"native/linux/provider/window_resolver.py",
+		"native/linux/provider/wire_v2.py",
+		"native/linux/provider/x11_windows.py",
 		"runtime.py",
 	}
 	gotPaths := make([]string, 0, len(bundle))
@@ -69,7 +69,7 @@ func TestLinuxRuntimeBundleIsCompleteAndOrdered(t *testing.T) {
 func TestLinuxRuntimeEntrypointNamesEveryFragment(t *testing.T) {
 	bundle := linuxRuntimeBundle()
 	for _, name := range []string{
-		"native.linux.provider_v1.wire_v2",
+		"native.linux.provider.wire_v2",
 		"import main",
 	} {
 		if !strings.Contains(bundle["runtime.py"], name) {
@@ -78,7 +78,7 @@ func TestLinuxRuntimeEntrypointNamesEveryFragment(t *testing.T) {
 	}
 	for _, forbidden := range []string{"ProviderFacade", "install_facade"} {
 		if strings.Contains(bundle["runtime.py"], forbidden) ||
-			strings.Contains(bundle["native/linux/provider_v1/__init__.py"], forbidden) {
+			strings.Contains(bundle["native/linux/provider/__init__.py"], forbidden) {
 			t.Fatalf("Linux runtime still references retired facade %q", forbidden)
 		}
 	}

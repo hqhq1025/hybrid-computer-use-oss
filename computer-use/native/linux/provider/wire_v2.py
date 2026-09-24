@@ -18,7 +18,7 @@ from .response_builder import (
 )
 
 
-PROTOCOL = "osw-provider-v2"
+PROTOCOL = "computer-use-provider-v2"
 SCHEMA_VERSION = 2
 _provider_initialized = False
 

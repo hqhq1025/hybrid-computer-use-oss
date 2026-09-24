@@ -148,7 +148,7 @@ class CoordinateActionabilityGateTests(unittest.TestCase):
 class ProviderWireV2Tests(unittest.TestCase):
     def test_observation_capture_snapshot_requires_boolean(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-capture",
             "operation": "resolve_and_act",
@@ -169,7 +169,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_stdio_worker_initializes_provider_once(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-1",
             "operation": "observe_apps",
@@ -252,7 +252,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_observe_request_uses_v2_envelope(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-observe",
             "operation": "observe",
@@ -273,7 +273,7 @@ class ProviderWireV2Tests(unittest.TestCase):
         ) as perform:
             response = runtime.execute(request)
         perform.assert_called_once_with("observe", request["observe"])
-        self.assertEqual(response["protocol"], "osw-provider-v2")
+        self.assertEqual(response["protocol"], "computer-use-provider-v2")
         self.assertEqual(response["request_id"], "req-observe")
         self.assertEqual(
             response["accessibility"]["snapshot"]["windowTitle"],
@@ -282,7 +282,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_unexpected_dispatch_failure_requires_provider_reset(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-reset",
             "operation": "observe_apps",
@@ -300,7 +300,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_expected_operation_failure_does_not_require_provider_reset(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-no-reset",
             "operation": "observe_apps",
@@ -327,7 +327,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_expected_provider_disconnect_requests_reset(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-expected-reset",
             "operation": "observe_apps",
@@ -356,7 +356,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_action_failure_preserves_typed_mutation_facts(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-action",
             "operation": "resolve_and_act",
@@ -403,7 +403,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_post_action_failure_exports_typed_recovery_context(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-recovery",
             "operation": "resolve_and_act",
@@ -469,7 +469,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_stale_observe_exports_read_only_recovery_context(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-stale-observe",
             "operation": "observe",
@@ -525,7 +525,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_rejects_unknown_top_level_field(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-observe",
             "operation": "observe_apps",
@@ -537,7 +537,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_rejects_unknown_payload_field(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-observe",
             "operation": "observe",
@@ -552,7 +552,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_rejects_action_field_from_another_intent(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-mixed-action",
             "operation": "resolve_and_act",
@@ -569,7 +569,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_rejects_keypress_without_key(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-keypress",
             "operation": "resolve_and_act",
@@ -586,7 +586,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_rejects_set_value_without_target(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-set-value",
             "operation": "resolve_and_act",
@@ -617,7 +617,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_rejects_desktop_settle_above_limit(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-desktop-settle",
             "operation": "desktop_execute_batch",
@@ -651,7 +651,7 @@ class RuntimeStartupErrorBoundaryTests(unittest.TestCase):
 
     def test_provider_initialization_failure_requires_reset(self):
         request = {
-            "protocol": "osw-provider-v2",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-startup-reset",
             "operation": "observe_apps",

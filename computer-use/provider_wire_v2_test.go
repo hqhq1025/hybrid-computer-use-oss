@@ -133,7 +133,7 @@ func assertProviderFixtureRoundTrip(t *testing.T, original []byte, value any) {
 
 func TestProviderV2StrictDecodeRejectsUnknownFields(t *testing.T) {
 	data := []byte(`{
-		"protocol":"osw-provider-v2",
+		"protocol":"computer-use-provider-v2",
 		"schema_version":2,
 		"request_id":"req-unknown",
 		"operation":"observe_apps",
@@ -235,7 +235,7 @@ func TestProviderV2ValidationRejectsAmbiguousOrMismatchedPayloads(t *testing.T) 
 
 func TestProviderV2DecoderRejectsTrailingJSON(t *testing.T) {
 	_, err := DecodeProviderWireRequest(
-		[]byte(`{"protocol":"osw-provider-v2","schema_version":2,` +
+		[]byte(`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"observe_apps",` +
 			`"observe_apps":{"protocol_version":2}} {}`),
 	)
@@ -246,7 +246,7 @@ func TestProviderV2DecoderRejectsTrailingJSON(t *testing.T) {
 
 func TestProviderV2ResponseDecoderRejectsUnknownSnapshotField(t *testing.T) {
 	_, err := DecodeProviderWireResponse([]byte(
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"observe",` +
 			`"accessibility":{"ok":true,"snapshot":{` +
 			`"windowTitle":"Editor","unexpectedSelection":{}}}}`,
@@ -258,7 +258,7 @@ func TestProviderV2ResponseDecoderRejectsUnknownSnapshotField(t *testing.T) {
 
 func TestProviderV2SnapshotAcceptsTypedWindowSelection(t *testing.T) {
 	response, err := DecodeProviderWireResponse([]byte(
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"observe",` +
 			`"accessibility":{"ok":true,"snapshot":{` +
 			`"windowTitle":"Editor","windowSelection":{` +
@@ -281,7 +281,7 @@ func TestProviderV2SnapshotAcceptsTypedWindowSelection(t *testing.T) {
 
 func TestProviderV2ResolvedElementAcceptsTypedRuntimeAliases(t *testing.T) {
 	response, err := DecodeProviderWireResponse([]byte(
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":true,"resolved_element":{` +
 			`"index":0,"runtimeId":[0,1],"runtimeAliases":[[0,1],[2,1]]}}}`,
@@ -297,7 +297,7 @@ func TestProviderV2ResolvedElementAcceptsTypedRuntimeAliases(t *testing.T) {
 
 func TestProviderV2ResponseAcceptsTypedRecoveryContext(t *testing.T) {
 	response, err := DecodeProviderWireResponse([]byte(
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":false,` +
 			`"failure":{"code":"effect_unknown",` +
@@ -329,24 +329,24 @@ func TestProviderV2ResponseAcceptsTypedRecoveryContext(t *testing.T) {
 
 func TestProviderV2ResponseRejectsInvalidRecoveryContext(t *testing.T) {
 	tests := []string{
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":false,"recovery_context":{` +
 			`"sourceAppStatus":"maybe"}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":false,"recovery_context":{` +
 			`"sourceAppStatus":"present"}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":false,"recovery_context":{` +
 			`"sourceWindowStatus":"alive"}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":false,"recovery_context":{` +
 			`"sourceWindowStatus":"gone","inventoryComplete":true,` +
 			`"currentWindow":{"windowHandle":"w2:not-private"}}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":false,"recovery_context":{` +
 			`"sourceAppStatus":"alive","sourceWindowStatus":"unknown",` +
@@ -362,7 +362,7 @@ func TestProviderV2ResponseRejectsInvalidRecoveryContext(t *testing.T) {
 
 func TestProviderV2ObserveStaleWindowRecoveryRoundTrip(t *testing.T) {
 	response, err := DecodeProviderWireResponse([]byte(
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"observe",` +
 			`"accessibility":{"ok":false,` +
 			`"failure":{"code":"stale_window_ref","phase":"precondition",` +
@@ -390,38 +390,38 @@ func TestProviderV2ObserveStaleWindowRecoveryRoundTrip(t *testing.T) {
 
 func TestProviderV2ResponseRejectsRecoveryOutsideEffectUnknown(t *testing.T) {
 	tests := []string{
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"observe",` +
 			`"accessibility":{"ok":false,"failure":{"code":"effect_unknown",` +
 			`"phase":"post_action_observation"},"mutation":{` +
 			`"input_events_emitted":true,"mutation_unknown":true},` +
 			`"recovery_context":{"sourceAppStatus":"unknown"}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"observe",` +
 			`"accessibility":{"ok":false,"failure":{` +
 			`"code":"stale_window_ref","phase":"precondition",` +
 			`"facts_complete":false},"recovery_context":{` +
 			`"sourceAppStatus":"unknown"}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"observe",` +
 			`"accessibility":{"ok":false,"failure":{` +
 			`"code":"stale_window_ref","phase":"precondition",` +
 			`"facts_complete":true},"mutation":{` +
 			`"input_events_emitted":true},"recovery_context":{` +
 			`"sourceAppStatus":"unknown"}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":true,"failure":{"code":"effect_unknown",` +
 			`"phase":"post_action_observation"},"mutation":{` +
 			`"input_events_emitted":true,"mutation_unknown":true},` +
 			`"recovery_context":{"sourceAppStatus":"unknown"}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":false,"failure":{"code":"stale_element_ref",` +
 			`"phase":"precondition"},"mutation":{"input_events_emitted":false},` +
 			`"recovery_context":{"sourceAppStatus":"exited",` +
 			`"sourceWindowStatus":"gone","inventoryComplete":true}}}`,
-		`{"protocol":"osw-provider-v2","schema_version":2,` +
+		`{"protocol":"computer-use-provider-v2","schema_version":2,` +
 			`"request_id":"req","operation":"resolve_and_act",` +
 			`"accessibility":{"ok":false,"failure":{"code":"effect_unknown",` +
 			`"phase":"post_action_observation"},"mutation":{` +
@@ -621,7 +621,7 @@ func TestProviderV2ValidationRejectsInvalidTypedPayloads(t *testing.T) {
 
 func TestProviderV2ActionDecodeRejectsIntentFieldMixing(t *testing.T) {
 	_, err := DecodeProviderWireRequest([]byte(`{
-		"protocol":"osw-provider-v2",
+		"protocol":"computer-use-provider-v2",
 		"schema_version":2,
 		"request_id":"req-mixed",
 		"operation":"resolve_and_act",
