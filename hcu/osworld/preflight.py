@@ -19,7 +19,8 @@ def validate_official_asset_runtime() -> dict:
         raise RuntimeError(
             "OSWorld V2 requires a local gated asset snapshot. "
             "OSWORLD_FILE_BASE_URL is unset. "
-            "Source deploy/osworld-v2.env before launching the runner."
+            "Load your environment file (see configs/env.example) before "
+            "launching the runner."
         )
     if "://" in raw_asset_root:
         raise RuntimeError(
@@ -57,7 +58,8 @@ def validate_dedicated_docker_runtime() -> dict:
             "OSWorld V2 requires the dedicated Docker daemon. "
             f"Expected DOCKER_HOST={DEDICATED_DOCKER_HOST}, "
             f"got {docker_host or '<unset>'}. "
-            "Source deploy/osworld-v2.env before launching the runner."
+            "Load your environment file (see configs/env.example) before "
+            "launching the runner."
         )
 
     socket_path = Path(
