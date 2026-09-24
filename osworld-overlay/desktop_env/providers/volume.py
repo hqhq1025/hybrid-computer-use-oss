@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# Modified by the Hybrid Computer Use authors from desktop_env/providers/volume.py
+# in xlang-ai/OSWorld-V2 (revision d578d2d4). See THIRD_PARTY_NOTICES.md.
+
 from __future__ import annotations
 
 import json
