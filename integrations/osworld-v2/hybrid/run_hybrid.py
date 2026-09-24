@@ -66,7 +66,7 @@ from runner_overrides.control_retry import bounded_control_retry  # noqa: E402
 from runner_overrides.judge_budget import completed_tool_events  # noqa: E402
 from task_loader import load_task_config  # noqa: E402
 from integrations.common.evaluator_channels import (  # noqa: E402
-    evaluate_official_only,
+    run_official_evaluator,
 )
 
 
@@ -4323,11 +4323,9 @@ def main() -> int:
                     before_eval
                 )
 
-            channels = evaluate_official_only(
-                task_id=args.task_id,
-                evaluate=lambda: phase["evaluate"](env),
+            official_channel = run_official_evaluator(
+                lambda: phase["evaluate"](env)
             )
-            official_channel = channels["official"]
             official_completed = (
                 official_channel["status"] == "completed"
             )
@@ -4342,7 +4340,7 @@ def main() -> int:
                 }
             )
             phase_score = (
-                float(channels["official_score"])
+                official_channel["result"]["score"]
                 if official_completed
                 else 0.0
             )
