@@ -230,166 +230,123 @@ func (s *service) a11yRequest(
 
 	switch mode {
 	case a11yModeObserve:
-		target := defaultString(
-			strings.ToLower(strings.TrimSpace(
-				optionalString(args, "observation_target"),
-			)),
-			"app",
-		)
-		switch target {
-		case "apps":
-			result := s.listApps().withEvidenceScope("app_inventory")
-			result = withA11yModeEvidence(result, mode)
-			if result.StructuredContent == nil {
-				result.StructuredContent = map[string]any{}
-			}
-			result.StructuredContent["observation_target"] = "apps"
-			return result
-		case "app":
-		default:
-			return textResult(
-				"observation_target must be app or apps", true,
-			).withEvidenceScope("error_only")
-		}
-		if raw, present := args["actions"]; present {
-			actions, ok := raw.([]any)
-			if !ok {
-				return textResult(
-					"mode=\"observe\" actions must be an empty array when supplied",
-					true,
-				).withEvidenceScope("error_only")
-			}
-			if len(actions) != 0 {
-				return textResult(
-					"mode=\"observe\" cannot execute actions; use mode=\"act\"",
-					true,
-				).withEvidenceScope("error_only")
-			}
-		}
-		if obs.resolvedMode() == observeNone {
-			return textResult(
-				"mode=\"observe\" cannot use observe=\"none\"",
-				true,
-			).withEvidenceScope("error_only")
-		}
-		view, err := parseTreeView(args)
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
-		}
-		scope, err := parseA11yScope(args)
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
-		}
-		root, err := parseObservationRoot(args["root"])
-		if err != nil {
-			return textResult(
-				"root: "+err.Error(), true,
-			).withEvidenceScope("error_only")
-		}
-		var includeScreenshot *bool
-		if obs.resolvedMode() == observeScreenshot ||
-			obs.resolvedMode() == observeFull {
-			enabled := true
-			includeScreenshot = &enabled
-		}
-		readContext, identityErr := s.resolveA11yReadIdentity(args, "")
-		if identityErr != nil {
-			return textResult(
-				"AX observation target: "+identityErr.Error(), true,
-			).withEvidenceScope("error_only")
-		}
-		result := s.getAppState(
-			readContext.appToken,
-			nil,
-			nil,
-			nil,
-			nil,
-			includeScreenshot,
-			nil,
-			view,
-			scope,
-			root,
-			readContext.windowHandle,
-		).withEvidenceScope("independent_ui_read")
-		result = withA11yModeEvidence(result, mode)
-		return result
-
+		return s.a11yObserve(args, obs)
 	case a11yModeFind:
-		if cursor := strings.TrimSpace(optionalString(args, "cursor")); cursor != "" {
-			for _, field := range []string{
-				"app", "app_ref", "window_ref", "query", "scope",
-			} {
-				if _, present := args[field]; present {
-					return textResult(
-						"AX find cursor continuation accepts only mode, cursor, and limit",
-						true,
-					).withEvidenceScope("error_only")
-				}
-			}
-			limit, err := optionalPositiveInt(args, "limit")
-			if err != nil {
-				return textResult(err.Error(), true).withEvidenceScope("error_only")
-			}
-			resolvedLimit := 20
-			if limit != nil {
-				resolvedLimit = *limit
-			}
-			if resolvedLimit > maxAXFindPageSize {
-				return textResult(fmt.Sprintf(
-					"limit must be at most %d", maxAXFindPageSize,
-				), true).withEvidenceScope("error_only")
-			}
-			return withA11yModeEvidence(
-				s.continueFind(cursor, resolvedLimit).
-					withEvidenceScope("cached_observation_page"),
-				mode,
-			)
+		return s.a11yFind(args, obs)
+	case a11yModeAssert:
+		return s.a11yAssert(args, obs)
+	case a11yModeAct:
+		return s.a11yAct(args, obs)
+	}
+	return textResult("unreachable AX mode", true).
+		withEvidenceScope("error_only")
+}
+
+func (s *service) a11yObserve(
+	args map[string]any,
+	obs observation,
+) toolCallResult {
+	target := defaultString(
+		strings.ToLower(strings.TrimSpace(
+			optionalString(args, "observation_target"),
+		)),
+		"app",
+	)
+	switch target {
+	case "apps":
+		result := s.listApps().withEvidenceScope("app_inventory")
+		result = withA11yModeEvidence(result, a11yModeObserve)
+		if result.StructuredContent == nil {
+			result.StructuredContent = map[string]any{}
 		}
-		readContext, identityErr := s.resolveA11yReadIdentity(args, "")
-		if identityErr != nil {
+		result.StructuredContent["observation_target"] = "apps"
+		return result
+	case "app":
+	default:
+		return textResult(
+			"observation_target must be app or apps", true,
+		).withEvidenceScope("error_only")
+	}
+	if raw, present := args["actions"]; present {
+		actions, ok := raw.([]any)
+		if !ok {
 			return textResult(
-				"AX find target: "+identityErr.Error(), true,
-			).withEvidenceScope("error_only")
-		}
-		query, err := requiredObjectArgument(args, "query")
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
-		}
-		allowedQueryFields := map[string]bool{
-			"role": true, "name_contains": true, "name_equals": true,
-			"text_contains": true, "text_equals": true, "state": true,
-			"limit": true,
-		}
-		unexpectedQueryFields := []string{}
-		for field := range query {
-			if !allowedQueryFields[field] {
-				unexpectedQueryFields = append(unexpectedQueryFields, field)
-			}
-		}
-		sort.Strings(unexpectedQueryFields)
-		if len(unexpectedQueryFields) > 0 {
-			return textResult(
-				"find.query has unsupported field(s): "+
-					strings.Join(unexpectedQueryFields, ", ")+
-					"; use name_equals/name_contains or text_equals/text_contains",
+				"mode=\"observe\" actions must be an empty array when supplied",
 				true,
 			).withEvidenceScope("error_only")
 		}
-		if optionalString(query, "name_contains") != "" &&
-			optionalString(query, "name_equals") != "" {
+		if len(actions) != 0 {
 			return textResult(
-				"find.query accepts only one of name_contains or name_equals",
+				"mode=\"observe\" cannot execute actions; use mode=\"act\"",
 				true,
 			).withEvidenceScope("error_only")
 		}
-		if optionalString(query, "text_contains") != "" &&
-			optionalString(query, "text_equals") != "" {
-			return textResult(
-				"find.query accepts only one of text_contains or text_equals",
-				true,
-			).withEvidenceScope("error_only")
+	}
+	if obs.resolvedMode() == observeNone {
+		return textResult(
+			"mode=\"observe\" cannot use observe=\"none\"",
+			true,
+		).withEvidenceScope("error_only")
+	}
+	view, err := parseTreeView(args)
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	scope, err := parseA11yScope(args)
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	root, err := parseObservationRoot(args["root"])
+	if err != nil {
+		return textResult(
+			"root: "+err.Error(), true,
+		).withEvidenceScope("error_only")
+	}
+	var includeScreenshot *bool
+	if obs.resolvedMode() == observeScreenshot ||
+		obs.resolvedMode() == observeFull {
+		enabled := true
+		includeScreenshot = &enabled
+	}
+	readContext, identityErr := s.resolveA11yReadIdentity(args, "")
+	if identityErr != nil {
+		return textResult(
+			"AX observation target: "+identityErr.Error(), true,
+		).withEvidenceScope("error_only")
+	}
+	result := s.getAppState(
+		readContext.appToken,
+		nil,
+		nil,
+		nil,
+		nil,
+		includeScreenshot,
+		nil,
+		view,
+		scope,
+		root,
+		readContext.windowHandle,
+	).withEvidenceScope("independent_ui_read")
+	result = withA11yModeEvidence(result, a11yModeObserve)
+	return result
+}
+
+func (s *service) a11yFind(
+	args map[string]any,
+	obs observation,
+) toolCallResult {
+	if cursor := strings.TrimSpace(optionalString(args, "cursor")); cursor != "" {
+		for _, field := range []string{
+			"app", "app_ref", "window_ref", "query", "scope",
+		} {
+			if _, present := args[field]; present {
+				return textResult(
+					"AX find cursor continuation accepts only mode, cursor, and limit",
+					true,
+				).withEvidenceScope("error_only")
+			}
 		}
-		limit, err := optionalPositiveInt(query, "limit")
+		limit, err := optionalPositiveInt(args, "limit")
 		if err != nil {
 			return textResult(err.Error(), true).withEvidenceScope("error_only")
 		}
@@ -399,173 +356,213 @@ func (s *service) a11yRequest(
 		}
 		if resolvedLimit > maxAXFindPageSize {
 			return textResult(fmt.Sprintf(
-				"find.query.limit must be at most %d", maxAXFindPageSize,
+				"limit must be at most %d", maxAXFindPageSize,
 			), true).withEvidenceScope("error_only")
 		}
-		scope, err := parseA11yScope(args)
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
+		return withA11yModeEvidence(
+			s.continueFind(cursor, resolvedLimit).
+				withEvidenceScope("cached_observation_page"),
+			a11yModeFind,
+		)
+	}
+	readContext, identityErr := s.resolveA11yReadIdentity(args, "")
+	if identityErr != nil {
+		return textResult(
+			"AX find target: "+identityErr.Error(), true,
+		).withEvidenceScope("error_only")
+	}
+	query, err := requiredObjectArgument(args, "query")
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	allowedQueryFields := map[string]bool{
+		"role": true, "name_contains": true, "name_equals": true,
+		"text_contains": true, "text_equals": true, "state": true,
+		"limit": true,
+	}
+	unexpectedQueryFields := []string{}
+	for field := range query {
+		if !allowedQueryFields[field] {
+			unexpectedQueryFields = append(unexpectedQueryFields, field)
 		}
-		name := optionalString(query, "name_contains")
-		nameExact := false
-		if exact := optionalString(query, "name_equals"); exact != "" {
-			name = exact
-			nameExact = true
-		}
-		text := optionalString(query, "text_contains")
-		textExact := false
-		if exact := optionalString(query, "text_equals"); exact != "" {
-			text = exact
-			textExact = true
-		}
-		result := s.find(
-			readContext.appToken,
-			optionalString(query, "role"),
-			name,
-			text,
-			optionalString(query, "state"),
-			resolvedLimit,
-			nameExact,
-			textExact,
-			scope,
-			readContext.windowHandle,
-		).withEvidenceScope("independent_ui_read")
-		return withA11yModeEvidence(result, mode)
+	}
+	sort.Strings(unexpectedQueryFields)
+	if len(unexpectedQueryFields) > 0 {
+		return textResult(
+			"find.query has unsupported field(s): "+
+				strings.Join(unexpectedQueryFields, ", ")+
+				"; use name_equals/name_contains or text_equals/text_contains",
+			true,
+		).withEvidenceScope("error_only")
+	}
+	if optionalString(query, "name_contains") != "" &&
+		optionalString(query, "name_equals") != "" {
+		return textResult(
+			"find.query accepts only one of name_contains or name_equals",
+			true,
+		).withEvidenceScope("error_only")
+	}
+	if optionalString(query, "text_contains") != "" &&
+		optionalString(query, "text_equals") != "" {
+		return textResult(
+			"find.query accepts only one of text_contains or text_equals",
+			true,
+		).withEvidenceScope("error_only")
+	}
+	limit, err := optionalPositiveInt(query, "limit")
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	resolvedLimit := 20
+	if limit != nil {
+		resolvedLimit = *limit
+	}
+	if resolvedLimit > maxAXFindPageSize {
+		return textResult(fmt.Sprintf(
+			"find.query.limit must be at most %d", maxAXFindPageSize,
+		), true).withEvidenceScope("error_only")
+	}
+	scope, err := parseA11yScope(args)
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	name := optionalString(query, "name_contains")
+	nameExact := false
+	if exact := optionalString(query, "name_equals"); exact != "" {
+		name = exact
+		nameExact = true
+	}
+	text := optionalString(query, "text_contains")
+	textExact := false
+	if exact := optionalString(query, "text_equals"); exact != "" {
+		text = exact
+		textExact = true
+	}
+	result := s.find(
+		readContext.appToken,
+		optionalString(query, "role"),
+		name,
+		text,
+		optionalString(query, "state"),
+		resolvedLimit,
+		nameExact,
+		textExact,
+		scope,
+		readContext.windowHandle,
+	).withEvidenceScope("independent_ui_read")
+	return withA11yModeEvidence(result, a11yModeFind)
+}
 
-	case a11yModeAssert:
-		assertion, err := requiredObjectArgument(args, "assertion")
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
+func (s *service) a11yAssert(
+	args map[string]any,
+	obs observation,
+) toolCallResult {
+	assertion, err := requiredObjectArgument(args, "assertion")
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	spec, err := parseA11yAssertionSpec(assertion)
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	timeoutMS := spec.timeoutMS
+	stableMS := spec.stableMS
+	assertionType := spec.assertionType
+	targetAddress := spec.targetAddress
+	readContext, identityErr := s.resolveA11yReadIdentity(args, targetAddress)
+	if identityErr != nil {
+		return textResult(
+			"AX assertion target: "+identityErr.Error(), true,
+		).withEvidenceScope("error_only")
+	}
+	if assertionType == "window_title_contains" {
+		windowTitle := strings.TrimSpace(
+			optionalString(assertion, "text"),
+		)
+		expected := true
+		if exists := optionalBool(assertion, "exists"); exists != nil {
+			expected = *exists
 		}
-		spec, err := parseA11yAssertionSpec(assertion)
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
+		result := s.verifyWindowTitle(
+			readContext.appToken,
+			windowTitle,
+			expected,
+			timeoutMS,
+			stableMS,
+			readContext.windowHandle,
+		)
+		result = result.withEvidenceScope(
+			assertionEvidenceScope(result),
+		)
+		result = withA11yModeEvidence(result, a11yModeAssert)
+		if result.StructuredContent == nil {
+			result.StructuredContent = map[string]any{}
 		}
-		timeoutMS := spec.timeoutMS
-		stableMS := spec.stableMS
-		assertionType := spec.assertionType
-		targetAddress := spec.targetAddress
-		readContext, identityErr := s.resolveA11yReadIdentity(args, targetAddress)
-		if identityErr != nil {
+		result.StructuredContent["assertion_scope"] =
+			"accessibility_visible_window_title_only"
+		result.StructuredContent["task_completion_verified"] = false
+		return result
+	}
+	scope, err := parseA11yScope(args)
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	goal := verifyGoal{}
+	switch assertionType {
+	case "exists":
+		goal.exists = optionalBool(assertion, "value")
+	case "state":
+		state := strings.TrimSpace(optionalString(assertion, "state"))
+		expected := optionalBool(assertion, "value")
+		if !*expected {
+			state = "!" + state
+		}
+		goal.state = state
+	case "value_contains":
+		goal.valueContains = optionalString(assertion, "value")
+	case "value_equals":
+		goal.valueEquals, goal.valueEqualsKind, _ =
+			assertionScalarString(assertion, "value")
+	case "text_contains":
+		goal.textContains = optionalString(assertion, "text")
+	}
+	target := targetAddress
+	if target == "" {
+		return textResult(
+			"mode=\"assert_ax\" requires assertion.target", true,
+		).withEvidenceScope("error_only")
+	}
+	displayTarget := target
+	if isShortAXWindowRef(target) {
+		return textResult(
+			"assertion.target: wN identifies a window action target; "+
+				"use top-level window_ref with "+
+				"assertion.type=\"window_title_contains\" for window state",
+			true,
+		).withEvidenceScope("error_only")
+	}
+	if isShortAXRef(target) {
+		entry, resolveErr := s.resolveShortAXRef(readContext.appToken, target)
+		if resolveErr != nil {
 			return textResult(
-				"AX assertion target: "+identityErr.Error(), true,
+				"assertion.target: "+resolveErr.Error(), true,
 			).withEvidenceScope("error_only")
 		}
-		if assertionType == "window_title_contains" {
-			windowTitle := strings.TrimSpace(
-				optionalString(assertion, "text"),
-			)
-			expected := true
-			if exists := optionalBool(assertion, "exists"); exists != nil {
-				expected = *exists
-			}
-			result := s.verifyWindowTitle(
-				readContext.appToken,
-				windowTitle,
-				expected,
-				timeoutMS,
-				stableMS,
-				readContext.windowHandle,
-			)
-			result = result.withEvidenceScope(
-				assertionEvidenceScope(result),
-			)
-			result = withA11yModeEvidence(result, mode)
-			if result.StructuredContent == nil {
-				result.StructuredContent = map[string]any{}
-			}
-			result.StructuredContent["assertion_scope"] =
-				"accessibility_visible_window_title_only"
-			result.StructuredContent["task_completion_verified"] = false
-			return result
-		}
-		scope, err := parseA11yScope(args)
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
-		}
-		goal := verifyGoal{}
-		switch assertionType {
-		case "exists":
-			goal.exists = optionalBool(assertion, "value")
-		case "state":
-			state := strings.TrimSpace(optionalString(assertion, "state"))
-			expected := optionalBool(assertion, "value")
-			if !*expected {
-				state = "!" + state
-			}
-			goal.state = state
-		case "value_contains":
-			goal.valueContains = optionalString(assertion, "value")
-		case "value_equals":
-			goal.valueEquals, goal.valueEqualsKind, _ =
-				assertionScalarString(assertion, "value")
-		case "text_contains":
-			goal.textContains = optionalString(assertion, "text")
-		}
-		target := targetAddress
-		if target == "" {
+		liveTarget, targetErr := semanticTargetFromRefEntry(entry)
+		if targetErr != nil {
 			return textResult(
-				"mode=\"assert_ax\" requires assertion.target", true,
+				"assertion.target: "+targetErr.Error(), true,
 			).withEvidenceScope("error_only")
 		}
-		displayTarget := target
-		if isShortAXWindowRef(target) {
-			return textResult(
-				"assertion.target: wN identifies a window action target; "+
-					"use top-level window_ref with "+
-					"assertion.type=\"window_title_contains\" for window state",
-				true,
-			).withEvidenceScope("error_only")
-		}
-		if isShortAXRef(target) {
-			entry, resolveErr := s.resolveShortAXRef(readContext.appToken, target)
-			if resolveErr != nil {
-				return textResult(
-					"assertion.target: "+resolveErr.Error(), true,
-				).withEvidenceScope("error_only")
-			}
-			liveTarget, targetErr := semanticTargetFromRefEntry(entry)
-			if targetErr != nil {
-				return textResult(
-					"assertion.target: "+targetErr.Error(), true,
-				).withEvidenceScope("error_only")
-			}
-			result := s.verifyResolvedAXRef(
-				readContext.appToken,
-				target,
-				liveTarget,
-				goal,
-				timeoutMS,
-				stableMS,
-			).withEvidenceScope("independent_ui_read")
-			result = withA11yModeEvidence(result, mode)
-			if result.StructuredContent == nil {
-				result.StructuredContent = map[string]any{}
-			}
-			result.StructuredContent["assertion_scope"] =
-				"accessibility_visible_state_only"
-			result.StructuredContent["task_completion_verified"] = false
-			return result
-		}
-		result := s.verify(
+		result := s.verifyResolvedAXRef(
 			readContext.appToken,
 			target,
-			displayTarget,
+			liveTarget,
 			goal,
 			timeoutMS,
 			stableMS,
-			scope,
-			readContext.windowHandle,
 		).withEvidenceScope("independent_ui_read")
-		if displayTarget != target {
-			result = replaceToolResultText(result, target, displayTarget)
-		}
-		result = withA11yModeEvidence(result, mode)
-		if result.StructuredContent != nil &&
-			result.StructuredContent["assertion_sampled_live_ui"] == true {
-			result.StructuredContent["evidence_scope"] =
-				"independent_ui_read"
-		}
+		result = withA11yModeEvidence(result, a11yModeAssert)
 		if result.StructuredContent == nil {
 			result.StructuredContent = map[string]any{}
 		}
@@ -573,41 +570,69 @@ func (s *service) a11yRequest(
 			"accessibility_visible_state_only"
 		result.StructuredContent["task_completion_verified"] = false
 		return result
-
-	case a11yModeAct:
-		switch obs.resolvedMode() {
-		case observeNone, observeDiff, observeScreenshot:
-		default:
-			return a11yBatchValidationError(
-				"mode=\"act\" observe must be none, diff, or screenshot. "+
-					"No action was executed. Retry this same act with observe omitted "+
-					"or set to diff; do not add a separate observe first.", 0)
-		}
-		rawActions, present := args["actions"]
-		if !present {
-			return a11yBatchValidationError(
-				"mode=\"act\" requires actions", 0)
-		}
-		var postcondition map[string]any
-		if raw, present := args["postcondition"]; present {
-			var ok bool
-			postcondition, ok = raw.(map[string]any)
-			if !ok {
-				return a11yBatchValidationError(
-					"postcondition must be an AX assertion object", 0,
-				)
-			}
-		}
-		result := s.a11yBatch(
-			"",
-			rawActions,
-			obs,
-			postcondition,
-			"",
-			optionalString(args, "window_ref"),
-		).withEvidenceScope("delivery_or_local_ui")
-		return withA11yModeEvidence(result, mode)
 	}
-	return textResult("unreachable AX mode", true).
-		withEvidenceScope("error_only")
+	result := s.verify(
+		readContext.appToken,
+		target,
+		displayTarget,
+		goal,
+		timeoutMS,
+		stableMS,
+		scope,
+		readContext.windowHandle,
+	).withEvidenceScope("independent_ui_read")
+	if displayTarget != target {
+		result = replaceToolResultText(result, target, displayTarget)
+	}
+	result = withA11yModeEvidence(result, a11yModeAssert)
+	if result.StructuredContent != nil &&
+		result.StructuredContent["assertion_sampled_live_ui"] == true {
+		result.StructuredContent["evidence_scope"] =
+			"independent_ui_read"
+	}
+	if result.StructuredContent == nil {
+		result.StructuredContent = map[string]any{}
+	}
+	result.StructuredContent["assertion_scope"] =
+		"accessibility_visible_state_only"
+	result.StructuredContent["task_completion_verified"] = false
+	return result
+}
+
+func (s *service) a11yAct(
+	args map[string]any,
+	obs observation,
+) toolCallResult {
+	switch obs.resolvedMode() {
+	case observeNone, observeDiff, observeScreenshot:
+	default:
+		return a11yBatchValidationError(
+			"mode=\"act\" observe must be none, diff, or screenshot. "+
+				"No action was executed. Retry this same act with observe omitted "+
+				"or set to diff; do not add a separate observe first.", 0)
+	}
+	rawActions, present := args["actions"]
+	if !present {
+		return a11yBatchValidationError(
+			"mode=\"act\" requires actions", 0)
+	}
+	var postcondition map[string]any
+	if raw, present := args["postcondition"]; present {
+		var ok bool
+		postcondition, ok = raw.(map[string]any)
+		if !ok {
+			return a11yBatchValidationError(
+				"postcondition must be an AX assertion object", 0,
+			)
+		}
+	}
+	result := s.a11yBatch(
+		"",
+		rawActions,
+		obs,
+		postcondition,
+		"",
+		optionalString(args, "window_ref"),
+	).withEvidenceScope("delivery_or_local_ui")
+	return withA11yModeEvidence(result, a11yModeAct)
 }
