@@ -645,16 +645,6 @@ func withA11yModeEvidence(
 	return result
 }
 
-func prependA11yScopeNotice(
-	result toolCallResult,
-	text string,
-) toolCallResult {
-	// The stable tool contract owns channel boundaries. Repeating them in each
-	// successful response obscures the state or action evidence.
-	_ = text
-	return result
-}
-
 func (s *service) a11yRequest(
 	args map[string]any,
 	obs observation,
@@ -683,13 +673,7 @@ func (s *service) a11yRequest(
 				result.StructuredContent = map[string]any{}
 			}
 			result.StructuredContent["observation_target"] = "apps"
-			notice := "A11Y APPLICATION OBSERVATION: this lists only applications " +
-				"currently visible through accessibility. It is not installed-software " +
-				"inventory and absence does not prove an application is unavailable."
-			return prependA11yScopeNotice(
-				result,
-				notice,
-			)
+			return result
 		case "app":
 		default:
 			return textResult(
@@ -757,12 +741,7 @@ func (s *service) a11yRequest(
 			readContext.windowHandle,
 		).withEvidenceScope("independent_ui_read")
 		result = withA11yModeEvidence(result, mode)
-		return prependA11yScopeNotice(
-			result,
-			"A11Y OBSERVATION: this reports only state visible through the "+
-				"accessibility provider. It does not prove file contents, image "+
-				"pixels, document formatting, persistence, or task completion.",
-		)
+		return result
 
 	case a11yModeFind:
 		if cursor := strings.TrimSpace(optionalString(args, "cursor")); cursor != "" {
@@ -927,12 +906,7 @@ func (s *service) a11yRequest(
 			result.StructuredContent["assertion_scope"] =
 				"accessibility_visible_window_title_only"
 			result.StructuredContent["task_completion_verified"] = false
-			return prependA11yScopeNotice(
-				result,
-				"A11Y WINDOW ASSERTION SCOPE: this verdict covers only current "+
-					"top-level window titles owned by the resolved AX application. "+
-					"It does not prove file contents, persistence, or task completion.",
-			)
+			return result
 		}
 		scope, err := parseA11yScope(args)
 		if err != nil {
@@ -1000,12 +974,7 @@ func (s *service) a11yRequest(
 			result.StructuredContent["assertion_scope"] =
 				"accessibility_visible_state_only"
 			result.StructuredContent["task_completion_verified"] = false
-			return prependA11yScopeNotice(
-				result,
-				"A11Y ASSERTION SCOPE: this verdict covers only the requested "+
-					"AX-visible predicate. It does not verify document formatting, "+
-					"image pixels, file contents, durable persistence, or whole-task completion.",
-			)
+			return result
 		}
 		result := s.verify(
 			readContext.appToken,
@@ -1032,12 +1001,7 @@ func (s *service) a11yRequest(
 		result.StructuredContent["assertion_scope"] =
 			"accessibility_visible_state_only"
 		result.StructuredContent["task_completion_verified"] = false
-		return prependA11yScopeNotice(
-			result,
-			"A11Y ASSERTION SCOPE: this verdict covers only the requested "+
-				"AX-visible predicate. It does not verify document formatting, "+
-				"image pixels, file contents, durable persistence, or whole-task completion.",
-		)
+		return result
 
 	case a11yModeAct:
 		switch obs.resolvedMode() {

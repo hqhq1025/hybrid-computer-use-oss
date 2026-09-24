@@ -2297,52 +2297,6 @@ func TestDeliveredTreeLedgerRequiresActualInlineDelivery(t *testing.T) {
 	})
 }
 
-func TestDocumentStateNeverEntersAXModelOrOperatorEvidence(t *testing.T) {
-	dirty := true
-	snapshot := &appSnapshot{
-		App:         appDescriptor{Name: "Writer", PID: 77},
-		WindowTitle: "report.docx",
-		TreeLines:   []string{"ax:", ` - "document \"report.docx\""`},
-		DocumentState: &documentState{
-			IdentityStatus: "resolved",
-			IdentityKind:   "file",
-			IdentityValue:  "/home/user/report.docx",
-			Dirty:          &dirty,
-			DiskStatus:     "available",
-			PathFingerprint: &resourceFingerprint{
-				Dev: 1, Ino: 20, Size: 100, MtimeNS: 30,
-			},
-		},
-	}
-	text := snapshot.renderedText()
-	for _, forbidden := range []string{
-		"Document state:",
-		"/home/user/report.docx",
-		"dirty=",
-		"inode",
-		"mtime",
-		"pid 77",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("filesystem/process evidence leaked %q: %s",
-				forbidden, text)
-		}
-	}
-	result := toolCallResult{
-		Content:           []contentItem{{Type: "text", Text: text}},
-		StructuredContent: map[string]any{},
-	}
-	addTreeProjectionMetadata(&result, snapshot)
-	if result.StructuredContent["operator_document_state"] != nil {
-		t.Fatalf("filesystem state entered AX telemetry: %#v",
-			result.StructuredContent)
-	}
-	result = prepareAXEvidence(result)
-	if result.StructuredContent["operator_document_state"] != nil {
-		t.Fatalf("document state leaked into model evidence: %#v", result)
-	}
-}
-
 func TestCompactAXActionContentDropsRoutineRouteNotes(t *testing.T) {
 	result := compactAXActionContent(toolCallResult{
 		Content: []contentItem{{Type: "text", Text: strings.Join([]string{

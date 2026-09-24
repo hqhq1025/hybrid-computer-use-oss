@@ -226,48 +226,6 @@ func (b *busySignal) busy() bool {
 	return b != nil && (b.WindowBusy || b.ProgressElements > 0)
 }
 
-type resourceFingerprint struct {
-	Dev     uint64 `json:"dev"`
-	Ino     uint64 `json:"ino"`
-	Size    int64  `json:"size"`
-	MtimeNS int64  `json:"mtimeNs"`
-}
-
-type openFileFingerprint struct {
-	FD      int    `json:"fd"`
-	Dev     uint64 `json:"dev"`
-	Ino     uint64 `json:"ino"`
-	Size    int64  `json:"size"`
-	MtimeNS int64  `json:"mtimeNs"`
-	Deleted bool   `json:"deleted"`
-}
-
-type resourceCandidate struct {
-	Path                 string                `json:"path"`
-	Kind                 string                `json:"kind"`
-	Sources              []string              `json:"sources"`
-	Deleted              bool                  `json:"deleted"`
-	OpenFileFingerprint  *openFileFingerprint  `json:"openFileFingerprint,omitempty"`
-	OpenFileFingerprints []openFileFingerprint `json:"openFileFingerprints,omitempty"`
-}
-
-type documentState struct {
-	IdentityStatus       string                `json:"identityStatus"`
-	IdentityKind         string                `json:"identityKind"`
-	IdentityValue        string                `json:"identityValue,omitempty"`
-	IdentityBasis        []string              `json:"identityBasis,omitempty"`
-	Candidates           []resourceCandidate   `json:"candidates,omitempty"`
-	Dirty                *bool                 `json:"dirty,omitempty"`
-	DirtyBasis           string                `json:"dirtyBasis,omitempty"`
-	TitleModifiedMarker  string                `json:"titleModifiedMarker,omitempty"`
-	DiskStatus           string                `json:"diskStatus"`
-	PathFingerprint      *resourceFingerprint  `json:"pathFingerprint,omitempty"`
-	OpenFileFingerprint  *openFileFingerprint  `json:"openFileFingerprint,omitempty"`
-	OpenFileFingerprints []openFileFingerprint `json:"openFileFingerprints,omitempty"`
-	ScanDeadlineExceeded bool                  `json:"scanDeadlineExceeded,omitempty"`
-	ScanIncomplete       bool                  `json:"scanIncomplete,omitempty"`
-}
-
 type appSnapshot struct {
 	App                 appDescriptor          `json:"app"`
 	WindowTitle         string                 `json:"windowTitle,omitempty"`
@@ -279,7 +237,6 @@ type appSnapshot struct {
 	SnapshotID          string                 `json:"snapshotId,omitempty"`
 	SampledAt           string                 `json:"sampledAt,omitempty"`
 	Busy                *busySignal            `json:"busy,omitempty"`
-	DocumentState       *documentState         `json:"documentState,omitempty"`
 	WindowBounds        *frame                 `json:"windowBounds,omitempty"`
 	ScreenshotPNGBase64 string                 `json:"screenshotPngBase64,omitempty"`
 	ScreenshotMimeType  string                 `json:"screenshotMimeType,omitempty"`

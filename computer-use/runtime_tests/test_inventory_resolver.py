@@ -226,23 +226,6 @@ class ResolvedNoteTests(AtspiPatchedTestCase):
         self.assertIsNone(runtime.resolved_note(_NamedNode(), None))
 
 
-class SnapshotDigestTests(unittest.TestCase):
-    def test_document_state_is_not_part_of_ax_snapshot_identity(self):
-        first = runtime.snapshot_digest(
-            "window",
-            ["0 frame Doc"],
-            "",
-            "",
-        )
-        second = runtime.snapshot_digest(
-            "window",
-            ["0 frame Doc"],
-            "",
-            "",
-        )
-        self.assertEqual(first, second)
-
-
 class ProcessNameAliasTests(unittest.TestCase):
     """Apps can be matched by process name, but URLs never become names.
 

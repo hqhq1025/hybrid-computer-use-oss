@@ -276,7 +276,6 @@ func compactFindSnapshot(snapshot *appSnapshot) *appSnapshot {
 	clone.Refs = nil
 	clone.Annotations = nil
 	clone.DesktopLayout = nil
-	clone.DocumentState = nil
 	if snapshot.axSnapshot != nil {
 		axClone := *snapshot.axSnapshot
 		axClone.CanonicalRoots = cloneAXForest(
