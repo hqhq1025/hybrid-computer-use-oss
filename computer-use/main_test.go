@@ -2814,10 +2814,10 @@ func TestElementIntentCrossCheck(t *testing.T) {
 	}
 }
 
-// TestNotesLearnedFromTheRealAgentRun covers two messages whose wording misled
+// TestSynthesisNotesStayWithinTheirEvidence covers two messages whose wording misled
 // an agent: the note after synthesized input with no tree change, and the error
 // for an element index that is missing from the snapshot.
-func TestNotesLearnedFromTheRealAgentRun(t *testing.T) {
+func TestSynthesisNotesStayWithinTheirEvidence(t *testing.T) {
 	// 1. After ctrl+s, calling the result "delivered but ignored" over-claims:
 	//    the file was saved, yet the note sent the agent on extra steps to prove
 	//    it. Formatting changes and file state never reach the accessibility
@@ -8305,7 +8305,7 @@ func TestNoInputRecoverablePreconditionDetectionIsNarrow(t *testing.T) {
 }
 
 func TestNoInputStaleFailureReturnsIndependentCurrentObservation(t *testing.T) {
-	current := beta36WindowTransitionSnapshot(
+	current := windowTransitionSnapshot(
 		"w2:"+strings.Repeat("b", 32),
 		"Current Document",
 		true,
@@ -8317,7 +8317,7 @@ func TestNoInputStaleFailureReturnsIndependentCurrentObservation(t *testing.T) {
 		},
 	}
 	service := newServiceWithBackend(backend)
-	before := beta36WindowTransitionSnapshot(
+	before := windowTransitionSnapshot(
 		"w2:"+strings.Repeat("a", 32),
 		"Old Dialog",
 		true,
@@ -8377,7 +8377,7 @@ func TestNoInputStaleFailureReturnsIndependentCurrentObservation(t *testing.T) {
 func TestNoInputRecoveryRespectsObserveNone(t *testing.T) {
 	backend := &recordingPlatformBackend{}
 	service := newServiceWithBackend(backend)
-	before := beta36WindowTransitionSnapshot(
+	before := windowTransitionSnapshot(
 		"w2:"+strings.Repeat("a", 32),
 		"Old Dialog",
 		true,
@@ -10312,12 +10312,12 @@ func TestGUIWaitDescriptionExplainsBarrierAndObservationBoundary(t *testing.T) {
 	}
 }
 
-func beta14LocalSnapshot() *appSnapshot {
+func editorFormSnapshot() *appSnapshot {
 	return &appSnapshot{
 		App:          appDescriptor{Name: "Editor", PID: 42},
 		WindowTitle:  "Document",
 		WindowHandle: "0x42",
-		SnapshotID:   "beta14-local",
+		SnapshotID:   "editor-form",
 		TreeLines: []string{
 			"\t0 frame \"Document\"",
 			"\t\t1 panel \"Form\"",
@@ -10373,7 +10373,7 @@ func TestPublicAXObserveUsesServerOwnedAcquisitionBudget(t *testing.T) {
 }
 
 func TestFocusedAndTargetRootPreserveCanonicalAddressSpace(t *testing.T) {
-	focused := beta14LocalSnapshot()
+	focused := editorFormSnapshot()
 	if err := applyObservationRoot(
 		focused,
 		map[string]any{"focused": true},
@@ -10393,7 +10393,7 @@ func TestFocusedAndTargetRootPreserveCanonicalAddressSpace(t *testing.T) {
 		t.Fatal("root projection changed canonical elements")
 	}
 
-	target := beta14LocalSnapshot()
+	target := editorFormSnapshot()
 	if err := applyObservationRoot(
 		target,
 		map[string]any{
@@ -10416,7 +10416,7 @@ func TestFocusedAndTargetRootPreserveCanonicalAddressSpace(t *testing.T) {
 }
 
 func TestObservationRootAcceptsExpandedShortRefInternally(t *testing.T) {
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	internalRef := encodeScopedSemanticRef(
 		`push button "Save"`,
 		snapshot.WindowHandle,
@@ -10439,7 +10439,7 @@ func TestObservationRootAcceptsExpandedShortRefInternally(t *testing.T) {
 }
 
 func TestRootProjectionFailsClosed(t *testing.T) {
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	err := applyObservationRoot(
 		snapshot,
 		map[string]any{
@@ -10642,7 +10642,7 @@ func TestWorkingProjectionDoesNotSummarizeArbitraryLargeControlSet(t *testing.T)
 }
 
 func TestActionFallbackReturnsFocusedContextNotWholeTree(t *testing.T) {
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	typedTreeTextForTest(t, snapshot)
 	lines := compactActionObservationLines(snapshot)
 	text := strings.Join(lines, "\n")
@@ -10763,7 +10763,7 @@ func TestFindTextMatchReportsOriginatingField(t *testing.T) {
 
 func TestFindPageRendersOriginatingTextField(t *testing.T) {
 	service := newServiceWithBackend(&recordingPlatformBackend{})
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	snapshot.Elements[3].Description = "Account anonym-x2024@outlook.com"
 	if err := service.buildAndRenderAXSnapshotV1(
 		snapshot,
@@ -10812,14 +10812,14 @@ func typedTreeTextForTest(t *testing.T, snapshot *appSnapshot) string {
 
 func TestCompactActionObservationDoesNotAdvanceDeliveredTreeBaseline(t *testing.T) {
 	service := newService()
-	previous := beta14LocalSnapshot()
+	previous := editorFormSnapshot()
 	previous.sourceApp = "editor"
 	previous.publicWindowRef = "w1"
 	previous.SnapshotID = "previous"
 	previous.projection = snapshotProjection{View: treeViewWorking, Scope: a11yScopeWindow}
 	service.rememberDeliveredSnapshot(previous)
 
-	current := beta14LocalSnapshot()
+	current := editorFormSnapshot()
 	current.sourceApp = "editor"
 	current.publicWindowRef = "w1"
 	current.SnapshotID = "current"
@@ -10845,7 +10845,7 @@ func TestCompactActionObservationDoesNotAdvanceDeliveredTreeBaseline(t *testing.
 
 func TestContentTransitionFallbackReturnsWorkingTree(t *testing.T) {
 	service := newService()
-	previous := beta14LocalSnapshot()
+	previous := editorFormSnapshot()
 	previous.sourceApp = "editor"
 	previous.publicWindowRef = "w1"
 	previous.SnapshotID = "previous"
@@ -10856,7 +10856,7 @@ func TestContentTransitionFallbackReturnsWorkingTree(t *testing.T) {
 	previous.axSnapshot = nil
 	service.rememberDeliveredSnapshot(previous)
 
-	current := beta14LocalSnapshot()
+	current := editorFormSnapshot()
 	current.sourceApp = "editor"
 	current.publicWindowRef = "w1"
 	current.SnapshotID = "current"
@@ -10887,7 +10887,7 @@ func TestContentTransitionFallbackReturnsWorkingTree(t *testing.T) {
 
 func TestFocusedFallbackTriggersOneContentStabilizationRead(t *testing.T) {
 	service := newService()
-	previous := beta14LocalSnapshot()
+	previous := editorFormSnapshot()
 	previous.sourceApp = "editor"
 	previous.WindowHandle = "w2:0123456789abcdef0123456789abcdef"
 	previous.publicWindowRef = service.windowRefRegistry.Acquire(
@@ -10907,7 +10907,7 @@ func TestFocusedFallbackTriggersOneContentStabilizationRead(t *testing.T) {
 	previous.axSnapshot = nil
 	service.rememberDeliveredSnapshot(previous)
 
-	current := beta14LocalSnapshot()
+	current := editorFormSnapshot()
 	current.sourceApp = "editor"
 	current.publicWindowRef = previous.publicWindowRef
 	current.WindowHandle = previous.WindowHandle
@@ -11430,7 +11430,7 @@ func TestTargetScopedCoverageRecoveryOnlyAfterTargetedFailure(t *testing.T) {
 }
 
 func TestAllModelRenderersHideProviderDiagnostics(t *testing.T) {
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	snapshot.Annotations = []axProviderAnnotation{{
 		Kind:   "provider_omission",
 		Count:  12,
@@ -11675,7 +11675,7 @@ func TestModelVisibleEvidenceKeepsInternalHashesPrivate(t *testing.T) {
 }
 
 func TestContentAndRepeatedTreeOutputKeepRevisionPrivate(t *testing.T) {
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	snapshot.contentRevision = "c1:deadbeef"
 	snapshot.scope = a11yScopeContent
 	snapshot.scopeRoot = &elementRecord{
@@ -13777,7 +13777,7 @@ func TestFinalObservationCompletesZeroStablePostcondition(t *testing.T) {
 }
 
 func TestActionPostconditionReconciliationSamplesAfterPolling(t *testing.T) {
-	service, appRef, windowRef, _ := candidateABatchService(t)
+	service, appRef, windowRef, _ := sheetBatchService(t)
 	handle := "w2:0123456789abcdef0123456789abcdef"
 	snapshot := &appSnapshot{
 		App: appDescriptor{
@@ -14326,7 +14326,7 @@ func TestPostconditionFinalObservationUsesLatestSnapshot(t *testing.T) {
 }
 
 func TestFinalObservationContinuationRequiresCompleteGoneSourceAndSameApp(t *testing.T) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	currentWindowRef := service.windowRefRegistry.Acquire(
 		"Editor",
 		"w2:11111111111111111111111111111111",
@@ -14390,7 +14390,7 @@ func TestFinalObservationContinuationRequiresCompleteGoneSourceAndSameApp(t *tes
 }
 
 func TestFinalObservationContinuationRejectsDifferentAppOwner(t *testing.T) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	otherAppRef := service.appRefRegistry.Acquire(
 		"Other",
 		":1.9",
@@ -14431,7 +14431,7 @@ func TestFinalObservationContinuationRejectsDifferentAppOwner(t *testing.T) {
 }
 
 func TestFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	backend := &recordingPlatformBackend{
 		accessibilityResponses: []ProviderAccessibilityResult{
 			{
@@ -14505,7 +14505,7 @@ func TestFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T) {
 func TestFinalObservationReturnsLifecycleWhenClosedAppHasNoReplacementWindow(
 	t *testing.T,
 ) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	backend := &recordingPlatformBackend{
 		accessibilityResponses: []ProviderAccessibilityResult{{
 			OK:    false,
@@ -14551,7 +14551,7 @@ func TestFinalObservationReturnsLifecycleWhenClosedAppHasNoReplacementWindow(
 func TestFinalObservationReturnsLifecycleWhenClosedAppRefIsStale(
 	t *testing.T,
 ) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	backend := &recordingPlatformBackend{
 		accessibilityResponses: []ProviderAccessibilityResult{{
 			OK:                   false,
@@ -14609,7 +14609,7 @@ func TestClosedWindowLifecycleRejectsIncompleteStaleAppFacts(t *testing.T) {
 }
 
 func TestSuccessfulCloseRecoversLifecycleObservation(t *testing.T) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	backend := &recordingPlatformBackend{
 		accessibilityResponses: []ProviderAccessibilityResult{{
 			OK:    false,
@@ -14667,7 +14667,7 @@ func TestSuccessfulCloseRecoversLifecycleObservation(t *testing.T) {
 func TestFinalObservationDoesNotInferCloseFromNonCloseWindowDisappearance(
 	t *testing.T,
 ) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	service.backend = &recordingPlatformBackend{
 		accessibilityResponses: []ProviderAccessibilityResult{{
 			OK:    false,
@@ -14782,7 +14782,7 @@ func TestSharedDiffFallbackDoesNotClaimEmptyObservation(t *testing.T) {
 
 func TestSharedDiffFallbackReturnsFreshBoundedWorkingTree(t *testing.T) {
 	service := newService()
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	for index := range snapshot.Elements {
 		snapshot.Elements[index].States = strings.ReplaceAll(
 			snapshot.Elements[index].States,
@@ -14814,7 +14814,7 @@ func TestSharedDiffFallbackReturnsFreshBoundedWorkingTree(t *testing.T) {
 
 func TestSharedDiffFallbackIdentifiesFocusedObservation(t *testing.T) {
 	service := newService()
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	typedTreeTextForTest(t, snapshot)
 	result, lines, returned, compact, fullTree :=
 		service.renderAXDiffOrCompactObservation(snapshot, nil)
@@ -14827,7 +14827,7 @@ func TestSharedDiffFallbackIdentifiesFocusedObservation(t *testing.T) {
 
 func TestSharedDiffFallbackPrefersWorkingTreeForStabilizedWindow(t *testing.T) {
 	service := newService()
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	typedTreeTextForTest(t, snapshot)
 
 	result, lines, returned, compact, fullTree :=
@@ -14843,12 +14843,12 @@ func TestSharedDiffFallbackPrefersWorkingTreeForStabilizedWindow(t *testing.T) {
 	}
 }
 
-func beta36WindowTransitionSnapshot(
+func windowTransitionSnapshot(
 	handle,
 	title string,
 	withProviderIdentity bool,
 ) *appSnapshot {
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	snapshot.App = appDescriptor{
 		Name:              "Editor",
 		PID:               42,
@@ -14880,10 +14880,10 @@ func beta36WindowTransitionSnapshot(
 func TestPostActionWindowIdentityStabilizationReturnsActionableNewWindow(t *testing.T) {
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
-	before := beta36WindowTransitionSnapshot(oldHandle, "Document", true)
-	immediate := beta36WindowTransitionSnapshot(newHandle, "Rename", true)
+	before := windowTransitionSnapshot(oldHandle, "Document", true)
+	immediate := windowTransitionSnapshot(newHandle, "Rename", true)
 	immediate.Elements[0].ControlType = "panel"
-	stable := beta36WindowTransitionSnapshot(newHandle, "Rename", true)
+	stable := windowTransitionSnapshot(newHandle, "Rename", true)
 	actionEvidence := &RuntimeActionEvidence{Route: "semantic"}
 	immediate.actionExecution = actionEvidence
 
@@ -14940,7 +14940,7 @@ func TestPostActionWindowIdentityStabilizationReturnsActionableNewWindow(t *test
 }
 
 func TestTransientCommitClassificationIsGeneralAndObservationBounded(t *testing.T) {
-	dialog := beta36WindowTransitionSnapshot(
+	dialog := windowTransitionSnapshot(
 		"w2:"+strings.Repeat("a", 32),
 		"Question",
 		true,
@@ -14975,7 +14975,7 @@ func TestTransientCommitClassificationIsGeneralAndObservationBounded(t *testing.
 	}) {
 		t.Fatal("ordinary dialog navigation was classified as a commit")
 	}
-	modalFrame := beta36WindowTransitionSnapshot(
+	modalFrame := windowTransitionSnapshot(
 		"w2:"+strings.Repeat("b", 32),
 		"Modal Frame",
 		true,
@@ -15017,8 +15017,8 @@ func TestTransientCommitClassificationIsGeneralAndObservationBounded(t *testing.
 func TestTransientCommitProbeReturnsReplacementWindow(t *testing.T) {
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
-	dialog := beta36WindowTransitionSnapshot(oldHandle, "Open File", true)
-	document := beta36WindowTransitionSnapshot(newHandle, "Document", true)
+	dialog := windowTransitionSnapshot(oldHandle, "Open File", true)
+	document := windowTransitionSnapshot(newHandle, "Document", true)
 	for index := range dialog.Elements {
 		dialog.Elements[index].ProviderWindowRole = "dialog"
 	}
@@ -15110,7 +15110,7 @@ func TestTransientCommitProbeDoesNotAdoptSiblingWindow(t *testing.T) {
 	})
 
 	oldHandle := "w2:" + strings.Repeat("a", 32)
-	dialog := beta36WindowTransitionSnapshot(oldHandle, "Open File", true)
+	dialog := windowTransitionSnapshot(oldHandle, "Open File", true)
 	for index := range dialog.Elements {
 		dialog.Elements[index].ProviderWindowRole = "dialog"
 	}
@@ -15172,7 +15172,7 @@ func TestTransientCommitProbeDoesNotCommitFailedReplacementRead(t *testing.T) {
 
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
-	dialog := beta36WindowTransitionSnapshot(oldHandle, "Open File", true)
+	dialog := windowTransitionSnapshot(oldHandle, "Open File", true)
 	for index := range dialog.Elements {
 		dialog.Elements[index].ProviderWindowRole = "dialog"
 	}
@@ -15257,10 +15257,10 @@ func TestPostActionWindowIdentityStabilizationRejectsDifferentWindow(t *testing.
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
 	otherHandle := "w2:" + strings.Repeat("c", 32)
-	before := beta36WindowTransitionSnapshot(oldHandle, "Document", true)
-	immediate := beta36WindowTransitionSnapshot(newHandle, "Rename", true)
+	before := windowTransitionSnapshot(oldHandle, "Document", true)
+	immediate := windowTransitionSnapshot(newHandle, "Rename", true)
 	immediate.Elements[0].ControlType = "panel"
-	other := beta36WindowTransitionSnapshot(otherHandle, "Other", true)
+	other := windowTransitionSnapshot(otherHandle, "Other", true)
 
 	backend := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
@@ -15292,8 +15292,8 @@ func TestPostActionWindowIdentityStabilizationRejectsDifferentWindow(t *testing.
 func TestPostActionWindowIdentityStabilizationSkipsReadyWindow(t *testing.T) {
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
-	before := beta36WindowTransitionSnapshot(oldHandle, "Document", true)
-	ready := beta36WindowTransitionSnapshot(newHandle, "Rename", true)
+	before := windowTransitionSnapshot(oldHandle, "Document", true)
+	ready := windowTransitionSnapshot(newHandle, "Rename", true)
 	service := newServiceWithBackend(&recordingPlatformBackend{})
 	if err := service.buildAndRenderAXSnapshotV1(
 		ready,
@@ -15323,10 +15323,10 @@ func TestPostActionWindowIdentityStabilizationSkipsReadyWindow(t *testing.T) {
 func TestPostActionWindowIdentityStabilizationRecoversStaleActionHandle(t *testing.T) {
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
-	before := beta36WindowTransitionSnapshot(oldHandle, "Document", true)
-	immediate := beta36WindowTransitionSnapshot(oldHandle, "Rename", true)
+	before := windowTransitionSnapshot(oldHandle, "Document", true)
+	immediate := windowTransitionSnapshot(oldHandle, "Rename", true)
 	immediate.Elements[0].ControlType = "panel"
-	stable := beta36WindowTransitionSnapshot(newHandle, "Rename", true)
+	stable := windowTransitionSnapshot(newHandle, "Rename", true)
 
 	backend := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
@@ -15375,10 +15375,10 @@ func TestPostActionWindowIdentityStabilizationRecoversStaleActionHandle(t *testi
 
 func TestPostActionWindowIdentityStabilizationRejectsOldHandleAfterTitleChange(t *testing.T) {
 	oldHandle := "w2:" + strings.Repeat("a", 32)
-	before := beta36WindowTransitionSnapshot(oldHandle, "Document", true)
-	immediate := beta36WindowTransitionSnapshot(oldHandle, "Rename", true)
+	before := windowTransitionSnapshot(oldHandle, "Document", true)
+	immediate := windowTransitionSnapshot(oldHandle, "Rename", true)
 	immediate.Elements[0].ControlType = "panel"
-	stale := beta36WindowTransitionSnapshot(oldHandle, "Rename", true)
+	stale := windowTransitionSnapshot(oldHandle, "Rename", true)
 
 	backend := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
@@ -15408,10 +15408,10 @@ func TestPostActionWindowIdentityStabilizationRejectsOldHandleAfterTitleChange(t
 func TestPostActionWindowIdentityStabilizationRejectsSameTitleSibling(t *testing.T) {
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
-	before := beta36WindowTransitionSnapshot(oldHandle, "Document", true)
-	immediate := beta36WindowTransitionSnapshot(oldHandle, "Rename", true)
+	before := windowTransitionSnapshot(oldHandle, "Document", true)
+	immediate := windowTransitionSnapshot(oldHandle, "Rename", true)
 	immediate.Elements[0].ControlType = "panel"
-	sibling := beta36WindowTransitionSnapshot(newHandle, "Rename", true)
+	sibling := windowTransitionSnapshot(newHandle, "Rename", true)
 	for index := range sibling.Elements {
 		sibling.Elements[index].ProviderWindowObjectPath = "/sibling-dialog"
 	}
@@ -15444,10 +15444,10 @@ func TestPostActionWindowIdentityStabilizationRejectsSameTitleSibling(t *testing
 func TestPostActionWindowIdentityStabilizationRejectedProbeIsTransactional(t *testing.T) {
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
-	before := beta36WindowTransitionSnapshot(oldHandle, "Document", true)
-	immediate := beta36WindowTransitionSnapshot(oldHandle, "Rename", true)
+	before := windowTransitionSnapshot(oldHandle, "Document", true)
+	immediate := windowTransitionSnapshot(oldHandle, "Rename", true)
 	immediate.Elements[0].ControlType = "panel"
-	sibling := beta36WindowTransitionSnapshot(newHandle, "Rename", true)
+	sibling := windowTransitionSnapshot(newHandle, "Rename", true)
 	for index := range sibling.Elements {
 		sibling.Elements[index].ProviderWindowObjectPath = "/sibling-dialog"
 	}
@@ -15494,12 +15494,12 @@ func TestPostActionWindowIdentityStabilizationRejectedProbeIsTransactional(t *te
 
 func TestPostActionWindowIdentityStabilizationRecoversProviderReplacement(t *testing.T) {
 	handle := "w2:" + strings.Repeat("a", 32)
-	before := beta36WindowTransitionSnapshot(handle, "Rename", true)
-	immediate := beta36WindowTransitionSnapshot(handle, "Rename", true)
+	before := windowTransitionSnapshot(handle, "Rename", true)
+	immediate := windowTransitionSnapshot(handle, "Rename", true)
 	for index := range immediate.Elements {
 		immediate.Elements[index].ProviderWindowObjectPath = "/replacement-dialog"
 	}
-	stable := beta36WindowTransitionSnapshot(handle, "Rename", true)
+	stable := windowTransitionSnapshot(handle, "Rename", true)
 	for index := range stable.Elements {
 		stable.Elements[index].ProviderWindowObjectPath = "/replacement-dialog"
 	}
@@ -15577,10 +15577,10 @@ func TestPostActionWindowIdentityStabilizationRecoversProviderReplacement(t *tes
 func TestPostActionWindowIdentityStabilizationAcceptsTitleChangeWithSameProvider(t *testing.T) {
 	oldHandle := "w2:" + strings.Repeat("a", 32)
 	newHandle := "w2:" + strings.Repeat("b", 32)
-	before := beta36WindowTransitionSnapshot(oldHandle, "Document", true)
-	immediate := beta36WindowTransitionSnapshot(oldHandle, "Opening", true)
+	before := windowTransitionSnapshot(oldHandle, "Document", true)
+	immediate := windowTransitionSnapshot(oldHandle, "Opening", true)
 	immediate.Elements[0].ControlType = "panel"
-	stable := beta36WindowTransitionSnapshot(newHandle, "Ready", true)
+	stable := windowTransitionSnapshot(newHandle, "Ready", true)
 	for index := range stable.Elements {
 		stable.Elements[index].ProviderWindowName = "Ready"
 	}
@@ -15630,7 +15630,7 @@ func TestModelVisibleEvidenceReportsOnlySuccessfulWindowStabilization(t *testing
 
 func TestBatchFinalObservationAdvancesFreshWorkingTreeBaseline(t *testing.T) {
 	service := newService()
-	snapshot := beta14LocalSnapshot()
+	snapshot := editorFormSnapshot()
 	for index := range snapshot.Elements {
 		snapshot.Elements[index].States = strings.ReplaceAll(
 			snapshot.Elements[index].States,
@@ -15819,7 +15819,7 @@ func TestRecoveryObservationFailureStillRequiresObservation(t *testing.T) {
 }
 
 func TestRecoveryObservationRetriesAtAppRootWhenReplacementRefStales(t *testing.T) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	replacementHandle := "w2:11111111111111111111111111111111"
 	replacementRef := service.windowRefRegistry.Acquire(
 		"editor",
@@ -15833,7 +15833,7 @@ func TestRecoveryObservationRetriesAtAppRootWhenReplacementRefStales(t *testing.
 		"Document",
 		appRef,
 	)
-	current := beta14LocalSnapshot()
+	current := editorFormSnapshot()
 	current.App = appDescriptor{
 		Name:              "Editor",
 		ProviderBusName:   ":1.84",
@@ -16405,7 +16405,7 @@ func TestVerifiedCloseDoesNotClaimTargetScreenshot(t *testing.T) {
 func TestCloseObserveNoneStillVerifiesLifecycleWithoutReturningObservation(
 	t *testing.T,
 ) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	backend := &recordingPlatformBackend{
 		accessibilityResponses: []ProviderAccessibilityResult{{
 			OK:    false,
@@ -16489,7 +16489,7 @@ func TestCloseObserveNoneStillVerifiesLifecycleWithoutReturningObservation(
 }
 
 func TestCloseObserveNoneDoesNotLeakReplacementWindowObservation(t *testing.T) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	backend := &recordingPlatformBackend{
 		accessibilityResponses: []ProviderAccessibilityResult{
 			{
@@ -16614,7 +16614,7 @@ func TestClosedWindowNegativeTitlePostconditionUsesOwningApp(t *testing.T) {
 			WindowTitles: []string{"Document - Editor"},
 		},
 	}
-	service, appRef, windowRef, _ := candidateABatchService(t)
+	service, appRef, windowRef, _ := sheetBatchService(t)
 	service.backend = backend
 	result := service.runA11yPostcondition(
 		&a11yBatchContext{
@@ -16756,7 +16756,7 @@ func TestNegativeSelectorPostconditionRejectsUnsafeWindowTransitionEvidence(
 }
 
 func TestNegativeWindowTitleAcceptsCompleteAppDisappearance(t *testing.T) {
-	service, appRef, _, _ := candidateABatchService(t)
+	service, appRef, _, _ := sheetBatchService(t)
 	result := service.verifyWindowTitleWithProbe(
 		appRef,
 		"Editor",
@@ -17447,7 +17447,7 @@ func TestPrepareAXEvidenceFullViewStillHidesDebugTelemetry(t *testing.T) {
 }
 
 func TestRootedAndWindowObservationsUseDifferentCaches(t *testing.T) {
-	window := beta14LocalSnapshot()
+	window := editorFormSnapshot()
 	window.publicWindowRef = "w1"
 	window.projection = snapshotProjection{
 		View: treeViewWorking, Scope: a11yScopeWindow,
@@ -17479,7 +17479,7 @@ func TestAppRefRegistryKeepsGenerationIdentity(t *testing.T) {
 	}
 }
 
-func candidateABatchService(t *testing.T) (*service, string, string, string) {
+func sheetBatchService(t *testing.T) (*service, string, string, string) {
 	t.Helper()
 	service := newService()
 	appRef := service.appRefRegistry.Acquire(
@@ -17502,7 +17502,7 @@ func candidateABatchService(t *testing.T) (*service, string, string, string) {
 }
 
 func TestRefOwnedBatchDerivesOneWindowAndKeyboardInheritance(t *testing.T) {
-	service, appRef, windowRef, elementRef := candidateABatchService(t)
+	service, appRef, windowRef, elementRef := sheetBatchService(t)
 	actions := []a11yBatchAction{
 		{actionType: "click", targetRef: elementRef},
 		{actionType: "keypress", key: "ENTER"},
@@ -17518,7 +17518,7 @@ func TestRefOwnedBatchDerivesOneWindowAndKeyboardInheritance(t *testing.T) {
 }
 
 func TestRefOwnedBatchScopesSelectorPostconditionToSameWindow(t *testing.T) {
-	service, _, windowRef, elementRef := candidateABatchService(t)
+	service, _, windowRef, elementRef := sheetBatchService(t)
 	context, err := service.deriveA11yBatchContext(
 		"", "", "", []a11yBatchAction{{
 			actionType: "click",
@@ -17549,7 +17549,7 @@ func TestRefOwnedBatchScopesSelectorPostconditionToSameWindow(t *testing.T) {
 }
 
 func TestActionPostconditionsArePreflightedBeforeFirstInput(t *testing.T) {
-	service, _, _, elementRef := candidateABatchService(t)
+	service, _, _, elementRef := sheetBatchService(t)
 	backend := &recordingPlatformBackend{}
 	service.backend = backend
 
@@ -17694,8 +17694,8 @@ func TestActionPostconditionFailureStopsLaterActionsWithCurrentEvidence(t *testi
 func TestUnknownActionPostconditionRecoversCurrentWindowAfterSourceDisappears(
 	t *testing.T,
 ) {
-	service, appRef, sourceWindowRef, _ := candidateABatchService(t)
-	current := beta14LocalSnapshot()
+	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
+	current := editorFormSnapshot()
 	current.App = appDescriptor{
 		Name:              "Editor",
 		ProviderBusName:   ":1.84",
@@ -17865,7 +17865,7 @@ func TestUnknownActionPostconditionRequiresObservationWhenNoneReturned(t *testin
 }
 
 func TestAllUntargetedBatchRequiresWindowRef(t *testing.T) {
-	service, _, _, _ := candidateABatchService(t)
+	service, _, _, _ := sheetBatchService(t)
 	_, err := service.deriveA11yBatchContext(
 		"LibreOffice", "", "", []a11yBatchAction{{
 			actionType: "keypress",
@@ -17878,7 +17878,7 @@ func TestAllUntargetedBatchRequiresWindowRef(t *testing.T) {
 }
 
 func TestCrossWindowBatchFailsBeforeInput(t *testing.T) {
-	service, appRef, _, firstRef := candidateABatchService(t)
+	service, appRef, _, firstRef := sheetBatchService(t)
 	secondHandle := "w2:fedcba9876543210fedcba9876543210"
 	secondRef := service.refRegistry.Acquire(
 		"libreoffice", secondHandle, `button "OK"`, CanonicalRole("button"),
@@ -17899,7 +17899,7 @@ func TestCrossWindowBatchFailsBeforeInput(t *testing.T) {
 }
 
 func TestRefOwnedBatchRejectsDuplicateLegacyAppAddress(t *testing.T) {
-	service, _, _, elementRef := candidateABatchService(t)
+	service, _, _, elementRef := sheetBatchService(t)
 	_, err := service.deriveA11yBatchContext(
 		"LibreOffice", "", "", []a11yBatchAction{{
 			actionType: "click",
@@ -17912,7 +17912,7 @@ func TestRefOwnedBatchRejectsDuplicateLegacyAppAddress(t *testing.T) {
 }
 
 func TestRefOwnedBatchRejectsDuplicateAppOrWindowRef(t *testing.T) {
-	service, appRef, windowRef, elementRef := candidateABatchService(t)
+	service, appRef, windowRef, elementRef := sheetBatchService(t)
 	for name, identity := range map[string]struct {
 		appRef    string
 		windowRef string
@@ -18098,7 +18098,7 @@ func TestTransientWindowRejectsSameRoleProviderReplacement(t *testing.T) {
 }
 
 func TestBatchContextCarriesPrivateWindowExpectation(t *testing.T) {
-	service, _, windowRef, elementRef := candidateABatchService(t)
+	service, _, windowRef, elementRef := sheetBatchService(t)
 	context, err := service.deriveA11yBatchContext(
 		"", "", "", []a11yBatchAction{
 			{actionType: "click", targetRef: elementRef},
@@ -18118,7 +18118,7 @@ func TestBatchContextCarriesPrivateWindowExpectation(t *testing.T) {
 }
 
 func TestBatchStopsAfterConfirmedWindowTransition(t *testing.T) {
-	service, appRef, _, _ := candidateABatchService(t)
+	service, appRef, _, _ := sheetBatchService(t)
 	context := &a11yBatchContext{
 		appRef:       appRef,
 		appToken:     appRef,
@@ -18133,7 +18133,7 @@ func TestBatchStopsAfterConfirmedWindowTransition(t *testing.T) {
 }
 
 func TestBatchAllowsProviderRebindInsideSameNativeWindow(t *testing.T) {
-	service, appRef, windowRef, _ := candidateABatchService(t)
+	service, appRef, windowRef, _ := sheetBatchService(t)
 	handle := "w2:0123456789abcdef0123456789abcdef"
 	context := &a11yBatchContext{
 		appRef:       appRef,
@@ -18155,7 +18155,7 @@ func TestBatchAllowsProviderRebindInsideSameNativeWindow(t *testing.T) {
 }
 
 func TestBatchStopsWhenWindowContinuityCannotBeSampled(t *testing.T) {
-	service, appRef, windowRef, _ := candidateABatchService(t)
+	service, appRef, windowRef, _ := sheetBatchService(t)
 	context := &a11yBatchContext{
 		appRef:       appRef,
 		appToken:     appRef,
@@ -18172,7 +18172,7 @@ func TestBatchStopsWhenWindowContinuityCannotBeSampled(t *testing.T) {
 }
 
 func TestBatchStopsWhenLogicalWindowChangesOnSameNativeHandle(t *testing.T) {
-	service, appRef, oldWindowRef, _ := candidateABatchService(t)
+	service, appRef, oldWindowRef, _ := sheetBatchService(t)
 	handle := "w2:0123456789abcdef0123456789abcdef"
 	newWindowRef := service.windowRefRegistry.Acquire(
 		"soffice", handle, `dialog "Question"`, "c2",
@@ -18233,7 +18233,7 @@ func TestPublicActRejectsInventedRefWithRecoveryGuidance(t *testing.T) {
 }
 
 func TestReadIdentityDerivesOwnerFromElementRef(t *testing.T) {
-	service, appRef, windowRef, elementRef := candidateABatchService(t)
+	service, appRef, windowRef, elementRef := sheetBatchService(t)
 	got, err := service.resolveA11yReadIdentity(
 		map[string]any{}, elementRef,
 	)
@@ -18250,7 +18250,7 @@ func TestReadIdentityDerivesOwnerFromElementRef(t *testing.T) {
 }
 
 func TestReadIdentityRejectsConflictingAddressForms(t *testing.T) {
-	service, appRef, windowRef, _ := candidateABatchService(t)
+	service, appRef, windowRef, _ := sheetBatchService(t)
 	for _, args := range []map[string]any{
 		{"app": "LibreOffice", "app_ref": appRef},
 		{"app_ref": appRef, "window_ref": windowRef},
@@ -18262,7 +18262,7 @@ func TestReadIdentityRejectsConflictingAddressForms(t *testing.T) {
 }
 
 func TestIncompleteReadMarksRefForRevalidationNotTombstone(t *testing.T) {
-	service, _, _, elementRef := candidateABatchService(t)
+	service, _, _, elementRef := sheetBatchService(t)
 	service.runtimeReportedFailure("", axServiceRequest{
 		SourceRef: elementRef,
 		SemanticTarget: &semanticTarget{
@@ -18303,7 +18303,7 @@ func TestIncompleteReadMarksRefForRevalidationNotTombstone(t *testing.T) {
 }
 
 func TestSemanticStaleMarksRefForRevalidation(t *testing.T) {
-	service, _, _, elementRef := candidateABatchService(t)
+	service, _, _, elementRef := sheetBatchService(t)
 	service.runtimeReportedFailure("", axServiceRequest{
 		SourceRef: elementRef,
 		SemanticTarget: &semanticTarget{
@@ -18322,7 +18322,7 @@ func TestSemanticStaleMarksRefForRevalidation(t *testing.T) {
 }
 
 func TestElementIncompleteDoesNotInvalidateOwnerRefs(t *testing.T) {
-	service, appRef, windowRef, elementRef := candidateABatchService(t)
+	service, appRef, windowRef, elementRef := sheetBatchService(t)
 	service.runtimeReportedFailure("", axServiceRequest{
 		App:       appRef,
 		SourceRef: elementRef,
@@ -18345,7 +18345,7 @@ func TestElementIncompleteDoesNotInvalidateOwnerRefs(t *testing.T) {
 }
 
 func TestWindowIncompleteDoesNotInvalidateAppOrElement(t *testing.T) {
-	service, appRef, windowRef, elementRef := candidateABatchService(t)
+	service, appRef, windowRef, elementRef := sheetBatchService(t)
 	service.runtimeReportedFailure("", axServiceRequest{
 		App:       appRef,
 		SourceRef: windowRef,
@@ -18368,7 +18368,7 @@ func TestWindowIncompleteDoesNotInvalidateAppOrElement(t *testing.T) {
 }
 
 func TestStaleElementDoesNotAdvertiseDifferentWindowAsReady(t *testing.T) {
-	service, _, oldWindowRef, elementRef := candidateABatchService(t)
+	service, _, oldWindowRef, elementRef := sheetBatchService(t)
 	newHandle := "w2:fedcba9876543210fedcba9876543210"
 	result := service.runtimeReportedFailure("", axServiceRequest{
 		SourceRef: elementRef,
@@ -18399,7 +18399,7 @@ func TestStaleElementDoesNotAdvertiseDifferentWindowAsReady(t *testing.T) {
 }
 
 func TestStaleElementReturnsSameLineageWindowForFindOnlyRecovery(t *testing.T) {
-	service, _, oldWindowRef, elementRef := candidateABatchService(t)
+	service, _, oldWindowRef, elementRef := sheetBatchService(t)
 	source := service.refRegistry.entries[elementRef]
 	result := service.runtimeReportedFailure("", axServiceRequest{
 		SourceRef: elementRef,
@@ -18433,7 +18433,7 @@ func TestStaleElementReturnsSameLineageWindowForFindOnlyRecovery(t *testing.T) {
 }
 
 func TestEffectUnknownReturnsFreshWindowWithoutClaimingSuccess(t *testing.T) {
-	service, _, oldWindowRef, elementRef := candidateABatchService(t)
+	service, _, oldWindowRef, elementRef := sheetBatchService(t)
 	newHandle := "w2:fedcba9876543210fedcba9876543210"
 	result := service.runtimeReportedFailure("", axServiceRequest{
 		SourceRef: elementRef,
@@ -18481,7 +18481,7 @@ func TestEffectUnknownReturnsFreshWindowWithoutClaimingSuccess(t *testing.T) {
 }
 
 func TestEffectUnknownAppExitTombstonesOwnedIdentityGraph(t *testing.T) {
-	service, appRef, windowRef, elementRef := candidateABatchService(t)
+	service, appRef, windowRef, elementRef := sheetBatchService(t)
 	result := service.runtimeReportedFailure("", axServiceRequest{
 		SourceRef: elementRef,
 	}, ProviderAccessibilityResult{
@@ -18512,7 +18512,7 @@ func TestEffectUnknownAppExitTombstonesOwnedIdentityGraph(t *testing.T) {
 }
 
 func TestIncompleteRecoveryDoesNotTombstoneIdentityGraph(t *testing.T) {
-	service, appRef, windowRef, elementRef := candidateABatchService(t)
+	service, appRef, windowRef, elementRef := sheetBatchService(t)
 	result := service.runtimeReportedFailure("", axServiceRequest{
 		SourceRef: elementRef,
 	}, ProviderAccessibilityResult{
@@ -18546,7 +18546,7 @@ func TestIncompleteRecoveryDoesNotTombstoneIdentityGraph(t *testing.T) {
 }
 
 func TestIncompleteStaleWindowRefRequiresRevalidation(t *testing.T) {
-	service, _, windowRef, _ := candidateABatchService(t)
+	service, _, windowRef, _ := sheetBatchService(t)
 	result := service.runtimeReportedFailure("", axServiceRequest{
 		SourceRef: windowRef,
 	}, ProviderAccessibilityResult{
@@ -18672,7 +18672,7 @@ func TestProjectedSubtreePreservesOwnerRefsForAddressability(t *testing.T) {
 }
 
 func TestCompleteProviderAbsenceTombstonesRef(t *testing.T) {
-	service, _, _, elementRef := candidateABatchService(t)
+	service, _, _, elementRef := sheetBatchService(t)
 	entry := service.refRegistry.entries[elementRef]
 	entry.LocatorKind = AXLocatorProviderBound
 	service.runtimeReportedFailure("", axServiceRequest{
@@ -18694,7 +18694,7 @@ func TestCompleteProviderAbsenceTombstonesRef(t *testing.T) {
 }
 
 func TestAppTombstoneCascadesToOwnedWindowsAndElements(t *testing.T) {
-	service, appRef, windowRef, elementRef := candidateABatchService(t)
+	service, appRef, windowRef, elementRef := sheetBatchService(t)
 	service.markAppIdentityLifecycle(appRef, AXRefStale, "process_restarted")
 	if _, err := service.appRefRegistry.Resolve(appRef); err == nil {
 		t.Fatal("stale app ref resolved")
@@ -18708,7 +18708,7 @@ func TestAppTombstoneCascadesToOwnedWindowsAndElements(t *testing.T) {
 }
 
 func TestAmbiguityCandidateUsesItsOwnWindowRef(t *testing.T) {
-	service, appRef, oldWindowRef, _ := candidateABatchService(t)
+	service, appRef, oldWindowRef, _ := sheetBatchService(t)
 	oldHandle := "w2:0123456789abcdef0123456789abcdef"
 	newHandle := "w2:fedcba9876543210fedcba9876543210"
 	service.snapshots[appRef] = &appSnapshot{
