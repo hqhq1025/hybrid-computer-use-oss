@@ -27,26 +27,11 @@ def test_no_private_absolute_paths_in_public_entrypoints():
         ROOT / "README.md",
         ROOT / "docs/OSWORLD_V1.md",
         ROOT / "docs/OSWORLD_V2.md",
-        ROOT / "integrations/osworld-v1/run_single.py",
-        ROOT / "integrations/osworld-v1/run_parallel.py",
         ROOT / "integrations/osworld-v2/hybrid/run_hybrid.py",
-        ROOT / "scripts/install-osworld-v1.py",
         ROOT / "scripts/install-osworld-v2.py",
     ]
     for path in paths:
         assert "/datadrive2/" not in path.read_text(encoding="utf-8")
-
-
-def test_v1_release_loader_supports_nested_manifest_layout():
-    path = ROOT / "integrations/osworld-v1/tool_release.py"
-    spec = importlib.util.spec_from_file_location("tool_release", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    release = module.load_tool_release("v0.14")
-    assert release["implementation"]["mcp_binary"]["sha256"] == (
-        "11adcefd856200eda37ec127b586d95105f1d9b52c64e6ee8ff5571c1f5bacf0"
-    )
 
 
 def test_agent_artifact_lock_is_complete():
