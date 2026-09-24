@@ -43,7 +43,6 @@ from .ax_snapshot import (
     effective_name,
     parse_text_limit,
     positive_int,
-    readable_states,
 )
 
 from .x11_windows import (
@@ -94,7 +93,6 @@ from .atspi_inventory import (
 )
 from .window_diagnostics import (
     accepts_user_input,
-    app_input_windows,
     foreign_foreground_note,
     is_infrastructure_window,
     modal_diagnostic,
@@ -152,7 +150,6 @@ from .ax_target_notes import (
     UNVERIFIED_SEMANTIC,
     UNVERIFIED_SYNTHESIS,
     addressing_channel,
-    describe_hit,
     element_at_point,
     resolved_note,
 )

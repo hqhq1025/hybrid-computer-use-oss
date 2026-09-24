@@ -313,12 +313,6 @@ def capture_gui_image(bounds):
         return None
 
 
-def capture_window_png(bounds):
-    """Return only the base64 image data from capture_window_image()."""
-    image = capture_window_image(bounds)
-    return image.get("data") if image else None
-
-
 def pixbuf_looks_black(pixbuf):
     try:
         pixels = pixbuf.get_pixels()

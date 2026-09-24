@@ -209,41 +209,6 @@ def gui_visual_change(before, after):
     }
 
 
-def gui_snapshot_visual_change(before, after):
-    before_id = (before or {}).get("contentFrameId")
-    after_id = (after or {}).get("contentFrameId")
-    if not before_id or not after_id:
-        return {
-            "changed_since_before": None,
-            "visual_change_percent": None,
-            "visual_change_box": None,
-            "visual_change_method": None,
-        }
-    changed = before_id != after_id
-    return {
-        "changed_since_before": changed,
-        "visual_change_percent": None,
-        "visual_change_box": None,
-        "visual_change_method": "exact_returned_screenshot_bytes",
-    }
-
-
-GUI_RESULT_FIELDS = (
-    "dispatched",
-    "input_events_emitted",
-    "input_actions_dispatched",
-    "mutation_unknown",
-    "partial_input_possible",
-    "effect_unknown",
-    "quiescent",
-    "changed_since_before",
-    "visual_change_percent",
-    "visual_change_box",
-    "visual_change_method",
-    "visual_change_observed",
-)
-
-
 def finalize_gui_response(response):
     """Attach a stable structured GUI result schema on success and failure."""
     if not isinstance(response, dict):

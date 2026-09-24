@@ -47,31 +47,6 @@ def element_at_point(window, x, y):
     return node
 
 
-def describe_hit(window, x, y):
-    """Describe the hit-test result as a sentence to append to a note.
-
-    When no element can be identified, the sentence says the click is
-    unverified.
-    """
-    node = safe(lambda: element_at_point(window, x, y))
-    if node is None:
-        return (
-            " Hit test could not identify any element under that point, so this click "
-            "is unverified: it may have landed on nothing, or on something this "
-            "toolkit does not expose."
-        )
-    role = node_role(node)
-    name = node_name(node)
-    label = "{} {!r}".format(role, name) if name else role
-    return (
-        " Hit test says the element under that point is {} — treat this as a HINT, not "
-        "proof: AT-SPI hit testing resolves only to a container on some toolkits "
-        "(measured accurate 11/11 on GTK gedit but 12/25 on LibreOffice). If it names "
-        "something other than your intended target, re-read the tree before "
-        "continuing.".format(label)
-    )
-
-
 def addressing_channel(element_record):
     """Return the note channel: [a11y] for tree targets, [gui] for points."""
     return A11Y_CHANNEL if element_record else GUI_CHANNEL

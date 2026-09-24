@@ -250,24 +250,6 @@ ACTION_MUST_FLIP = {
     "expandorcontract": "EXPANDED",
     "toggle": "CHECKED",
 }
-# Directional actions: the value must change.
-ACTION_MUST_CHANGE_VALUE = ("increase", "decrease")
-
-
-def readable_states(node):
-    """Read back the decidable states, or return None if they are unreadable.
-
-    None is returned instead of an empty dict that would pose as a reading.
-    """
-    if node is None:
-        return None
-    out = {}
-    for name, _label in NOTABLE_STATES:
-        state = getattr(Atspi.StateType, name, None)
-        if state is None:
-            continue
-        out[name] = state_contains(node, state)
-    return out or None
 
 
 def state_transition_note(action, before, after):

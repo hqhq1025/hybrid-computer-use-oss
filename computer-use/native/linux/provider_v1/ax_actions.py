@@ -315,17 +315,6 @@ def insert_text_detail(root, text):
     return status == "verified", before, after
 
 
-def insert_text_detail_on_node(node, text):
-    status, before, after, _emitted = insert_text_outcome_on_node(node, text)
-    if status == "effect_unknown":
-        raise RuntimeError(
-            "AT-SPI text write may have deleted the selected text, changed the "
-            "control to unexpected content, or lost readback; refusing automatic "
-            "keyboard fallback"
-        )
-    return status == "verified", before, after
-
-
 def insert_text_outcome_on_node(node, text):
     """Write text and distinguish verified, confirmed-no-change, and unknown."""
     if node is None:

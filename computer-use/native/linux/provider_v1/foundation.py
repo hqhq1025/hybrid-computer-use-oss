@@ -130,7 +130,6 @@ GUI_ACTION_FIELDS = {
     "keypress": {"type", "keys"},
     "wait": {"type"},
 }
-AX_WINDOW_ACTION_TYPES = {"activate", "close"}
 AX_WINDOW_ROLES = {
     "frame", "window", "dialog", "alert", "file chooser", "color chooser",
 }

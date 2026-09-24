@@ -153,17 +153,6 @@ ELEMENT_FIELDS = {
     "relationReadComplete",
     "nameSource",
 }
-DESKTOP_ACTION_FIELDS = {
-    "type",
-    "x",
-    "y",
-    "button",
-    "text",
-    "keys",
-    "path",
-    "scroll_x",
-    "scroll_y",
-}
 POINT_FIELDS = {"x", "y"}
 DESKTOP_ACTION_CONTRACTS = {
     "screenshot": ({"type"}, {"type"}),

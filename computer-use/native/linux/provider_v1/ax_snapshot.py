@@ -52,7 +52,6 @@ from .ax_node_properties import (
     placeholder_text,
     plain_text_from_rich_text,
     positive_int,
-    readable_states,
     render_element_line,
     selected_option_name,
     state_segment,

@@ -71,16 +71,6 @@ def is_infrastructure_window(window):
     return str(node_role(window) or "").strip().lower() in {"desktop", "panel"}
 
 
-def app_input_windows(app):
-    if app is None:
-        return []
-    return [
-        (index, window)
-        for index, window in app_windows(app)
-        if not is_infrastructure_window(window)
-    ]
-
-
 def accepts_user_input(app):
     windows = app_windows(app)
     if not windows:

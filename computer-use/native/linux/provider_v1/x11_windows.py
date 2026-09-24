@@ -407,12 +407,6 @@ def opaque_window_instance_handle_for_id(app, window_id):
     return "w2:" + hashlib.sha256(material).hexdigest()[:32]
 
 
-def opaque_window_instance_handle(app, window):
-    return opaque_window_instance_handle_for_id(
-        app, x11_window_id_for_accessible(app, window)
-    )
-
-
 def strong_window_instance_handle_inventory(app, windows=None):
     """Return only one-to-one AX-to-managed-window bindings."""
     if windows is None:
