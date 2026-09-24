@@ -222,53 +222,62 @@ def monitor_judge_workload(
     }
 
 
-def run_live_judge(
-    *,
-    env: DesktopEnv,
-    base_url: str,
-    result_dir: Path,
+def judge_prompt_text(
     settings: JudgeSettings,
-    run_tag: str,
+    *,
     instruction: str,
     final_response: str,
     declared_infeasible: bool,
-    base_instructions_file: Path,
     current_date: str,
     timezone_name: str,
-    user_context: dict | None = None,
-    retry_context: str | None = None,
-    tool_limit: int | None = None,
-    raw_evaluator_completed_before_judge: bool = True,
-    sealed_before: dict | None = None,
-    prior_judge_evidence_path: Path | None = None,
-) -> dict:
-    judge_dir = result_dir / "judge"
-    judge_dir.mkdir(parents=True, exist_ok=True)
-    before = sealed_before or capture_judge_state(
-        env, base_url, judge_dir, "pre_judge"
+    user_context: dict | None,
+    tool_limit: int,
+    retry_context: str | None,
+) -> str:
+    prompt_text = build_judge_prompt(
+        Path(settings.prompt_file).resolve(),
+        instruction=instruction,
+        final_response=final_response,
+        declared_infeasible=declared_infeasible,
+        current_date=current_date,
+        timezone_name=timezone_name,
+        user_context=user_context,
     )
+    prompt_text = (
+        prompt_text
+        + "\n\nEnforced inspection budget:\n"
+        + f"- hard completed-tool limit: {tool_limit}\n"
+        + "- finish evidence collection at least four calls before the hard "
+        "limit and emit the final JSON verdict.\n"
+        + "- the runner will terminate the exact Judge workload when the "
+        "hard limit is reached.\n"
+    )
+    if retry_context:
+        prompt_text = f"{prompt_text}\n\n{retry_context.strip()}\n"
+    return prompt_text
 
-    prompt_template = Path(settings.prompt_file).resolve()
-    schema_file = Path(settings.schema_file).resolve()
-    for required in (prompt_template, schema_file):
-        if not required.is_file():
-            raise FileNotFoundError(required)
 
+def stage_judge_inputs(
+    *,
+    env: DesktopEnv,
+    base_url: str,
+    judge_dir: Path,
+    trace_path: Path,
+    settings: JudgeSettings,
+    run_tag: str,
+    prompt_text: str,
+    base_instructions_file: Path,
+    final_response: str,
+    prior_judge_evidence_path: Path | None,
+) -> dict:
+    """Write the Judge inputs locally, upload them and describe the seal."""
     config_path = judge_dir / "config.toml"
     prompt_path = judge_dir / "prompt.txt"
     schema_copy = judge_dir / "schema.json"
     base_copy = judge_dir / "codex-base-instructions.md"
     probe_copy = judge_dir / "judge-probe"
     final_response_path = judge_dir / "task_agent_final_response.txt"
-    trace_path = result_dir / "agent.jsonl"
-    if not trace_path.is_file():
-        raise FileNotFoundError(
-            "Task Agent execution trace is required before Judge staging: "
-            f"{trace_path}"
-        )
-    execution_evidence_path = (
-        judge_dir / "task_agent_execution_evidence.jsonl"
-    )
+    execution_evidence_path = judge_dir / "task_agent_execution_evidence.jsonl"
     execution_event_count = build_live_judge_trace_evidence(
         trace_path,
         execution_evidence_path,
@@ -285,36 +294,8 @@ def run_live_judge(
         ),
         encoding="utf-8",
     )
-    prompt_text = build_judge_prompt(
-            prompt_template,
-            instruction=instruction,
-            final_response=final_response,
-            declared_infeasible=declared_infeasible,
-            current_date=current_date,
-            timezone_name=timezone_name,
-            user_context=user_context,
-        )
-    effective_tool_limit = max(
-        1,
-        int(
-            tool_limit
-            if tool_limit is not None
-            else settings.tool_limit
-        ),
-    )
-    prompt_text = (
-        prompt_text
-        + "\n\nEnforced inspection budget:\n"
-        + f"- hard completed-tool limit: {effective_tool_limit}\n"
-        + "- finish evidence collection at least four calls before the hard "
-        "limit and emit the final JSON verdict.\n"
-        + "- the runner will terminate the exact Judge workload when the "
-        "hard limit is reached.\n"
-    )
-    if retry_context:
-        prompt_text = f"{prompt_text}\n\n{retry_context.strip()}\n"
     prompt_path.write_text(prompt_text, encoding="utf-8")
-    schema_copy.write_bytes(schema_file.read_bytes())
+    schema_copy.write_bytes(Path(settings.schema_file).resolve().read_bytes())
     base_copy.write_bytes(base_instructions_file.read_bytes())
     probe_copy.write_text(LIVE_JUDGE_PROBE_SCRIPT, encoding="utf-8")
     final_response_path.write_text(final_response, encoding="utf-8")
@@ -337,16 +318,11 @@ def run_live_judge(
     )
     upload_rows = [
         {"local_path": str(config_path), "path": GUEST_JUDGE_CONFIG},
-        {
-            "local_path": str(base_copy),
-            "path": GUEST_JUDGE_BASE_INSTRUCTIONS,
-        },
+        {"local_path": str(base_copy), "path": GUEST_JUDGE_BASE_INSTRUCTIONS},
         {"local_path": str(prompt_path), "path": GUEST_JUDGE_PROMPT},
         {"local_path": str(schema_copy), "path": GUEST_JUDGE_SCHEMA},
         {
-            "local_path": str(
-                GUEST_FILES_DIR / "pty_stream.py"
-            ),
+            "local_path": str(GUEST_FILES_DIR / "pty_stream.py"),
             "path": GUEST_JUDGE_PTY_STREAM,
         },
         {
@@ -355,15 +331,9 @@ def run_live_judge(
         },
         {
             "local_path": str(execution_evidence_path),
-            "path": (
-                f"{GUEST_JUDGE_ROOT}/"
-                "task_agent_execution_evidence.jsonl"
-            ),
+            "path": f"{GUEST_JUDGE_ROOT}/task_agent_execution_evidence.jsonl",
         },
-        {
-            "local_path": str(probe_copy),
-            "path": GUEST_JUDGE_PROBE,
-        },
+        {"local_path": str(probe_copy), "path": GUEST_JUDGE_PROBE},
         {
             "local_path": str(judge_dir / "pre_judge.a11y.txt"),
             "path": f"{GUEST_JUDGE_ROOT}/final_state.a11y.txt",
@@ -408,7 +378,7 @@ def run_live_judge(
             f"{shlex.quote(GUEST_JUDGE_ROOT + '/task_agent_execution_evidence.jsonl')}",
         ],
     )
-    sealed_evidence = {
+    return {
         "container_path": GUEST_JUDGE_ROOT,
         "execution_evidence_file": (
             f"{GUEST_JUDGE_ROOT}/task_agent_execution_evidence.jsonl"
@@ -420,23 +390,18 @@ def run_live_judge(
             else None
         ),
         "prior_judge_execution_event_count": prior_judge_event_count,
-        "uploaded_files": [
-            Path(row["path"]).name
-            for row in upload_rows
-        ],
+        "uploaded_files": [Path(row["path"]).name for row in upload_rows],
     }
 
-    timeout = max(1, int(settings.timeout))
+
+def judge_command(*, attempt_token: str, timeout: int, with_image: bool) -> str:
+    """Shell command that runs one Judge attempt and records its exit state."""
     image_arg = (
         f"-i {shlex.quote(GUEST_JUDGE_ROOT + '/final_state.png')} "
-        if (judge_dir / "pre_judge.png").is_file()
+        if with_image
         else ""
     )
-    started = time.monotonic()
-    attempt_token = hashlib.sha256(
-        f"{run_tag}:{time.time_ns()}".encode()
-    ).hexdigest()[:24]
-    command = (
+    return (
         "set +e; "
         "export HOME=/home/user "
         f"CODEX_HOME={shlex.quote(GUEST_JUDGE_CODEX_HOME)} "
@@ -476,18 +441,30 @@ def run_live_judge(
         f"> {shlex.quote(GUEST_JUDGE_STATUS)}; "
         "echo $rc"
     )
+
+
+def launch_judge(
+    *,
+    base_url: str,
+    judge_dir: Path,
+    run_tag: str,
+    command: str,
+    timeout: int,
+    tool_limit: int,
+    attempt_token: str,
+) -> dict:
+    """Run the Judge workload, then fetch its artifacts even if it failed."""
     execution_error = None
     monitor = {
         "status": None,
         "completed_tools": 0,
-        "tool_limit": effective_tool_limit,
-        "finalization_at": max(1, effective_tool_limit - 4),
+        "tool_limit": tool_limit,
+        "finalization_at": max(1, tool_limit - 4),
         "finalization_threshold_reached": False,
         "tool_budget_exhausted": False,
         "monitor_duration_seconds": 0.0,
     }
-    verdict_raw = None
-    status_raw = None
+    fetched: dict[str, bytes | None] = {}
     artifact_fetch_errors = {}
     judge_unit_name = f"osw-judge-{run_tag}"
     try:
@@ -504,81 +481,147 @@ def run_live_judge(
             base_url=base_url,
             unit_name=judge_unit_name,
             timeout_seconds=timeout,
-            tool_limit=effective_tool_limit,
+            tool_limit=tool_limit,
             attempt_token=attempt_token,
         )
     except Exception as exc:
         execution_error = f"{type(exc).__name__}: {exc}"
     finally:
-        verdict_raw, fetch_error = save_guest_artifact_best_effort(
-            base_url,
-            GUEST_JUDGE_RESULT,
-            judge_dir / "verdict.json",
-        )
-        if fetch_error:
-            artifact_fetch_errors["verdict.json"] = fetch_error
-        _, fetch_error = save_guest_artifact_best_effort(
-            base_url,
-            GUEST_JUDGE_TRACE,
-            judge_dir / "agent.jsonl",
-        )
-        if fetch_error:
-            artifact_fetch_errors["agent.jsonl"] = fetch_error
-        _, fetch_error = save_guest_artifact_best_effort(
-            base_url,
-            GUEST_JUDGE_STDERR,
-            judge_dir / "stderr.log",
-        )
-        if fetch_error:
-            artifact_fetch_errors["stderr.log"] = fetch_error
-        status_raw, fetch_error = save_guest_artifact_best_effort(
-            base_url,
-            GUEST_JUDGE_STATUS,
-            judge_dir / "status.json",
-        )
-        if fetch_error:
-            artifact_fetch_errors["status.json"] = fetch_error
-    returncode = None
-    status = None
-    if status_raw:
-        try:
-            status = json.loads(status_raw)
-        except json.JSONDecodeError:
-            status = None
-    if (
-        isinstance(status, dict)
-        and isinstance(status.get("returncode"), int)
+        for guest_path, local_name in (
+            (GUEST_JUDGE_RESULT, "verdict.json"),
+            (GUEST_JUDGE_TRACE, "agent.jsonl"),
+            (GUEST_JUDGE_STDERR, "stderr.log"),
+            (GUEST_JUDGE_STATUS, "status.json"),
+        ):
+            fetched[local_name], fetch_error = save_guest_artifact_best_effort(
+                base_url,
+                guest_path,
+                judge_dir / local_name,
+            )
+            if fetch_error:
+                artifact_fetch_errors[local_name] = fetch_error
+    return {
+        "execution_error": execution_error,
+        "monitor": monitor,
+        "verdict_raw": fetched["verdict.json"],
+        "status_raw": fetched["status.json"],
+        "artifact_fetch_errors": artifact_fetch_errors,
+    }
+
+
+def parse_json_bytes(raw: bytes | None):
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def run_live_judge(
+    *,
+    env: DesktopEnv,
+    base_url: str,
+    result_dir: Path,
+    settings: JudgeSettings,
+    run_tag: str,
+    instruction: str,
+    final_response: str,
+    declared_infeasible: bool,
+    base_instructions_file: Path,
+    current_date: str,
+    timezone_name: str,
+    user_context: dict | None = None,
+    retry_context: str | None = None,
+    tool_limit: int | None = None,
+    raw_evaluator_completed_before_judge: bool = True,
+    sealed_before: dict | None = None,
+    prior_judge_evidence_path: Path | None = None,
+) -> dict:
+    """Run one Judge attempt and write its metadata to judge/metadata.json."""
+    judge_dir = result_dir / "judge"
+    judge_dir.mkdir(parents=True, exist_ok=True)
+    before = sealed_before or capture_judge_state(
+        env, base_url, judge_dir, "pre_judge"
+    )
+    for required in (
+        Path(settings.prompt_file).resolve(),
+        Path(settings.schema_file).resolve(),
     ):
+        if not required.is_file():
+            raise FileNotFoundError(required)
+    trace_path = result_dir / "agent.jsonl"
+    if not trace_path.is_file():
+        raise FileNotFoundError(
+            "Task Agent execution trace is required before Judge staging: "
+            f"{trace_path}"
+        )
+    effective_tool_limit = max(
+        1,
+        int(tool_limit if tool_limit is not None else settings.tool_limit),
+    )
+    sealed_evidence = stage_judge_inputs(
+        env=env,
+        base_url=base_url,
+        judge_dir=judge_dir,
+        trace_path=trace_path,
+        settings=settings,
+        run_tag=run_tag,
+        prompt_text=judge_prompt_text(
+            settings,
+            instruction=instruction,
+            final_response=final_response,
+            declared_infeasible=declared_infeasible,
+            current_date=current_date,
+            timezone_name=timezone_name,
+            user_context=user_context,
+            tool_limit=effective_tool_limit,
+            retry_context=retry_context,
+        ),
+        base_instructions_file=base_instructions_file,
+        final_response=final_response,
+        prior_judge_evidence_path=prior_judge_evidence_path,
+    )
+
+    timeout = max(1, int(settings.timeout))
+    started = time.monotonic()
+    attempt_token = hashlib.sha256(
+        f"{run_tag}:{time.time_ns()}".encode()
+    ).hexdigest()[:24]
+    launched = launch_judge(
+        base_url=base_url,
+        judge_dir=judge_dir,
+        run_tag=run_tag,
+        command=judge_command(
+            attempt_token=attempt_token,
+            timeout=timeout,
+            with_image=(judge_dir / "pre_judge.png").is_file(),
+        ),
+        timeout=timeout,
+        tool_limit=effective_tool_limit,
+        attempt_token=attempt_token,
+    )
+    monitor = launched["monitor"]
+    execution_error = launched["execution_error"]
+    status = parse_json_bytes(launched["status_raw"])
+    returncode = None
+    if isinstance(status, dict) and isinstance(status.get("returncode"), int):
         returncode = status["returncode"]
     elif (
         isinstance(monitor.get("status"), dict)
         and isinstance(monitor["status"].get("returncode"), int)
     ):
         returncode = monitor["status"]["returncode"]
-    verdict = None
-    if verdict_raw:
-        try:
-            verdict = json.loads(verdict_raw)
-        except json.JSONDecodeError:
-            verdict = None
+    verdict = parse_json_bytes(launched["verdict_raw"])
 
-    after = capture_judge_state(
-        env,
-        base_url,
-        judge_dir,
-        "post_judge",
-    )
+    after = capture_judge_state(env, base_url, judge_dir, "post_judge")
     integrity = compare_judge_states(before, after, judge_dir)
     judge_trace_path = judge_dir / "agent.jsonl"
     mutation_audit = live_judge_mutation_audit(
-        judge_trace_path.read_text(
-            encoding="utf-8",
-            errors="replace",
-        )
+        judge_trace_path.read_text(encoding="utf-8", errors="replace")
         if judge_trace_path.is_file()
         else ""
     )
-    nonvolatile_changes = nonvolatile_judge_changes(integrity)
     state_capture_errors = [
         error
         for error in (
@@ -587,17 +630,16 @@ def run_live_judge(
         )
         if error
     ]
-    control_error = execution_error
-    if state_capture_errors:
-        control_error = "; ".join(state_capture_errors)
     failure_classification = classify_judge_attempt(
         returncode=returncode,
         status=status,
-        execution_error=control_error,
-        verdict=verdict,
-        tool_budget_exhausted=bool(
-            monitor.get("tool_budget_exhausted")
+        execution_error=(
+            "; ".join(state_capture_errors)
+            if state_capture_errors
+            else execution_error
         ),
+        verdict=verdict,
+        tool_budget_exhausted=bool(monitor.get("tool_budget_exhausted")),
     )
     metadata = {
         "judge_mode": "interactive_outcome",
@@ -610,7 +652,7 @@ def run_live_judge(
         "state_capture_errors": state_capture_errors,
         "monitor": monitor,
         "attempt_token": attempt_token,
-        "artifact_fetch_errors": artifact_fetch_errors,
+        "artifact_fetch_errors": launched["artifact_fetch_errors"],
         "failure_classification": failure_classification,
         "sealed_evidence": sealed_evidence,
         "verdict": verdict,
@@ -627,7 +669,7 @@ def run_live_judge(
         ),
         "integrity": {**integrity, "before": before, "after": after},
         "mutation_audit": mutation_audit,
-        "nonvolatile_file_changes": nonvolatile_changes,
+        "nonvolatile_file_changes": nonvolatile_judge_changes(integrity),
         "stdout": "judge/agent.jsonl",
         "stderr": "judge/stderr.log",
         "status_file": "judge/status.json",

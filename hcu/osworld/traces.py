@@ -11,8 +11,8 @@ from hcu.osworld.prompts import split_completion_message
 FAILURE_SUMMARY_MAX_CHARS = 4096
 
 
-def summarize_codex_trace(raw: bytes | None) -> dict:
-    summary = {
+def empty_trace_summary() -> dict:
+    return {
         "events": 0,
         "mcp_calls": 0,
         "shell_calls": 0,
@@ -28,6 +28,26 @@ def summarize_codex_trace(raw: bytes | None) -> dict:
         "agent_error_original_chars": 0,
         "failure_classification": None,
     }
+
+
+def record_agent_message(summary: dict, message: str) -> None:
+    """Remember the latest agent message and its completion declaration."""
+    summary["last_agent_message"] = message
+    body, sentinel = split_completion_message(message)
+    if body:
+        summary["last_substantive_message"] = body
+    if sentinel is not None:
+        summary["completion_sentinel"] = sentinel
+
+
+def record_agent_error(summary: dict, message: str) -> None:
+    summary["agent_error_original_chars"] = len(message)
+    summary["failure_classification"] = classify_turn_failure(message)
+    summary["agent_error"] = concise_failure_message(message)
+
+
+def summarize_codex_trace(raw: bytes | None) -> dict:
+    summary = empty_trace_summary()
     if not raw:
         return summary
 
@@ -47,12 +67,7 @@ def summarize_codex_trace(raw: bytes | None) -> dict:
                 )
             else:
                 message = str(failure)
-            message = message or "turn failed"
-            summary["agent_error_original_chars"] = len(message)
-            summary["failure_classification"] = (
-                classify_turn_failure(message)
-            )
-            summary["agent_error"] = concise_failure_message(message)
+            record_agent_error(summary, message or "turn failed")
         if event.get("type") == "turn.completed":
             usage = event.get("usage") or {}
             summary["input_tokens"] += int(usage.get("input_tokens") or 0)
@@ -68,13 +83,7 @@ def summarize_codex_trace(raw: bytes | None) -> dict:
         item = event.get("item") or {}
         item_type = item.get("type")
         if item_type == "agent_message":
-            message = str(item.get("text") or "")
-            summary["last_agent_message"] = message
-            body, sentinel = split_completion_message(message)
-            if body:
-                summary["last_substantive_message"] = body
-            if sentinel is not None:
-                summary["completion_sentinel"] = sentinel
+            record_agent_message(summary, str(item.get("text") or ""))
         elif item_type == "mcp_tool_call":
             summary["mcp_calls"] += 1
             name = str(item.get("tool") or item.get("name") or "unknown")
@@ -87,22 +96,7 @@ def summarize_codex_trace(raw: bytes | None) -> dict:
 
 
 def summarize_claude_trace(raw: bytes | None) -> dict:
-    summary = {
-        "events": 0,
-        "mcp_calls": 0,
-        "shell_calls": 0,
-        "tool_breakdown": {},
-        "input_tokens": 0,
-        "cached_input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "last_agent_message": "",
-        "last_substantive_message": "",
-        "completion_sentinel": None,
-        "agent_error": None,
-        "agent_error_original_chars": 0,
-        "failure_classification": None,
-    }
+    summary = empty_trace_summary()
     if not raw:
         return summary
 
@@ -122,14 +116,8 @@ def summarize_claude_trace(raw: bytes | None) -> dict:
                     )
                 elif block_type == "text":
                     message = str(block.get("text") or "")
-                    if not message.strip():
-                        continue
-                    summary["last_agent_message"] = message
-                    body, sentinel = split_completion_message(message)
-                    if body:
-                        summary["last_substantive_message"] = body
-                    if sentinel is not None:
-                        summary["completion_sentinel"] = sentinel
+                    if message.strip():
+                        record_agent_message(summary, message)
                 elif block_type == "tool_use":
                     name = str(block.get("name") or "unknown")
                     if name in shell_tools:
@@ -158,19 +146,12 @@ def summarize_claude_trace(raw: bytes | None) -> dict:
             )
             message = str(event.get("result") or "")
             if message.strip():
-                summary["last_agent_message"] = message
-                body, sentinel = split_completion_message(message)
-                if body:
-                    summary["last_substantive_message"] = body
-                if sentinel is not None:
-                    summary["completion_sentinel"] = sentinel
+                record_agent_message(summary, message)
             if event.get("is_error"):
-                error = message or str(event.get("error") or "Claude Code failed")
-                summary["agent_error_original_chars"] = len(error)
-                summary["failure_classification"] = (
-                    classify_turn_failure(error)
+                record_agent_error(
+                    summary,
+                    message or str(event.get("error") or "Claude Code failed"),
                 )
-                summary["agent_error"] = concise_failure_message(error)
     return summary
 
 

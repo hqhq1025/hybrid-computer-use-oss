@@ -51,6 +51,31 @@ def completed_tool_events(lines: Iterable[str]) -> list[dict[str, Any]]:
     return events
 
 
+def _shareable_tool_events(trace_path: Path) -> Iterable[tuple[dict, dict]]:
+    """Yield completed tool events that may be shown to the Judge.
+
+    Events that mention evaluator or gold-data locations are dropped so the
+    Judge cannot learn the expected answer from the task agent's trace.
+    """
+    for line in trace_path.read_text(errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") != "item.completed":
+            continue
+        item = event.get("item") or {}
+        if item.get("type") not in LIVE_JUDGE_TRACE_EVIDENCE_ITEM_TYPES:
+            continue
+        serialized = json.dumps(item, ensure_ascii=False).casefold()
+        if any(
+            marker in serialized
+            for marker in LIVE_JUDGE_FORBIDDEN_TRACE_MARKERS
+        ):
+            continue
+        yield event, item
+
+
 def build_live_judge_trace_evidence(
     trace_path: Path,
     output_path: Path,
@@ -58,23 +83,7 @@ def build_live_judge_trace_evidence(
     """Write completed execution events without reasoning or image payloads."""
     retained = 0
     with output_path.open("w", encoding="utf-8") as output:
-        for line in trace_path.read_text(errors="replace").splitlines():
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") != "item.completed":
-                continue
-            item = event.get("item") or {}
-            if item.get("type") not in LIVE_JUDGE_TRACE_EVIDENCE_ITEM_TYPES:
-                continue
-            serialized = json.dumps(item, ensure_ascii=False).casefold()
-            if any(
-                marker in serialized
-                for marker in LIVE_JUDGE_FORBIDDEN_TRACE_MARKERS
-            ):
-                continue
-
+        for event, _item in _shareable_tool_events(trace_path):
             sanitized = json.loads(json.dumps(event))
             result = (sanitized.get("item") or {}).get("result")
             if isinstance(result, dict) and isinstance(
@@ -121,23 +130,7 @@ def build_prior_judge_trace_evidence(
     """Write a bounded, reasoning-free ledger of completed Judge tools."""
     retained = 0
     with output_path.open("w", encoding="utf-8") as output:
-        for line in trace_path.read_text(errors="replace").splitlines():
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") != "item.completed":
-                continue
-            item = event.get("item") or {}
-            if item.get("type") not in LIVE_JUDGE_TRACE_EVIDENCE_ITEM_TYPES:
-                continue
-            serialized = json.dumps(item, ensure_ascii=False).casefold()
-            if any(
-                marker in serialized
-                for marker in LIVE_JUDGE_FORBIDDEN_TRACE_MARKERS
-            ):
-                continue
-
+        for _event, item in _shareable_tool_events(trace_path):
             compact_item = {
                 key: item[key]
                 for key in ("id", "type", "tool", "exit_code", "status")

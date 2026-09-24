@@ -404,6 +404,20 @@ def run_agent_phase(
     session_id = ""
     user_exchanges = []
     turns = []
+
+    def phase_result(turn: dict) -> dict:
+        return {
+            "phase_index": phase_index,
+            "phase_name": phase_name,
+            "instruction": instruction,
+            "turns": turns,
+            "user_exchanges": user_exchanges,
+            "final_message": turn["final_message"],
+            "done_payload": turn["done_payload"],
+            "truncated": turn["truncated"],
+            "budget_exhausted": turn["budget_exhausted"],
+        }
+
     turn_index = 0
     transport_retries = 0
     tool_argument_retries = 0
@@ -475,17 +489,7 @@ def run_agent_phase(
             ),
         })
         if turn["truncated"]:
-            return {
-                "phase_index": phase_index,
-                "phase_name": phase_name,
-                "instruction": instruction,
-                "turns": turns,
-                "user_exchanges": user_exchanges,
-                "final_message": turn["final_message"],
-                "done_payload": turn["done_payload"],
-                "truncated": True,
-                "budget_exhausted": turn["budget_exhausted"],
-            }
+            return phase_result(turn)
         returncode = (
             turn["done_payload"].get("returncode")
             if turn["done_payload"] else None
@@ -560,17 +564,7 @@ def run_agent_phase(
             session_id = turn["thread_id"]
         question = user_question(turn["final_message"])
         if question is None:
-            return {
-                "phase_index": phase_index,
-                "phase_name": phase_name,
-                "instruction": instruction,
-                "turns": turns,
-                "user_exchanges": user_exchanges,
-                "final_message": turn["final_message"],
-                "done_payload": turn["done_payload"],
-                "truncated": False,
-                "budget_exhausted": False,
-            }
+            return phase_result(turn)
         if not session_id:
             raise RuntimeError(
                 f"ASK_USER requires a persisted {agent} session ID, "
