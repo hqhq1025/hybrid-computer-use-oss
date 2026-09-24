@@ -1,9 +1,10 @@
 SHELL := /bin/bash
-VERSION := 0.70.0-beta.70+osw-v013-gui-native-1080p
-OSWORLD_BASE_IMAGE ?= osw-hybrid:v0.14
+VERSION := $(shell cat VERSION)
+DESKTOP_IMAGE ?= hybrid-computer-use-desktop:$(VERSION)
 DOCKER_BUILD_NETWORK ?= host
+SMOKE_NETWORK ?= bridge
 
-.PHONY: agents build build-local test smoke smoke-v1-direct image-v1
+.PHONY: agents build build-local test smoke desktop-image smoke-desktop
 
 agents:
 	python3 scripts/download-agent-artifacts.py
@@ -18,18 +19,22 @@ build-local:
 		-o ../artifacts/computer-use .
 
 test:
-	cd computer-use && go test ./...
+	cd computer-use && test -z "$$(gofmt -l .)" && go vet ./... && go test ./...
+	cd computer-use && python3 runtime_test.py
 	python3 -m pytest -q tests
 
 smoke:
 	python3 scripts/smoke-mcp.py artifacts/computer-use
 
-image-v1:
+desktop-image: build
+	@test -n "$(OSWORLD_BASE_IMAGE)" || { \
+		echo "Set OSWORLD_BASE_IMAGE to a desktop image that runs the OSWorld guest server." >&2; \
+		exit 1; }
 	docker build \
 		--network "$(DOCKER_BUILD_NETWORK)" \
 		--build-arg OSWORLD_BASE_IMAGE="$(OSWORLD_BASE_IMAGE)" \
-		-t hybrid-computer-use:v0.14-source \
-		-f docker/Dockerfile.osworld-v1 .
+		-t "$(DESKTOP_IMAGE)" \
+		-f docker/Dockerfile.desktop .
 
-smoke-v1-direct:
-	python3 scripts/smoke-v1-direct.py --image hybrid-computer-use:v0.14-source
+smoke-desktop:
+	python3 scripts/smoke-desktop.py --image "$(DESKTOP_IMAGE)" --network "$(SMOKE_NETWORK)"

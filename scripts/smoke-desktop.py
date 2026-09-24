@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the direct-container desktop and the public MCP surface."""
+"""Start the desktop image and exercise the public MCP surface inside it."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
 def run(*args: str, input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -90,7 +91,7 @@ def call(request_id, method, params):
 call(1, "initialize", {
     "protocolVersion": "2025-06-18",
     "capabilities": {},
-    "clientInfo": {"name": "hcu-v1-direct-smoke", "version": "1"},
+    "clientInfo": {"name": "hcu-desktop-smoke", "version": "1"},
 })
 tools = call(2, "tools/list", {}).get("tools", [])
 ax = call(3, "tools/call", {
@@ -139,14 +140,14 @@ process.wait(timeout=5)
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image", default="hybrid-computer-use:v0.14-source")
-    parser.add_argument("--network", default="osw-net")
+    parser.add_argument("--image", default=f"hybrid-computer-use-desktop:{VERSION}")
+    parser.add_argument("--network", default="bridge")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
 
     suffix = uuid.uuid4().hex[:8]
-    container = f"hcu-v1-direct-smoke-{suffix}"
+    container = f"hcu-desktop-smoke-{suffix}"
     gateway = json.loads(
         docker_output("network", "inspect", args.network)
     )[0]["IPAM"]["Config"][0]["Gateway"]
@@ -190,6 +191,8 @@ def main() -> int:
         expected_claude = (
             f"{agent_lock['agents']['claude_code']['version']} (Claude Code)"
         )
+        if version != VERSION:
+            raise RuntimeError(f"unexpected computer-use version: {version!r}")
         if codex_version != expected_codex:
             raise RuntimeError(
                 f"unexpected Codex version: {codex_version!r}"

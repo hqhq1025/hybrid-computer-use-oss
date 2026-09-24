@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-var version = "0.3.0"
+// version is set at release build time from the repository VERSION file.
+var version = "dev"
 
 const (
 	publicToolAX  = "AX"

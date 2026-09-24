@@ -7,7 +7,9 @@ TMP=$(mktemp -d)
 trap 'rm -rf "${TMP}"' EXIT
 
 mkdir -p "${OUT}"
+# The module has no dependencies, so the build needs no network.
 docker build \
+  --network none \
   --file "${ROOT}/docker/Dockerfile.binary" \
   --output "type=local,dest=${TMP}" \
   "${ROOT}"

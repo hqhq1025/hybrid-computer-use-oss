@@ -1,15 +1,16 @@
 FROM golang:1.22 AS builder
 
 WORKDIR /src
+COPY VERSION /VERSION
 COPY computer-use/ ./
-RUN test -z "$(/usr/local/go/bin/gofmt -l .)" \
-    && /usr/local/go/bin/go test ./... \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 /usr/local/go/bin/go build \
+RUN version="$(cat /VERSION)" \
+    && test -z "$(gofmt -l .)" \
+    && go test ./... \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
        -trimpath \
-       -ldflags "-s -w -X main.version=0.70.0-beta.70+osw-v013-gui-native-1080p" \
+       -ldflags "-s -w -X main.version=${version}" \
        -o /out/computer-use . \
-    && test "$(/out/computer-use --version)" = \
-       "0.70.0-beta.70+osw-v013-gui-native-1080p"
+    && test "$(/out/computer-use --version)" = "${version}"
 
 FROM scratch AS export
 COPY --from=builder /out/computer-use /computer-use
