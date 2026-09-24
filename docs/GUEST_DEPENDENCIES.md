@@ -1,116 +1,96 @@
 # Guest Workstation Dependencies
 
-The official OSWorld V1 and V2 qcow2 images are preserved unchanged. Hybrid
-Computer Use builds separate derived guest images containing ordinary upstream
-workstation dependencies.
+The official OSWorld and OSWorld-V2 guest images stay unchanged. The scripts
+in `guest-images/workstation-deps/` derive separate images that add common
+workstation dependencies, so agents do not spend their budget installing
+packages that many tasks need.
 
-The dependency builder is under
-`guest-images/workstation-deps-v014-beta1/`. The two explicit manifests are:
+Two package profiles are provided:
 
-- `profiles/v1-core/`: the smaller V1 profile based on the high-frequency V1
-  audit;
-- `profiles/v2-full/`: the broader dependency demand observed in V2.
+- `profiles/v1-core/`: a smaller profile for V1, based on the dependencies
+  that V1 tasks use most often;
+- `profiles/v2-full/`: the broader set that V2 tasks were observed to need.
 
 Together they cover:
 
 - document and Office formats: `openpyxl`, `python-docx`, `python-pptx`,
   `odfpy`, `xlrd`, XlsxWriter, LibreOffice UNO and Python macro support;
-- PDF, image, OCR and archive tooling: Poppler, MuPDF, qpdf, Ghostscript,
+- PDF, image, OCR and archive tools: Poppler, MuPDF, qpdf, Ghostscript,
   ImageMagick, Tesseract, ExifTool, libarchive, zip and 7-Zip;
-- audio and video tooling: ffmpeg, SoX, librosa, SoundFile, Vosk and
+- audio and video tools: ffmpeg, SoX, librosa, SoundFile, Vosk and
   faster-whisper;
 - browser and CDP clients: Python and Node Playwright, Selenium, pychrome,
   `ws` and `chrome-remote-interface`;
 - data and plotting libraries: NumPy, pandas, SciPy, scikit-image,
   scikit-learn, matplotlib, seaborn, Plotly, Altair and Bokeh;
-- general workstation utilities including `rg`, SQLite, `file`, `strings`,
-  `lsof`, `jq`, `wmctrl`, `xdotool`, clipboard tools and disk expansion tools.
+- general utilities including `rg`, SQLite, `file`, `strings`, `lsof`, `jq`,
+  `wmctrl`, `xdotool`, clipboard tools and disk expansion tools.
 
-V1 intentionally omits V2's low-frequency heavy stacks: speech recognition,
-music transcription, background-removal/ONNX, medical imaging, Java, LaTeX and
-OpenBoard. V2 retains them because historical V2 tasks explicitly attempted
-to install or use those dependencies.
+`v1-core` leaves out the heavy stacks that only a few V2 tasks use: speech
+recognition, music transcription, background removal with ONNX, medical
+imaging, Java, LaTeX and OpenBoard.
 
-The candidate intentionally excludes software whose installation or
-configuration is itself an OSWorld task, project-specific dependency
-environments, model weights, benchmark helpers and repository-authored
-near-solution commands.
+Both profiles exclude software whose installation or configuration is itself
+part of an OSWorld task, project-specific environments, model weights,
+benchmark helpers and anything that would solve a task directly.
 
-Build the shared V2-superset cache once:
+## Building
 
-```bash
-deps=guest-images/workstation-deps-v014-beta1
-"$deps/cache-dependencies.sh" \
-  /path/to/cache \
-  "$deps/profiles/v2-full"
-```
-
-Build V1 core:
+The build needs Docker, `qemu-img`, libguestfs (`virt-resize` and
+`virt-customize`) and sudo. First cache the packages of the larger profile,
+which covers both:
 
 ```bash
-"$deps/build-candidate.sh" \
-  /path/to/v1-official-source.qcow2 \
-  /path/to/v1-core.qcow2 \
-  64 \
-  /path/to/cache \
-  "$deps/profiles/v1-core"
+deps=guest-images/workstation-deps
+"$deps/cache-dependencies.sh" /path/to/cache "$deps/profiles/v2-full"
 ```
 
-Build V2 full:
+Then derive an image from an official source image:
 
 ```bash
-"$deps/build-candidate.sh" \
-  /path/to/v2-official-source.qcow2 \
-  /path/to/v2-full.qcow2 \
-  100 \
-  /path/to/cache \
-  "$deps/profiles/v2-full"
+# V1 core, 64 GiB
+"$deps/build-candidate.sh" /path/to/official-v1.qcow2 /path/to/v1-core.qcow2 \
+  64 /path/to/cache "$deps/profiles/v1-core"
+
+# V2 full, 100 GiB
+"$deps/build-candidate.sh" /path/to/official-v2.qcow2 /path/to/v2-full.qcow2 \
+  100 /path/to/cache "$deps/profiles/v2-full"
 ```
 
-Validated candidates:
+`build-candidate.sh` never overwrites an existing output image. Pass the same
+size as `--volume-size` when you run tasks on the result.
 
-| Benchmark | Profile | Image | SHA-256 | Actual host size |
-| --- | --- | --- | --- | --- |
-| V1 | `v1-core` | `/datadrive2/osworld-v1/images/workstation-deps-v014-beta1/osworld-v1-ubuntu-workstation-deps-v014-beta1-core-64g.qcow2` | `acb8297f6d5e94a2c57eac6db05cc9822939d2c6389ce52cec5eb93306139479` | about 24 GiB |
-| V2 | `v2-full` | `/datadrive2/osworld-v2/images/workstation-deps-v014-beta1/osworld-v2-ubuntu-workstation-deps-v014-beta1-100g.qcow2` | `76d3eebed863d6834254729c2bd7805d080cfbf3f6de1c4036a78d8b010f404a` | about 30 GiB |
+## Verifying
 
-Both images passed `qemu-img check`, a real
-`happysixd/osworld-docker` QEMU boot, dependency imports and command checks,
-an `openpyxl` write/read round trip, LibreOffice UNO/Python checks, and the
-v0.14 `AX`/`GUI` smoke. Reports are stored under
-`/datadrive2/osworld-v1/smokes/workstation-deps-v014-beta1-core-20260830-r2`
-and
-`/datadrive2/osworld-v2/smokes/workstation-deps-v014-beta1-full-20260830`.
+`scripts/smoke-qemu-guest.py` boots an image in the official QEMU runtime,
+runs the profile's `verify-guest.sh` (imports, command checks, an `openpyxl`
+round trip and LibreOffice UNO checks) and calls `AX` and `GUI` once through
+the uploaded MCP binary:
 
-The default `python3` remains `/usr/bin/python3`. Third-party packages are
-provided through `PYTHONPATH` from `/opt/osw-workstation`, preserving Ubuntu
-desktop integrations such as `gi`, AT-SPI and PyAutoGUI. The venv `bin`
-directory is appended, rather than prepended, to `PATH` so package CLIs such
-as `yt-dlp` remain available without replacing the system Python interpreter.
+```bash
+external/OSWorld-V2/.venv/bin/python scripts/smoke-qemu-guest.py \
+  --label v2-full --image /path/to/v2-full.qcow2 --volume-size 100 \
+  --output-dir runs/guest-smoke-v2-full
+```
 
-## Task Canaries
+The script checks the `v2-full` profile by default; for a `v1-core` image pass
+`--dependency-smoke guest-images/workstation-deps/profiles/v1-core/verify-guest.sh`.
 
-The August 30, 2026 canaries used Codex `0.151.0`, Computer Use `v0.14`, and
-`gpt-5.4` with `xhigh` reasoning.
+Follow with a setup canary from [Running OSWorld](OSWORLD.md) before running
+tasks on a new image.
 
-| Benchmark | Task | Dependency evidence | Outcome |
-| --- | --- | --- | --- |
-| V1 core | `6f81754e-285d-4ce0-b59e-af7edb02d108` | `file` was available; no package installation or missing-module error | Judge `PASS`; same eight train IDs as history; RAW `0.0` due evaluator interpretation |
-| V2 full | `060` | `openpyxl` and `python-pptx` imported immediately; no `pip install` or missing-module error | Truncated at the 100-call budget; Judge `FAIL` on slide order, animations, duplicate content and broken links |
+## Python layout in the guest
 
-Evidence paths:
+The default `python3` stays `/usr/bin/python3`. Third-party packages come from
+`/opt/osw-workstation` through `PYTHONPATH`, which keeps Ubuntu desktop
+integrations such as `gi`, AT-SPI and PyAutoGUI working. The virtual
+environment's `bin` directory is appended to `PATH`, not prepended, so package
+CLIs such as `yt-dlp` are available without replacing the system interpreter.
 
-- `/datadrive2/osworld-v1/canaries/workstation-deps-v014-beta1-g54xhigh-20260830/v1-6f81754e-r2`
-- `/datadrive2/osworld-v2/canaries/workstation-deps-v014-beta1-g54xhigh-20260830/v2-060`
-- `/datadrive2/repos/osw-hybrid/logs/workstation-deps-v014-beta1-g54-canary-20260830.tokens.jsonl`
+## What the images do and do not change
 
-V1 and V2 do not share a sudo password. V1 requires
-`--client-password password`; V2 uses
-`--client-password osworld-public-evaluation`. Omitting the V1 override causes
-the unified runner to fail before task execution while aligning the guest
-clock.
-
-These canaries show that the dependency layer removes missing-package
-blockers. They do not show that every task becomes shorter or more accurate:
-the agent can still choose a lower-level implementation, make application or
-file-format mistakes, or exhaust its model-call budget.
+In canary runs the dependency layer removed missing-package blockers: tasks
+imported `openpyxl` or `python-pptx` immediately instead of installing them.
+It does not make tasks shorter or more accurate by itself; an agent can still
+choose a poor approach, make application or file-format mistakes, or exhaust
+its model-call budget.

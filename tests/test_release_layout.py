@@ -1,21 +1,42 @@
 import json
 from pathlib import Path
+import subprocess
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Host paths and addresses of the machines this project was developed on.
+PRIVATE_MARKERS = ("/datadrive", "/home/v-", "172.28.", "10.1.0.", "20.225.")
 
 
-def test_no_private_absolute_paths_in_public_entrypoints():
-    paths = [
-        ROOT / "README.md",
-        ROOT / "docs/OSWORLD_V1.md",
-        ROOT / "docs/OSWORLD_V2.md",
-        ROOT / "hcu/osworld/run_task.py",
-        ROOT / "hcu/paths.py",
-        ROOT / "scripts/install-osworld-v2.py",
+def tracked_text_files():
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pytest.skip("not a git checkout")
+    for name in listing.decode().split("\0"):
+        if not name or name == "tests/test_release_layout.py":
+            continue
+        try:
+            yield name, (ROOT / name).read_text(encoding="utf-8")
+        except (FileNotFoundError, UnicodeDecodeError):
+            continue
+
+
+def test_tracked_files_contain_no_private_hosts_or_paths():
+    leaks = [
+        (name, marker)
+        for name, text in tracked_text_files()
+        for marker in PRIVATE_MARKERS
+        if marker in text
     ]
-    for path in paths:
-        assert "/datadrive2/" not in path.read_text(encoding="utf-8")
+    assert leaks == []
 
 
 def test_agent_artifact_lock_is_complete():

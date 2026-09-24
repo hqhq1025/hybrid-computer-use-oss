@@ -1,23 +1,21 @@
 # Skills
 
-The repository ships three immutable benchmark profiles plus one shared base
-prompt:
+The evaluated agent receives the shared base instructions and exactly one
+benchmark skill:
 
-| Profile | Purpose | Public computer-use channels |
+| File | Purpose | Computer-use channels |
 | --- | --- | --- |
-| `skills/hybrid/SKILL.md` | Default formal hybrid profile | Bash, files, browser/CDP, AX, GUI |
-| `skills/ax-only/SKILL.md` | Diagnostic accessibility ablation | Bash, files, browser/CDP, AX |
-| `skills/gui-only/SKILL.md` | Diagnostic pixel-control ablation | Bash, files, browser/CDP, GUI |
-| `skills/base/CODEX_BASE_INSTRUCTIONS.md` | Replaces coding-oriented agent defaults | Defines task completion, honesty, and environment rules |
+| `skills/hybrid/SKILL.md` | default profile | Bash, files, browser/CDP, AX, GUI |
+| `skills/ax-only/SKILL.md` | accessibility ablation | Bash, files, browser/CDP, AX |
+| `skills/gui-only/SKILL.md` | pixel-control ablation | Bash, files, browser/CDP, GUI |
+| `skills/base/CODEX_BASE_INSTRUCTIONS.md` | replaces coding-oriented agent defaults | defines task completion, honesty and environment rules |
 
-The v0.14 formal hybrid skill SHA-256 is:
+Select a skill with `--skill-file` and the base instructions with
+`--base-instructions-file`. The AX-only and GUI-only profiles are ablations;
+do not report them as the hybrid result.
 
-```text
-61777e8101103cba07be3eacf26fc745a6c5bc94cbd1707ca194050f1f993d16
-```
-
-The AX-only and GUI-only profiles are ablations. They must not replace the
-hybrid result when reporting product capability.
-
-Repository instructions, evaluator details, task recipes, coordinates, and
-private run memory must never be injected into these skills.
+The skills are model input. Editing them changes what the agent sees, so treat
+an edit like a change to the MCP contract: give the run a new ID and never mix
+skill versions within one comparison. Repository instructions, evaluator
+details, task recipes, coordinates and memory from earlier runs must never be
+added to a skill.

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: computer-use
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: computer-use/go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./...
+      - name: Tests compile for macOS and Windows
+        run: |
+          GOOS=darwin go vet ./...
+          GOOS=windows go vet ./...
+
+  provider:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PyGObject and typelibs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0
+      - name: Provider tests
+        working-directory: computer-use
+        run: /usr/bin/python3 runtime_test.py
+
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[test]'
+      - run: python -m pytest -q tests

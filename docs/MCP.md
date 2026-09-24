@@ -1,80 +1,59 @@
 # Computer Use MCP
 
-This document is the operational entry point for the released Computer Use
-`v0.14` MCP. For internal design details, see
-[Architecture](ARCHITECTURE.md). For desktop-session and browser-channel
-details, see [AX, GUI, And CDP](AX_AND_CDP.md).
+`computer-use` is a stdio MCP server that controls an already-running Linux
+desktop. This page covers building it, running it, configuring Codex and
+Claude Code, the public contract and troubleshooting. For the internal design
+see [Architecture](ARCHITECTURE.md); for the desktop session and the browser
+channel see [AX, GUI and CDP](AX_AND_CDP.md).
 
-## Released Identity
+| | |
+| --- | --- |
+| Executable | `computer-use` |
+| Transport | stdio, newline-delimited JSON-RPC |
+| MCP protocol versions | `2025-03-26` and `2025-06-18` |
+| Public tools | `AX` and `GUI` |
+| Version | the repository `VERSION` file, reported by `--version` and `serverInfo.version` |
 
-- Product release: `v0.14`
-- Executable: `computer-use`
-- MCP transport: stdio
-- Public tools: `AX` and `GUI`
-- Component version:
-  `0.70.0-beta.70+osw-v013-gui-native-1080p`
-- Promoted Linux x86-64 binary SHA-256:
-  `11adcefd856200eda37ec127b586d95105f1d9b52c64e6ee8ff5571c1f5bacf0`
+One `computer-use mcp` process serves one desktop session. It starts one
+persistent Python provider and keeps AX snapshots, element references and the
+GUI layout lease in memory, so never share a process between benchmark tasks.
 
-The exact release binding is in `releases/v0.14/release.json`. The component
-version contains the historical candidate identifier and is intentionally not
-rewritten after promotion.
-
-## Source Layout
+## Source layout
 
 ```text
 computer-use/
-  main.go                     MCP service and session state
-  mcp_transport.go            stdio JSON-RPC transport and local call CLI
-  tool_contract.go            public AX and GUI JSON Schemas
-  ax_*.go                     AX snapshots, refs, actions and evidence
-  gui_service.go              GUI batching and stale-layout checks
-  runtime_backend*.go         private runtime boundary
-  provider_wire_v2.go         typed Go/Python provider protocol
-  native/linux/provider_v1/   persistent AT-SPI/X11 Python provider
+  main.go                  CLI entry point
+  mcp_transport.go         JSON-RPC framing and MCP method handling
+  service.go               tool dispatch, session state and error context
+  tool_contract.go         server instructions and the AX and GUI schemas
+  tool_arguments.go        argument parsing shared by the tools
+  tool_result.go           result type, evidence text and file output
+  app_snapshot.go          snapshot model returned by the provider
+  ax_*.go                  AX requests, batches, refs, projections, evidence
+  gui_service.go           GUI batches and layout-lease checks
+  runtime_backend*.go      platform backend boundary
+  provider_*.go            typed Go/Python provider protocol
+  linux_*.go               Linux backend: provider process and host runtime
+  native/linux/provider/   AT-SPI, X11, screenshot and input provider (Python)
+  runtime.py               provider entry point
 ```
 
-One `computer-use mcp` process owns one desktop session. It starts one
-persistent Python provider and keeps AX snapshots, semantic refs and the GUI
-layout lease in process memory. Do not share one MCP process across benchmark
-tasks.
-
-## Build And Verify
-
-Build the frozen release artifact:
+## Build
 
 ```bash
-make build
-sha256sum artifacts/releases/v0.14/computer-use
-make verify
-make smoke
+make build        # release binary in artifacts/computer-use, built in Docker
+make build-local  # the same with a local Go 1.22+ toolchain
+make smoke        # initialize, list tools, require exactly AX and GUI
+make test         # gofmt, go vet, Go tests, provider tests, Python tests
 ```
 
-`make verify` checks the release-bound source, prompt and skill hashes.
-`make smoke` starts the built stdio server, initializes MCP, lists tools and
-requires the public surface to be exactly `AX` and `GUI`.
+`make build` runs gofmt and the Go tests inside the builder, injects the
+version from `VERSION` and checks that `--version` reports it. A plain
+`go build` reports `dev`.
 
-For an unbound local development build:
+## Desktop runtime
 
-```bash
-make build-local
-```
-
-Do not use a local development build in a formal run unless it has a recorded
-tool change ID, exact hashes and a new run ID.
-
-## Desktop Runtime
-
-Run the MCP as the signed-in desktop user with the desktop session environment:
-
-```bash
-source /home/user/a11y-env.sh
-export DISPLAY="${DISPLAY:-:0}"
-computer-use doctor
-computer-use mcp
-```
-
-The important environment values are:
+Run the server as the signed-in desktop user with that session's environment:
 
 ```text
 DISPLAY
@@ -83,60 +62,72 @@ XDG_RUNTIME_DIR
 DBUS_SESSION_BUS_ADDRESS
 ```
 
-The guest also needs AT-SPI, GTK/GdkPixbuf, X11 input and window-management
-packages. The V1 and V2 derived qcow2 profiles install these dependencies.
-
-The server communicates over stdin/stdout. Never write diagnostics to stdout
-from a wrapper because that corrupts the MCP stream; send logs to stderr.
-
-## Local Calls
-
-The executable includes a local call client for diagnostics:
+The provider needs Python 3 with PyGObject and the AT-SPI, GTK and GdkPixbuf
+typelibs, plus `xdotool`, `wmctrl` and `x11-utils`. On Debian or Ubuntu:
 
 ```bash
-computer-use call AX \
-  --args '{"mode":"observe","observation_target":"apps"}'
-
-computer-use call GUI \
-  --args '{"actions":[{"type":"screenshot"}]}'
+sudo apt-get install python3 python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 \
+  gir1.2-gdkpixbuf-2.0 xdotool wmctrl x11-utils
 ```
 
-Multiple ordered diagnostic calls can be supplied with `--calls`. This CLI
-uses the same public schemas and stateful service as MCP clients.
+OSWorld guests provide `/home/user/a11y-env.sh`, which the runner sources
+before it starts the agent. The dependency images in
+[Guest dependencies](GUEST_DEPENDENCIES.md) include all packages above.
 
-## Codex Configuration
+The server speaks MCP on stdout. A wrapper must never print to stdout; send
+diagnostics to stderr.
 
-The generated task-local Codex configuration contains:
+## Command line
+
+```text
+computer-use mcp               start the stdio MCP server
+computer-use call AX|GUI       call one tool, or a JSON array of calls with --calls
+computer-use doctor            print Linux runtime notes
+computer-use version           print the version
+computer-use help [command]
+```
+
+`call` uses the same schemas and the same stateful service as an MCP client,
+which makes it useful for diagnostics:
+
+```bash
+computer-use call AX --args '{"mode":"observe","observation_target":"apps"}'
+computer-use call GUI --args '{"actions":[{"type":"screenshot"}]}'
+```
+
+## Codex
+
+The runner writes a task-local `config.toml`; its MCP section is:
 
 ```toml
 [mcp_servers.computer_use]
-command = "/opt/osw-runtime/computer-use"
+command = "/path/to/computer-use"
 args = ["mcp"]
 required = true
 startup_timeout_sec = 60
 tool_timeout_sec = 180
 ```
 
-Generate the complete isolated profile with:
+To reproduce the runner's complete Codex profile outside OSWorld:
 
 ```bash
-python3 scripts/render-agent-config.py \
-  --agent codex \
-  --model gpt-5.5 \
-  --effort xhigh \
-  --task-id manual \
-  --gateway http://172.17.0.1:18080 \
-  --mcp /opt/osw-runtime/computer-use \
-  --output /tmp/osw-codex/config.toml
+python3 -m hcu.render_agent_config --agent codex \
+  --model gpt-5.5 --effort xhigh \
+  --gateway http://127.0.0.1:8611 \
+  --mcp "$PWD/artifacts/computer-use" \
+  --output /tmp/codex-home/config.toml
 ```
 
-The benchmark profile disables Codex's built-in `computer_use` feature so the
-only computer-control MCP is this released server. Browser/CDP and shell remain
-separate hybrid channels.
+The profile turns off Codex's built-in `computer_use` feature, so desktop
+input comes only from this server, the shell or the browser runtime. See
+[Agent profiles](AGENT_PROFILES.md) for every switch.
 
-## Claude Code Configuration
+## Claude Code
 
-Claude Code `2.1.251` requires the included schema adapter:
+Claude Code 2.1.251 drops tools whose input schema is a root-level `oneOf`,
+so it reaches the server through `hcu/osworld/guest_files/claude_mcp_schema_adapter.py`.
+The adapter flattens only the schemas it shows Claude; the server still
+validates the original schemas before any side effect.
 
 ```json
 {
@@ -144,105 +135,111 @@ Claude Code `2.1.251` requires the included schema adapter:
     "computer_use": {
       "type": "stdio",
       "command": "/usr/bin/python3",
-      "args": [
-        "/opt/osw-runtime/claude_mcp_schema_adapter.py",
-        "/opt/osw-runtime/computer-use",
-        "mcp"
-      ]
+      "args": ["/path/to/claude_mcp_schema_adapter.py", "/path/to/computer-use", "mcp"]
     }
   }
 }
 ```
 
-Generate the complete MCP file and replacement system prompt with:
+`python3 -m hcu.render_agent_config --agent claude-code ...` writes this file
+and the replacement system prompt. The runner allows the tools `Bash`,
+`Edit`, `Read`, `mcp__computer_use__AX` and `mcp__computer_use__GUI`.
 
-```bash
-python3 scripts/render-agent-config.py \
-  --agent claude-code \
-  --model claude-opus-5 \
-  --task-id manual \
-  --gateway http://172.17.0.1:18081 \
-  --mcp /opt/osw-runtime/computer-use \
-  --output /tmp/osw-claude/mcp.json
-```
+## Public contract
 
-The allowed Claude tools are `Bash`, `Edit`, `Read`,
-`mcp__computer_use__AX` and `mcp__computer_use__GUI`.
-
-## Public Contract
-
-`AX` is a mode-discriminated tool with `observe`, `find`, `act` and
-`assert_ax`. Its server-managed identity graph is:
+`AX` takes a `mode`: `observe`, `find`, `act` or `assert_ax`. The server
+owns an identity graph:
 
 ```text
 application aN -> top-level window wN -> element rN
 ```
 
-Refs are current-state capabilities, not durable selectors. Mutation actions
-re-resolve refs against the live canonical tree and reject stale or
-cross-window targets before input.
+References describe current state; they are not durable selectors. Every
+mutation resolves its reference against the live accessibility tree again and
+rejects stale or cross-window targets before any input.
 
-`GUI` accepts an ordered `actions` array. It supports screenshot, pointer,
-drag, scroll, keyboard, text and fixed one-second wait actions. A screenshot
-establishes a private full-desktop layout lease. Coordinate actions fail closed
-before stale input if the live layout no longer matches the screenshot.
+`GUI` takes an ordered `actions` array: screenshot, pointer, drag, scroll,
+keyboard, text and wait actions. A screenshot establishes a private layout
+lease for the full desktop; coordinate actions fail before input when the
+live layout no longer matches the screenshot they refer to.
 
-AX evidence proves only accessibility-visible state. GUI evidence proves only
-the returned desktop pixels and reported input delivery. Use shell, file APIs
-or application-native inspection when durable contents or persistence must be
-verified.
+AX evidence covers only what the accessibility tree shows, and GUI evidence
+only the returned pixels and reported input delivery. Neither proves file
+contents, persistence or network state; agents should verify those through
+the shell or the application.
 
-## OSWorld Lifecycle
+### Contract tests
 
-For every task, the unified runner:
+The model sees the tool schemas, descriptions, server instructions and error
+texts, so they are treated as an interface. `contract_golden_test.go`
+records `initialize`, `tools/list`, the argument-validation errors and the CLI
+help in `testdata/contract/public_contract.json`, and `go test` fails when any
+of them changes. After an intentional change, regenerate the file and review
+the diff:
 
-1. creates a fresh official Docker/QEMU environment and qcow2 overlay;
-2. copies the frozen MCP binary and selected agent into the guest;
-3. removes inherited Codex and Claude state;
-4. writes a task-local MCP/client configuration;
-5. sources the active desktop accessibility environment;
-6. starts one agent session, which owns one MCP child;
-7. preserves tool calls, screenshots, results and cleanup evidence;
-8. terminates the task environment without reusing MCP state.
+```bash
+cd computer-use && go test -run TestPublicContractMatchesGolden -update-contract
+```
 
-V1 and V2 use the same MCP binary and lifecycle. Their task data, evaluator,
-guest password, derived qcow2 profile and volume size differ.
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `COMPUTER_USE_CHANNELS` | comma-separated channels to expose (`a11y`, `gui`, `keyboard`); all by default. Disabled tools disappear from `tools/list`. |
+| `COMPUTER_USE_STRUCTURED_CONTENT` | `1` adds `structuredContent` to tool results |
+| `COMPUTER_USE_ERROR_CONTEXT` | `off` stops capturing fresh UI state after a failed call |
+| `COMPUTER_USE_OUTPUT_MODE` | `file` writes large outputs to files and returns their paths |
+| `COMPUTER_USE_OUTPUT_DIR`, `COMPUTER_USE_OUTPUT_THRESHOLD` | directory and minimum size (4000 characters) for file output |
+| `COMPUTER_USE_MAX_INLINE_CHARS` | inline text budget per result, 24000 characters by default |
+| `COMPUTER_USE_TRACE_FILE` | append one JSONL line per AX action |
+| `COMPUTER_USE_AX_TELEMETRY_LOG` | private AX telemetry log, `/tmp/computer-use-ax-telemetry.jsonl` by default |
+| `COMPUTER_USE_PYTHON_BINARY` | interpreter for the provider, `python3` by default |
+| `COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS` | provider request timeout, 30 seconds by default |
+
+The contract test clears the variables that change model-visible output, so
+it always checks the defaults.
+
+## Desktop image smoke test
+
+`docker/Dockerfile.desktop` adds the binary, its provider dependencies and the
+agent CLIs to a desktop image that already runs the OSWorld guest server on
+port 5000 as user `user`. This repository does not publish such a base image.
+
+```bash
+make agents
+make desktop-image OSWORLD_BASE_IMAGE=<desktop-image>
+make smoke-desktop SMOKE_NETWORK=bridge
+```
+
+The smoke test starts a container, waits for the guest server's screenshot
+endpoint, checks the binary and agent versions, lists the tools and calls
+`AX` and `GUI` once each.
 
 ## Troubleshooting
 
-If the server starts but AX cannot see applications:
+AX sees no applications:
 
 ```bash
 source /home/user/a11y-env.sh
 computer-use doctor
 python3 -c 'import gi; gi.require_version("Atspi", "2.0"); from gi.repository import Atspi'
-printf '%s\n' "$DISPLAY" "$XAUTHORITY" "$XDG_RUNTIME_DIR" \
-  "$DBUS_SESSION_BUS_ADDRESS"
+printf '%s\n' "$DISPLAY" "$XAUTHORITY" "$XDG_RUNTIME_DIR" "$DBUS_SESSION_BUS_ADDRESS"
 ```
 
-If GUI observation or input fails:
+GUI observation or input fails:
 
 ```bash
 xdotool getactivewindow
 wmctrl -lpG
 ```
 
-If an MCP client cannot initialize:
+A client cannot initialize the server:
 
-- confirm the configured binary exists and is executable;
-- run `computer-use --version`;
-- ensure wrappers keep stdout reserved for MCP JSON-RPC;
-- verify the process runs as the desktop user, not in a detached root session;
-- run `make smoke` outside the guest to separate protocol failure from desktop
-  provider failure.
+- check that the configured binary exists and runs `computer-use --version`;
+- make sure no wrapper writes to stdout;
+- run the server as the desktop user, not in a detached root session;
+- run `make smoke` outside the desktop to separate protocol problems from
+  desktop problems.
 
-If AX reports a stale ref or GUI reports a stale layout, obtain a fresh AX
-observation or GUI screenshot. Do not retry the rejected mutation unchanged.
-
-## Change Control
-
-Changes to schemas, descriptions, provider behavior, screenshots, input
-delivery, runtime dependencies or model-visible recovery text are product
-changes. Record them under `analysis/tool_changes/`, build a new immutable
-artifact identity and use a new run ID. Do not overwrite the `v0.14` release
-manifest or silently mix MCP builds in one evaluation round.
+When AX reports a stale reference or GUI a stale layout, take a fresh AX
+observation or GUI screenshot instead of repeating the rejected call.

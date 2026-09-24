@@ -1,19 +1,18 @@
 # Architecture
 
-## Control Plane
+## Control plane
 
-The task harness creates one isolated desktop per task, installs one task-agent
-binary, and starts one dedicated `computer-use mcp` child over stdio. No MCP
-state is shared across tasks.
+The OSWorld runner creates one isolated desktop per task, installs one task
+agent and lets that agent start one `computer-use mcp` child over stdio. No
+MCP state is shared across tasks.
 
-Formal OSWorld V1 and V2 runs share the official Docker/QEMU backend. The
-benchmark version selects the task/evaluator generation; it does not select the
-virtualization architecture. The direct-container backend is retained only for
-fast Linux MCP regression tests.
+OSWorld V1 and OSWorld-V2 runs share the official Docker/QEMU backend. The
+benchmark version selects the task and evaluator generation, not the
+virtualization.
 
 ```mermaid
 flowchart TB
-    R[Unified host runner] --> B{benchmark version}
+    R[hcu.osworld.run_task] --> B{benchmark version}
     B --> V1[V1 task and evaluator]
     B --> V2[V2 task and evaluator]
     V1 --> O[Official Docker QEMU wrapper]
@@ -22,45 +21,48 @@ flowchart TB
     Q --> A[Codex or Claude Code]
     A --> M[computer-use MCP]
     M --> D[Guest desktop]
-    S[Direct-container smoke] -. diagnostic only .-> M
+    A -.model requests.-> G[hcu.gateway task-scoped gateway]
 ```
 
 Codex and Claude Code receive the original OSWorld instruction plus a minimal
 completion contract. Codex loads the benchmark skill as `AGENTS.md`. Claude
 Code receives the same skill appended to a replacement system prompt, because
-leaving it as `CLAUDE.md` would allow duplicate or ambient configuration.
+a `CLAUDE.md` would be merged with ambient configuration.
 
-## MCP Process
+## MCP process
 
 ```mermaid
 flowchart TB
-    T[MCP transport] --> V[Schema and whole-batch validation]
-    V --> S[Stateful service]
+    T[mcp_transport.go] --> V[Schema and whole-batch validation]
+    V --> S[service.go: stateful service]
     S --> AR[AX ref registries aN / wN / rN]
     S --> AS[AX snapshots and canonical tree]
     S --> GL[GUI private layout lease]
     S --> E[Evidence normalization]
     S --> B[Linux runtime backend]
-    B --> W[Persistent JSONL provider worker]
+    B --> W[Persistent JSONL provider process]
     W --> AT[AT-SPI]
-    W --> WM[X11 window manager tools]
-    W --> PX[GDK/GdkPixbuf screenshots]
-    W --> IN[XTest/AT-SPI input]
+    W --> WM[X11 window tools]
+    W --> PX[GdkPixbuf screenshots]
+    W --> IN[XTest and AT-SPI input]
 ```
 
-The main boundaries are:
+The main boundaries:
 
-1. `tool_contract.go` publishes the strict mode-specific JSON schemas.
-2. `main.go` routes calls and owns session state.
-3. `ax_*` implements canonical AX state, compact working projections, refs,
-   action guards, postconditions, and evidence.
-4. `gui_service.go` implements batch validation and screenshot/layout binding.
-5. `runtime_backend*.go` and `provider_wire_v2.go` implement the private
-   provider protocol.
-6. `native/linux/provider_v1/` implements Linux AT-SPI, X11, screenshots, and
-   input.
+1. `tool_contract.go` publishes the server instructions and the strict,
+   mode-specific JSON schemas; `tool_arguments.go` parses arguments.
+2. `service.go` routes calls, owns session state and captures error context.
+3. `ax_*.go` implements the canonical AX state, compact working projections,
+   references, action guards, postconditions and evidence.
+4. `gui_service.go` validates GUI batches and binds coordinates to the last
+   screenshot.
+5. `runtime_backend*.go` and `provider_*.go` implement the private,
+   versioned provider protocol; `linux_*.go` runs the provider process.
+6. `native/linux/provider/` implements AT-SPI, X11, screenshots and input in
+   Python. The binary embeds it and writes it to disk when it starts the
+   provider process.
 
-## AX State Model
+## AX state model
 
 The server owns an identity graph:
 
@@ -68,36 +70,37 @@ The server owns an identity graph:
 application aN -> logical top-level window wN -> element rN
 ```
 
-Refs are short-lived capabilities, not selectors. Every mutation re-resolves
-the ref against live canonical state. A ref becomes stale when its exact target
-disappears or is replaced. Cross-window action batches fail before input.
+References are short-lived capabilities, not selectors. Every mutation
+resolves its reference against live canonical state. A reference becomes stale
+when its exact target disappears or is replaced, and batches that would act
+across windows fail before input.
 
-The canonical AX tree remains complete. The model sees a compact working
-projection that can remove empty leaves and collapse neutral containers.
-`find`, selectors, refs, and actions still query canonical records.
+The canonical AX tree stays complete. The model sees a compact working
+projection that drops empty leaves and collapses neutral containers, while
+`find`, selectors, references and actions keep querying canonical records.
 
-## GUI State Model
+## GUI state model
 
-GUI is full-desktop and app-free. A screenshot establishes a private layout
-lease. Before each coordinate action the provider compares the current desktop
-layout with the lease. If the layout changed, it rejects the stale coordinate,
-emits no stale click, and returns a fresh screenshot.
+GUI is full-desktop and not tied to an application. A screenshot establishes
+a private layout lease. Before each coordinate action the provider compares
+the current desktop layout with the lease; if it changed, the action is
+rejected before any input and a fresh screenshot is returned.
 
-The Linux provider returns native `1920x1080` for the standard OSWorld desktop.
-Larger desktops are aspect-ratio bounded to `1920x1080`, with private coordinate
-mapping back to the native virtual desktop.
+The provider returns the standard OSWorld desktop at its native 1920x1080.
+Larger desktops are scaled to fit 1920x1080, and coordinates are mapped back
+to the native desktop privately.
 
-## Evidence Model
+## Evidence model
 
-An accepted API call is not task completion. Responses distinguish:
+An accepted call is not task completion. Responses distinguish:
 
-- validation failure before input;
-- input not emitted;
-- input emitted or possibly emitted;
+- validation failures before input;
+- input that was not emitted;
+- input that was or may have been emitted;
 - semantic postcondition evidence;
-- visual screenshot evidence;
-- stale state requiring a new observation.
+- visual evidence from screenshots;
+- stale state that requires a new observation.
 
-AX cannot prove pixels, durable file contents, network state, or evaluator
-acceptance. GUI cannot prove semantic identity or persistence. The agent must
-use the evidence source appropriate to the requested result.
+AX cannot prove pixels, durable file contents, network state or evaluator
+acceptance, and GUI cannot prove semantic identity or persistence. The agent
+has to pick the evidence source that matches the requested result.
