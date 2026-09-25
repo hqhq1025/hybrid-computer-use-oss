@@ -2,8 +2,7 @@
 
 The task agent (Codex or Claude Code) and the computer-use MCP run inside
 the QEMU guest; the outer Docker container is the stock OSWorld runtime that
-only hosts the VM. After the official evaluator seals the RAW result, the
-optional interactive Judge inspects the still-running guest.
+only hosts the VM. The official evaluator scores the guest afterwards.
 """
 
 from __future__ import annotations
@@ -55,14 +54,6 @@ from hcu.osworld.guest import (
     safe_tag,
     transient_workload_command,
 )
-from hcu.osworld.judge.prompt import judge_instruction_text, judge_user_context
-from hcu.osworld.judge.runner import (
-    DEFAULT_JUDGE_PROMPT_FILE,
-    DEFAULT_JUDGE_SCHEMA_FILE,
-    JudgeSettings,
-    run_live_judge_with_retry,
-)
-from hcu.osworld.judge.verdict import judge_answer_score_eligibility
 from hcu.osworld.preflight import (
     validate_dedicated_docker_runtime,
     validate_official_asset_runtime,
@@ -133,7 +124,7 @@ def parse_args() -> argparse.Namespace:
         "--agent",
         choices=("codex", "claude-code"),
         default="codex",
-        help="Guest-local Task Agent. The independent Judge remains Codex.",
+        help="Guest-local Task Agent.",
     )
     parser.add_argument(
         "--model",
@@ -199,19 +190,6 @@ def parse_args() -> argparse.Namespace:
         default=str(DEFAULT_BASE_INSTRUCTIONS_FILE),
         help="Compact model base instructions copied into the guest.",
     )
-    parser.add_argument("--judge-model", default="")
-    parser.add_argument("--judge-effort", default="xhigh")
-    parser.add_argument("--judge-timeout", type=int, default=600)
-    parser.add_argument("--judge-tool-limit", type=int, default=30)
-    parser.add_argument("--judge-retry-tool-limit", type=int, default=15)
-    parser.add_argument(
-        "--judge-prompt-file",
-        default=str(DEFAULT_JUDGE_PROMPT_FILE),
-    )
-    parser.add_argument(
-        "--judge-schema-file",
-        default=str(DEFAULT_JUDGE_SCHEMA_FILE),
-    )
     parser.add_argument(
         "--result-dir",
         default="",
@@ -237,8 +215,8 @@ def parse_args() -> argparse.Namespace:
         "--retain-container",
         action="store_true",
         help=(
-            "Stop but do not remove the task VM container after evaluation and "
-            "Judge completion, preserving it for manual inspection."
+            "Stop but do not remove the task VM container after evaluation, "
+            "preserving it for manual inspection."
         ),
     )
     parser.add_argument(
@@ -333,7 +311,7 @@ class TaskRun:
 
     @property
     def uses_codex(self) -> bool:
-        return self.args.agent == "codex" or bool(self.args.judge_model)
+        return self.args.agent == "codex"
 
     def write_meta(self, **json_options) -> None:
         write_local(
@@ -403,7 +381,7 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
         args.base_instructions_file
     ).resolve()
     required_files = [mcp_binary, skill_file, base_instructions_file]
-    if args.agent == "codex" or args.judge_model:
+    if args.agent == "codex":
         required_files.append(codex_binary)
     if args.agent == "claude-code":
         required_files.append(claude_code_binary)
@@ -411,14 +389,6 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
     for required in required_files:
         if not required.is_file():
             raise FileNotFoundError(required)
-    if args.judge_model:
-        for required in (
-            Path(args.judge_prompt_file).resolve(),
-            Path(args.judge_schema_file).resolve(),
-        ):
-            if not required.is_file():
-                raise FileNotFoundError(required)
-
     task = load_task_config(
         None,
         task_id=args.task_id,
@@ -586,25 +556,6 @@ def initial_meta(
         "skill_file": str(run.skill_file),
         "base_instructions_file": str(run.base_instructions_file),
         "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "judge_model": args.judge_model or None,
-        "judge_effort": args.judge_effort if args.judge_model else None,
-        "judge_timeout_seconds": (
-            args.judge_timeout if args.judge_model else None
-        ),
-        "judge_tool_limit": (
-            args.judge_tool_limit if args.judge_model else None
-        ),
-        "judge_retry_tool_limit": (
-            args.judge_retry_tool_limit if args.judge_model else None
-        ),
-        "judge_prompt_file": (
-            str(Path(args.judge_prompt_file).resolve())
-            if args.judge_model else None
-        ),
-        "judge_schema_file": (
-            str(Path(args.judge_schema_file).resolve())
-            if args.judge_model else None
-        ),
         "status": "initializing",
         "score": None,
         "error": None,
@@ -647,12 +598,6 @@ def runtime_uploads(run: TaskRun) -> tuple[list[dict], list[str]]:
             },
         ])
         executable_paths.append(GUEST_CLAUDE_CODE)
-    if args.judge_model and args.agent != "codex":
-        upload_rows.append({
-            "local_path": str(run.codex_binary),
-            "path": GUEST_CODEX,
-        })
-        executable_paths.append(GUEST_CODEX)
     return upload_rows, executable_paths
 
 
@@ -1015,91 +960,6 @@ def save_phase_screenshot(
         (result_dir / f"final-{label}.png").write_bytes(screenshot)
 
 
-def run_judge(
-    run: TaskRun,
-    env: DesktopEnv,
-    base_url: str,
-    outcome: PhaseOutcome,
-    delivery: dict,
-) -> dict:
-    """Run the interactive Judge and decide whether its verdict may score."""
-    args = run.args
-    run.meta["status"] = "judge_running"
-    run.write_meta(ensure_ascii=False)
-    settings = JudgeSettings(
-        model=args.judge_model,
-        effort=args.judge_effort,
-        gateway_base=args.gateway_base,
-        timeout=args.judge_timeout,
-        tool_limit=args.judge_tool_limit,
-        retry_tool_limit=args.judge_retry_tool_limit,
-        prompt_file=Path(args.judge_prompt_file),
-        schema_file=Path(args.judge_schema_file),
-    )
-    try:
-        live_judge = run_live_judge_with_retry(
-            env=env,
-            base_url=base_url,
-            result_dir=run.result_dir,
-            settings=settings,
-            run_tag=run.run_tag,
-            instruction=judge_instruction_text(
-                run.instruction,
-                (
-                    run.phases[:delivery["delivered_phase_count"]]
-                    if run.phases
-                    else run.phases
-                ),
-            ),
-            final_response=outcome.final_response,
-            declared_infeasible=(
-                outcome.completion_sentinel == INFEASIBLE_SENTINEL
-            ),
-            base_instructions_file=run.base_instructions_file,
-            current_date=run.current_date,
-            timezone_name=run.run_timezone,
-            user_context=judge_user_context(run.task, outcome.phase_details),
-            raw_evaluator_completed_before_judge=(
-                not outcome.official_evaluator_errors
-            ),
-        )
-    except Exception as judge_exc:
-        live_judge = {
-            "judge_mode": "interactive_outcome",
-            "model": args.judge_model,
-            "effort": args.judge_effort,
-            "judge_valid": False,
-            "error": f"{type(judge_exc).__name__}: {judge_exc}",
-            "traceback": traceback.format_exc(),
-            "raw_evaluator_attempted_before_judge": True,
-            "raw_evaluator_completed_before_judge": (
-                not outcome.official_evaluator_errors
-            ),
-        }
-        judge_dir = run.result_dir / "judge"
-        judge_dir.mkdir(parents=True, exist_ok=True)
-        (judge_dir / "metadata.json").write_text(
-            json.dumps(
-                live_judge,
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-    live_judge["phase_delivery"] = delivery
-    (
-        live_judge["answer_score_eligible"],
-        live_judge["answer_score_exclusion_reason"],
-    ) = judge_answer_score_eligibility(
-        truncated=outcome.truncated,
-        delivery=delivery,
-        final_message=outcome.final_message,
-        done_payload=outcome.done_payload,
-        official_evaluator_errors=outcome.official_evaluator_errors,
-    )
-    return live_judge
-
-
 def summarize_usage(run: TaskRun, outcome: PhaseOutcome) -> dict:
     """Summarize the aggregate agent trace and reconcile it with the proxy."""
     aggregate_path = run.result_dir / "agent.jsonl"
@@ -1132,7 +992,7 @@ def finish_run(
     base_url: str,
     outcome: PhaseOutcome,
 ) -> int:
-    """Write the RAW evaluator result, run the Judge and seal the result."""
+    """Write the evaluator result and seal the run."""
     args = run.args
     score = round(max(0.0, min(1.0, outcome.total_score)), 4)
     raw_evaluator_status = (
@@ -1170,11 +1030,6 @@ def finish_run(
 
     delivery = phase_delivery_status(run.phases, outcome.phase_details)
     result_payload["phase_delivery"] = delivery
-    live_judge = None
-    if args.judge_model:
-        live_judge = run_judge(run, env, base_url, outcome, delivery)
-        result_payload["live_judge"] = live_judge
-
     summary = summarize_usage(run, outcome)
     done_payload = outcome.done_payload
     result_payload.update({
@@ -1221,7 +1076,6 @@ def finish_run(
         "termination_reason": result_payload["termination_reason"],
         "final_message": outcome.final_message,
         "trace_summary": summary,
-        "live_judge": live_judge,
     })
     run.write_meta(ensure_ascii=False)
     print(json.dumps(
@@ -1365,8 +1219,6 @@ def main() -> int:
         "guest_image",
         "skill_file",
         "base_instructions_file",
-        "judge_prompt_file",
-        "judge_schema_file",
         "result_dir",
         "token_log",
     )

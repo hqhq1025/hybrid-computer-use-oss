@@ -25,13 +25,6 @@ RUNNER_VALUE_OPTIONS = (
     ("skill_file", "--skill-file"),
     ("base_instructions_file", "--base-instructions-file"),
     ("client_password", "--client-password"),
-    ("judge_model", "--judge-model"),
-    ("judge_effort", "--judge-effort"),
-    ("judge_timeout", "--judge-timeout"),
-    ("judge_tool_limit", "--judge-tool-limit"),
-    ("judge_retry_tool_limit", "--judge-retry-tool-limit"),
-    ("judge_prompt_file", "--judge-prompt-file"),
-    ("judge_schema_file", "--judge-schema-file"),
     ("token_log", "--token-log"),
 )
 RUNNER_SWITCHES = (

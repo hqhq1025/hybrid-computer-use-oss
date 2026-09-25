@@ -71,7 +71,7 @@ def openai_gateway(tmp_path):
     pools = {}
     gateway = openai_proxy.OpenAIGateway(
         upstreams=["east.example", "west.example"],
-        model_upstreams={"judge-model": ["judge.example"]},
+        model_upstreams={"other-model": ["other.example"]},
         token_log=TokenLog(tmp_path / "tokens.jsonl"),
         max_requests_per_task=2,
         token=StaticToken(),
@@ -100,14 +100,14 @@ def test_openai_budget_caps_task_agents_of_both_benchmarks(openai_gateway, bench
     assert rows[0]["input_tokens"] == 10 and rows[0]["cached_tokens"] == 4
 
 
-def test_openai_judge_traffic_is_not_capped(openai_gateway):
+def test_openai_non_task_traffic_is_not_capped(openai_gateway):
     _gateway, base, pools = openai_gateway
     statuses = [
-        post(base, "/t/osworld-v2-judge-run/v1/responses", {"model": "judge-model"})
+        post(base, "/t/other-run/v1/responses", {"model": "other-model"})
         for _ in range(3)
     ]
     assert statuses == [200, 200, 200]
-    assert len(pools["judge.example"].calls) == 3
+    assert len(pools["other.example"].calls) == 3
 
 
 def test_openai_pins_each_task_to_one_upstream(openai_gateway):

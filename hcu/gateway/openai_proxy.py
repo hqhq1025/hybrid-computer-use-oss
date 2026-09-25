@@ -475,7 +475,7 @@ def main() -> int:
         default=0,
         help=(
             "Hard admission cap for each OSWorld task agent; 0 disables the "
-            "cap. Judge and other traffic is not capped."
+            "cap. Other traffic is not capped."
         ),
     )
     args = parser.parse_args()

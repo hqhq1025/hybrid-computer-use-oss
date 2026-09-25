@@ -27,7 +27,6 @@ include = ["hcu*"]
 
 [tool.setuptools.package-data]
 "hcu.osworld" = ["guest_files/*.py"]
-"hcu.osworld.judge" = ["prompt.md", "schema.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

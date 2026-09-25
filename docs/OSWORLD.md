@@ -18,8 +18,7 @@ image you select supplies the V1 or V2 desktop.
    executables and the MCP tool list.
 5. Runs the agent inside the guest desktop session until it finishes, reports
    the task infeasible, or reaches the model-call budget or the timeout.
-6. Runs the official evaluator and, when `--judge-model` is set, the
-   interactive outcome Judge.
+6. Runs the official evaluator.
 7. Writes the result files and removes the container, or only stops it with
    `--retain-container`.
 
@@ -163,7 +162,7 @@ the bridge gateway address (commonly `172.17.0.1`), not to loopback. Restrict
 that address with a host firewall; the gateway spends your model quota for
 anyone who can reach it.
 
-### OpenAI Responses (Codex and the Judge)
+### OpenAI Responses (Codex)
 
 `hcu.gateway.openai_proxy` forwards `/v1/responses` requests to Azure OpenAI
 with an Azure CLI token, so run `az login` first. It pins each task to one
@@ -175,7 +174,6 @@ python3 -m hcu.gateway.openai_proxy \
   --host 172.17.0.1 --ports 8611 \
   --out "$HCU_RESULTS_DIR/openai-tokens.jsonl" \
   --upstreams <resource>.openai.azure.com \
-  --model-upstreams gpt-5.4=<judge-resource>.openai.azure.com \
   --max-requests-per-task 200
 ```
 
@@ -198,7 +196,7 @@ python3 -m hcu.gateway.anthropic_proxy \
 ### Budgets
 
 Only task agents are budgeted, identified by the `osworld-v1-hybrid-` and
-`osworld-v2-hybrid-` task prefixes; Judge traffic is not. The OpenAI gateway
+`osworld-v2-hybrid-` task prefixes; other traffic is not. The OpenAI gateway
 counts admitted requests. The Anthropic gateway counts successful responses
 that reached the agent, so an upstream failure or a dropped connection does
 not use up a step. Both gateways rebuild their counters from the token log
@@ -248,7 +246,6 @@ $PY -m hcu.osworld.run_task \
   --volume-size 100 --ram-size 4G \
   --max-model-calls 200 \
   --token-log "$HCU_RESULTS_DIR/openai-tokens.jsonl" \
-  --judge-model gpt-5.4 \
   --result-dir "runs/osworld-v2/001-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
@@ -263,9 +260,6 @@ Anthropic gateway's log:
 --claude-gateway-base "$HCU_ANTHROPIC_GATEWAY"
 --token-log "$HCU_RESULTS_DIR/anthropic-tokens.jsonl"
 ```
-
-Keep `--gateway-base` when you use the Judge: it always runs Codex, even when
-the task agent is Claude Code.
 
 Other useful options:
 
@@ -295,7 +289,7 @@ $PY -m hcu.osworld.run_batch --config configs/osworld-v2-queue.example.json \
 
 `--dry-run` validates the config and prints the generated commands; remove it
 to launch. Config keys map to `run_task` options (`gateway_base`,
-`guest_image`, `judge_model`, and so on), string values may reference
+`guest_image`, `max_model_calls`, and so on), string values may reference
 environment variables such as `${HCU_ARTIFACT_DIR}`, and each task may
 override `volume_size`, `ram_size` and `task_domain`. Unknown keys are
 rejected.
@@ -317,21 +311,18 @@ A result directory contains, among others:
 
 | File | Contents |
 | --- | --- |
-| `result.json` | score, termination reason, truncation, trace summary, evaluator status and the Judge verdict |
+| `result.json` | score, termination reason, truncation, trace summary and evaluator status |
 | `meta.json` | run configuration and status transitions |
 | `agent.jsonl` | the agent's event stream |
 | `task-agent-token-usage.jsonl` | the task agent's rows from the token log |
 | `raw_evaluator.json` | the official evaluator's output |
-| `judge/` | Judge prompt, evidence, attempts and verdict |
 | `phase-*.png`, `final-*.png` | screenshots before and after evaluation |
 | `cleanup.json` | container cleanup record |
 
 ```bash
-jq '{score, termination_reason, truncated, raw_evaluator_status,
-     judge: .live_judge.verdict.instruction_verdict}' <result-dir>/result.json
+jq '{score, termination_reason, truncated, raw_evaluator_status}' <result-dir>/result.json
 ```
 
-The official evaluator score and the Judge verdict are separate evidence.
 Report the evaluator score unchanged. A truncated run, one that hit the budget
 or the timeout, counts as a failure even if the evaluator happens to pass.
 
@@ -344,7 +335,7 @@ or the timeout, counts as a failure even if the evaluator happens to pass.
 - Hosts whose Docker daemon lost its default `docker0` bridge can still build
   the release binary (`make build` uses `--network none`); the desktop image
   build uses `DOCKER_BUILD_NETWORK=host` by default.
-- A passing evaluator does not prove that the task was done as asked; read the
-  Judge verdict and the artifacts as well.
+- A passing evaluator does not prove that the task was done as asked; read
+  the trace and the artifacts as well.
 - This repository's `AGENTS.md` is written for developers and must never
   reach an evaluated agent.

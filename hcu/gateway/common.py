@@ -14,7 +14,7 @@ from pathlib import Path
 import threading
 import urllib.parse
 
-# Task agents of the OSWorld runner; Judge and other traffic is not budgeted.
+# Task agents of the OSWorld runner; other traffic is not budgeted.
 BUDGETED_TASK_PREFIXES = ("osworld-v1-hybrid-", "osworld-v2-hybrid-")
 HOP_BY_HOP_RESPONSE_HEADERS = frozenset({
     "transfer-encoding",

@@ -54,9 +54,7 @@ def test_batch_expands_environment_backed_paths(tmp_path, monkeypatch):
         {
             "guest_image": "${TEST_GUEST_IMAGE}",
             "client_password": "osworld-public-evaluation",
-            "judge_timeout": 600,
-            "judge_tool_limit": 30,
-            "judge_retry_tool_limit": 15,
+            "max_model_calls": 200,
         },
         {"id": "001"},
         tmp_path,
@@ -66,9 +64,7 @@ def test_batch_expands_environment_backed_paths(tmp_path, monkeypatch):
         command[command.index("--client-password") + 1]
         == "osworld-public-evaluation"
     )
-    assert command[command.index("--judge-timeout") + 1] == "600"
-    assert command[command.index("--judge-tool-limit") + 1] == "30"
-    assert command[command.index("--judge-retry-tool-limit") + 1] == "15"
+    assert command[command.index("--max-model-calls") + 1] == "200"
 
 
 def test_example_queues_bind_guest_password_and_capacity():

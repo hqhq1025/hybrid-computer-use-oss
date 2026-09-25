@@ -153,22 +153,6 @@ def load_result_payload(path: Path) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def judge_score_status(result_payload: dict | None) -> tuple[float | None, str]:
-    if result_payload is None:
-        return None, "missing"
-    live_judge = result_payload.get("live_judge")
-    if not isinstance(live_judge, dict):
-        return None, "missing"
-    if not live_judge.get("judge_valid", False):
-        return None, "error"
-    if not live_judge.get("answer_score_eligible", False):
-        return None, "excluded"
-    verdict = live_judge.get("strict_instruction_verdict")
-    if verdict == "PASS":
-        return 1.0, "scored"
-    if verdict == "FAIL":
-        return 0.0, "scored"
-    return None, "error"
 
 
 def validate_queue_guest_image_capacity(config: dict) -> dict | None:
@@ -608,7 +592,7 @@ class QueueRunner:
         run_id = str(self.config.get("run_id") or "unversioned")
         affinity = "".join(
             char if char.isalnum() or char in "._-" else "-"
-            for char in f"osworld-v2-original-{run_id}-{task_id}"
+            for char in f"original-{run_id}-{task_id}"
         )
         gateway = os.environ.get(
             "HCU_OPENAI_GATEWAY",
@@ -620,7 +604,7 @@ class QueueRunner:
         run_id = str(self.config.get("run_id") or "unversioned")
         affinity = "".join(
             char if char.isalnum() or char in "._-" else "-"
-            for char in f"osworld-v2-evaluator-{run_id}-{task_id}"
+            for char in f"evaluator-{run_id}-{task_id}"
         )
         gateway = os.environ.get(
             "HCU_EVALUATOR_GATEWAY",
@@ -732,7 +716,7 @@ class QueueRunner:
         return max(0.0, self.rate_limit_pause_until - timestamp)
 
     def active_count(self) -> int:
-        """Return bounded Task-side load; Judges use a separate count."""
+        """Return bounded Task-side load."""
         active = 0
         for task in self.config["tasks"]:
             for side in self.sides:
@@ -742,39 +726,9 @@ class QueueRunner:
                         "running",
                         "external-running",
                     }
-                    and not self.is_judge_phase(task_id, side)
                 ):
                     active += 1
         return active + self.external_active_count()
-
-    def judge_active_count(self) -> int:
-        active = 0
-        for task in self.config["tasks"]:
-            for side in self.sides:
-                task_id = task["id"]
-                if (
-                    self.side_status(task_id, side) in {
-                        "running",
-                        "external-running",
-                    }
-                    and self.is_judge_phase(task_id, side)
-                ):
-                    active += 1
-        return active
-
-    def hybrid_phase(self, task_id: str) -> str | None:
-        meta = self.root_path(task_id, "hybrid") / "meta.json"
-        try:
-            payload = json.loads(meta.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        status = payload.get("status")
-        return status if isinstance(status, str) and status else None
-
-    def is_judge_phase(self, task_id: str, side: str) -> bool:
-        if side != "hybrid":
-            return False
-        return self.hybrid_phase(task_id) == "judge_running"
 
     def total_live_count(self) -> int:
         active = 0
@@ -799,7 +753,6 @@ class QueueRunner:
                 pass
             return payload.get("status") in {
                 "agent_running",
-                "judge_running",
                 "completed",
                 "truncated",
             }
@@ -1191,9 +1144,6 @@ class QueueRunner:
         rows = []
         complete_sides = 0
         official_raw_scores = []
-        judge_scores = []
-        judge_error_count = 0
-        judge_excluded_count = 0
         total_sides = len(self.config["tasks"]) * len(self.sides)
         for task in self.config["tasks"]:
             cells = []
@@ -1220,22 +1170,7 @@ class QueueRunner:
                     )
                     if score is not None:
                         official_raw_scores.append(score)
-                judge_text = ""
-                if side == "hybrid" and self.config.get("judge_model"):
-                    judge_score, judge_status = judge_score_status(
-                        result_payload
-                    )
-                    if judge_status == "scored":
-                        judge_scores.append(judge_score)
-                        judge_text = f" JUDGE={judge_score:.0f}"
-                    elif status == "completed":
-                        if judge_status == "excluded":
-                            judge_excluded_count += 1
-                            judge_text = " JUDGE=EXCLUDED"
-                        else:
-                            judge_error_count += 1
-                            judge_text = " JUDGE=ERR"
-                cells.append(f"{status}{score_text}{judge_text}")
+                cells.append(f"{status}{score_text}")
             rows.append(
                 "| "
                 + " | ".join(
@@ -1265,22 +1200,8 @@ class QueueRunner:
                 if official_raw_scores
                 else "no completed scores"
             ),
-            "Agent-as-Judge: "
-            + (
-                f"{sum(judge_scores):.0f}/{len(judge_scores)} PASS "
-                f"({sum(judge_scores) / len(judge_scores):.4f})"
-                if judge_scores
-                else "no eligible verdicts"
-            )
-            + (
-                f"; invalid={judge_error_count}, "
-                f"excluded={judge_excluded_count}"
-                if judge_error_count or judge_excluded_count
-                else ""
-            ),
             f"Active Task sides: {self.active_count()}/"
             f"{self.config['max_active_sides']}",
-            f"Active Judges: {self.judge_active_count()}",
             "Total live sides: "
             f"{self.total_live_count()}/"
             f"{self.config.get('max_total_live_sides', 'unbounded')}",

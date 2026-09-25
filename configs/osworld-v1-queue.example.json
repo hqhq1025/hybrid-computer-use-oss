@@ -9,7 +9,9 @@
       "ram_size": "4G"
     }
   ],
-  "sides": ["hybrid"],
+  "sides": [
+    "hybrid"
+  ],
   "agent": "codex",
   "model": "gpt-5.5",
   "effort": "xhigh",
@@ -19,11 +21,6 @@
   "base_instructions_file": "${HYBRID_COMPUTER_USE_ROOT}/skills/base/CODEX_BASE_INSTRUCTIONS.md",
   "gateway_base": "${HCU_OPENAI_GATEWAY}",
   "client_password": "password",
-  "judge_model": "gpt-5.4",
-  "judge_effort": "xhigh",
-  "judge_timeout": 600,
-  "judge_tool_limit": 30,
-  "judge_retry_tool_limit": 15,
   "token_log": "${HCU_RESULTS_DIR}/osworld-v1/example-osworld-v1.tokens.jsonl",
   "max_model_calls": 200,
   "timeout_seconds": 0,

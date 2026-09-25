@@ -16,7 +16,6 @@ from hcu.osworld.guest import (
     GUEST_CLAUDE_CONFIG_DIR,
     GUEST_CODEX,
     GUEST_CODEX_HOME,
-    GUEST_JUDGE_CODEX_HOME,
     GUEST_LAUNCHER,
     GUEST_MCP,
     GUEST_MCP_RUNTIME_ROOT,
@@ -91,7 +90,6 @@ def runtime_bootstrap_command(client_password: str) -> list[str]:
     runtime_dirs = (
         GUEST_CODEX_HOME,
         GUEST_CLAUDE_CONFIG_DIR,
-        GUEST_JUDGE_CODEX_HOME,
         GUEST_MCP_RUNTIME_ROOT,
     )
     quoted_dirs = " ".join(shlex.quote(path) for path in runtime_dirs)
@@ -109,8 +107,7 @@ def runtime_bootstrap_command(client_password: str) -> list[str]:
         f"&& printf '%s\\n' {shlex.quote(client_password)} "
         f"| sudo -S install -d -o user -g user {quoted_dirs} "
         f"&& test -w {shlex.quote(GUEST_CODEX_HOME)} "
-        f"&& test -w {shlex.quote(GUEST_CLAUDE_CONFIG_DIR)} "
-        f"&& test -w {shlex.quote(GUEST_JUDGE_CODEX_HOME)}",
+        f"&& test -w {shlex.quote(GUEST_CLAUDE_CONFIG_DIR)}",
     ]
 
 

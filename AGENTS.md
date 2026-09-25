@@ -23,7 +23,7 @@ earlier traces or cross-task memory to an evaluated agent.
 | --- | --- |
 | `computer-use/` | Go MCP server; `native/linux/provider/` is the embedded Python provider |
 | `computer-use/testdata/contract/` | golden copy of the model-visible MCP contract |
-| `hcu/osworld/` | OSWorld runner, batch and queue coordinators, Judge |
+| `hcu/osworld/` | OSWorld runner, batch and queue coordinators |
 | `hcu/gateway/` | task-scoped OpenAI and Anthropic gateways |
 | `osworld-overlay/` | files installed into the pinned OSWorld-V2 checkout |
 | `skills/` | model input: skills and base instructions |

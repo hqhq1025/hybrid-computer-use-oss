@@ -10,8 +10,7 @@ def run_official_evaluator(evaluate: Callable[[], Any]) -> dict:
 
     An evaluator exception, including a result without a numeric score, is
     recorded instead of raised, so the run still seals an explicit RAW
-    error, the Judge can inspect the final state, and the result is
-    excluded from scoring rather than lost.
+    error and the result is excluded from scoring rather than lost.
     """
     try:
         result = evaluate()

@@ -23,6 +23,10 @@ this repository started from:
 
 ### OSWorld runner
 
+- Removed the interactive outcome Judge (`hcu/osworld/judge`, the
+  `--judge-*` options, the `judge_*` config keys, `live_judge` in
+  `result.json` and the queue's Judge columns). The official evaluator is the
+  only scorer.
 - The runner is the `hcu` Python package. `python -m hcu.osworld.run_task`
   replaces `integrations/osworld-v2/hybrid/run_hybrid.py`, and `run_batch`,
   `run_queue`, `setup_canary` and `setup_canary_queue` moved the same way.
@@ -34,8 +38,7 @@ this repository started from:
   `--mcp-contract-manifest`, `--provider-name`,
   `--audited-evaluator-overrides`, the queue's implementation and benchmark
   bindings, and `releases/`. `make agents` still verifies the archive
-  checksums of the agent CLIs, and the Judge still hashes guest state to detect
-  mutations.
+  checksums of the agent CLIs.
 - Removed the legacy direct-container V1 runner (`integrations/osworld-v1`).
 - Fixed: an exception in the official evaluator is recorded as an evaluator
   error; before, it aborted the run before `result.json` was written.

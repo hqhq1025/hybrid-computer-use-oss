@@ -1,6 +1,6 @@
 """Guest filesystem layout and the HTTP control channel into the QEMU guest.
 
-All task-agent and Judge files live at fixed guest paths. Commands run through
+All task-agent files live at fixed guest paths. Commands run through
 the OSWorld guest server's ``/setup/execute`` endpoint, long-running workloads
 start as transient systemd user units through ``/setup/launch``, and files are
 read back through ``/file``.
@@ -28,15 +28,10 @@ GUEST_CLAUDE_CONFIG_DIR = "/opt/osw-runtime/claude-task"
 GUEST_CLAUDE_MCP_ADAPTER = (
     f"{GUEST_CLAUDE_CONFIG_DIR}/mcp_schema_adapter.py"
 )
-GUEST_JUDGE_CODEX_HOME = "/opt/osw-runtime/codex-judge"
 GUEST_CONFIG = f"{GUEST_CODEX_HOME}/config.toml"
 GUEST_CLAUDE_MCP_CONFIG = f"{GUEST_CLAUDE_CONFIG_DIR}/mcp.json"
-GUEST_JUDGE_CONFIG = f"{GUEST_JUDGE_CODEX_HOME}/config.toml"
 GUEST_BASE_INSTRUCTIONS = (
     f"{GUEST_CODEX_HOME}/osw-base-instructions.md"
-)
-GUEST_JUDGE_BASE_INSTRUCTIONS = (
-    f"{GUEST_JUDGE_CODEX_HOME}/osw-base-instructions.md"
 )
 GUEST_SKILL = "/home/user/AGENTS.md"
 GUEST_PROMPT = "/tmp/osworld-v2-hybrid-prompt.txt"
@@ -46,19 +41,6 @@ GUEST_STDERR = "/tmp/osworld-v2-hybrid-agent.stderr"
 GUEST_FINAL = "/tmp/osworld-v2-hybrid-final.txt"
 GUEST_DONE = "/tmp/osworld-v2-hybrid-done.json"
 GUEST_LAUNCHER_STATUS = "/tmp/osworld-v2-hybrid-launcher-status.json"
-GUEST_JUDGE_ROOT = "/tmp/osw-live-judge-sealed"
-GUEST_JUDGE_WORK = "/tmp/osw-live-judge-work"
-GUEST_JUDGE_PROMPT = "/tmp/osw-live-judge-prompt.txt"
-GUEST_JUDGE_SCHEMA = "/tmp/osw-live-judge-schema.json"
-GUEST_JUDGE_RESULT = "/tmp/osw-live-judge-result.json"
-GUEST_JUDGE_TRACE = "/tmp/osw-live-judge-agent.jsonl"
-GUEST_JUDGE_STDERR = "/tmp/osw-live-judge.stderr"
-GUEST_JUDGE_STATUS = "/tmp/osw-live-judge-status.json"
-GUEST_JUDGE_PROBE = f"{GUEST_JUDGE_WORK}/judge-probe"
-GUEST_JUDGE_PTY_STREAM = f"{GUEST_JUDGE_WORK}/pty_stream.py"
-GUEST_PRIOR_JUDGE_EVIDENCE = (
-    f"{GUEST_JUDGE_ROOT}/prior_judge_execution_evidence.jsonl"
-)
 
 
 GUEST_FILE_ATTEMPTS = 5

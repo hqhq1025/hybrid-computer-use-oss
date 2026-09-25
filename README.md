@@ -48,7 +48,7 @@ full-desktop image the tool returned. See [Architecture](docs/ARCHITECTURE.md).
 | Path | Contents |
 | --- | --- |
 | `computer-use/` | Go MCP server and its embedded Python AT-SPI/X11 provider |
-| `hcu/osworld/` | OSWorld runner: one QEMU guest, agent and MCP process per task, the official evaluator and an optional interactive Judge |
+| `hcu/osworld/` | OSWorld runner: one QEMU guest, agent and MCP process per task, then the official evaluator |
 | `hcu/gateway/` | Task-scoped model gateways that route and meter the agents' model requests |
 | `osworld-overlay/` | Patches installed into a pinned OSWorld-V2 checkout |
 | `skills/` | Agent instructions: hybrid, AX-only and GUI-only skills and shared base instructions |
