@@ -30,9 +30,15 @@ from hcu.paths import (
 )
 from hcu.osworld.agent_loop import TurnSettings, run_agent_phase
 from hcu.osworld.agents import (
+    AGENT_PROFILES,
+    AGENTS,
     claude_mcp_config,
     claude_system_prompt,
     codex_config,
+    gemini_experiments,
+    gemini_settings,
+    grok_config,
+    grok_system_prompt,
     public_tools,
     launcher_script,
     task_gateway_base,
@@ -42,12 +48,22 @@ from hcu.gateway.common import TASK_AFFINITY_PREFIX
 from hcu.osworld.evaluation import run_official_evaluator
 from hcu.osworld.guest import (
     GUEST_BASE_INSTRUCTIONS,
-    GUEST_CLAUDE_CODE,
     GUEST_CLAUDE_MCP_ADAPTER,
     GUEST_CLAUDE_MCP_CONFIG,
-    GUEST_CODEX,
     GUEST_CODEX_HOME,
+    GUEST_CLAUDE_CODE,
+    GUEST_CODEX,
     GUEST_CONFIG,
+    GUEST_GEMINI_ARCHIVE,
+    GUEST_GEMINI_CLI,
+    GUEST_GEMINI_CONTEXT,
+    GUEST_GEMINI_EXPERIMENTS,
+    GUEST_GEMINI_NODE,
+    GUEST_GEMINI_PACKAGE,
+    GUEST_GEMINI_SETTINGS,
+    GUEST_GEMINI_TRUSTED,
+    GUEST_GROK,
+    GUEST_GROK_CONFIG,
     GUEST_LAUNCHER,
     GUEST_MCP,
     GUEST_PROMPT,
@@ -97,6 +113,14 @@ from hcu.osworld.usage import (
 from desktop_env.cache import run_scoped_cache_dir
 from desktop_env.desktop_env import DesktopEnv
 
+# Where each agent's artifact lands in the guest.
+GUEST_AGENT_BINARIES = {
+    "codex": GUEST_CODEX,
+    "claude-code": GUEST_CLAUDE_CODE,
+    "gemini-cli": GUEST_GEMINI_ARCHIVE,
+    "grok-build": GUEST_GROK,
+}
+
 CLAUDE_MCP_ADAPTER = (
     Path(__file__).resolve().parent
     / "guest_files"
@@ -123,7 +147,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--agent",
-        choices=("codex", "claude-code"),
+        choices=AGENTS,
         default="codex",
         help="Guest-local Task Agent.",
     )
@@ -131,34 +155,27 @@ def parse_args() -> argparse.Namespace:
         "--model",
         default="",
         help=(
-            "Task Agent model. Defaults to gpt-5.5 for Codex and "
-            "claude-opus-5 for Claude Code."
+            "Task Agent model. Defaults: gpt-5.5 (Codex), claude-opus-5 "
+            "(Claude Code), gemini-3.8-flash (Gemini CLI), grok-4.7 (Grok Build)."
         ),
     )
-    parser.add_argument("--effort", default="xhigh")
+    parser.add_argument(
+        "--effort",
+        default="",
+        help=(
+            "Reasoning effort; for Gemini CLI a thinking level or native. "
+            "Defaults to xhigh, and to high for Gemini CLI."
+        ),
+    )
     parser.add_argument(
         "--gateway-base",
         default=os.environ.get(
             "HCU_OPENAI_GATEWAY",
             "http://172.17.0.1:8611",
         ),
-        help="Container-bridge address reachable from the QEMU guest.",
-    )
-    parser.add_argument(
-        "--artifact-dir",
-        default=str(DEFAULT_ARTIFACT_DIR),
-    )
-    parser.add_argument(
-        "--codex-binary",
-        default="",
-        help="Explicit Codex executable; otherwise use artifact-dir/codex.",
-    )
-    parser.add_argument(
-        "--claude-code-binary",
-        default="",
         help=(
-            "Explicit Claude Code executable; otherwise use "
-            "artifact-dir/claude-code."
+            "OpenAI Responses gateway reachable from the QEMU guest; serves "
+            "Codex and Grok Build."
         ),
     )
     parser.add_argument(
@@ -167,9 +184,26 @@ def parse_args() -> argparse.Namespace:
             "HCU_ANTHROPIC_GATEWAY",
             "http://172.17.0.1:8537",
         ),
+        help="Anthropic-compatible gateway reachable from the QEMU guest.",
+    )
+    parser.add_argument(
+        "--gemini-gateway-base",
+        default=os.environ.get(
+            "HCU_GEMINI_GATEWAY",
+            "http://172.17.0.1:8571",
+        ),
+        help="Gemini API gateway reachable from the QEMU guest.",
+    )
+    parser.add_argument(
+        "--artifact-dir",
+        default=str(DEFAULT_ARTIFACT_DIR),
+    )
+    parser.add_argument(
+        "--agent-binary",
+        default="",
         help=(
-            "Anthropic-compatible gateway base reachable from the QEMU guest. "
-            "Claude Code appends /v1/messages."
+            "Explicit agent executable, or the Gemini CLI npm tarball; "
+            "otherwise the agent's file under --artifact-dir."
         ),
     )
     parser.add_argument(
@@ -260,12 +294,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-vnc", action="store_true")
     parser.add_argument("--enable-recording", action="store_true")
     args = parser.parse_args()
-    if not args.model:
-        args.model = (
-            "claude-opus-5"
-            if args.agent == "claude-code"
-            else "gpt-5.5"
-        )
+    profile = AGENT_PROFILES[args.agent]
+    args.model = args.model or profile["default_model"]
+    args.effort = args.effort or profile["default_effort"]
     return args
 
 
@@ -278,8 +309,8 @@ class TaskRun:
     result_dir: Path
     token_log: Path
     affinity_task: str
-    codex_binary: Path
-    claude_code_binary: Path
+    agent_binary: Path
+    node_binary: Path | None
     mcp_binary: Path
     skill_file: Path | None
     base_instructions_file: Path
@@ -291,18 +322,31 @@ class TaskRun:
     run_started_at_utc: str
     explicit_task_date: Any
     guest_image: str
-    claude_endpoint: str = ""
+    agent_endpoint: str = ""
     meta: dict = field(default_factory=dict)
     started: float = 0.0
     recording_started: bool = False
 
     @property
+    def profile(self) -> dict:
+        return AGENT_PROFILES[self.args.agent]
+
+    @property
     def config_path(self) -> Path:
-        return self.result_dir / (
-            "guest-config.toml"
-            if self.args.agent == "codex"
-            else "guest-mcp.json"
-        )
+        return self.result_dir / {
+            "codex": "guest-config.toml",
+            "claude-code": "guest-mcp.json",
+            "gemini-cli": "guest-settings.json",
+            "grok-build": "guest-config.toml",
+        }[self.args.agent]
+
+    @property
+    def gemini_trusted_path(self) -> Path:
+        return self.result_dir / "guest-trusted-folders.json"
+
+    @property
+    def gemini_experiments_path(self) -> Path:
+        return self.result_dir / "guest-experiments.json"
 
     @property
     def prompt_path(self) -> Path:
@@ -323,10 +367,6 @@ class TaskRun:
     @property
     def base_instructions_copy(self) -> Path:
         return self.result_dir / "agent-base-instructions.md"
-
-    @property
-    def uses_codex(self) -> bool:
-        return self.args.agent == "codex"
 
     def write_meta(self, **json_options) -> None:
         write_local(
@@ -369,9 +409,7 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
         results
         / benchmark_dir
         / (
-            "claude-tokens.jsonl"
-            if args.agent == "claude-code"
-            else "tokens.jsonl"
+            f"{AGENT_PROFILES[args.agent]['gateway']}-tokens.jsonl"
         )
     )
     token_log = Path(token_log_value).resolve()
@@ -382,12 +420,13 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
     affinity_task = f"{TASK_AFFINITY_PREFIX}{run_tag}"
 
     artifact_dir = Path(args.artifact_dir).resolve()
-    codex_binary = Path(
-        args.codex_binary or artifact_dir / "codex"
+    profile = AGENT_PROFILES[args.agent]
+    agent_binary = Path(
+        args.agent_binary or artifact_dir / profile["artifact"]
     ).resolve()
-    claude_code_binary = Path(
-        args.claude_code_binary or artifact_dir / "claude-code"
-    ).resolve()
+    node_binary = (
+        (artifact_dir / "node").resolve() if args.agent == "gemini-cli" else None
+    )
     mcp_binary = Path(
         args.mcp_binary or artifact_dir / "computer-use"
     ).resolve()
@@ -395,14 +434,13 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
     base_instructions_file = Path(
         args.base_instructions_file
     ).resolve()
-    required_files = [mcp_binary, base_instructions_file]
+    required_files = [agent_binary, mcp_binary, base_instructions_file]
     if skill_file is not None:
         required_files.append(skill_file)
-    if args.agent == "codex":
-        required_files.append(codex_binary)
     if args.agent == "claude-code":
-        required_files.append(claude_code_binary)
         required_files.append(CLAUDE_MCP_ADAPTER)
+    if node_binary is not None:
+        required_files.append(node_binary)
     for required in required_files:
         if not required.is_file():
             raise FileNotFoundError(required)
@@ -444,8 +482,8 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
         result_dir=result_dir,
         token_log=token_log,
         affinity_task=affinity_task,
-        codex_binary=codex_binary,
-        claude_code_binary=claude_code_binary,
+        agent_binary=agent_binary,
+        node_binary=node_binary,
         mcp_binary=mcp_binary,
         skill_file=skill_file,
         base_instructions_file=base_instructions_file,
@@ -464,25 +502,40 @@ def stage_local_files(run: TaskRun) -> None:
     """Write the agent configuration, prompt, skill and launcher locally."""
     args = run.args
     affinity_prefix = TASK_AFFINITY_PREFIX.rstrip("-")
+    gateway_bases = {
+        "openai": args.gateway_base,
+        "anthropic": args.claude_gateway_base,
+        "gemini": args.gemini_gateway_base,
+    }
+    run.agent_endpoint = task_gateway_base(
+        gateway_bases[run.profile["gateway"]],
+        run.run_tag,
+        affinity_prefix=affinity_prefix,
+    )
     if args.agent == "codex":
-        write_local(
-            run.config_path,
-            codex_config(
-                model=args.model,
-                effort=args.effort,
-                base_url=task_gateway_base(
-                    args.gateway_base,
-                    run.run_tag,
-                    affinity_prefix=affinity_prefix,
-                ) + "/v1",
-                codex_home=GUEST_CODEX_HOME,
-                base_instructions=GUEST_BASE_INSTRUCTIONS,
-                mcp_command=GUEST_MCP,
-                channels=args.channels,
-            ),
+        config = codex_config(
+            model=args.model,
+            effort=args.effort,
+            base_url=run.agent_endpoint + "/v1",
+            codex_home=GUEST_CODEX_HOME,
+            base_instructions=GUEST_BASE_INSTRUCTIONS,
+            mcp_command=GUEST_MCP,
+            channels=args.channels,
+        )
+    elif args.agent == "claude-code":
+        config = claude_mcp_config(channels=args.channels)
+    elif args.agent == "gemini-cli":
+        config = gemini_settings(
+            model=args.model, effort=args.effort, channels=args.channels
         )
     else:
-        write_local(run.config_path, claude_mcp_config(channels=args.channels))
+        config = grok_config(
+            model=args.model,
+            base_url=run.agent_endpoint + "/v1",
+            effort=args.effort,
+            channels=args.channels,
+        )
+    write_local(run.config_path, config)
     write_local(
         run.prompt_path,
         task_prompt(
@@ -491,27 +544,32 @@ def stage_local_files(run: TaskRun) -> None:
             can_ask_user=task_value(run.task, "user_simulator") is not None,
         ),
     )
+    # Codex reads the skill from a task-local AGENTS.md and Gemini CLI from
+    # its global GEMINI.md, both uploaded from skill_copy; Claude Code and
+    # Grok Build get it inside their replacement system prompts.
     if run.skill_file is not None:
         run.skill_copy.write_bytes(run.skill_file.read_bytes())
     base_instructions = run.base_instructions_file.read_text(encoding="utf-8")
-    if args.agent == "claude-code" and run.skill_file is not None:
-        base_instructions = claude_system_prompt(
-            base_instructions,
-            run.skill_file.read_text(encoding="utf-8"),
-        )
+    if run.skill_file is not None:
+        skill = run.skill_file.read_text(encoding="utf-8")
+        if args.agent == "claude-code":
+            base_instructions = claude_system_prompt(base_instructions, skill)
+        elif args.agent == "grok-build":
+            base_instructions = grok_system_prompt(base_instructions, skill)
     write_local(run.base_instructions_copy, base_instructions)
-    run.claude_endpoint = task_gateway_base(
-        args.claude_gateway_base,
-        run.run_tag,
-        affinity_prefix=affinity_prefix,
-    )
+    if args.agent == "gemini-cli":
+        write_local(
+            run.gemini_trusted_path,
+            json.dumps({"/home/user": "TRUST_FOLDER"}) + "\n",
+        )
+        write_local(run.gemini_experiments_path, gemini_experiments())
     write_local(
         run.launcher_path,
         launcher_script(
             agent=args.agent,
             model=args.model,
             effort=args.effort,
-            claude_gateway_base=run.claude_endpoint,
+            gateway_endpoint=run.agent_endpoint,
             public_mcp_tools=run.mcp_public_tools,
         ),
     )
@@ -544,27 +602,13 @@ def initial_meta(
         "model": args.model,
         "effort": args.effort,
         "agent": args.agent,
-        "gateway_base": args.gateway_base,
-        "claude_gateway_base": (
-            args.claude_gateway_base
-            if args.agent == "claude-code"
-            else None
-        ),
-        "claude_gateway_endpoint": (
-            run.claude_endpoint
-            if args.agent == "claude-code"
-            else None
-        ),
+        "gateway": run.profile["gateway"],
+        "gateway_endpoint": run.agent_endpoint,
         "affinity_task": run.affinity_task,
         "token_log": str(run.token_log),
         "provider": "docker",
         "guest_image": run.guest_image,
-        "codex_binary": str(run.codex_binary) if run.uses_codex else None,
-        "claude_code_binary": (
-            str(run.claude_code_binary)
-            if args.agent == "claude-code"
-            else None
-        ),
+        "agent_binary": str(run.agent_binary),
         "claude_mcp_adapter": (
             str(CLAUDE_MCP_ADAPTER)
             if args.agent == "claude-code"
@@ -595,32 +639,38 @@ def runtime_uploads(run: TaskRun) -> tuple[list[dict], list[str]]:
         {"local_path": str(run.mcp_binary), "path": GUEST_MCP},
     ]
     executable_paths = [GUEST_MCP, GUEST_LAUNCHER]
+    guest_binary = GUEST_AGENT_BINARIES[args.agent]
+    upload_rows.append({"local_path": str(run.agent_binary), "path": guest_binary})
+    if args.agent != "gemini-cli":
+        executable_paths.append(guest_binary)
     if args.agent == "codex":
-        upload_rows.extend([
-            {"local_path": str(run.codex_binary), "path": GUEST_CODEX},
-            {"local_path": str(run.config_path), "path": GUEST_CONFIG},
-        ])
+        upload_rows.append({"local_path": str(run.config_path), "path": GUEST_CONFIG})
         if run.skill_file is not None:
             upload_rows.append(
                 {"local_path": str(run.skill_copy), "path": GUEST_SKILL}
             )
-        executable_paths.append(GUEST_CODEX)
-    else:
+    elif args.agent == "claude-code":
         upload_rows.extend([
+            {"local_path": str(run.config_path), "path": GUEST_CLAUDE_MCP_CONFIG},
+            {"local_path": str(CLAUDE_MCP_ADAPTER), "path": GUEST_CLAUDE_MCP_ADAPTER},
+        ])
+    elif args.agent == "gemini-cli":
+        upload_rows.extend([
+            {"local_path": str(run.node_binary), "path": GUEST_GEMINI_NODE},
+            {"local_path": str(run.config_path), "path": GUEST_GEMINI_SETTINGS},
+            {"local_path": str(run.gemini_trusted_path), "path": GUEST_GEMINI_TRUSTED},
             {
-                "local_path": str(run.claude_code_binary),
-                "path": GUEST_CLAUDE_CODE,
-            },
-            {
-                "local_path": str(run.config_path),
-                "path": GUEST_CLAUDE_MCP_CONFIG,
-            },
-            {
-                "local_path": str(CLAUDE_MCP_ADAPTER),
-                "path": GUEST_CLAUDE_MCP_ADAPTER,
+                "local_path": str(run.gemini_experiments_path),
+                "path": GUEST_GEMINI_EXPERIMENTS,
             },
         ])
-        executable_paths.append(GUEST_CLAUDE_CODE)
+        if run.skill_file is not None:
+            upload_rows.append(
+                {"local_path": str(run.skill_copy), "path": GUEST_GEMINI_CONTEXT}
+            )
+        executable_paths.append(GUEST_GEMINI_NODE)
+    else:
+        upload_rows.append({"local_path": str(run.config_path), "path": GUEST_GROK_CONFIG})
     return upload_rows, executable_paths
 
 
@@ -641,6 +691,11 @@ def start_guest(run: TaskRun) -> DesktopEnv:
         volume_size = max(volume_size, int(task_volume_size))
     os.environ["OSWORLD_DOCKER_RAM_SIZE"] = args.ram_size
     upload_rows, executable_paths = runtime_uploads(run)
+    unpack = (
+        {GUEST_GEMINI_ARCHIVE: GUEST_GEMINI_PACKAGE}
+        if args.agent == "gemini-cli"
+        else {}
+    )
 
     def bootstrap_runtime(setup_controller) -> None:
         install_guest_runtime(
@@ -648,6 +703,7 @@ def start_guest(run: TaskRun) -> DesktopEnv:
             client_password=args.client_password,
             upload_rows=upload_rows,
             executable_paths=tuple(executable_paths),
+            unpack=unpack,
         )
 
     env = DesktopEnv(
@@ -732,11 +788,7 @@ def prepare_guest(run: TaskRun, env: DesktopEnv) -> str:
         ).strip(),
     }
 
-    active_gateway_base = (
-        args.claude_gateway_base
-        if args.agent == "claude-code"
-        else args.gateway_base
-    )
+    gateway_base = run.agent_endpoint.rsplit("/t/", 1)[0]
     health = request_execute(
         base_url,
         [
@@ -744,23 +796,21 @@ def prepare_guest(run: TaskRun, env: DesktopEnv) -> str:
             "-fsS",
             "--max-time",
             "10",
-            active_gateway_base + "/healthz",
+            gateway_base + "/healthz",
         ],
         timeout=20,
     )
     meta["gateway_health"] = health.get("output", "").strip()
 
-    version_commands = [f"{shlex.quote(GUEST_MCP)} --version"]
-    if run.uses_codex:
-        version_commands.insert(
-            0,
-            f"{shlex.quote(GUEST_CODEX)} --version",
-        )
-    if args.agent == "claude-code":
-        version_commands.insert(
-            0,
-            f"{shlex.quote(GUEST_CLAUDE_CODE)} --version",
-        )
+    agent_version = (
+        f"{shlex.quote(GUEST_GEMINI_NODE)} {shlex.quote(GUEST_GEMINI_CLI)}"
+        if args.agent == "gemini-cli"
+        else shlex.quote(GUEST_AGENT_BINARIES[args.agent])
+    )
+    version_commands = [
+        f"{agent_version} --version",
+        f"{shlex.quote(GUEST_MCP)} --version",
+    ]
     versions = request_execute(
         base_url,
         [
@@ -1236,8 +1286,7 @@ def main() -> int:
     anchor_path_args(
         args,
         "artifact_dir",
-        "codex_binary",
-        "claude_code_binary",
+        "agent_binary",
         "mcp_binary",
         "guest_image",
         "skill_file",

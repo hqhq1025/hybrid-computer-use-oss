@@ -21,12 +21,25 @@ import requests
 
 GUEST_CODEX = "/home/user/.local/bin/codex"
 GUEST_CLAUDE_CODE = "/home/user/.local/bin/claude"
+GUEST_GROK = "/home/user/.local/bin/grok"
+# Node runtime for Gemini CLI, named apart from any node on the guest so the
+# watchdog can find the agent process by name.
+GUEST_GEMINI_NODE = "/home/user/.local/bin/gemini-node"
 GUEST_MCP = "/home/user/.local/bin/computer-use"
 GUEST_RUNTIME_ROOT = "/opt/agent-runtime"
 GUEST_MCP_RUNTIME_ROOT = f"{GUEST_RUNTIME_ROOT}/mcp"
 GUEST_CODEX_HOME = f"{GUEST_RUNTIME_ROOT}/codex"
 GUEST_CLAUDE_CONFIG_DIR = f"{GUEST_RUNTIME_ROOT}/claude"
 GUEST_CLAUDE_MCP_ADAPTER = f"{GUEST_CLAUDE_CONFIG_DIR}/mcp_schema_adapter.py"
+GUEST_GEMINI_HOME = f"{GUEST_RUNTIME_ROOT}/gemini"
+GUEST_GEMINI_PACKAGE = f"{GUEST_GEMINI_HOME}/cli"
+GUEST_GEMINI_CLI = f"{GUEST_GEMINI_PACKAGE}/bundle/gemini.js"
+GUEST_GEMINI_SETTINGS = f"{GUEST_GEMINI_HOME}/.gemini/settings.json"
+GUEST_GEMINI_CONTEXT = f"{GUEST_GEMINI_HOME}/.gemini/GEMINI.md"
+GUEST_GEMINI_TRUSTED = f"{GUEST_GEMINI_HOME}/trusted-folders.json"
+GUEST_GEMINI_EXPERIMENTS = f"{GUEST_GEMINI_HOME}/experiments.json"
+GUEST_GROK_HOME = f"{GUEST_RUNTIME_ROOT}/grok"
+GUEST_GROK_CONFIG = f"{GUEST_GROK_HOME}/config.toml"
 GUEST_CONFIG = f"{GUEST_CODEX_HOME}/config.toml"
 GUEST_CLAUDE_MCP_CONFIG = f"{GUEST_CLAUDE_CONFIG_DIR}/mcp.json"
 GUEST_BASE_INSTRUCTIONS = f"{GUEST_CODEX_HOME}/base-instructions.md"
@@ -39,6 +52,7 @@ GUEST_STDERR = f"{GUEST_TASK_DIR}/agent.stderr"
 GUEST_FINAL = f"{GUEST_TASK_DIR}/final.txt"
 GUEST_DONE = f"{GUEST_TASK_DIR}/done.json"
 GUEST_LAUNCHER_STATUS = f"{GUEST_TASK_DIR}/launcher-status.json"
+GUEST_GEMINI_ARCHIVE = f"{GUEST_TASK_DIR}/gemini-cli.tgz"
 
 
 GUEST_FILE_ATTEMPTS = 5

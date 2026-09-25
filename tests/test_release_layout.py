@@ -44,7 +44,9 @@ def test_agent_artifact_lock_is_complete():
         (ROOT / "configs/agent-artifacts.lock.json").read_text(encoding="utf-8")
     )
     assert lock["platform"] == "linux-x86_64"
-    assert set(lock["agents"]) == {"codex", "claude_code"}
-    for config in lock["agents"].values():
+    assert set(lock["agents"]) == {"codex", "claude_code", "gemini_cli", "grok_build"}
+    assert set(lock["runtimes"]) == {"node"}
+    for config in [*lock["agents"].values(), *lock["runtimes"].values()]:
         assert len(config["archive_sha256"]) == 64
-        assert config["archive_url"].startswith("https://github.com/")
+        assert config["archive_url"].startswith("https://")
+        assert config["artifact_path"].startswith("artifacts/")

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import requests
 
-from hcu.osworld.agents import thread_id_from_trace
+from hcu.osworld.agents import AGENT_PROFILES, thread_id_from_trace
 from hcu.osworld.diagnostics import (
     collect_guest_infra_diagnostic,
     collect_workload_unit_diagnostic,
@@ -288,7 +288,7 @@ def wait_for_agent_turn(
     watchdog = AgentWatchdog(
         result_dir,
         workload_unit=workload_unit,
-        process_name="claude" if agent == "claude-code" else "codex",
+        process_name=AGENT_PROFILES[agent]["process"],
     )
     done_payload = None
     budget_exhausted = False
@@ -327,7 +327,7 @@ def wait_for_agent_turn(
                 "bash",
                 "-lc",
                 "pids=$(pgrep -x "
-                + ("claude" if agent == "claude-code" else "codex")
+                + shlex.quote(AGENT_PROFILES[agent]["process"])
                 + " || true); "
                 "[ -z \"$pids\" ] || kill -TERM $pids",
             ],
@@ -438,6 +438,11 @@ def run_agent_phase(
         )
         command = [GUEST_LAUNCHER, "start", "", label]
         if session_id:
+            if not AGENT_PROFILES[agent]["can_resume"]:
+                raise RuntimeError(
+                    f"{agent} cannot resume its session under the same system "
+                    "prompt, so it cannot answer ASK_USER"
+                )
             command = [GUEST_LAUNCHER, "resume", session_id, label]
         workload_unit = request_launch(base_url, command)
         write_local(
@@ -498,8 +503,10 @@ def run_agent_phase(
             failure_classification = trace_summary[
                 "failure_classification"
             ]
+            can_resume = AGENT_PROFILES[agent]["can_resume"]
             if (
                 failure_classification == "upstream_rate_limit"
+                and can_resume
                 and observed_thread_id
                 and transport_retries < STREAM_RETRY_LIMIT
                 and time.monotonic() + STREAM_RETRY_BACKOFF_SEC < deadline
@@ -525,6 +532,7 @@ def run_agent_phase(
                 continue
             if (
                 failure_classification == "tool_argument_too_large"
+                and can_resume
                 and observed_thread_id
                 and tool_argument_retries < TOOL_ARGUMENT_RETRY_LIMIT
                 and time.monotonic() < deadline

@@ -130,22 +130,26 @@ def test_entrypoint_help_imports_with_osworld_checkout(module, expected):
         assert text in result.stdout
 
 
-GATEWAY_AFFINITY_PROBE = """
+STAGING_PROBE = """
 import argparse, json, sys
 from pathlib import Path
 from hcu.osworld import run_task
 
-root, out = Path(sys.argv[1]), Path(sys.argv[2])
+root, out, agent = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+profile = run_task.AGENT_PROFILES[agent]
 args = argparse.Namespace(
-    agent="codex", model="gpt-5.5", effort="xhigh",
+    agent=agent, model=profile["default_model"],
+    effort=profile["default_effort"],
     gateway_base="http://gateway:8600",
     claude_gateway_base="http://gateway:8537",
+    gemini_gateway_base="http://gateway:8571",
     benchmark_version="v1", channels="",
 )
 run = run_task.TaskRun(
     args=args, run_tag="RUN", result_dir=out,
     token_log=out / "tokens.jsonl", affinity_task="task-RUN",
-    codex_binary=out / "codex", claude_code_binary=out / "claude",
+    agent_binary=out / profile["artifact"],
+    node_binary=out / "node" if agent == "gemini-cli" else None,
     mcp_binary=out / "computer-use",
     skill_file=root / "skills/hybrid/SKILL.md",
     base_instructions_file=root / "skills/base/CODEX_BASE_INSTRUCTIONS.md",
@@ -154,15 +158,23 @@ run = run_task.TaskRun(
     run_timezone="UTC", run_started_at_utc="2026-01-01T00:00:00+00:00",
     explicit_task_date=None, guest_image="",
 )
+out.mkdir(parents=True, exist_ok=True)
 run_task.stage_local_files(run)
-print(json.dumps({"claude_endpoint": run.claude_endpoint}))
+uploads, executables = run_task.runtime_uploads(run)
+print(json.dumps({
+    "endpoint": run.agent_endpoint,
+    "uploads": {row["path"]: Path(row["local_path"]).name for row in uploads},
+    "executables": executables,
+    "system_prompt": run.base_instructions_copy.read_text(),
+    "launcher": run.launcher_path.read_text(),
+}))
 """
 
 
-def test_gateway_affinity_uses_the_neutral_task_prefix(tmp_path):
+def stage(tmp_path, agent):
     python = require_osworld_checkout()
     result = subprocess.run(
-        [str(python), "-c", GATEWAY_AFFINITY_PROBE, str(ROOT), str(tmp_path)],
+        [str(python), "-c", STAGING_PROBE, str(ROOT), str(tmp_path), agent],
         cwd=ROOT,
         env={**os.environ, "OSWORLD_V2_ROOT": str(OSWORLD_ROOT)},
         capture_output=True,
@@ -170,11 +182,70 @@ def test_gateway_affinity_uses_the_neutral_task_prefix(tmp_path):
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    config = (tmp_path / "guest-config.toml").read_text(encoding="utf-8")
-    assert 'base_url = "http://gateway:8600/t/task-RUN/v1"' in config
-    assert json.loads(result.stdout)["claude_endpoint"] == (
-        "http://gateway:8537/t/task-RUN"
+    return json.loads(result.stdout)
+
+
+def test_each_agent_is_bound_to_its_gateway_with_the_task_prefix(tmp_path):
+    expected = {
+        "codex": "http://gateway:8600/t/task-RUN",
+        "claude-code": "http://gateway:8537/t/task-RUN",
+        "gemini-cli": "http://gateway:8571/t/task-RUN",
+        "grok-build": "http://gateway:8600/t/task-RUN",
+    }
+    staged = {agent: stage(tmp_path / agent, agent) for agent in expected}
+    for agent, endpoint in expected.items():
+        assert staged[agent]["endpoint"] == endpoint
+    for agent in ("codex", "grok-build"):
+        config = (tmp_path / agent / "guest-config.toml").read_text(encoding="utf-8")
+        assert 'base_url = "http://gateway:8600/t/task-RUN/v1"' in config
+    assert (
+        "ANTHROPIC_BASE_URL=http://gateway:8537/t/task-RUN"
+        in staged["claude-code"]["launcher"]
     )
+    assert (
+        "GOOGLE_GEMINI_BASE_URL=http://gateway:8571/t/task-RUN"
+        in staged["gemini-cli"]["launcher"]
+    )
+
+
+def test_each_agent_receives_the_skill_through_its_own_channel(tmp_path):
+    skill_head = (ROOT / "skills/hybrid/SKILL.md").read_text().splitlines()[0]
+    base_head = (
+        ROOT / "skills/base/CODEX_BASE_INSTRUCTIONS.md"
+    ).read_text().splitlines()[0]
+    staged = {agent: stage(tmp_path / agent, agent) for agent in (
+        "codex", "claude-code", "gemini-cli", "grok-build"
+    )}
+    # Codex and Gemini CLI read the skill from a context file.
+    assert staged["codex"]["uploads"]["/home/user/AGENTS.md"] == "AGENTS.md"
+    assert staged["gemini-cli"]["uploads"][
+        "/opt/agent-runtime/gemini/.gemini/GEMINI.md"
+    ] == "AGENTS.md"
+    for agent in ("codex", "gemini-cli"):
+        assert skill_head not in staged[agent]["system_prompt"]
+    # Claude Code and Grok Build get it after the base instructions.
+    for agent in ("claude-code", "grok-build"):
+        prompt = staged[agent]["system_prompt"]
+        assert prompt.startswith(base_head)
+        assert skill_head in prompt
+        assert "/home/user/AGENTS.md" not in staged[agent]["uploads"]
+
+
+def test_gemini_ships_its_own_node_and_unpacks_the_cli_in_the_guest(tmp_path):
+    staged = stage(tmp_path, "gemini-cli")
+    uploads = staged["uploads"]
+    assert uploads["/tmp/agent-task/gemini-cli.tgz"] == "gemini-cli.tgz"
+    assert uploads["/home/user/.local/bin/gemini-node"] == "node"
+    assert "/tmp/agent-task/gemini-cli.tgz" not in staged["executables"]
+    assert "/home/user/.local/bin/gemini-node" in staged["executables"]
+    experiments = json.loads(
+        (tmp_path / "guest-experiments.json").read_text(encoding="utf-8")
+    )
+    assert experiments["flags"][0]["intValue"] == "600"
+    settings = json.loads((tmp_path / "guest-settings.json").read_text())
+    assert settings["modelConfigs"]["customOverrides"][0]["modelConfig"] == {
+        "generateContentConfig": {"thinkingConfig": {"thinkingLevel": "HIGH"}}
+    }
 
 
 def test_channel_ablation_exposes_one_tool_to_each_agent():
@@ -211,3 +282,33 @@ def test_batch_forwards_channels_and_an_empty_skill(tmp_path):
     )
     assert command[command.index("--channels") + 1] == "gui,keyboard"
     assert command[command.index("--skill-file") + 1] == ""
+
+
+def test_gemini_and_grok_expose_only_the_requested_channel():
+    from hcu.osworld.agents import gemini_settings, grok_config
+
+    settings = json.loads(gemini_settings(
+        model="gemini-3.8-flash", effort="native", channels="a11y,keyboard"
+    ))
+    assert settings["mcpServers"]["computer_use"]["env"] == {
+        "COMPUTER_USE_CHANNELS": "a11y,keyboard"
+    }
+    assert "customOverrides" not in settings["modelConfigs"]
+    assert "google_web_search" in settings["tools"]["exclude"]
+    with pytest.raises(ValueError):
+        gemini_settings(model="gemini-3.8-flash", effort="xhigh")
+
+    grok = grok_config(
+        model="grok-4.7", base_url="http://g/t/task-x/v1", effort="xhigh",
+        channels="gui,keyboard",
+    )
+    assert 'COMPUTER_USE_CHANNELS = "gui,keyboard"' in grok
+    assert "computer_use.env" not in grok_config(
+        model="grok-4.7", base_url="http://g/t/task-x/v1", effort="xhigh"
+    )
+
+
+def test_batch_leaves_model_and_effort_defaults_to_the_agent(tmp_path):
+    command = runner_command({"agent": "gemini-cli"}, {"id": "001"}, tmp_path)
+    assert command[command.index("--effort") + 1] == ""
+    assert command[command.index("--model") + 1] == ""

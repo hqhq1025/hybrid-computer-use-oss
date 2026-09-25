@@ -1,8 +1,10 @@
 """Configuration and launcher for the guest-local task agents.
 
 Codex reads a generated ``config.toml``; Claude Code receives CLI flags, an
-MCP configuration and a schema adapter. Both run through one guest launcher
-script that writes a turn-scoped completion record when the agent exits.
+MCP configuration and a schema adapter; Gemini CLI reads a ``settings.json``
+from an isolated home; Grok Build reads a ``config.toml`` from an isolated
+``GROK_HOME``. All four run through one guest launcher script that writes a
+turn-scoped completion record when the agent exits.
 """
 
 from __future__ import annotations
@@ -21,12 +23,63 @@ from hcu.osworld.guest import (
     GUEST_CODEX_HOME,
     GUEST_DONE,
     GUEST_FINAL,
+    GUEST_GEMINI_CLI,
+    GUEST_GEMINI_EXPERIMENTS,
+    GUEST_GEMINI_HOME,
+    GUEST_GEMINI_NODE,
+    GUEST_GEMINI_TRUSTED,
+    GUEST_GROK,
+    GUEST_GROK_HOME,
     GUEST_LAUNCHER_STATUS,
     GUEST_MCP,
     GUEST_PROMPT,
     GUEST_STDERR,
     GUEST_TRACE,
 )
+
+
+# Per-agent facts the runner needs: the file under artifacts/, the gateway
+# that serves the agent ("openai" is the Responses API), the process name the
+# watchdog looks for, the defaults for --model and --effort (Gemini CLI takes
+# a thinking level), and whether a turn can resume the agent's session.
+# Grok Build 1.0.40 drops --system-prompt-override on --resume and falls back
+# to its default prompt, so it cannot continue a task under the same
+# instructions.
+AGENT_PROFILES = {
+    "codex": {
+        "artifact": "codex",
+        "gateway": "openai",
+        "process": "codex",
+        "default_model": "gpt-5.5",
+        "default_effort": "xhigh",
+        "can_resume": True,
+    },
+    "claude-code": {
+        "artifact": "claude-code",
+        "gateway": "anthropic",
+        "process": "claude",
+        "default_model": "claude-opus-5",
+        "default_effort": "xhigh",
+        "can_resume": True,
+    },
+    "gemini-cli": {
+        "artifact": "gemini-cli.tgz",
+        "gateway": "gemini",
+        "process": "gemini-node",
+        "default_model": "gemini-3.8-flash",
+        "default_effort": "high",
+        "can_resume": True,
+    },
+    "grok-build": {
+        "artifact": "grok",
+        "gateway": "openai",
+        "process": "grok",
+        "default_model": "grok-4.7",
+        "default_effort": "xhigh",
+        "can_resume": False,
+    },
+}
+AGENTS = tuple(AGENT_PROFILES)
 
 
 CLAUDE_BUILTIN_TOOLS = "Bash,Edit,Read"
@@ -217,6 +270,231 @@ def claude_system_prompt(base_instructions: str, skill: str) -> str:
     return base_instructions + "\n\n# Benchmark computer-use skill\n\n" + skill
 
 
+def grok_system_prompt(base_instructions: str, skill: str) -> str:
+    """Grok Build ignores its rules files under a system-prompt override, so
+    the skill follows the base instructions in the override itself."""
+    return base_instructions + "\n\n" + skill
+
+
+# Gemini CLI tools that talk to the user or the web, or add planning and
+# memory layers outside the benchmark contract.
+GEMINI_EXCLUDED_TOOLS = (
+    "google_web_search", "web_fetch", "save_memory", "write_todos", "ask_user",
+    "enter_plan_mode", "exit_plan_mode", "invoke_agent", "activate_skill",
+    "update_topic",
+)
+GEMINI_THINKING_LEVELS = ("minimal", "low", "medium", "high")
+# Gemini CLI waits 60 s for response headers by default. The gateway relays a
+# streamed response only after it completes, so long generations need more.
+GEMINI_REQUEST_TIMEOUT_SEC = 600
+GEMINI_EXPERIMENT_REQUEST_TIMEOUT = 45773134
+
+
+def gemini_experiments() -> str:
+    """Local experiment flags for ``GEMINI_EXP``; only the request timeout."""
+    return json.dumps({
+        "flags": [{
+            "flagId": GEMINI_EXPERIMENT_REQUEST_TIMEOUT,
+            "intValue": str(GEMINI_REQUEST_TIMEOUT_SEC),
+        }],
+        "experimentIds": [],
+    }, indent=2) + "\n"
+
+
+def gemini_settings(
+    *,
+    model: str,
+    effort: str,
+    mcp_command: str = GUEST_MCP,
+    channels: str = "",
+) -> str:
+    """Gemini CLI ``settings.json`` with ambient features off and the MCP allowed.
+
+    ``dynamicModelConfiguration`` is required: without it CLI 0.60.0 rewrites
+    the selected model. Only the global ``GEMINI.md`` next to this file is
+    loaded as context, and it carries the skill; directory discovery is off.
+    ``effort`` is a Gemini thinking level, or ``native`` for the model default.
+    """
+    public_tools(channels)
+    if effort != "native" and effort not in GEMINI_THINKING_LEVELS:
+        raise ValueError(
+            "Gemini CLI effort must be native or a thinking level ("
+            + ", ".join(GEMINI_THINKING_LEVELS) + f"), got {effort!r}"
+        )
+    server: dict = {
+        "command": mcp_command,
+        "args": ["mcp"],
+        "timeout": 180000,
+        "trust": False,
+    }
+    if channels:
+        server["env"] = {"COMPUTER_USE_CHANNELS": channels}
+    settings = {
+        # The gateway enforces the model-call budget; the CLI has no turn cap.
+        "model": {"name": model, "maxSessionTurns": -1},
+        "experimental": {
+            "dynamicModelConfiguration": True,
+            "enableAgents": False,
+            "autoMemory": False,
+            "taskTracker": False,
+        },
+        "general": {
+            "enableAutoUpdate": False,
+            "enableAutoUpdateNotification": False,
+            "topicUpdateNarration": False,
+            "plan": {"enabled": False, "modelRouting": False},
+        },
+        "skills": {"enabled": False},
+        "hooksConfig": {"enabled": False},
+        "admin": {"extensions": {"enabled": False}, "skills": {"enabled": False}},
+        "tools": {"exclude": list(GEMINI_EXCLUDED_TOOLS)},
+        "mcpServers": {"computer_use": server},
+        "mcp": {"allowed": ["computer_use"]},
+        "security": {
+            "auth": {"selectedType": "gemini-api-key", "enforcedType": "gemini-api-key"},
+            "environmentVariableRedaction": {"allowed": ["COMPUTER_USE_CHANNELS"]},
+        },
+        "context": {
+            "fileName": "GEMINI.md",
+            "discoveryMaxDirs": 0,
+            "memoryBoundaryMarkers": [],
+            "loadMemoryFromIncludeDirectories": False,
+            "includeDirectoryTree": False,
+        },
+        "advanced": {"ignoreLocalEnv": True, "autoConfigureMemory": False},
+        "privacy": {"usageStatisticsEnabled": False},
+        "telemetry": {"enabled": False},
+        # Compression and loop detection otherwise fall back to older models.
+        "modelConfigs": {"customAliases": {
+            alias: {"modelConfig": {"model": model}}
+            for alias in ("chat-compression-default", "loop-detection",
+                          "loop-detection-double-check")
+        }},
+    }
+    if effort != "native":
+        settings["modelConfigs"]["customOverrides"] = [{
+            "match": {"model": model},
+            "modelConfig": {"generateContentConfig": {
+                "thinkingConfig": {"thinkingLevel": effort.upper()},
+            }},
+        }]
+    return json.dumps(settings, indent=2) + "\n"
+
+
+GROK_DISALLOWED_TOOLS = (
+    "todo_write,enter_plan_mode,exit_plan_mode,skill,ask_user_question,image_edit,"
+    "workflow,scheduler_create,scheduler_delete,scheduler_list,monitor,send_feedback"
+)
+
+
+def grok_config(
+    *,
+    model: str,
+    base_url: str,
+    effort: str,
+    mcp_command: str = GUEST_MCP,
+    channels: str = "",
+) -> str:
+    """Grok Build ``config.toml`` bound to the task gateway with ambient features off.
+
+    The model is registered under the key ``gateway`` so the CLI never
+    contacts x.ai directly; the gateway URL already carries the task path.
+    """
+    public_tools(channels)
+    q = json.dumps
+    mcp_env = (
+        f"\n[mcp_servers.computer_use.env]\nCOMPUTER_USE_CHANNELS = {q(channels)}\n"
+        if channels
+        else ""
+    )
+    off = lambda *keys: "\n".join(f"{key} = false" for key in keys)  # noqa: E731
+    return f"""\
+[cli]
+auto_update = false
+use_leader = false
+
+[models]
+default = "gateway"
+allowed_models = ["gateway", {q(model)}]
+session_summary = "gateway"
+image_description = "gateway"
+web_search = "gateway"
+prompt_suggestion = "gateway"
+max_retries = 0
+subagent_rate_limit_max_attempts = 0
+
+[model.gateway]
+model = {q(model)}
+name = {q(model)}
+base_url = {q(base_url)}
+api_backend = "responses"
+env_key = "GROK_GATEWAY_TOKEN"
+reasoning_summary = "none"
+context_window = 500000
+max_retries = 0
+inference_idle_timeout_secs = 600
+subagent_rate_limit_max_attempts = 0
+supports_backend_search = false
+
+[[model.gateway.reasoning_efforts]]
+id = {q(effort)}
+name = {q(effort.title())}
+value = {q(effort)}
+
+[endpoints]
+models_base_url = {q(base_url)}
+models_list_url = {q(base_url + "/models")}
+xai_api_base_url = {q(base_url)}
+cli_chat_proxy_base_url = {q(base_url)}
+
+[mcp_servers.computer_use]
+command = {q(mcp_command)}
+args = ["mcp"]
+enabled = true
+startup_timeout_sec = 60
+tool_timeout_sec = 180
+{mcp_env}
+[features]
+{off("remote_fetch", "managed_config", "telemetry", "title_refresh", "turn_summary",
+     "session_recap", "session_search", "feedback", "backend_tools", "image_gen",
+     "video_gen", "voice_mode", "non_git_warning", "ask_user_question")}
+
+[telemetry]
+otel_enabled = false
+trace_upload = false
+
+[relay]
+enabled = false
+
+[memory]
+enabled = false
+
+[memory_v2]
+enabled = false
+
+[session]
+load_envrc = false
+
+[subagents]
+enabled = false
+
+[workflows]
+enabled = false
+
+[ui]
+prompt_suggestions = false
+
+[compat.claude]
+{off("agents", "hooks", "mcps", "rules", "skills", "sessions")}
+
+[compat.cursor]
+{off("agents", "hooks", "mcps", "rules", "skills", "sessions")}
+
+[compat.codex]
+{off("hooks", "skills", "sessions")}
+"""
+
+
 def claude_mcp_tools(public_tools=None) -> str:
     names = public_tools or ("AX", "GUI")
     qualified = []
@@ -233,14 +511,47 @@ def claude_mcp_tools(public_tools=None) -> str:
     return ",".join(qualified)
 
 
+# Shared by the agents whose stream does not write the final answer itself:
+# take the last assistant text from the JSONL trace.
+FINAL_MESSAGE_SCRIPT = """\
+python3 - {trace} {final} <<'PY'
+import json
+import sys
+
+last = ""
+with open(sys.argv[1], encoding="utf-8", errors="replace") as handle:
+    for line in handle:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+{extract}
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    handle.write(last)
+PY
+"""
+
+
+def final_message_command(trace: str, final: str, extract: str) -> str:
+    return FINAL_MESSAGE_SCRIPT.format(
+        trace=shlex.quote(trace), final=shlex.quote(final), extract=extract
+    )
+
+
 def launcher_script(
     *,
     agent: str = "codex",
     model: str = "",
     effort: str = "xhigh",
-    claude_gateway_base: str = "",
+    gateway_endpoint: str = "",
     public_mcp_tools=None,
 ) -> str:
+    """Guest launcher for one agent turn.
+
+    ``gateway_endpoint`` is the task-scoped gateway URL. Codex and Grok Build
+    read it from their configuration files; Claude Code and Gemini CLI get it
+    through the environment.
+    """
     if agent == "claude-code":
         mcp_tools = claude_mcp_tools(public_mcp_tools)
         allowed_tools = f"{CLAUDE_BUILTIN_TOOLS},{mcp_tools}"
@@ -272,31 +583,16 @@ def launcher_script(
             f"> {shlex.quote(GUEST_TRACE)} "
             f"2> {shlex.quote(GUEST_STDERR)}"
         )
-        finalize_command = f"""\
-python3 - {shlex.quote(GUEST_TRACE)} {shlex.quote(GUEST_FINAL)} <<'PY'
-import json
-import sys
-
-last = ""
-with open(sys.argv[1], encoding="utf-8", errors="replace") as handle:
-    for line in handle:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+        finalize_command = final_message_command(GUEST_TRACE, GUEST_FINAL, """\
         if event.get("type") == "result" and isinstance(event.get("result"), str):
             last = event["result"]
         elif event.get("type") == "assistant":
-            for block in (event.get("message") or {{}}).get("content", []) or []:
+            for block in (event.get("message") or {}).get("content", []) or []:
                 if block.get("type") == "text" and str(block.get("text") or "").strip():
-                    last = str(block["text"])
-with open(sys.argv[2], "w", encoding="utf-8") as handle:
-    handle.write(last)
-PY
-"""
+                    last = str(block["text"])""")
         agent_environment = f"""\
 export CLAUDE_CONFIG_DIR={shlex.quote(GUEST_CLAUDE_CONFIG_DIR)}
-export ANTHROPIC_BASE_URL={shlex.quote(claude_gateway_base)}
+export ANTHROPIC_BASE_URL={shlex.quote(gateway_endpoint)}
 export ANTHROPIC_AUTH_TOKEN=hcu-task-gateway
 export CLAUDE_CODE_SKIP_AUTH_LOGIN=true
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
@@ -330,6 +626,74 @@ export DISABLE_COST_WARNINGS=1
         agent_environment = f"""\
 export CODEX_HOME={shlex.quote(GUEST_CODEX_HOME)}
 export CODEX_SQLITE_HOME={shlex.quote(GUEST_CODEX_HOME)}
+"""
+    elif agent == "gemini-cli":
+        # Assistant text streams as deltas; a turn ends with one "result" row.
+        common = (
+            f"{shlex.quote(GUEST_GEMINI_NODE)} {shlex.quote(GUEST_GEMINI_CLI)} "
+            f"--model {shlex.quote(model)} "
+            "--include-directories /home/user "
+            "--approval-mode yolo "
+            "--output-format stream-json"
+        )
+        start_command = (
+            f"{common} < {shlex.quote(GUEST_PROMPT)} "
+            f"> {shlex.quote(GUEST_TRACE)} "
+            f"2> {shlex.quote(GUEST_STDERR)}"
+        )
+        resume_command = (
+            f"{common} --resume \"$session_id\" "
+            f"< {shlex.quote(GUEST_PROMPT)} "
+            f"> {shlex.quote(GUEST_TRACE)} "
+            f"2> {shlex.quote(GUEST_STDERR)}"
+        )
+        finalize_command = final_message_command(GUEST_TRACE, GUEST_FINAL, """\
+        if event.get("type") == "message" and event.get("role") == "assistant":
+            chunk = str(event.get("content") or "")
+            last = last + chunk if event.get("delta") else chunk""")
+        agent_environment = f"""\
+export GEMINI_CLI_HOME={shlex.quote(GUEST_GEMINI_HOME)}
+export GEMINI_CLI_SYSTEM_SETTINGS_PATH={shlex.quote(GUEST_GEMINI_HOME + "/absent-system-settings.json")}
+export GEMINI_CLI_SYSTEM_DEFAULTS_PATH={shlex.quote(GUEST_GEMINI_HOME + "/absent-system-defaults.json")}
+export GEMINI_CLI_TRUSTED_FOLDERS_PATH={shlex.quote(GUEST_GEMINI_TRUSTED)}
+export GEMINI_SYSTEM_MD={shlex.quote(GUEST_BASE_INSTRUCTIONS)}
+export GEMINI_EXP={shlex.quote(GUEST_GEMINI_EXPERIMENTS)}
+export GEMINI_CLI_NO_RELAUNCH=1
+export GOOGLE_GENAI_API_VERSION=v1beta
+export GOOGLE_GEMINI_BASE_URL={shlex.quote(gateway_endpoint)}
+export GEMINI_API_KEY=hcu-task-gateway
+"""
+    elif agent == "grok-build":
+        common = (
+            f"{shlex.quote(GUEST_GROK)} --cwd /home/user "
+            "--model gateway "
+            f"--reasoning-effort {shlex.quote(effort)} "
+            f"--system-prompt-override=\"$(cat {shlex.quote(GUEST_BASE_INSTRUCTIONS)})\" "
+            "--output-format streaming-json --always-approve "
+            "--no-plan --no-subagents --disable-web-search --verbatim "
+            f"--disallowed-tools {shlex.quote(GROK_DISALLOWED_TOOLS)}"
+        )
+        start_command = (
+            f"{common} --prompt-file {shlex.quote(GUEST_PROMPT)} "
+            f"> {shlex.quote(GUEST_TRACE)} "
+            f"2> {shlex.quote(GUEST_STDERR)}"
+        )
+        resume_command = (
+            "echo 'Grok Build cannot resume under the system prompt override' "
+            f"> {shlex.quote(GUEST_STDERR)}; false"
+        )
+        finalize_command = final_message_command(GUEST_TRACE, GUEST_FINAL, """\
+        if event.get("type") == "text" and isinstance(event.get("data"), str):
+            last += event["data"]
+        elif event.get("type") == "tool_call":
+            last = \"\"""")
+        agent_environment = f"""\
+export GROK_HOME={shlex.quote(GUEST_GROK_HOME)}
+export GROK_GATEWAY_TOKEN=hcu-task-gateway
+export GROK_DISABLE_AUTOUPDATER=1
+export GROK_MEMORY=0
+export GROK_LOG_FILE={shlex.quote(GUEST_GROK_HOME + "/grok.log")}
+export RUST_LOG=warn
 """
     else:
         raise ValueError(f"Unsupported task agent: {agent}")
@@ -415,4 +779,8 @@ def thread_id_from_trace(raw: bytes | None, agent: str = "codex") -> str:
             return str(event.get("thread_id") or "")
         if agent == "claude-code" and event.get("session_id"):
             return str(event["session_id"])
+        if agent == "gemini-cli" and event.get("type") == "init":
+            return str(event.get("session_id") or "")
+        if agent == "grok-build" and event.get("type") == "end":
+            return str(event.get("sessionId") or "")
     return ""

@@ -16,6 +16,8 @@ from hcu.osworld.guest import (
     GUEST_CLAUDE_CONFIG_DIR,
     GUEST_CODEX,
     GUEST_CODEX_HOME,
+    GUEST_GEMINI_HOME,
+    GUEST_GROK_HOME,
     GUEST_LAUNCHER,
     GUEST_MCP,
     GUEST_MCP_RUNTIME_ROOT,
@@ -90,6 +92,8 @@ def runtime_bootstrap_command(client_password: str) -> list[str]:
     runtime_dirs = (
         GUEST_CODEX_HOME,
         GUEST_CLAUDE_CONFIG_DIR,
+        GUEST_GEMINI_HOME,
+        GUEST_GROK_HOME,
         GUEST_MCP_RUNTIME_ROOT,
     )
     quoted_dirs = " ".join(shlex.quote(path) for path in runtime_dirs)
@@ -100,8 +104,8 @@ def runtime_bootstrap_command(client_password: str) -> list[str]:
         "| sudo -S sh -c "
         + shlex.quote(
             "rm -rf /home/user/.codex /home/user/.claude "
-            "/home/user/.claude.json "
-            "/home/user/AGENTS.md /home/user/CLAUDE.md"
+            "/home/user/.claude.json /home/user/.gemini /home/user/.grok "
+            "/home/user/AGENTS.md /home/user/CLAUDE.md /home/user/GEMINI.md"
         )
         + " "
         f"&& printf '%s\\n' {shlex.quote(client_password)} "
@@ -162,13 +166,29 @@ def install_guest_runtime(
         GUEST_MCP,
         GUEST_LAUNCHER,
     ),
+    unpack: dict[str, str] | None = None,
 ) -> None:
+    """Upload the agent runtime; ``unpack`` maps uploaded npm tarballs to the
+    directories their ``package/`` tree is extracted into."""
     base_url = setup_controller.http_server
     request_execute(
         base_url,
         runtime_bootstrap_command(client_password),
     )
     setup_controller._upload_file_setup(upload_rows)
+    for archive, target in (unpack or {}).items():
+        request_execute(
+            base_url,
+            [
+                "bash",
+                "-lc",
+                f"mkdir -p {shlex.quote(target)} "
+                f"&& tar -xzf {shlex.quote(archive)} -C {shlex.quote(target)} "
+                "--strip-components=1 "
+                f"&& rm -f {shlex.quote(archive)}",
+            ],
+            timeout=300,
+        )
     request_execute(
         base_url,
         [

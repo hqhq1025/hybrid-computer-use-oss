@@ -1,4 +1,4 @@
-"""Summaries of Codex and Claude Code JSONL traces and failure messages."""
+"""Summaries of the task agents' JSONL traces and of failure messages."""
 
 from __future__ import annotations
 
@@ -155,10 +155,122 @@ def summarize_claude_trace(raw: bytes | None) -> dict:
     return summary
 
 
+def count_tool_call(summary: dict, name: str, mcp_prefix: str, shell_tool: str) -> None:
+    if name.startswith(mcp_prefix):
+        summary["mcp_calls"] += 1
+        short_name = name[len(mcp_prefix):]
+        summary["tool_breakdown"][short_name] = (
+            summary["tool_breakdown"].get(short_name, 0) + 1
+        )
+    elif name == shell_tool:
+        summary["shell_calls"] += 1
+
+
+def summarize_gemini_trace(raw: bytes | None) -> dict:
+    """Gemini CLI stream-json: message deltas, tool_use rows, one result."""
+    summary = empty_trace_summary()
+    if not raw:
+        return summary
+    text = ""
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        summary["events"] += 1
+        kind = event.get("type")
+        if kind == "message" and event.get("role") == "assistant":
+            chunk = str(event.get("content") or "")
+            text = text + chunk if event.get("delta") else chunk
+        elif kind == "tool_use":
+            if text.strip():
+                record_agent_message(summary, text)
+            text = ""
+            count_tool_call(
+                summary,
+                str(event.get("tool_name") or ""),
+                "mcp_computer_use_",
+                "run_shell_command",
+            )
+        elif kind == "result":
+            # input_tokens already includes the cached prompt tokens.
+            stats = event.get("stats") or {}
+            summary["input_tokens"] = int(stats.get("input_tokens") or 0)
+            summary["cached_input_tokens"] = int(stats.get("cached") or 0)
+            summary["output_tokens"] = int(stats.get("output_tokens") or 0)
+            if event.get("status") != "success":
+                record_agent_error(
+                    summary,
+                    str(event.get("error") or event.get("status") or "failed"),
+                )
+        elif kind == "error":
+            record_agent_error(summary, str(event.get("message") or "error"))
+    if text.strip():
+        record_agent_message(summary, text)
+    return summary
+
+
+def summarize_grok_trace(raw: bytes | None) -> dict:
+    """Grok Build streaming-json: text chunks, tool_call rows, one end row."""
+    summary = empty_trace_summary()
+    if not raw:
+        return summary
+    text = ""
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        summary["events"] += 1
+        kind = event.get("type")
+        if kind == "text" and isinstance(event.get("data"), str):
+            text += event["data"]
+        elif kind == "tool_call":
+            if text.strip():
+                record_agent_message(summary, text)
+            text = ""
+            name = str(event.get("toolName") or "")
+            arguments = event.get("rawInput")
+            # MCP tools are reached through Grok's use_tool dispatcher.
+            if name == "use_tool" and isinstance(arguments, dict):
+                name = str(arguments.get("tool_name") or name)
+            count_tool_call(
+                summary, name, "computer_use__", "run_terminal_command"
+            )
+        elif kind == "end":
+            # Grok reports cache reads apart from input_tokens; the summary
+            # counts input with cached tokens included, as the gateways do.
+            usage = event.get("usage") or {}
+            cached = int(usage.get("cache_read_input_tokens") or 0)
+            summary["input_tokens"] = (
+                int(usage.get("input_tokens") or 0)
+                + cached
+                + int(usage.get("cache_creation_input_tokens") or 0)
+            )
+            summary["cached_input_tokens"] = cached
+            summary["output_tokens"] = int(usage.get("output_tokens") or 0)
+            summary["reasoning_tokens"] = int(usage.get("reasoning_tokens") or 0)
+            if event.get("stopReason") != "end_turn":
+                record_agent_error(
+                    summary, str(event.get("stopReason") or "no stop reason")
+                )
+        elif kind == "error":
+            record_agent_error(summary, str(event.get("message") or "error"))
+    if text.strip():
+        record_agent_message(summary, text)
+    return summary
+
+
+TRACE_SUMMARIZERS = {
+    "codex": summarize_codex_trace,
+    "claude-code": summarize_claude_trace,
+    "gemini-cli": summarize_gemini_trace,
+    "grok-build": summarize_grok_trace,
+}
+
+
 def summarize_agent_trace(raw: bytes | None, agent: str) -> dict:
-    if agent == "claude-code":
-        return summarize_claude_trace(raw)
-    return summarize_codex_trace(raw)
+    return TRACE_SUMMARIZERS[agent](raw)
 
 
 def classify_turn_failure(message: str) -> str:

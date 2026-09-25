@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at_utc": "2026-08-29T17:18:29Z",
+  "updated_at_utc": "2026-09-25T00:00:00Z",
   "platform": "linux-x86_64",
   "agents": {
     "codex": {
@@ -22,6 +22,32 @@
       "archive_sha256": "4fda59f47ab17c0e0c831b3144e3025c050397ba37d574388f52e92e1af81c74",
       "archive_member": "claude",
       "artifact_path": "artifacts/claude-code"
+    },
+    "gemini_cli": {
+      "version": "0.60.0",
+      "archive": "gemini-cli-0.60.0.tgz",
+      "archive_url": "https://registry.npmjs.org/@google/gemini-cli/-/gemini-cli-0.60.0.tgz",
+      "archive_sha256": "cecb24eabf2eb23f0f49bf131cddd640e65017336b6298da9297bdf9d213cc0b",
+      "artifact_path": "artifacts/gemini-cli.tgz"
+    },
+    "grok_build": {
+      "version": "1.0.40",
+      "archive": "grok-linux-x64-1.0.40.tgz",
+      "archive_url": "https://registry.npmjs.org/@xai-official/grok-linux-x64/-/grok-linux-x64-1.0.40.tgz",
+      "archive_sha256": "8a66a13330c1abedde2c2217bbb972e0c3e04ac874063ca850a8f817e4815c50",
+      "archive_member": "package/bin/grok.br",
+      "brotli": true,
+      "artifact_path": "artifacts/grok"
+    }
+  },
+  "runtimes": {
+    "node": {
+      "version": "20.19.5",
+      "archive": "node-v20.19.5-linux-x64.tar.xz",
+      "archive_url": "https://nodejs.org/dist/v20.19.5/node-v20.19.5-linux-x64.tar.xz",
+      "archive_sha256": "315046739a513a70e03a4a55a8afda8cf979f30852e576075c340084e3f8ac0f",
+      "archive_member": "node-v20.19.5-linux-x64/bin/node",
+      "artifact_path": "artifacts/node"
     }
   }
 }
