@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 VERSION := $(shell cat VERSION)
 
-.PHONY: agents build build-local test smoke
+.PHONY: agents build build-local build-macos build-windows test test-transports smoke
 
 agents:
 	python3 scripts/download-agent-artifacts.py
@@ -14,6 +14,16 @@ build-local:
 	cd computer-use && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 		-ldflags "-s -w -X main.version=$(VERSION)" \
 		-o ../artifacts/computer-use .
+	bash scripts/install-license-notices.sh "$(CURDIR)/artifacts"
+
+build-macos:
+	./computer-use/native/macos/build.sh "$(CURDIR)/artifacts/macos"
+
+build-windows:
+	pwsh -NoProfile -File computer-use/native/windows/build.ps1 -OutputDirectory "$(CURDIR)/artifacts/windows"
+
+test-transports:
+	cd computer-use && go test -tags 'darwin_sidecar_test windows_sidecar_test' ./...
 
 test:
 	cd computer-use && test -z "$$(gofmt -l .)" && go vet ./... && go test ./...

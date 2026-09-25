@@ -2,8 +2,9 @@
 
 ## AX Startup
 
-`computer-use` must run in the same signed-in Linux desktop session as the
-applications. The environment must expose the correct:
+`computer-use` must run in the same signed-in desktop session as the
+applications. See [Platform support](PLATFORMS.md) for macOS permissions and
+Windows session requirements. On Linux the environment must expose the correct:
 
 ```text
 DISPLAY

@@ -43,13 +43,21 @@ if [[ ! -f "$archive" ]] \
     fi
 fi
 
+if [[ "$(stat -c %s "$archive")" != "$ARCHIVE_SIZE" ]]; then
+    echo "Unexpected archive size; review or remove ${archive} before retrying" >&2
+    exit 1
+fi
 echo "${ARCHIVE_SHA256}  ${archive}" | sha256sum --check
 unzip -t "$archive"
 
 # Re-extract when the image is missing or truncated by an interrupted unzip.
 expected_image_size="$(unzip -Zl "$archive" "$IMAGE_NAME" | awk '{print $4}')"
+if [[ ! "$expected_image_size" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Archive must contain one non-empty ${IMAGE_NAME}" >&2
+    exit 1
+fi
 if [[ ! -f "$image" ]] || [[ "$(stat -c %s "$image")" != "$expected_image_size" ]]; then
-    unzip -o "$archive" -d "$destination"
+    unzip -o "$archive" "$IMAGE_NAME" -d "$destination"
 fi
 
 qemu-img info "$image"

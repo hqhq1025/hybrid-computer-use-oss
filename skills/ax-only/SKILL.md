@@ -119,6 +119,10 @@ recovery option.
   `input_events_emitted=false`, it caused no later UI change.
 - Continue from current refs returned in the same response when available.
   Call `observe` or `find` only when `observation_required=true`.
+- An explicit stop response overrides refresh and retry guidance. Stop desktop
+  automation and report the uncertainty without replaying input or issuing
+  recovery observations. Zero requested input does not prove an earlier focus
+  or activation request cannot still take effect.
 - On `stale_element_ref`, every target from the failed call is expired. Never
   submit the old ref unchanged.
 - Prefer `find` for a known replacement control, `assert_ax` for a known

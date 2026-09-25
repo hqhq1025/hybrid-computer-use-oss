@@ -105,12 +105,12 @@ func TestFindFiltersAreAnded(t *testing.T) {
 func TestFindTextMatchReportsOriginatingField(t *testing.T) {
 	record := &elementRecord{
 		Name:        "",
-		Description: "SMTP user anonym-x2024@outlook.com",
+		Description: "SMTP user synthetic-user@example.invalid",
 		Value:       "unrelated",
 	}
 	field, value, ok := matchedFindTextField(
 		record,
-		"anonym-x2024",
+		"synthetic-user",
 		false,
 	)
 	if !ok || field != "description" ||
@@ -122,7 +122,7 @@ func TestFindTextMatchReportsOriginatingField(t *testing.T) {
 func TestFindPageRendersOriginatingTextField(t *testing.T) {
 	service := newServiceWithBackend(&recordingPlatformBackend{})
 	snapshot := editorFormSnapshot()
-	snapshot.Elements[3].Description = "Account anonym-x2024@outlook.com"
+	snapshot.Elements[3].Description = "Account synthetic-user@example.invalid"
 	if err := service.buildAndRenderAXSnapshotV1(
 		snapshot,
 		treeViewWorking,
@@ -137,7 +137,7 @@ func TestFindPageRendersOriginatingTextField(t *testing.T) {
 		[]elementRecord{matched},
 		0,
 		1,
-		`text_contains="anonym-x2024"`,
+		`text_contains="synthetic-user"`,
 		nil,
 		false,
 	)

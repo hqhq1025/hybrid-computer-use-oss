@@ -237,7 +237,8 @@ func (s *service) a11yBatchWindowContinuity(
 	}
 	windowEntry, err := s.windowRefRegistry.Resolve(context.windowRef, "")
 	if err != nil {
-		if strings.Contains(err.Error(), "needs_revalidation") {
+		var lifecycle *axRefLifecycleError
+		if errors.As(err, &lifecycle) && lifecycle.lifecycle == AXRefNeedsRevalidation {
 			return a11yWindowUnknown
 		}
 		return a11yWindowChanged
@@ -631,6 +632,19 @@ func prependA11yBatchSummary(
 		result.StructuredContent = map[string]any{}
 	}
 	result.StructuredContent["a11y_batch_result"] = facts
+	if actions, ok := facts["actions"].([]map[string]any); ok {
+		emitted, partial, unknown := batchMutationSummary(actions)
+		// A successful tail cannot erase uncertainty from an earlier action.
+		for key, value := range map[string]bool{
+			"input_events_emitted":   emitted,
+			"partial_input_possible": partial,
+			"mutation_unknown":       unknown,
+		} {
+			if value {
+				result.StructuredContent[key] = true
+			}
+		}
+	}
 	return result
 }
 
@@ -701,6 +715,45 @@ func a11yBatchValidationError(message string, requested int) toolCallResult {
 	return result
 }
 
+func a11yBatchPreflightError(err error, requested int) toolCallResult {
+	return withAXLifecycleFailure(a11yBatchValidationError(err.Error(), requested), err)
+}
+
+func withAXLifecycleFailure(result toolCallResult, err error) toolCallResult {
+	var lifecycle *axRefLifecycleError
+	if !errors.As(err, &lifecycle) {
+		return result
+	}
+	code := ""
+	switch lifecycle.kind {
+	case "app":
+		code = "stale_app_ref"
+	case "window":
+		code = "stale_window_ref"
+	case "element":
+		code = "stale_element_ref"
+	default:
+		return result
+	}
+	complete := lifecycle.lifecycle != AXRefNeedsRevalidation
+	if !complete {
+		code = "observation_incomplete"
+	}
+	if result.StructuredContent == nil {
+		result.StructuredContent = map[string]any{}
+	}
+	result.StructuredContent["failure_code"] = code
+	result.StructuredContent["failure_subject"] = lifecycle.kind
+	result.StructuredContent["failure_phase"] = "precondition"
+	result.StructuredContent["failure_facts_complete"] = complete
+	result.StructuredContent["observation_required"] = true
+	result.StructuredContent["final_observation_returned"] = false
+	result.StructuredContent["partial_input_possible"] = false
+	result.StructuredContent["input_events_emitted"] = false
+	result.StructuredContent["retry_same_request"] = false
+	return result
+}
+
 func (s *service) a11yBatch(
 	app string,
 	rawActions any,
@@ -734,18 +787,26 @@ func (s *service) a11yBatch(
 	}
 	actions, err := normalizeA11yBatchActions(rawActions)
 	if err != nil {
-		return a11yBatchValidationError(err.Error(), requested)
+		return a11yBatchPreflightError(err, requested)
+	}
+	if err := s.preflightPlatformAXKeys(actions); err != nil {
+		return a11yBatchPreflightError(err, requested)
+	}
+	if s.platformBackend().HostInfo().Platform == "windows" {
+		if err := preflightWindowsAXKeys(actions); err != nil {
+			return a11yBatchPreflightError(err, requested)
+		}
 	}
 	context, err := s.deriveA11yBatchContext(
 		app, appRef, windowRef, actions,
 	)
 	if err != nil {
-		return a11yBatchValidationError(err.Error(), requested)
+		return a11yBatchPreflightError(err, requested)
 	}
 	if postcondition != nil {
 		if err := s.preflightA11yPostcondition(context, postcondition); err != nil {
-			return a11yBatchValidationError(
-				"postcondition: "+err.Error(), requested,
+			return a11yBatchPreflightError(
+				fmt.Errorf("postcondition: %w", err), requested,
 			)
 		}
 	}
@@ -757,9 +818,9 @@ func (s *service) a11yBatch(
 			context,
 			action.postcondition,
 		); err != nil {
-			return a11yBatchValidationError(
-				fmt.Sprintf(
-					"actions[%d].postcondition: %s",
+			return a11yBatchPreflightError(
+				fmt.Errorf(
+					"actions[%d].postcondition: %w",
 					index,
 					err,
 				),
@@ -768,8 +829,33 @@ func (s *service) a11yBatch(
 		}
 	}
 
+	executionPlan, err := compileA11yBatchExecutionPlan(context, actions, obs, postcondition)
+	if err != nil {
+		return a11yBatchPreflightError(err, requested)
+	}
+	orderedRuns := map[int]ProviderOrderedInputRequest{}
+	// The existing assertion path owns predicate identity and reconciliation.
+	// Keep guarded batches there until it supports pre-input identity capture
+	// across internal ordered-run snapshot commits.
+	guarded := postcondition != nil
+	for _, action := range actions {
+		guarded = guarded || action.postcondition != nil
+	}
+	if _, available := orderedInputBackend(s.platformBackend()); available && !guarded {
+		requests, err := providerOrderedInputRequestsFromPlan(context, executionPlan, actions)
+		if err != nil {
+			return a11yBatchPreflightError(err, requested)
+		}
+		if result, used := s.executeWholeBatchOrderedInput(context, actions, executionPlan, obs, postcondition); used {
+			return result
+		}
+		for _, request := range requests {
+			orderedRuns[request.Steps[0].ActionIndex] = request
+		}
+	}
 	actionEvidence := make([]map[string]any, 0, len(actions))
-	for index, action := range actions {
+	for index := 0; index < len(actions); index++ {
+		action := actions[index]
 		actionObservation := a11yBatchActionObservation(
 			index,
 			len(actions),
@@ -778,26 +864,41 @@ func (s *service) a11yBatch(
 		)
 		windowAction := action.actionType == "activate" ||
 			action.actionType == "close"
-		result := s.executeA11yBatchAction(
-			context,
-			action,
-			actionObservation,
-		)
-		if !result.IsError ||
-			(action.actionType == "close" &&
-				axEvidenceReportsInputEmission(result.StructuredContent)) {
-			result = s.recoverClosedWindowActionObservation(
-				context,
-				action,
-				result,
-				obs,
-			)
+		result := toolCallResult{}
+		actionEntry := map[string]any{}
+		request, orderedRun := orderedRuns[index]
+		if orderedRun {
+			runEnd := index + len(request.Steps) - 1
+			execution := s.executePlannedOrderedInputRun(context, request,
+				runEnd == len(actions)-1 && obs.resolvedMode() == observeScreenshot)
+			result = execution.result
+			runEvidence := orderedInputActionEvidence(actions[index:runEnd+1], execution.nativeResult)
+			actionEvidence = append(actionEvidence, runEvidence...)
+			if result.IsError {
+				return s.stopA11yOrderedInputRun(context, actions, index, runEnd,
+					execution, actionEvidence, obs)
+			}
+			actionEntry = runEvidence[len(runEvidence)-1]
+			index = runEnd
+			action = actions[index]
+			if index == len(actions)-1 && obs.resolvedMode() != observeNone {
+				result = mergeA11yBatchFinalObservation(result,
+					s.renderA11yBatchFinalObservation(execution.snapshot, execution.notes, obs))
+			}
+		} else {
+			result = s.executeA11yBatchAction(context, action, actionObservation)
+			if !result.IsError ||
+				(action.actionType == "close" &&
+					axEvidenceReportsInputEmission(result.StructuredContent)) {
+				result = s.recoverClosedWindowActionObservation(
+					context,
+					action,
+					result,
+					obs,
+				)
+			}
+			actionEntry = batchActionEvidenceEntry(index, action.actionType, result)
 		}
-		actionEntry := batchActionEvidenceEntry(
-			index,
-			action.actionType,
-			result,
-		)
 		actionPostconditionResult := toolCallResult{}
 		actionPostconditionChecked := false
 		if result.IsError {
@@ -829,7 +930,9 @@ func (s *service) a11yBatch(
 			}
 			finalObservationReturned, _ :=
 				result.StructuredContent["final_observation_returned"].(bool)
-			if !finalObservationReturned {
+			preparationFailed := result.StructuredContent["focus_preparation"] != nil ||
+				result.StructuredContent["pointer_preparation"] != nil
+			if !finalObservationReturned && !preparationFailed {
 				result.StructuredContent["observation_required"] = true
 			}
 			result.StructuredContent["partial_sequence_possible"] = index > 0
@@ -846,6 +949,10 @@ func (s *service) a11yBatch(
 				result.StructuredContent["observation_required"]
 			observationSummary := "No final batch observation was returned; " +
 				"observe fresh state before recovery."
+			if preparationFailed {
+				observationSummary = "Preparation may have changed state or may complete later. " +
+					"Stop; no recovery observation, postcondition or later action was attempted."
+			}
 			if finalObservationReturned {
 				observationSummary = "A fresh current-state observation follows. " +
 					"It does not prove which action caused that state."
@@ -908,7 +1015,7 @@ func (s *service) a11yBatch(
 				result.StructuredContent,
 				actionEntry,
 			)
-		} else {
+		} else if !orderedRun {
 			actionEvidence = append(actionEvidence, actionEntry)
 		}
 		if index < len(actions)-1 {
@@ -1119,6 +1226,8 @@ func batchActionEvidenceEntry(
 		for _, key := range []string{
 			"failure_code",
 			"failure_phase",
+			"focus_preparation",
+			"pointer_preparation",
 			"input_events_emitted",
 			"partial_input_possible",
 			"mutation_unknown",

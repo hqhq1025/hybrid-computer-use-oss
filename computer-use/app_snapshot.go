@@ -57,6 +57,7 @@ type elementRecord struct {
 	ProviderWindowName              string                        `json:"providerWindowName,omitempty"`
 	Showing                         *bool                         `json:"showing,omitempty"`
 	Visible                         *bool                         `json:"visible,omitempty"`
+	VisibilityEvidence              *AXVisibilityEvidence         `json:"visibilityEvidence,omitempty"`
 	NameHash                        string                        `json:"nameHash,omitempty"`
 	Name                            string                        `json:"name,omitempty"`
 	ControlType                     string                        `json:"controlType,omitempty"`
@@ -66,6 +67,7 @@ type elementRecord struct {
 	NativeWindowHandle              int64                         `json:"nativeWindowHandle,omitempty"`
 	Frame                           *frame                        `json:"frame,omitempty"`
 	Actions                         []string                      `json:"actions,omitempty"`
+	SetValueSupported               *bool                         `json:"setValue,omitempty"`
 	States                          string                        `json:"states,omitempty"`
 	Description                     string                        `json:"description,omitempty"`
 	TextAttributes                  map[string]string             `json:"textAttributes,omitempty"`
@@ -171,6 +173,7 @@ type appSnapshot struct {
 	contentCanonicalCount     int
 	contentRevision           string
 	axSnapshot                *AXSnapshotV1
+	findHiddenRecords         map[int]elementRecord
 	shadowAST                 AXShadowStats
 	actionExecution           *RuntimeActionEvidence
 	deliveryOnly              bool

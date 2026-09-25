@@ -1,7 +1,7 @@
 # Task Agent Profiles
 
 `hcu/osworld/agents.py` builds one profile per agent; `python3 -m
-hcu.render_agent_config` writes the Codex and Claude Code ones for use outside
+hcu.render_agent_config` writes these configurations for use outside
 OSWorld. Four agents are supported: Codex, Claude Code, Gemini CLI and Grok
 Build. Each has a default model and reasoning effort; `--model` and `--effort`
 override them.
@@ -55,6 +55,9 @@ Disabled:
 
 The base instructions are selected with `model_instructions_file`, and the
 benchmark skill is written to `/home/user/AGENTS.md` under the guest user's home.
+Outside OSWorld, the configuration generator embeds the selected skill in
+`developer_instructions` instead, without replacing the user's workspace
+instructions. Its `--codex-home` must match the client's actual `CODEX_HOME`.
 
 ## Claude Code
 
@@ -119,8 +122,8 @@ process by name. `settings.json` keeps only this MCP server:
 `config.toml` in an isolated `GROK_HOME` registers the gateway as the only
 model (Responses API, `env_key = "GROK_GATEWAY_TOKEN"`), disables auto-update,
 subagents, workflows, memory, web search and the plugins of other harnesses,
-and keeps the `computer_use` MCP server. The launcher passes the same flags the
-paper runs used, including `--always-approve`, `--no-plan`,
+and keeps the `computer_use` MCP server. The launcher passes
+`--always-approve`, `--no-plan`,
 `--no-subagents`, `--disable-web-search`, `--verbatim` and the disallowed
 tools list.
 
@@ -128,8 +131,7 @@ Grok Build 1.0.40 drops `--system-prompt-override` when it resumes a session
 and falls back to its default prompt. A resumed turn would therefore run under
 different instructions, so Grok Build cannot resume: a task that needs a
 second turn (an `ASK_USER` answer or a resume-based retry) fails with that
-reason. Everything else, including the `--resume` command shape, is ready for
-a release that fixes it.
+reason.
 
 ## Prompt replacement
 
@@ -143,4 +145,7 @@ reach every agent, and each harness reads them differently:
 | Gemini CLI | `GEMINI_SYSTEM_MD` replaces the core prompt | global `GEMINI.md` |
 | Grok Build | `--system-prompt-override` | appended to that override |
 
+This table describes the isolated OSWorld runner. Standalone Codex generation
+uses `developer_instructions` for the skill; standalone Claude configuration
+uses the generator's local Python interpreter for the MCP adapter.
 Repository development instructions must never reach the evaluated agent.

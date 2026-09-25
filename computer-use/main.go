@@ -49,7 +49,7 @@ func runCLI(args []string, stdout io.Writer) error {
 	case "mcp":
 		return runMCP(os.Stdin, stdout)
 	case "doctor":
-		fmt.Fprintln(stdout, "Linux runtime: AT-SPI2 and GDK run against the signed-in desktop user's accessibility session. When the client starts without XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, or display variables, computer-use tries to discover the same user's session from /run/user/<uid> and desktop processes.")
+		fmt.Fprintln(stdout, runtimeNotes(defaultRuntimeBackend().HostInfo().Platform))
 		return nil
 	case "call":
 		output, hasError, err := runCallCommand(args[1:], newService())
@@ -240,21 +240,34 @@ func helpText(command string) string {
 	case "call":
 		return "Usage:\n  computer-use call <AX|GUI> [--args '<json-object>']\n  computer-use call --calls '<json-array>'\n\nOnly the public AX and GUI tools are accepted.\n"
 	default:
-		return `Computer Use for Linux
+		return `Computer Use
 
 Usage:
   computer-use [command] [options]
 
 Commands:
   mcp                  Start the stdio MCP server.
-  doctor               Print Linux runtime notes.
+  doctor               Print platform runtime requirements.
   call <AX|GUI>         Call one public tool, or run a JSON array of calls.
   help [command]       Show general or command-specific help.
   version              Print the CLI version.
 
 Notes:
-  The Linux runtime uses AT-SPI2 semantic actions first, then best-effort
-  coordinate/key synthesis. Run it in the signed-in desktop session.
+  Run in the signed-in desktop session. Native providers use Linux AT-SPI2,
+  macOS Accessibility, or Windows UI Automation. Run doctor for requirements.
 `
+	}
+}
+
+func runtimeNotes(platform string) string {
+	switch platform {
+	case "linux":
+		return "Linux runtime: AT-SPI2 and GDK run against the signed-in desktop user's accessibility session. When the client starts without XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, or display variables, computer-use tries to discover the same user's session from /run/user/<uid> and desktop processes."
+	case "darwin":
+		return "macOS runtime: install ComputerUseProvider.app beside computer-use and grant that provider Accessibility and Screen Recording permissions. Run inside the signed-in graphical session. Permissions and desktop capture must be checked with a live AX/GUI call; doctor does not verify them."
+	case "windows":
+		return "Windows runtime: install computer-use-windows-provider.exe beside computer-use.exe. Run in an unlocked interactive user session at the target application's integrity level. Secure desktops and Session 0 cannot provide normal desktop input. Verify access with a live AX/GUI call; doctor only describes requirements."
+	default:
+		return "No native desktop backend is linked for this platform."
 	}
 }

@@ -40,13 +40,15 @@ func TestReadArgumentsAcceptsJSONObject(t *testing.T) {
 	}
 }
 
-func TestCLIHelpMentionsLinuxRuntime(t *testing.T) {
+func TestCLIHelpMentionsNativeRuntimes(t *testing.T) {
 	var out bytes.Buffer
 	if err := runCLI([]string{"--help"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Computer Use for Linux") {
-		t.Fatalf("help text did not mention Linux runtime:\n%s", out.String())
+	for _, platform := range []string{"Linux AT-SPI2", "macOS Accessibility", "Windows UI Automation"} {
+		if !strings.Contains(out.String(), platform) {
+			t.Fatalf("help text did not mention %s:\n%s", platform, out.String())
+		}
 	}
 	if strings.Contains(out.String(), "open-computer-use") {
 		t.Fatalf("help text leaked the retired upstream command:\n%s", out.String())

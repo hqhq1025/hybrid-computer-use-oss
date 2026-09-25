@@ -1,8 +1,9 @@
 # Running OSWorld
 
 `hcu.osworld.run_task` runs one OSWorld (V1) or OSWorld-V2 (V2) task in a
-fresh official Docker/QEMU guest with Codex or Claude Code as the task agent.
-Both benchmark generations use a pinned OSWorld-V2 checkout as the host-side
+fresh official Docker/QEMU guest with Codex, Claude Code, Gemini CLI or Grok
+Build as the task agent.
+Both benchmark generations use an OSWorld-V2 checkout as the host-side
 runner: V1 task files come from its `evaluation_examples` tree, and the guest
 image you select supplies the V1 or V2 desktop.
 
@@ -10,8 +11,9 @@ image you select supplies the V1 or V2 desktop.
 
 1. Starts `happysixd/osworld-docker` with a disposable overlay on the guest
    qcow2 image and grows the guest root disk to `--volume-size` GiB.
-2. Removes inherited `.codex`, `.claude`, `.claude.json`, `AGENTS.md` and
-   `CLAUDE.md` state from the guest.
+2. Removes inherited agent configuration and context from the guest, including
+   `.codex`, `.claude`, `.gemini`, `.grok`, `.mcp.json`, `AGENTS.md`,
+   `CLAUDE.md` and `GEMINI.md` (see [Isolation](ISOLATION.md)).
 3. Uploads the agent CLI, `computer-use`, the agent configuration, the base
    instructions and the skill.
 4. Runs the task setup, then checks the model gateway, the uploaded
@@ -82,13 +84,18 @@ make agents
 make build
 ```
 
-`install-osworld-v2.py` copies `osworld-overlay/` into the checkout. It
-refuses other OSWorld-V2 revisions unless you pass `--force`; review the
-upstream changes to the patched files first. Reinstall the overlay whenever
-you replace or clean the checkout.
+The checkout above is the known upstream source reference, not an installation
+admission check. `install-osworld-v2.py` checks the required upstream structure
+before copying `osworld-overlay/` into the checkout; it does not compare Git
+revisions. Review upstream changes to the patched files before using a different
+checkout. Structural compatibility does not prove evaluator equivalence.
+Reinstall the overlay whenever you replace or clean the checkout.
 
 `make agents` downloads the agent releases and the Node runtime pinned in
-`configs/agent-artifacts.lock.json` and verifies their archive checksums. To
+`configs/agent-artifacts.lock.json`. Downloads use the recorded HTTPS URLs,
+verify the publisher archive against the recorded SHA256 and validate its
+required contents before replacing an artifact. This download-integrity check
+is separate from run or release admission. To
 use another build during development, pass `--agent-binary` to `run_task` (or
 `agent_binary` in a batch or queue config); it replaces the agent's file under
 the artifact directory.
@@ -100,8 +107,8 @@ Relative path arguments are resolved against your working directory.
 ## Guest images and task assets
 
 - V1: `scripts/fetch-osworld-v1-image.sh DIR` downloads the official
-  `Ubuntu.qcow2.zip` from a pinned Hugging Face revision, verifies the archive
-  checksum and extracts the image.
+  `Ubuntu.qcow2.zip` from a pinned Hugging Face revision, verifies its recorded
+  SHA256, validates the archive and extracts the image.
 - V2 task definitions: the OSWorld-V2 task classes (`task_*.py`) are gated and
   not part of the GitHub checkout. Accept the terms of the Hugging Face
   datasets `xlangai/osworld_v2_tasks` and `xlangai/osworld_v2_assets_gated`,
@@ -141,6 +148,7 @@ set -a; source .env; set +a
 | `OSWORLD_V2_ROOT` | OSWorld-V2 checkout; defaults to `external/OSWorld-V2` |
 | `HCU_ARTIFACT_DIR` | agent CLIs and `computer-use`; defaults to `artifacts/` |
 | `HCU_RESULTS_DIR` | default result root; defaults to `runs/` |
+| `HCU_QUEUE` | default config for `run_queue` when `--queue` is omitted |
 | `OSWORLD_FILE_BASE_URL` | local task asset snapshot |
 | `OSWORLD_V1_GUEST_IMAGE`, `OSWORLD_V2_GUEST_IMAGE` | guest images, used by the example configs |
 | `HCU_OPENAI_GATEWAY`, `HCU_ANTHROPIC_GATEWAY`, `HCU_GEMINI_GATEWAY` | gateway base URLs reachable from the guest |
@@ -288,7 +296,7 @@ option and token log:
 
 ```text
 --agent claude-code --model claude-opus-5 --claude-gateway-base "$HCU_ANTHROPIC_GATEWAY"
---agent gemini-cli  --claude-gateway-base ignored --gemini-gateway-base "$HCU_GEMINI_GATEWAY"
+--agent gemini-cli  --gemini-gateway-base "$HCU_GEMINI_GATEWAY"
 --agent grok-build  --gateway-base "$HCU_OPENAI_GATEWAY"
 ```
 
@@ -336,6 +344,14 @@ rolling queue: bounded concurrency, launch staggering, a rate-limit circuit
 breaker, and restart recovery that adopts live attempts, re-queues interrupted
 ones and renders `QUEUE_STATUS.md`. Concurrency is `max_active_tasks`. The
 queue-only keys are listed in `hcu/osworld/batch_config.py`.
+
+Without `--queue`, the queue reads `HCU_QUEUE`, falling back to
+`configs/osworld-v2-codex-queue.example.json`. A configuration selects one
+top-level `benchmark_version` (`v1` or `v2`, default `v2`) for every task;
+task-level generation overrides and mixed-generation queues are unsupported.
+The status title reflects that selection. Static strata retain their
+configured labels, including diagnostic words; task status and evaluator
+errors appear separately.
 
 Give every experiment its own `run_id` and token log, and do not mix guest
 images, MCP binaries, skills, prompts, agent versions or model routes in one

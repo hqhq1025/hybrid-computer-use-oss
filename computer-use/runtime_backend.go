@@ -2,37 +2,65 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 type runtimeTimeoutError struct {
 	duration time.Duration
 	phase    string
+	platform string
 }
 
 func (e *runtimeTimeoutError) Error() string {
-	return fmt.Sprintf("Linux runtime timed out after %s", e.duration)
+	return fmt.Sprintf("%s runtime timed out after %s", defaultString(e.platform, "Linux"), e.duration)
 }
 
 var _ error = (*runtimeTimeoutError)(nil)
 
 type runtimeTransportError struct {
+	platform    string
 	operation   ProviderWireOperation
 	phase       string
 	requestSent bool
+	cause       error
 }
 
 func (e *runtimeTransportError) Error() string {
-	return fmt.Sprintf(
-		"Linux provider transport failed during %s",
-		e.operation,
-	)
+	message := fmt.Sprintf("%s provider transport failed during %s",
+		defaultString(e.platform, "Linux"), e.operation)
+	if e.cause != nil {
+		cause := strings.Join(strings.Fields(e.cause.Error()), " ")
+		if len(cause) > 512 {
+			cause = cause[:512]
+		}
+		if cause != "" {
+			message += ": " + cause
+		}
+	}
+	return message
 }
+
+func (e *runtimeTransportError) Unwrap() error { return e.cause }
 
 var _ error = (*runtimeTransportError)(nil)
 
 func accessibilityOperationCanMutate(request axServiceRequest) bool {
-	return request.Action != nil || request.WindowAction != nil
+	return request.WindowAction != nil ||
+		(request.Action != nil && request.Action.Intent() != AccessibilityResolveTarget)
+}
+
+func providerRequestCanMutate(request ProviderWireRequest) bool {
+	switch request.Operation {
+	case ProviderWireResolveAndAct:
+		return request.Action != nil && request.Action.Intent != AccessibilityResolveTarget
+	case ProviderWireOrderedInput:
+		return request.OrderedInput != nil
+	case ProviderWireDesktopBatch, ProviderWireWindowAction:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *service) platformBackend() PlatformBackend {
@@ -208,14 +236,14 @@ func formatRuntimeTimeoutDiagnostic(
 			"a11y_responsive=false cached_pid_present=true "+
 				"window_for_cached_pid=unknown cached_pid=%d. The cached PID exists "+
 				"but the accessibility bridge did not answer; "+
-				"the bounded X11 window probe was unavailable.",
+				"the bounded native window probe was unavailable.",
 			pid)
 	}
 	if windowAlive {
 		return fmt.Sprintf(
 			"a11y_responsive=false cached_pid_present=true "+
 				"window_for_cached_pid=true cached_pid=%d. The cached PID and a managed "+
-				"X11 window exist, but the accessibility "+
+				"native window exist, but the accessibility "+
 				"bridge did not answer. Inspect the GUI instead of retrying the same "+
 				"A11Y call indefinitely.",
 			pid)
@@ -223,7 +251,7 @@ func formatRuntimeTimeoutDiagnostic(
 	return fmt.Sprintf(
 		"a11y_responsive=false cached_pid_present=true "+
 			"window_for_cached_pid=false cached_pid=%d. The cached PID exists without "+
-			"a managed X11 window; the application may be rebuilding its UI. A bounded "+
+			"a managed native window; the application may be rebuilding its UI. A bounded "+
 			"retry can be appropriate.",
 		pid)
 }

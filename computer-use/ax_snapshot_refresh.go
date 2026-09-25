@@ -220,19 +220,34 @@ func (s *service) readSnapshot(app string, request axServiceRequest) (*appSnapsh
 			return nil, nil, s.missingRuntimeSnapshotResult(app, request, response)
 		}
 	}
+	snapshot, result := s.prepareProviderSnapshot(request, response)
+	if result.IsError {
+		return nil, nil, result
+	}
+	return snapshot, response.Notes, toolCallResult{}
+}
+
+func (s *service) prepareProviderSnapshot(
+	request axServiceRequest,
+	response *ProviderAccessibilityResult,
+) (*appSnapshot, toolCallResult) {
+	if response == nil || response.Snapshot == nil {
+		return nil, textResult("provider snapshot preparation requires a canonical snapshot", true).
+			withEvidenceScope("error_only")
+	}
 	response.Snapshot.rawTreeLines = append(
 		[]string(nil),
 		response.Snapshot.TreeLines...,
 	)
 	if err := applyA11yScope(response.Snapshot, request.Scope); err != nil {
-		return nil, nil, textResult(err.Error(), true).
+		return nil, textResult(err.Error(), true).
 			withEvidenceScope("error_only")
 	}
 	if err := applyObservationRoot(
 		response.Snapshot,
 		request.ObservationRoot,
 	); err != nil {
-		return nil, nil, textResult(err.Error(), true).
+		return nil, textResult(err.Error(), true).
 			withEvidenceScope("error_only")
 	}
 	baselineProjection := *response.Snapshot
@@ -268,7 +283,11 @@ func (s *service) readSnapshot(app string, request axServiceRequest) (*appSnapsh
 		response.Snapshot,
 		request.TreeView,
 	); err != nil {
-		return nil, nil, textResult(
+		var conflict *axProviderIdentityConflict
+		if errors.As(err, &conflict) {
+			return nil, s.providerIdentityConflictResult(request, response, conflict)
+		}
+		return nil, textResult(
 			"AXSnapshotV1 pipeline failed: "+err.Error(),
 			true,
 		).withEvidenceScope("error_only")
@@ -276,7 +295,46 @@ func (s *service) readSnapshot(app string, request axServiceRequest) (*appSnapsh
 	response.Snapshot.actionExecution = response.ActionEvidence
 	response.Snapshot.externalDesktopTransition =
 		response.ExternalDesktopTransition
-	return response.Snapshot, response.Notes, toolCallResult{}
+	return response.Snapshot, toolCallResult{}
+}
+
+func (s *service) providerIdentityConflictResult(
+	request axServiceRequest,
+	response *ProviderAccessibilityResult,
+	conflict *axProviderIdentityConflict,
+) toolCallResult {
+	snapshot := response.Snapshot
+	s.rememberFailedObservation(request.App, snapshot)
+	s.pendingFailedObservations[len(s.pendingFailedObservations)-1].continuityNote =
+		"[continuity] The previous accessibility acquisition contained contradictory " +
+			"provider identity evidence. This independent observation does not establish " +
+			"whether earlier input was accepted or persisted."
+	if window := snapshotLogicalWindowRef(snapshot); window != "" {
+		s.refRegistry.MarkByWindow(window, AXRefNeedsRevalidation, "provider_identity_conflict")
+		s.windowRefRegistry.MarkLifecycle(window, AXRefNeedsRevalidation, "provider_identity_conflict")
+	}
+	s.invalidateAccessibilitySnapshots()
+	failure := *response
+	failure.prepareForService()
+	emitted := failure.InputEventsEmitted ||
+		(failure.ActionEvidence != nil && failure.ActionEvidence.InputEmitted)
+	unknown := emitted || failure.PartialInputPossible || failure.DesktopStateMutated || failure.MutationUnknown
+	failure.OK = false
+	failure.Error = conflict.Error() + "; no trustworthy final accessibility observation is available. " +
+		"Observe current state before further input; do not replay the action."
+	failure.Snapshot = nil
+	failure.Failure = &ProviderFailure{
+		Code: "observation_incomplete", UnderlyingCode: "provider_identity_conflict",
+		Phase: "observation", Subject: "element", FactsComplete: false,
+	}
+	failure.Mutation = &ProviderMutationFacts{
+		InputEventsEmitted: emitted, PartialInputPossible: failure.PartialInputPossible,
+		DesktopStateMutated: failure.DesktopStateMutated, MutationUnknown: unknown,
+	}
+	result := s.runtimeReportedFailure(request.App, request, failure).withEvidenceScope("error_only")
+	result.StructuredContent["observation_required"] = true
+	result.StructuredContent["final_observation_returned"] = false
+	return result
 }
 
 func (s *service) missingRuntimeSnapshotResult(
@@ -285,7 +343,7 @@ func (s *service) missingRuntimeSnapshotResult(
 	response *ProviderAccessibilityResult,
 ) toolCallResult {
 	if response == nil {
-		return textResult("Linux runtime did not return an app snapshot.", true).
+		return textResult("The native provider did not return an app snapshot.", true).
 			withEvidenceScope("error_only")
 	}
 	emitted := response.InputEventsEmitted ||
@@ -293,12 +351,12 @@ func (s *service) missingRuntimeSnapshotResult(
 		response.DesktopStateMutated ||
 		response.MutationUnknown
 	if !emitted {
-		return textResult("Linux runtime did not return an app snapshot.", true).
+		return textResult("The native provider did not return an app snapshot.", true).
 			withEvidenceScope("error_only")
 	}
 	response.OK = false
 	response.Error = "post_action_observation_failed; the action outcome is unknown " +
-		"because the Linux runtime returned no final app snapshot; inspect fresh state " +
+		"because the native provider returned no final app snapshot; inspect fresh state " +
 		"before retrying."
 	response.Failure = &ProviderFailure{
 		Code:           "effect_unknown",
@@ -366,6 +424,21 @@ func (s *service) runtimeReportedFailure(
 ) toolCallResult {
 	response.prepareForService()
 	subject := strings.TrimSpace(strings.ToLower(response.FailureSubject))
+	var sourceEntry *AXRefEntry
+	if s != nil && isShortAXRef(request.SourceRef) {
+		sourceEntry, _ = s.refRegistry.Resolve(request.SourceRef, "")
+	}
+	var sourceWindowEntry *AXWindowRefEntry
+	if s != nil && isShortAXWindowRef(request.SourceRef) {
+		sourceWindowEntry, _ = s.windowRefRegistry.Resolve(request.SourceRef, "")
+	}
+	s.syncRuntimeFailureLifecycle(request, response)
+	return s.renderRuntimeReportedFailure(app, request, response, subject, sourceEntry, sourceWindowEntry)
+}
+
+func (s *service) syncRuntimeFailureLifecycle(request axServiceRequest, response ProviderAccessibilityResult) {
+	response.prepareForService()
+	subject := strings.TrimSpace(strings.ToLower(response.FailureSubject))
 	if s != nil && isShortAXAppRef(request.App) && subject == "app" {
 		switch {
 		case response.FailureCode == "observation_incomplete" ||
@@ -380,14 +453,6 @@ func (s *service) runtimeReportedFailure(
 			}
 			s.markAppIdentityLifecycle(request.App, lifecycle, response.FailureCode)
 		}
-	}
-	var sourceEntry *AXRefEntry
-	if s != nil && isShortAXRef(request.SourceRef) {
-		sourceEntry, _ = s.refRegistry.Resolve(request.SourceRef, "")
-	}
-	var sourceWindowEntry *AXWindowRefEntry
-	if s != nil && isShortAXWindowRef(request.SourceRef) {
-		sourceWindowEntry, _ = s.windowRefRegistry.Resolve(request.SourceRef, "")
 	}
 	if s != nil && request.SourceRef != "" {
 		switch {
@@ -428,7 +493,7 @@ func (s *service) runtimeReportedFailure(
 				)
 			} else if response.FailureCode == "stale_window_ref" ||
 				response.FailureCode == "stale_window" ||
-				response.FailureCode == "stale_target" {
+				(response.FailureCode == "stale_target" && subject == "window") {
 				lifecycle := AXRefStale
 				if !response.FailureFactsComplete {
 					lifecycle = AXRefNeedsRevalidation
@@ -436,9 +501,18 @@ func (s *service) runtimeReportedFailure(
 				s.windowRefRegistry.MarkLifecycle(
 					request.SourceRef, lifecycle, response.FailureCode,
 				)
+				if subject == "window" && response.FailureFactsComplete {
+					s.refRegistry.MarkByWindow(request.SourceRef, lifecycle, response.FailureCode)
+				}
 			}
 		}
 	}
+}
+
+func (s *service) renderRuntimeReportedFailure(
+	app string, request axServiceRequest, response ProviderAccessibilityResult,
+	subject string, sourceEntry *AXRefEntry, sourceWindowEntry *AXWindowRefEntry,
+) toolCallResult {
 	result := textResult(publicRuntimeFailureText(response), true)
 	if response.FailureCode == "" {
 		return result
@@ -467,6 +541,9 @@ func (s *service) runtimeReportedFailure(
 		continuation["state"] = "verify_only"
 	}
 	result.StructuredContent["continuation"] = continuation
+	if response.FocusPreparation != "" || response.PointerPreparation != "" {
+		return preparationFailureResult(response, result)
+	}
 	s.attachRuntimeRecoveryContext(
 		&result,
 		request,
@@ -812,6 +889,9 @@ func (s *service) runtimeFailureResult(
 	diagnosticSnapshot *appSnapshot,
 	err error,
 ) toolCallResult {
+	if result, rejected := runtimeRequestRejectionResult(err); rejected {
+		return result
+	}
 	var timeout *runtimeTimeoutError
 	var transport *runtimeTransportError
 	if !errors.As(err, &timeout) && !errors.As(err, &transport) {
@@ -845,8 +925,8 @@ func (s *service) runtimeFailureResult(
 		}
 		return result
 	}
-	mutationUnknown := timeout != nil ||
-		(transport != nil && transport.requestSent)
+	mutationUnknown := accessibilityOperationCanMutate(request) &&
+		(timeout != nil || (transport != nil && transport.requestSent))
 	failureCode := "runtime_timeout"
 	failureMarker := "runtime_timeout=true "
 	if transport != nil {
@@ -1012,6 +1092,16 @@ func (s *service) refreshSnapshot(app string, request axServiceRequest) (*appSna
 	snapshot, notes, result := s.readSnapshot(app, request)
 	if result.IsError {
 		return nil, nil, result
+	}
+	return s.commitPreparedSnapshot(app, request, snapshot, notes)
+}
+
+func (s *service) commitPreparedSnapshot(
+	app string, request axServiceRequest, snapshot *appSnapshot, notes []string,
+) (*appSnapshot, []string, toolCallResult) {
+	if snapshot == nil {
+		return nil, nil, textResult("provider snapshot commit requires a canonical snapshot", true).
+			withEvidenceScope("error_only")
 	}
 	snapshot.projection = projectionFromRequest(request)
 	visiblePrevious := s.deliveredSnapshotFor(snapshot)

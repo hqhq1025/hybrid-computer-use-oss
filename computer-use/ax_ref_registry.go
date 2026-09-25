@@ -93,6 +93,8 @@ type AXRefEntry struct {
 	ProviderWindowProcessGeneration string
 	ProviderWindowRole              string
 	ProviderWindowName              string
+	AutomationID                    string
+	ProviderRole                    string
 	RuntimeID                       []int
 	RuntimeIDAliases                [][]int
 	SemanticTarget                  string
@@ -149,6 +151,17 @@ func (registry *RefRegistry) RefreshProviderBinding(
 		entry.LocatorKind != AXLocatorSemantic {
 		return false
 	}
+	if processInstanceBindingChanged(
+		entry, record.ProviderBusName, record.ProviderObjectPath,
+		record.ProcessGeneration, record.ProviderIdentityScope,
+	) {
+		registry.MarkSuperseded(ref, "provider instance continuity lost")
+		return false
+	}
+	if !providerWindowOwnershipContinuous(entry, record.ProviderWindowBusName,
+		record.ProviderWindowObjectPath, record.ProviderWindowProcessGeneration) {
+		return false
+	}
 	if !runtimePathMatchesEntry(entry, record.RuntimeID) {
 		return false
 	}
@@ -164,8 +177,11 @@ func (registry *RefRegistry) RefreshProviderBinding(
 	if !providerSemanticContinuity(
 		entry,
 		role,
+		record.ControlType,
 		record.Name,
 		entry.SemanticTarget,
+		record.AutomationID,
+		record.RuntimeID,
 	) {
 		return false
 	}
@@ -174,14 +190,17 @@ func (registry *RefRegistry) RefreshProviderBinding(
 	entry.ProcessGeneration = strings.TrimSpace(record.ProcessGeneration)
 	entry.ProviderIdentityScope =
 		strings.TrimSpace(record.ProviderIdentityScope)
-	entry.ProviderWindowBusName =
-		strings.TrimSpace(record.ProviderWindowBusName)
-	entry.ProviderWindowObjectPath =
-		strings.TrimSpace(record.ProviderWindowObjectPath)
-	entry.ProviderWindowProcessGeneration =
-		strings.TrimSpace(record.ProviderWindowProcessGeneration)
+	entry.ProviderWindowBusName = firstNonEmpty(record.ProviderWindowBusName, entry.ProviderWindowBusName)
+	entry.ProviderWindowObjectPath = firstNonEmpty(record.ProviderWindowObjectPath, entry.ProviderWindowObjectPath)
+	entry.ProviderWindowProcessGeneration = firstNonEmpty(
+		record.ProviderWindowProcessGeneration, entry.ProviderWindowProcessGeneration,
+	)
 	entry.ProviderWindowRole = normalizedTreeText(record.ProviderWindowRole)
 	entry.ProviderWindowName = normalizedTreeText(record.ProviderWindowName)
+	entry.AutomationID = strings.TrimSpace(record.AutomationID)
+	entry.ProviderRole = strings.TrimSpace(record.ControlType)
+	entry.Role = role
+	entry.Name = record.Name
 	entry.RuntimeID = append([]int(nil), record.RuntimeID...)
 	entry.RuntimeIDAliases = copyRuntimeIDs([][]int{record.RuntimeID})
 	entry.StaleReason = ""
@@ -242,6 +261,14 @@ type AXWindowRefEntry struct {
 	LifecycleReason                 string
 }
 
+type axRefLifecycleError struct {
+	kind      string
+	lifecycle AXRefLifecycle
+	message   string
+}
+
+func (err *axRefLifecycleError) Error() string { return err.message }
+
 func lifecycleResolveError(kind, ref string, lifecycle AXRefLifecycle, reason, recovery string) error {
 	if lifecycle == "" || lifecycle == AXRefActive {
 		return nil
@@ -249,10 +276,10 @@ func lifecycleResolveError(kind, ref string, lifecycle AXRefLifecycle, reason, r
 	if reason == "" {
 		reason = string(lifecycle)
 	}
-	return fmt.Errorf(
+	return &axRefLifecycleError{kind: kind, lifecycle: lifecycle, message: fmt.Sprintf(
 		"short AX %s ref %q is %s (%s); %s",
 		kind, ref, lifecycle, reason, recovery,
-	)
+	)}
 }
 
 func NewAppRefRegistry(limit int) *AppRefRegistry {
@@ -362,10 +389,10 @@ func (registry *AppRefRegistry) Resolve(ref string) (*AXAppRefEntry, error) {
 	entry := registry.entries[strings.TrimSpace(ref)]
 	if entry == nil {
 		if id < registry.next {
-			return nil, fmt.Errorf(
+			return nil, &axRefLifecycleError{kind: "app", lifecycle: AXRefExpired, message: fmt.Sprintf(
 				"short AX app ref %q expired from this session registry; observe applications again",
 				ref,
-			)
+			)}
 		}
 		return nil, fmt.Errorf(
 			"short AX app ref %q was never issued in this session",
@@ -590,6 +617,15 @@ func (registry *WindowRefRegistry) Acquire(
 				entry.LifecycleReason = "logical_window_replaced"
 				delete(registry.byIdentity, key)
 			} else {
+				if !modalWindowRole(providerWindowRole) {
+					providerWindowBusName = firstNonEmpty(providerWindowBusName, entry.ProviderWindowBusName)
+					providerWindowObjectPath = firstNonEmpty(providerWindowObjectPath, entry.ProviderWindowObjectPath)
+					providerWindowProcessGeneration = firstNonEmpty(
+						providerWindowProcessGeneration, entry.ProviderWindowProcessGeneration,
+					)
+					providerWindowRole = firstNonEmpty(providerWindowRole, entry.ProviderWindowRole)
+					providerWindowName = firstNonEmpty(providerWindowName, entry.ProviderWindowName)
+				}
 				entry.AppRef = appRef
 				entry.SemanticTarget = semanticTarget
 				entry.ProviderWindowBusName = providerWindowBusName
@@ -674,10 +710,10 @@ func (registry *WindowRefRegistry) Resolve(
 	entry := registry.entries[strings.TrimSpace(ref)]
 	if entry == nil {
 		if id < registry.next {
-			return nil, fmt.Errorf(
+			return nil, &axRefLifecycleError{kind: "window", lifecycle: AXRefExpired, message: fmt.Sprintf(
 				"short AX window ref %q expired from this session registry; observe the window again",
 				ref,
-			)
+			)}
 		}
 		return nil, fmt.Errorf(
 			"short AX window ref %q was never issued in this session",
@@ -847,6 +883,13 @@ func (registry *RefRegistry) AcquireTyped(
 	if len(providerIdentity) > 10 {
 		providerIdentityScope = strings.TrimSpace(providerIdentity[10])
 	}
+	automationID, providerRole := "", ""
+	if len(providerIdentity) > 11 {
+		automationID = strings.TrimSpace(providerIdentity[11])
+	}
+	if len(providerIdentity) > 12 {
+		providerRole = strings.TrimSpace(providerIdentity[12])
+	}
 	providerComplete := strings.TrimSpace(providerBusName) != "" &&
 		strings.TrimSpace(providerObjectPath) != "" &&
 		strings.TrimSpace(processGeneration) != ""
@@ -875,9 +918,25 @@ func (registry *RefRegistry) AcquireTyped(
 				entry.Lifecycle != AXRefNeedsRevalidation {
 				delete(registry.byIdentity, key)
 			} else {
-				if locatorKind == AXLocatorProviderBound &&
+				if processInstanceBindingChanged(entry, providerBusName, providerObjectPath,
+					processGeneration, providerIdentityScope) ||
+					!providerWindowOwnershipContinuous(entry, providerWindowBusName,
+						providerWindowObjectPath, providerWindowProcessGeneration) ||
+					entry.WindowHandle != strings.TrimSpace(windowHandle) {
+					registry.MarkSuperseded(ref, "provider instance or window continuity lost")
+				} else if locatorKind == AXLocatorProviderBound &&
 					providerComplete &&
-					!providerSemanticContinuity(entry, role, name, semanticTarget) {
+					!providerBoundProjectionContinuity(entry, &AXRefEntry{
+						LocatorKind: locatorKind, AppRef: appRef,
+						LogicalWindowRef: logicalWindowRef, WindowHandle: windowHandle,
+						ProviderBusName: providerBusName, ProviderObjectPath: providerObjectPath,
+						ProcessGeneration: processGeneration, ProviderIdentityScope: providerIdentityScope,
+						ProviderWindowBusName:           providerWindowBusName,
+						ProviderWindowObjectPath:        providerWindowObjectPath,
+						ProviderWindowProcessGeneration: providerWindowProcessGeneration,
+						Role:                            role, ProviderRole: providerRole, Name: name,
+						AutomationID: automationID, SemanticTarget: semanticTarget,
+					}, nil) {
 					entry.Lifecycle = AXRefSuperseded
 					entry.StaleReason = "provider identity now exposes a different semantic object"
 					delete(registry.byIdentity, key)
@@ -901,6 +960,13 @@ func (registry *RefRegistry) AcquireTyped(
 					entry.LastUsedTick = registry.tick
 					entry.ProviderWindowRole = normalizedTreeText(providerWindowRole)
 					entry.ProviderWindowName = normalizedTreeText(providerWindowName)
+					if locatorKind == AXLocatorProviderBound {
+						entry.AutomationID = automationID
+						entry.ProviderRole = providerRole
+						entry.Role = role
+						entry.Name = name
+						entry.SemanticTarget = strings.TrimSpace(semanticTarget)
+					}
 					entry.Lifecycle = AXRefActive
 					entry.StaleReason = ""
 					return ref
@@ -908,6 +974,9 @@ func (registry *RefRegistry) AcquireTyped(
 			}
 		}
 		delete(registry.byIdentity, key)
+	}
+	if providerIdentityScope == "process_instance" && !providerComplete {
+		return ""
 	}
 	ref := "r" + strconv.FormatUint(registry.next, 10)
 	registry.next++
@@ -930,8 +999,10 @@ func (registry *RefRegistry) AcquireTyped(
 		ProviderWindowRole:              normalizedTreeText(providerWindowRole),
 		ProviderWindowName:              normalizedTreeText(providerWindowName),
 		SemanticTarget:                  strings.TrimSpace(semanticTarget),
+		AutomationID:                    automationID,
+		ProviderRole:                    providerRole,
 		Role:                            role,
-		Name:                            normalizedTreeText(name),
+		Name:                            name,
 		CreatedRevision:                 revision,
 		LastSeenRevision:                revision,
 		LastUsedTick:                    registry.tick,
@@ -940,6 +1011,56 @@ func (registry *RefRegistry) AcquireTyped(
 	registry.byIdentity[key] = ref
 	registry.evict()
 	return ref
+}
+
+// Retained native objects must never fall back to semantic replacement.
+func processInstanceBindingChanged(
+	entry *AXRefEntry,
+	providerBusName, providerObjectPath, processGeneration, scope string,
+) bool {
+	if entry == nil {
+		return false
+	}
+	oldScope := strings.TrimSpace(entry.ProviderIdentityScope)
+	scope = strings.TrimSpace(scope)
+	if oldScope != "process_instance" && scope != "process_instance" {
+		return false
+	}
+	if oldScope != scope {
+		return true
+	}
+	for _, pair := range [][2]string{
+		{entry.ProviderBusName, providerBusName},
+		{entry.ProviderObjectPath, providerObjectPath},
+		{entry.ProcessGeneration, processGeneration},
+	} {
+		old, current := strings.TrimSpace(pair[0]), strings.TrimSpace(pair[1])
+		if old == "" || current == "" || old != current {
+			return true
+		}
+	}
+	return false
+}
+
+func providerWindowOwnershipContinuous(entry *AXRefEntry, bus, object, generation string) bool {
+	if entry == nil {
+		return false
+	}
+	for _, pair := range [][2]string{
+		{entry.ProviderWindowBusName, bus},
+		{entry.ProviderWindowObjectPath, object},
+		{entry.ProviderWindowProcessGeneration, generation},
+	} {
+		// Legacy providers may omit owner fields on an action readback. Keep
+		// the issuing owner, but never accept contradictory owner evidence.
+		if strings.TrimSpace(entry.ProviderIdentityScope) != "process_instance" && strings.TrimSpace(pair[1]) == "" {
+			continue
+		}
+		if old := strings.TrimSpace(pair[0]); old != "" && old != strings.TrimSpace(pair[1]) {
+			return false
+		}
+	}
+	return true
 }
 
 func completeProviderIdentityChanged(
@@ -977,8 +1098,11 @@ func firstNonEmpty(values ...string) string {
 func providerSemanticContinuity(
 	entry *AXRefEntry,
 	role CanonicalRole,
+	providerRole,
 	name,
-	semanticTarget string,
+	semanticTarget,
+	automationID string,
+	runtimeID []int,
 ) bool {
 	if entry == nil {
 		return false
@@ -986,11 +1110,66 @@ func providerSemanticContinuity(
 	if entry.Role != "" && role != "" && entry.Role != role {
 		return false
 	}
+	oldRole, newRole := strings.TrimSpace(entry.ProviderRole), strings.TrimSpace(providerRole)
+	if oldRole != "" && newRole != "" && !strings.EqualFold(oldRole, newRole) {
+		return false
+	}
+	oldID, newID := strings.TrimSpace(entry.AutomationID), strings.TrimSpace(automationID)
+	if oldID != "" || newID != "" {
+		if oldID == "" || oldID != newID {
+			return false
+		}
+		return len(runtimeID) == 0 || runtimePathMatchesEntry(entry, runtimeID)
+	}
 	if comparableTreeText(entry.Name) != comparableTreeText(name) {
 		return false
 	}
 	return strings.TrimSpace(entry.SemanticTarget) ==
 		strings.TrimSpace(semanticTarget)
+}
+
+func providerBoundProjectionContinuity(entry, current *AXRefEntry, runtimeID []int) bool {
+	if entry == nil || current == nil {
+		return false
+	}
+	legacy := func() bool {
+		return providerSemanticContinuity(entry, current.Role, current.ProviderRole,
+			current.Name, current.SemanticTarget, current.AutomationID, runtimeID)
+	}
+	if strings.TrimSpace(entry.ProviderIdentityScope) != "process_instance" &&
+		strings.TrimSpace(current.ProviderIdentityScope) != "process_instance" {
+		return legacy()
+	}
+	if entry.LocatorKind != AXLocatorProviderBound || current.LocatorKind != AXLocatorProviderBound ||
+		processInstanceBindingChanged(entry, current.ProviderBusName, current.ProviderObjectPath,
+			current.ProcessGeneration, current.ProviderIdentityScope) ||
+		entry.Role != current.Role ||
+		!strings.EqualFold(strings.TrimSpace(entry.ProviderRole), strings.TrimSpace(current.ProviderRole)) ||
+		comparableTreeText(entry.Name) != comparableTreeText(current.Name) ||
+		strings.TrimSpace(entry.AutomationID) != strings.TrimSpace(current.AutomationID) {
+		return false
+	}
+	complete := entry.Role != "" && strings.TrimSpace(entry.ProviderRole) != ""
+	for _, pair := range [][2]string{
+		{entry.AppRef, current.AppRef},
+		{entry.LogicalWindowRef, current.LogicalWindowRef},
+		{entry.WindowHandle, current.WindowHandle},
+		{entry.ProviderWindowBusName, current.ProviderWindowBusName},
+		{entry.ProviderWindowObjectPath, current.ProviderWindowObjectPath},
+		{entry.ProviderWindowProcessGeneration, current.ProviderWindowProcessGeneration},
+	} {
+		old, next := strings.TrimSpace(pair[0]), strings.TrimSpace(pair[1])
+		if old != next {
+			return false
+		}
+		complete = complete && old != ""
+	}
+	if complete {
+		// A retained native object may move within its window's projection.
+		return true
+	}
+	return strings.TrimSpace(entry.SemanticTarget) == strings.TrimSpace(current.SemanticTarget) &&
+		(len(runtimeID) == 0 || runtimePathMatchesEntry(entry, runtimeID)) && legacy()
 }
 
 func runtimePathEqual(first, second []int) bool {
@@ -1035,8 +1214,8 @@ func (registry *RefRegistry) AcquireNode(
 		}
 		locatorKind = AXLocatorProviderBound
 	}
-	if locatorKind == AXLocatorSemantic &&
-		!snapshot.IdentityCoverageIncomplete {
+	if locatorKind == AXLocatorProviderBound ||
+		locatorKind == AXLocatorSemantic && !snapshot.IdentityCoverageIncomplete {
 		key := refIdentityKey(
 			locatorKind,
 			firstNonEmpty(snapshot.AppRef, snapshot.AppIdentity),
@@ -1055,22 +1234,42 @@ func (registry *RefRegistry) AcquireNode(
 		)
 		if existingRef := registry.byIdentity[key]; existingRef != "" {
 			entry := registry.entries[existingRef]
-			if completeProviderIdentityChanged(
+			providerChanged := completeProviderIdentityChanged(
 				entry,
 				node.ProviderBusName,
 				node.ProviderObjectPath,
 				node.ProcessGeneration,
-			) && !runtimePathMatchesEntry(entry, node.RuntimeID) {
+			)
+			boundDiscontinuity := locatorKind == AXLocatorProviderBound &&
+				!providerBoundProjectionContinuity(entry, &AXRefEntry{
+					LocatorKind: locatorKind, AppRef: snapshot.AppRef,
+					LogicalWindowRef: snapshot.WindowRef, WindowHandle: snapshot.WindowHandle,
+					ProviderBusName: node.ProviderBusName, ProviderObjectPath: node.ProviderObjectPath,
+					ProcessGeneration: node.ProcessGeneration, ProviderIdentityScope: node.ProviderIdentityScope,
+					ProviderWindowBusName:           node.ProviderWindowBusName,
+					ProviderWindowObjectPath:        node.ProviderWindowObjectPath,
+					ProviderWindowProcessGeneration: node.ProviderWindowProcessGeneration,
+					Role:                            node.Role, ProviderRole: node.ProviderRole, Name: node.Name,
+					AutomationID: node.AutomationID, SemanticTarget: node.SemanticTarget,
+				}, node.RuntimeID)
+			if processInstanceBindingChanged(entry, node.ProviderBusName, node.ProviderObjectPath,
+				node.ProcessGeneration, node.ProviderIdentityScope) || boundDiscontinuity ||
+				providerChanged && !runtimePathMatchesEntry(entry, node.RuntimeID) {
 				// A complete fresh snapshot must never advertise an rN that the
 				// live resolver will immediately reject. A different provider
 				// identity outside the recorded runtime lineage is a replacement,
 				// not proven continuity: retire the old ref and issue a new one.
 				registry.MarkSuperseded(
 					existingRef,
-					"complete snapshot observed a replacement provider lineage",
+					"complete snapshot observed replacement element identity",
 				)
 			}
 		}
+	}
+	// Display normalization must not alter the label bound to a native object.
+	name := node.Name
+	if node.SourceRecord != nil {
+		name = node.SourceRecord.Name
 	}
 	ref := registry.AcquireTyped(
 		locatorKind,
@@ -1078,7 +1277,7 @@ func (registry *RefRegistry) AcquireNode(
 		snapshot.WindowHandle,
 		node.SemanticTarget,
 		node.Role,
-		node.Name,
+		name,
 		snapshot.Revision,
 		node.ProviderBusName,
 		node.ProviderObjectPath,
@@ -1091,6 +1290,8 @@ func (registry *RefRegistry) AcquireNode(
 		snapshot.AppRef,
 		snapshot.WindowRef,
 		node.ProviderIdentityScope,
+		node.AutomationID,
+		node.ProviderRole,
 	)
 	if ref != "" {
 		entry := registry.entries[ref]
@@ -1139,7 +1340,8 @@ func (registry *RefRegistry) MarkLifecycle(
 	}
 	entry.Lifecycle = lifecycle
 	entry.StaleReason = strings.TrimSpace(reason)
-	if lifecycle != AXRefActive && lifecycle != AXRefNeedsRevalidation {
+	if lifecycle != AXRefActive && lifecycle != AXRefNeedsRevalidation &&
+		registry.byIdentity[entry.IdentityKey] == entry.Ref {
 		delete(registry.byIdentity, entry.IdentityKey)
 	}
 }
@@ -1191,7 +1393,9 @@ func (registry *RefRegistry) evict() {
 			continue
 		}
 		delete(registry.entries, oldestRef)
-		delete(registry.byIdentity, entry.IdentityKey)
+		if registry.byIdentity[entry.IdentityKey] == entry.Ref {
+			delete(registry.byIdentity, entry.IdentityKey)
+		}
 		entry.Lifecycle = AXRefExpired
 		entry.StaleReason = "session registry capacity eviction"
 	}
@@ -1220,10 +1424,10 @@ func (registry *RefRegistry) Resolve(
 	entry := registry.entries[strings.TrimSpace(ref)]
 	if entry == nil {
 		if id < registry.next {
-			return nil, fmt.Errorf(
+			return nil, &axRefLifecycleError{kind: "element", lifecycle: AXRefExpired, message: fmt.Sprintf(
 				"short AX ref %q expired from this session registry; observe or find the target again",
 				ref,
-			)
+			)}
 		}
 		return nil, fmt.Errorf(
 			"short AX ref %q was never issued in this session",
@@ -1240,10 +1444,10 @@ func (registry *RefRegistry) Resolve(
 		case AXRefExpired:
 			reason = "target reference expired"
 		}
-		return nil, fmt.Errorf(
+		return nil, &axRefLifecycleError{kind: "element", lifecycle: entry.Lifecycle, message: fmt.Sprintf(
 			"short AX ref %q is %s (%s); observe or find the target again",
 			ref, entry.Lifecycle, reason,
-		)
+		)}
 	}
 	if requested := looseKey(requestedApp); requested != "" {
 		registered := looseKey(entry.AppIdentity)
@@ -1503,6 +1707,13 @@ func (registry *RefRegistry) markExistingNodeRefsPresent(
 		ref := registry.byIdentity[key]
 		entry := registry.entries[ref]
 		if entry == nil || entry.Lifecycle == AXRefExpired {
+			return
+		}
+		if processInstanceBindingChanged(entry, node.ProviderBusName, node.ProviderObjectPath,
+			node.ProcessGeneration, node.ProviderIdentityScope) ||
+			!providerWindowOwnershipContinuous(entry, node.ProviderWindowBusName,
+				node.ProviderWindowObjectPath, node.ProviderWindowProcessGeneration) {
+			registry.MarkSuperseded(ref, "provider instance or window continuity lost")
 			return
 		}
 		if locatorKind == AXLocatorSemantic &&

@@ -92,6 +92,7 @@ func cloneAXFindContextForest(
 			continue
 		}
 		clone := *canonical
+		clone.VisibilityEvidence = cloneVisibilityEvidence(canonical.VisibilityEvidence)
 		clone.Parent = parent
 		clone.Children = nil
 		clone.Annotations = append(

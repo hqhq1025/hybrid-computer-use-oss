@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import subprocess
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -47,8 +48,14 @@ def test_agent_artifact_lock_is_complete():
     assert set(lock["agents"]) == {"codex", "claude_code", "gemini_cli", "grok_build"}
     assert set(lock["runtimes"]) == {"node"}
     for config in [*lock["agents"].values(), *lock["runtimes"].values()]:
-        assert len(config["archive_sha256"]) == 64
-        assert config["archive_url"].startswith("https://")
+        digest = config["archive_sha256"]
+        assert len(digest) == 64
+        assert all(character in "0123456789abcdef" for character in digest)
+        url = urlsplit(config["archive_url"])
+        assert url.scheme == "https"
+        assert url.hostname in {"github.com", "registry.npmjs.org", "nodejs.org"}
+        assert config["version"] in url.path
+        assert url.path.endswith("/" + config["archive"])
         assert config["artifact_path"].startswith("artifacts/")
 
 

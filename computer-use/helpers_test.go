@@ -147,6 +147,8 @@ func testPNGBase64(t *testing.T, width, height int) string {
 
 type recordingPlatformBackend struct {
 	calls                  []string
+	actionRequests         []ProviderActionRequest
+	desktopRequests        []ProviderDesktopRequest
 	observeRequests        []ProviderObserveRequest
 	accessibilityResponse  *ProviderAccessibilityResult
 	accessibilityResponses []ProviderAccessibilityResult
@@ -190,14 +192,16 @@ func (b *recordingPlatformBackend) Observe(
 }
 
 func (b *recordingPlatformBackend) ResolveAndAct(
-	ProviderActionRequest,
+	request ProviderActionRequest,
 ) (ProviderAccessibilityResult, error) {
+	b.actionRequests = append(b.actionRequests, request)
 	return b.accessibilityResult("resolve_and_act")
 }
 
 func (b *recordingPlatformBackend) ExecuteBatch(
-	ProviderDesktopRequest,
+	request ProviderDesktopRequest,
 ) (ProviderDesktopResult, error) {
+	b.desktopRequests = append(b.desktopRequests, request)
 	b.calls = append(b.calls, "desktop_execute_batch")
 	if b.desktopResponse == nil {
 		return ProviderDesktopResult{}, b.err

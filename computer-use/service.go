@@ -12,9 +12,10 @@ import (
 )
 
 type failedObservationEntry struct {
-	query        string
-	windowHandle string
-	aliases      map[string]bool
+	continuityNote string
+	query          string
+	windowHandle   string
+	aliases        map[string]bool
 }
 
 type observationLedger struct {
@@ -184,6 +185,26 @@ func (s *service) callTool(
 	// Capture error context in one place: errors are returned from many call
 	// sites, and adding the capture to each would miss some.
 	if result.IsError && internalName != "gui" {
+		// Preparation can remain queued after the failure. Error reporting must
+		// not issue a hidden read or replace the explicit stop with recovery.
+		if result.StructuredContent["focus_preparation"] != nil ||
+			result.StructuredContent["pointer_preparation"] != nil {
+			result.StructuredContent["evidence_scope"] = "error_only"
+			result.StructuredContent["preflight_only"] = false
+			result.StructuredContent["error_context_captured"] = false
+			result.StructuredContent["error_context_fresh_ui_sampled"] = false
+			return result
+		}
+		if result.StructuredContent["find_delivery_budget_exhausted"] == true {
+			// A sampled/cached read that cannot fit is not a preflight rejection
+			// and must not trigger a second, hidden UI read.
+			result.StructuredContent["evidence_scope"] = result.StructuredContent["find_read_scope"]
+			result.StructuredContent["preflight_only"] = false
+			result.StructuredContent["input_events_emitted"] = false
+			result.StructuredContent["error_context_captured"] = false
+			result.StructuredContent["error_context_fresh_ui_sampled"] = false
+			return result
+		}
 		app := requiredString(args, "app")
 		recoveryObservationAttempted := result.StructuredContent != nil &&
 			result.StructuredContent["recovery_observation_attempted"] == true
@@ -234,7 +255,9 @@ func (s *service) callTool(
 			result.StructuredContent["evidence_scope"] == "error_only" {
 			result.StructuredContent["error_context_captured"] = false
 			result.StructuredContent["error_context_fresh_ui_sampled"] = false
-			result.StructuredContent["preflight_only"] = true
+			if _, known := result.StructuredContent["preflight_only"]; !known {
+				result.StructuredContent["preflight_only"] = true
+			}
 			return result
 		}
 		message := ""
@@ -441,7 +464,7 @@ func (s *service) listApps() toolCallResult {
 		}
 	}
 	if strings.TrimSpace(response.Text) == "" {
-		response.Text = "No running top-level apps are visible to this Linux runtime."
+		response.Text = "No running top-level apps are visible to this accessibility provider."
 	}
 	return textResult(response.Text, false)
 }

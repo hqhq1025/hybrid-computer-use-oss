@@ -131,7 +131,7 @@ func matchedFindTextField(
 			)
 		}
 		if matched {
-			return field.name, clipRunes([]rune(field.value)), true
+			return field.name, field.value, true
 		}
 	}
 	return "", "", false
@@ -311,24 +311,13 @@ func (s *service) renderFindPage(
 			true,
 		).withEvidenceScope("error_only")
 	}
-	end := offset + limit
-	if end > len(matched) {
-		end = len(matched)
-	}
-	shown := matched[offset:end]
 	setID := ""
 	if len(resultSetID) > 0 {
 		setID = strings.TrimSpace(resultSetID[0])
 	}
 	frozenRefs := setID != ""
 	projected := axProjectedIndices(snapshot.axSnapshot.Roots)
-	if !frozenRefs && end < len(matched) {
-		for index := range matched {
-			record := &matched[index]
-			if !projected[record.Index] {
-				s.rememberExposedHiddenRef(snapshot, *record)
-			}
-		}
+	if !frozenRefs {
 		allFindNodes := buildAXFindContext(snapshot, matched, projected)
 		allFindSnapshot := newAXFindSnapshot(
 			snapshot.axSnapshot, allFindNodes,
@@ -338,108 +327,18 @@ func (s *service) renderFindPage(
 		cursorSnapshot := *snapshot
 		cursorSnapshot.axSnapshot = allFindSnapshot
 		cursorSnapshot.Elements = append([]elementRecord(nil), matched...)
+		// Ref assignment freezes identity; only delivered content proves exposure.
+		cursorSnapshot.findHiddenRecords = map[int]elementRecord{}
+		for _, record := range snapshot.Elements {
+			if !projected[record.Index] && allFindSnapshot.ByIndex[record.Index] != nil {
+				cursorSnapshot.findHiddenRecords[record.Index] = cloneFindRecord(record)
+			}
+		}
 		snapshot = &cursorSnapshot
 		projected = axProjectedIndices(allFindSnapshot.Roots)
-		frozenRefs = true
 	}
-	var out strings.Builder
-	fmt.Fprintf(&out, "window: %q\nmatches: %d query=%s",
-		snapshot.WindowTitle, len(matched), strconv.Quote(query))
-	fmt.Fprintf(&out, " range=%d..%d", offset+1, end)
-	nextCursor := ""
-	if end < len(matched) {
-		if setID == "" {
-			nextCursor = s.findCursorRegistry.Create(
-				snapshot, matched, end, query,
-			)
-			if nextCursor != "" {
-				if resolution, err := s.findCursorRegistry.Resolve(
-					nextCursor,
-				); err == nil && resolution.ResultSet != nil {
-					snapshot = resolution.ResultSet.Snapshot
-					setID = resolution.Cursor.ResultSetID
-				}
-			}
-		} else {
-			nextCursor = s.findCursorRegistry.Continue(setID, end)
-		}
-		if nextCursor != "" {
-			fmt.Fprintf(&out, " next_cursor=%s", nextCursor)
-		} else {
-			out.WriteString(
-				" continuation=unavailable_budget refine_query=true",
-			)
-		}
-	}
-	out.WriteString("\n")
-	for index := range shown {
-		record := &shown[index]
-		if !projected[record.Index] {
-			s.rememberExposedHiddenRef(snapshot, *record)
-		}
-	}
-	findNodes := buildAXFindContext(snapshot, shown, projected)
-	findSnapshot := newAXFindSnapshot(snapshot.axSnapshot, findNodes)
-	if !frozenRefs {
-		s.refRegistry.AssignSnapshotRefs(findSnapshot)
-		s.stabilizeFindRefs(snapshot, findSnapshot)
-	}
-	findLines, renderErr := RenderAXSnapshotYAML(
-		findSnapshot,
-		AXRenderOptions{RootKey: "matches"},
-	)
-	if renderErr != nil {
-		return textResult("AX find renderer failed: "+renderErr.Error(), true)
-	}
-	if len(findLines) > 0 {
-		out.WriteString(strings.Join(findLines, "\n"))
-		out.WriteByte('\n')
-	}
-	out.WriteString("addressability:\n")
-	for matchIndex, record := range shown {
-		node := axNodeByIndex(findNodes, record.Index)
-		matchEvidence := ""
-		if record.FindMatchedField != "" {
-			matchEvidence = fmt.Sprintf(
-				" matched_field=%s matched_text=%s",
-				record.FindMatchedField,
-				strconv.Quote(record.FindMatchedText),
-			)
-		}
-		if node != nil && node.Ref != "" {
-			fmt.Fprintf(
-				&out,
-				" - match=%d%s target={\"ref\":%q}\n",
-				offset+matchIndex+1,
-				matchEvidence,
-				node.Ref,
-			)
-			continue
-		}
-		reason := "stable_identity_unavailable"
-		if node != nil {
-			_, reason, _ = axNodeRefEligibility(findSnapshot, node)
-		}
-		fmt.Fprintf(
-			&out,
-			" - match=%d%s addressable=false reason=%s; use nearby context, GUI, or a fresh observation\n",
-			offset+matchIndex+1,
-			matchEvidence,
-			reason,
-		)
-	}
-	response := withFailedActionContinuity(
-		snapshot.textWithNotes(out.String(), notes),
-		followsFailedAction,
-	)
-	addTreeProjectionMetadata(&response, snapshot)
-	response.StructuredContent["find_match_count"] = len(matched)
-	response.StructuredContent["find_page_start"] = offset + 1
-	response.StructuredContent["find_page_count"] = len(shown)
-	if nextCursor != "" {
-		response.StructuredContent["next_cursor"] = nextCursor
-	}
-	return response
+	return s.deliverFindPage(snapshot, matched, offset, limit, query, notes,
+		followsFailedAction, projected, setID)
 }
 
 func (s *service) stabilizeFindRefs(
@@ -455,43 +354,49 @@ func (s *service) stabilizeFindRefs(
 		for _, node := range nodes {
 			if node.FindMatch && node.Ref != "" {
 				entry := s.refRegistry.entries[node.Ref]
+				if entry != nil && (entry.WindowHandle != source.WindowHandle ||
+					entry.WindowHandle != findSnapshot.WindowHandle ||
+					entry.LogicalWindowRef != "" && entry.LogicalWindowRef != findSnapshot.WindowRef) {
+					node.Ref = ""
+					if canonical := findSnapshot.ByID[node.ID]; canonical != nil {
+						canonical.Ref = ""
+					}
+					visit(node.Children)
+					continue
+				}
 				if entry != nil && entry.LocatorKind == AXLocatorSemantic {
-					_, err := lookupBySelector(
-						source,
-						strings.TrimSpace(entry.SemanticTarget),
-						"",
-					)
+					selector := strings.TrimSpace(entry.SemanticTarget)
+					var current *elementRecord
+					var err error
+					if isSemanticRef(selector) {
+						var scopedWindow string
+						selector, scopedWindow, err = decodeSemanticRefScope(selector)
+						if err == nil && scopedWindow != "" && scopedWindow != source.WindowHandle {
+							err = fmt.Errorf("semantic ref belongs to another window")
+						}
+					}
+					if err == nil {
+						current, err = lookupBySelector(source, selector, "")
+					}
 					if err != nil {
 						node.Ref = ""
 						if axNodeProviderIdentityComplete(node) {
-							node.Ref = s.refRegistry.AcquireTyped(
+							node.Ref = s.refRegistry.AcquireNode(
+								findSnapshot,
+								node,
 								AXLocatorProviderBound,
-								findSnapshot.AppIdentity,
-								findSnapshot.WindowHandle,
-								"",
-								node.Role,
-								node.Name,
-								findSnapshot.Revision,
-								node.ProviderBusName,
-								node.ProviderObjectPath,
-								node.ProcessGeneration,
-								node.ProviderWindowBusName,
-								node.ProviderWindowObjectPath,
-								node.ProviderWindowProcessGeneration,
-								node.ProviderWindowRole,
-								node.ProviderWindowName,
-								findSnapshot.AppRef,
-								findSnapshot.WindowRef,
-								node.ProviderIdentityScope,
-							)
-							s.refRegistry.BindRuntimePaths(
-								node.Ref,
-								node.RuntimeID,
-								node.RuntimeIDAliases,
 							)
 						}
 						if canonical := findSnapshot.ByID[node.ID]; canonical != nil {
 							canonical.Ref = node.Ref
+						}
+					} else if current != nil {
+						s.refRegistry.RefreshProviderBinding(node.Ref, current, true)
+						if entry.Lifecycle != AXRefActive {
+							node.Ref = ""
+							if canonical := findSnapshot.ByID[node.ID]; canonical != nil {
+								canonical.Ref = ""
+							}
 						}
 					}
 				}

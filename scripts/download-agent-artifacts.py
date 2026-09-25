@@ -2,10 +2,11 @@
 """Download the agent CLIs pinned in configs/agent-artifacts.lock.json.
 
 Each archive is fetched from its publisher and checked against the recorded
-SHA-256. An entry with ``archive_member`` is extracted to its artifact path;
-an entry without one is kept as the archive itself (the Gemini CLI npm
-tarball, unpacked in the guest). Grok Build's member is Brotli-compressed and
-is decoded with the pinned Node runtime, so runtimes are installed first.
+SHA-256, then validated as an archive. An entry with ``archive_member`` is
+extracted to its artifact path; an entry without one is kept as the archive
+itself (the Gemini CLI npm tarball, unpacked in the guest). Grok Build's member
+is Brotli-compressed and is decoded with the pinned Node runtime, so runtimes
+are installed first.
 """
 
 from __future__ import annotations
@@ -52,13 +53,19 @@ def install(name: str, config: dict, temp_dir: Path, node: Path | None) -> Path:
     target = ROOT / config["artifact_path"]
     target.parent.mkdir(parents=True, exist_ok=True)
     if "archive_member" not in config:
+        with tarfile.open(archive, "r:*") as bundle:
+            if not any(member.isfile() and member.size > 0 for member in bundle.getmembers()):
+                raise RuntimeError(f"{name} archive contains no non-empty files")
         shutil.copyfile(archive, target)
         print(f"{name}: {config['version']} -> {target}")
         return target
 
     member = temp_dir / f"{name}.member"
     with tarfile.open(archive, "r:*") as bundle:
-        source = bundle.extractfile(bundle.getmember(config["archive_member"]))
+        entry = bundle.getmember(config["archive_member"])
+        if not entry.isfile() or entry.size <= 0:
+            raise RuntimeError(f"{name} archive member must be a non-empty regular file")
+        source = bundle.extractfile(entry)
         if source is None:
             raise RuntimeError(f"{name} archive member is not a file")
         with member.open("wb") as output:

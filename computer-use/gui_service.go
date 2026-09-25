@@ -13,6 +13,18 @@ import (
 )
 
 func (s *service) gui(actions any, settleMS int) toolCallResult {
+	providerActions, err := decodeProviderDesktopActions(actions)
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	if err := s.preflightPlatformGUIKeys(providerActions); err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	if s.platformBackend().HostInfo().Platform == "windows" {
+		if err := preflightWindowsGUIKeys(providerActions); err != nil {
+			return textResult(err.Error(), true).withEvidenceScope("error_only")
+		}
+	}
 	privateFrameID := ""
 	if guiBatchUsesFrameProvenance(actions) {
 		if s.guiSnapshot == nil || s.guiSnapshot.FrameID == "" {
@@ -21,6 +33,9 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 				Actions:         []ProviderDesktopAction{},
 			})
 			if err != nil {
+				if result, rejected := runtimeRequestRejectionResult(err); rejected {
+					return result
+				}
 				return textResult(err.Error(), true)
 			}
 			result := s.guiResponse(*observed)
@@ -35,10 +50,6 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 		}
 		privateFrameID = s.guiSnapshot.FrameID
 	}
-	providerActions, err := decodeProviderDesktopActions(actions)
-	if err != nil {
-		return textResult(err.Error(), true)
-	}
 	response, err := s.callProviderDesktop(ProviderDesktopRequest{
 		ProtocolVersion: providerProtocolV2,
 		Actions:         providerActions,
@@ -47,6 +58,9 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 		LeaseState:      s.guiLeaseState,
 	})
 	if err != nil {
+		if result, rejected := runtimeRequestRejectionResult(err); rejected {
+			return result
+		}
 		var timeout *runtimeTimeoutError
 		var transport *runtimeTransportError
 		mayMutate := guiBatchCanMutateDesktop(actions)

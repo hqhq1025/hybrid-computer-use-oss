@@ -141,6 +141,7 @@ def codex_config(
     base_instructions: str,
     mcp_command: str,
     channels: str = "",
+    developer_instructions: str | None = None,
 ) -> str:
     """Codex ``config.toml`` with ambient features off and the MCP required."""
     public_tools(channels)
@@ -152,10 +153,19 @@ def codex_config(
     disabled_system_skills = "\n\n".join(
         (
             "[[skills.config]]\n"
-            f'path = "{codex_home}/skills/.system/{name}/SKILL.md"\n'
+            "path = "
+            + json.dumps(f"{codex_home}/skills/.system/{name}/SKILL.md")
+            + "\n"
             "enabled = false"
         )
         for name in CODEX_BUNDLED_SYSTEM_SKILLS
+    )
+    extra_instructions = (
+        "developer_instructions = "
+        + json.dumps(developer_instructions, ensure_ascii=False)
+        + "\n"
+        if developer_instructions is not None
+        else ""
     )
     return f"""\
 model = {json.dumps(model)}
@@ -167,7 +177,7 @@ web_search = "disabled"
 model_reasoning_summary = "detailed"
 show_raw_agent_reasoning = true
 model_instructions_file = {json.dumps(base_instructions)}
-check_for_update_on_startup = false
+{extra_instructions}check_for_update_on_startup = false
 
 [analytics]
 enabled = false
@@ -248,12 +258,13 @@ def claude_mcp_config(
     adapter: str = GUEST_CLAUDE_MCP_ADAPTER,
     mcp_command: str = GUEST_MCP,
     channels: str = "",
+    python_executable: str = "/usr/bin/python3",
 ) -> str:
     """Claude Code MCP configuration that runs the MCP behind the adapter."""
     public_tools(channels)
     server: dict = {
         "type": "stdio",
-        "command": "/usr/bin/python3",
+        "command": python_executable,
         "args": [adapter, mcp_command, "mcp"],
     }
     if channels:

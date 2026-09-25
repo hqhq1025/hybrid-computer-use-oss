@@ -94,11 +94,19 @@ func enforceAXResponseBudget(result toolCallResult) toolCallResult {
 	limit := maxInlineChars()
 	const evidenceReserve = 2048
 	alreadyTruncated := resultContainsInlineTruncation(result)
+	if result.StructuredContent["find_delivery_complete"] == true {
+		// Application text is not truncation evidence for atomic find units.
+		alreadyTruncated = result.StructuredContent["truncation_reason"] == "response_budget"
+	}
 	structuralBudgetApplied := false
 	coverageIncomplete := 0
 	if result.StructuredContent != nil {
 		structuralBudgetApplied, _ =
 			result.StructuredContent["structural_budget_applied"].(bool)
+		if result.StructuredContent["find_delivery_complete"] == true {
+			structuralBudgetApplied = result.StructuredContent["find_context_omitted"] == true ||
+				result.StructuredContent["find_display_excerpt"] == true
+		}
 		coverageIncomplete, _ = intEvidence(
 			result.StructuredContent["coverage_incomplete_nodes"],
 		)

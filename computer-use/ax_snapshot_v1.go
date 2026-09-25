@@ -89,6 +89,7 @@ type AXNode struct {
 	SemanticClass       string                        `json:"-"`
 	ProviderRole        string                        `json:"providerRole,omitempty"`
 	Name                string                        `json:"name,omitempty"`
+	VisibilityEvidence  *AXVisibilityEvidence         `json:"visibilityEvidence,omitempty"`
 	States              AXStates                      `json:"states,omitempty"`
 	Capabilities        AXCapabilities                `json:"capabilities,omitempty"`
 	Properties          AXProperties                  `json:"properties,omitempty"`
@@ -100,6 +101,7 @@ type AXNode struct {
 	SemanticFingerprint string                        `json:"semanticFingerprint"`
 	ProviderIdentity    string                        `json:"-"`
 	LocatorKind         AXLocatorKind                 `json:"-"`
+	AutomationID        string                        `json:"-"`
 
 	ProviderIndex                   int            `json:"-"`
 	ProviderIndices                 []int          `json:"-"`
@@ -264,6 +266,7 @@ var roleOntology = []RoleDescriptor{
 var roleByProvider = func() map[string]RoleDescriptor {
 	out := map[string]RoleDescriptor{}
 	for _, descriptor := range roleOntology {
+		out[strings.ToLower(strings.TrimSpace(string(descriptor.ModelRole)))] = descriptor
 		for _, alias := range descriptor.ProviderAliases {
 			out[strings.ToLower(strings.TrimSpace(alias))] = descriptor
 		}
@@ -341,8 +344,15 @@ func typedAXCapabilities(record *elementRecord, role CanonicalRole) AXCapabiliti
 		actionSet["activate"] || actionSet["press"] || actionSet["toggle"] {
 		capabilities.Activate = ActivationSemantic
 	}
-	capabilities.SetValue = actionSet["setvalue"] ||
-		role == "slider" || role == "spinbutton" || role == "combobox"
+	if record != nil && record.SetValueSupported != nil {
+		capabilities.SetValue = *record.SetValueSupported
+	} else {
+		roleImpliesSetValue := role == "slider" || role == "spinbutton" || role == "combobox"
+		if record != nil && strings.HasPrefix(record.ProviderBusName, "uia3:") {
+			roleImpliesSetValue = false
+		}
+		capabilities.SetValue = actionSet["setvalue"] || roleImpliesSetValue
+	}
 	capabilities.EditText = role == "textbox"
 	capabilities.Scroll = actionSet["scroll"] || role == "scrollbar"
 	return capabilities
@@ -489,6 +499,47 @@ func mergeBoolEvidence(first, second *bool) *bool {
 	return first
 }
 
+type axProviderIdentityConflict struct {
+	reason string
+}
+
+func (err *axProviderIdentityConflict) Error() string {
+	return "provider_identity_conflict: contradictory " + err.reason + " in accessibility records"
+}
+
+func conflictingNonemptyIdentity(first, second string) bool {
+	first, second = strings.TrimSpace(first), strings.TrimSpace(second)
+	return first != "" && second != "" && first != second
+}
+
+func validateExactProviderAlias(node *AXNode, record *elementRecord, role CanonicalRole) error {
+	if node.Role != role {
+		return &axProviderIdentityConflict{reason: "roles"}
+	}
+	if conflictingNonemptyIdentity(node.AutomationID, record.AutomationID) {
+		return &axProviderIdentityConflict{reason: "control identifiers"}
+	}
+	for _, pair := range [][2]string{
+		{node.ProviderWindowBusName, record.ProviderWindowBusName},
+		{node.ProviderWindowObjectPath, record.ProviderWindowObjectPath},
+		{node.ProviderWindowProcessGeneration, record.ProviderWindowProcessGeneration},
+	} {
+		if conflictingNonemptyIdentity(pair[0], pair[1]) {
+			return &axProviderIdentityConflict{reason: "window ownership"}
+		}
+	}
+	return nil
+}
+
+func retainProviderAliasIdentity(node *AXNode, record *elementRecord) {
+	node.AutomationID = firstNonEmpty(node.AutomationID, record.AutomationID)
+	node.ProviderWindowBusName = firstNonEmpty(node.ProviderWindowBusName, record.ProviderWindowBusName)
+	node.ProviderWindowObjectPath = firstNonEmpty(node.ProviderWindowObjectPath, record.ProviderWindowObjectPath)
+	node.ProviderWindowProcessGeneration = firstNonEmpty(
+		node.ProviderWindowProcessGeneration, record.ProviderWindowProcessGeneration,
+	)
+}
+
 func mergeExactProviderAlias(node *AXNode, record *elementRecord) {
 	if node == nil || record == nil {
 		return
@@ -524,6 +575,12 @@ func mergeExactProviderAlias(node *AXNode, record *elementRecord) {
 	node.Capabilities.Scroll = node.Capabilities.Scroll || aliasCapabilities.Scroll
 	node.Showing = mergeBoolEvidence(node.Showing, record.Showing)
 	node.Visible = mergeBoolEvidence(node.Visible, record.Visible)
+	node.VisibilityEvidence = mergeVisibilityEvidence(node.VisibilityEvidence, record.VisibilityEvidence)
+	if node.VisibilityEvidence != nil && node.VisibilityEvidence.State == "unknown" {
+		node.Showing, node.Visible = nil, nil
+	}
+	// Keep later owner evidence so a third alias cannot hide a conflict.
+	retainProviderAliasIdentity(node, record)
 }
 
 func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
@@ -551,6 +608,7 @@ func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
 		ByIndex: map[int]*AXNode{},
 	}
 	byProviderIdentity := map[string]*AXNode{}
+	processIdentityEvidence := map[string]*AXNode{}
 	for index := range snapshot.Elements {
 		record := &snapshot.Elements[index]
 		if !recordInObservation(snapshot, record) {
@@ -581,8 +639,29 @@ func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
 			record.ProviderIdentityScope,
 			semanticTarget,
 		)
+		// Process object identity is independent of its projected label.
+		identityScope := strings.TrimSpace(record.ProviderIdentityScope)
+		if identityScope == "process" || identityScope == "process_instance" {
+			objectKey := completeAXProviderIdentity(
+				snapshot.publicWindowRef, record.ProcessGeneration,
+				record.ProviderBusName, record.ProviderObjectPath, identityScope, "",
+			)
+			if objectKey != "" {
+				identity := processIdentityEvidence[objectKey]
+				if identity == nil {
+					identity = &AXNode{Role: descriptor.ModelRole}
+					processIdentityEvidence[objectKey] = identity
+				} else if err := validateExactProviderAlias(identity, record, descriptor.ModelRole); err != nil {
+					return nil, err
+				}
+				retainProviderAliasIdentity(identity, record)
+			}
+		}
 		if providerIdentity != "" {
 			if canonical := byProviderIdentity[providerIdentity]; canonical != nil {
+				if err := validateExactProviderAlias(canonical, record, descriptor.ModelRole); err != nil {
+					return nil, err
+				}
 				out.ByID[id] = canonical
 				out.ByIndex[record.Index] = canonical
 				mergeExactProviderAlias(canonical, record)
@@ -653,11 +732,16 @@ func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
 			ProviderWindowName:              record.ProviderWindowName,
 			ProviderIdentity:                providerIdentity,
 			LocatorKind:                     locatorKind,
+			AutomationID:                    strings.TrimSpace(record.AutomationID),
 			Showing:                         record.Showing,
 			Visible:                         record.Visible,
+			VisibilityEvidence:              cloneVisibilityEvidence(record.VisibilityEvidence),
 			SemanticTarget:                  semanticTarget,
 			SourceRecord:                    record,
 			Parent:                          parent,
+		}
+		if node.VisibilityEvidence != nil && node.VisibilityEvidence.State == "unknown" {
+			node.Showing, node.Visible = nil, nil
 		}
 		node.Capabilities = typedAXCapabilities(record, node.Role)
 		node.SemanticFingerprint = semanticFingerprint(
@@ -737,6 +821,7 @@ func cloneAXForest(nodes []*AXNode, parent *AXNode) []*AXNode {
 	out := make([]*AXNode, 0, len(nodes))
 	for _, node := range nodes {
 		clone := *node
+		clone.VisibilityEvidence = cloneVisibilityEvidence(node.VisibilityEvidence)
 		clone.Parent = parent
 		clone.Children = cloneAXForest(node.Children, &clone)
 		clone.RuntimeID = append([]int(nil), node.RuntimeID...)

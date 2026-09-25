@@ -40,12 +40,14 @@ flowchart TB
     S --> AS[AX snapshots and canonical tree]
     S --> GL[GUI private layout lease]
     S --> E[Evidence normalization]
-    S --> B[Linux runtime backend]
+    S --> B[PlatformBackend]
     B --> W[Persistent JSONL provider process]
     W --> AT[AT-SPI]
     W --> WM[X11 window tools]
     W --> PX[GdkPixbuf screenshots]
     W --> IN[XTest and AT-SPI input]
+    B --> M[Persistent Swift macOS provider]
+    B --> N[Persistent C# Windows UIA3 provider]
 ```
 
 The main boundaries:
@@ -58,10 +60,19 @@ The main boundaries:
 4. `gui_service.go` validates GUI batches and binds coordinates to the last
    screenshot.
 5. `runtime_backend*.go` and `provider_*.go` implement the private,
-   versioned provider protocol; `linux_*.go` runs the provider process.
+   versioned provider protocol; platform transports run the provider process.
 6. `native/linux/provider/` implements AT-SPI, X11, screenshots and input in
    Python. The binary embeds it and writes it to disk when it starts the
    provider process.
+7. `native/macos/` and `native/windows/` implement native accessibility,
+   screenshot and input mechanisms. Their app/executable is packaged beside
+   the Go binary. A native worker is never shared between MCP processes.
+
+macOS also implements the optional private ordered-keyboard operation. The
+Go service still validates the whole public batch, binds one logical window,
+and consumes per-action continuity and emission evidence. Other providers use
+the existing per-action path. Provider argument rejection is distinct from a
+transport failure and does not imply input or restart a healthy worker.
 
 ## AX state model
 
@@ -90,6 +101,22 @@ rejected before any input and a fresh screenshot is returned.
 The provider returns the standard OSWorld desktop at its native 1920x1080.
 Larger desktops are scaled to fit 1920x1080, and coordinates are mapped back
 to the native desktop privately.
+
+## Identity And Distribution
+
+Runtime fingerprints remain private implementation details. Providers use
+them to distinguish window instances, detect layout changes and preserve exact
+element identity when displayed names are truncated. Semantic snapshot
+fingerprints support state comparison. These mechanisms are unrelated to
+release admission and must not be removed without preserving their safety
+properties.
+
+Release and run selection uses explicit versions and functional checks rather
+than project-enforced content-digest gates. Third-party downloads retain their
+recorded SHA256 checks to reject corrupted or substituted archives before
+installation. Provider diagnostics retain bounded text, original byte counts
+and truncation metadata without calculating unused text digests. Upstream
+package-manager integrity checks and vendored code remain unchanged.
 
 ## Evidence model
 

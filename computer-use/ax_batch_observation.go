@@ -321,6 +321,9 @@ func (s *service) recoverA11yBatchObservation(
 	if failed.StructuredContent == nil {
 		return failed
 	}
+	if failed.StructuredContent["focus_preparation"] != nil || failed.StructuredContent["pointer_preparation"] != nil {
+		return failed
+	}
 	inputEmitted := axEvidenceReportsInputEmission(failed.StructuredContent)
 	partial, _ := failed.StructuredContent["partial_input_possible"].(bool)
 	unknown, _ := failed.StructuredContent["mutation_unknown"].(bool)
@@ -413,7 +416,7 @@ func a11yRecoveryObservationCanRetryAtAppRoot(result toolCallResult) bool {
 	}
 	code, _ := result.StructuredContent["failure_code"].(string)
 	switch code {
-	case "stale_window_ref", "stale_target", "observation_incomplete":
+	case "stale_window_ref", "stale_target", "observation_incomplete", "state_unavailable":
 		return true
 	default:
 		return false

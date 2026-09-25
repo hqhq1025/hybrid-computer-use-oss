@@ -1,4 +1,4 @@
-"""Run a bounded rolling queue of hybrid OSWorld V2 tasks.
+"""Run a bounded rolling queue of hybrid OSWorld V1 or V2 tasks.
 
 The queue keeps a fixed number of task runs going, retries interrupted runs
 and renders ``QUEUE_STATUS.md`` while it runs.
@@ -30,12 +30,8 @@ from desktop_env.providers.volume import (
 RUNNER_MODULE = "hcu.osworld.run_task"
 
 def default_queue_path() -> Path:
-    """Queue configuration to read when ``--queue`` is not given.
-
-    Both benchmark generations use this queue, so the variable has no
-    generation in its name; ``HCU_V2_QUEUE`` is still accepted.
-    """
-    configured = os.environ.get("HCU_QUEUE") or os.environ.get("HCU_V2_QUEUE")
+    """Read HCU_QUEUE when ``--queue`` is not given."""
+    configured = os.environ.get("HCU_QUEUE")
     return Path(
         configured or REPO_ROOT / "configs" / "osworld-v2-codex-queue.example.json"
     )
@@ -359,6 +355,7 @@ class QueueRunner:
             return "external-running" if self.pid_alive(pid) else "failed"
         return "pending"
 
+    @staticmethod
     def pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
@@ -545,21 +542,11 @@ class QueueRunner:
 
     @staticmethod
     def display_stratum(value: object) -> str:
-        """Render queue taxonomy without presenting stale diagnostics as state."""
+        """Preserve the configured taxonomy in one Markdown table cell."""
 
-        text = " ".join(str(value or "").split()).strip()
+        text = " ".join(str(value if value is not None else "").split())
         if not text:
             return "unclassified"
-        error_markers = (
-            "blocked",
-            "error",
-            "failed",
-            "failure",
-            "exception",
-            "traceback",
-        )
-        if any(marker in text.casefold() for marker in error_markers):
-            return "legacy diagnostic cohort"
         return text.replace("|", r"\|")
 
     def render_status(self) -> None:
@@ -598,8 +585,9 @@ class QueueRunner:
                 + " |"
             )
         headers = ["Task", "Static stratum", "Hybrid"]
+        benchmark_version = str(self.config.get("benchmark_version") or "v2")
         lines = [
-            "# Rolling OSWorld V2 Queue Status",
+            f"# Rolling OSWorld {benchmark_version.upper()} Queue Status",
             "",
             f"Updated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}",
             "",
@@ -620,7 +608,6 @@ class QueueRunner:
             f"{self.config.get('max_starting_tasks', 6)}",
             f"External active processes: {self.external_active_count()}",
             f"Host load 1m: {os.getloadavg()[0]:.1f}",
-            f"Available memory: {self.available_memory_gb():.1f} GiB",
             f"Rate-limit pause remaining: "
             f"{self.rate_limit_pause_remaining():.0f}s",
             f"Launch gate: {'open' if self.launch_gate_open() else 'waiting'}",

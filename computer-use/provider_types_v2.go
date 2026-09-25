@@ -71,6 +71,7 @@ type ProviderSemanticTarget struct {
 	ProviderWindowName              string                    `json:"providerWindowName,omitempty"`
 	ProviderRoleAliases             []string                  `json:"providerRoleAliases,omitempty"`
 	ProviderIdentityScope           string                    `json:"providerIdentityScope,omitempty"`
+	AutomationID                    string                    `json:"automationId,omitempty"`
 	RuntimeID                       []int                     `json:"runtimeId,omitempty"`
 	RuntimeIDAliases                [][]int                   `json:"runtimeAliases,omitempty"`
 	Role                            string                    `json:"role,omitempty"`
@@ -178,6 +179,7 @@ type ProviderActionRequest struct {
 	SetValue        *ProviderSetValueInput        `json:"-"`
 	WindowBounds    *ProviderFrame                `json:"window_bounds,omitempty"`
 	Observation     ProviderObservationOptions    `json:"observation,omitempty"`
+	Diagnostics     *ProviderDiagnosticContext    `json:"diagnostics,omitempty"`
 	KnownRefs       map[string]ProviderElementRef `json:"-"`
 }
 
@@ -193,6 +195,7 @@ type providerActionRequestWire struct {
 	Input           json.RawMessage            `json:"input,omitempty"`
 	WindowBounds    *ProviderFrame             `json:"window_bounds,omitempty"`
 	Observation     ProviderObservationOptions `json:"observation,omitempty"`
+	Diagnostics     *ProviderDiagnosticContext `json:"diagnostics,omitempty"`
 }
 
 func (request ProviderActionRequest) MarshalJSON() ([]byte, error) {
@@ -229,6 +232,7 @@ func (request ProviderActionRequest) MarshalJSON() ([]byte, error) {
 		Input:           raw,
 		WindowBounds:    request.WindowBounds,
 		Observation:     request.Observation,
+		Diagnostics:     request.Diagnostics,
 	})
 }
 
@@ -248,6 +252,7 @@ func (request *ProviderActionRequest) UnmarshalJSON(data []byte) error {
 		Target:          wire.Target,
 		WindowBounds:    wire.WindowBounds,
 		Observation:     wire.Observation,
+		Diagnostics:     wire.Diagnostics,
 	}
 	decodeInput := func(target any) error {
 		if len(wire.Input) == 0 {
@@ -364,10 +369,12 @@ type ProviderFailure struct {
 }
 
 type ProviderMutationFacts struct {
-	InputEventsEmitted   bool `json:"input_events_emitted,omitempty"`
-	PartialInputPossible bool `json:"partial_input_possible,omitempty"`
-	DesktopStateMutated  bool `json:"desktop_state_mutated,omitempty"`
-	MutationUnknown      bool `json:"mutation_unknown,omitempty"`
+	FocusPreparation     string `json:"focus_preparation,omitempty"`
+	PointerPreparation   string `json:"pointer_preparation,omitempty"`
+	InputEventsEmitted   bool   `json:"input_events_emitted,omitempty"`
+	PartialInputPossible bool   `json:"partial_input_possible,omitempty"`
+	DesktopStateMutated  bool   `json:"desktop_state_mutated,omitempty"`
+	MutationUnknown      bool   `json:"mutation_unknown,omitempty"`
 }
 
 type ProviderAccessibilityResult struct {
@@ -404,6 +411,8 @@ type ProviderAccessibilityResult struct {
 	PartialInputPossible  bool                       `json:"-"`
 	DesktopStateMutated   bool                       `json:"-"`
 	MutationUnknown       bool                       `json:"-"`
+	FocusPreparation      string                     `json:"-"`
+	PointerPreparation    string                     `json:"-"`
 }
 
 type ProviderDesktopResult struct {
@@ -456,6 +465,8 @@ func (result *ProviderAccessibilityResult) prepareForService() {
 		result.PartialInputPossible = result.Mutation.PartialInputPossible
 		result.DesktopStateMutated = result.Mutation.DesktopStateMutated
 		result.MutationUnknown = result.Mutation.MutationUnknown
+		result.FocusPreparation = result.Mutation.FocusPreparation
+		result.PointerPreparation = result.Mutation.PointerPreparation
 	}
 	if result.ActionEvidence != nil && result.ActionEvidence.InputEmitted {
 		result.InputEventsEmitted = true

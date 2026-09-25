@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -103,7 +102,6 @@ func writeLinuxRuntimeDiagnosticBytes(
 	raw []byte,
 ) {
 	originalBytes := len(raw)
-	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
 	sample := raw
 	if len(sample) > linuxProviderDiagnosticLimit {
 		sample = sample[:linuxProviderDiagnosticLimit]
@@ -114,7 +112,6 @@ func writeLinuxRuntimeDiagnosticBytes(
 		"stage":                     stage,
 		"diagnostic":                string(sample),
 		"diagnostic_original_bytes": originalBytes,
-		"diagnostic_sha256":         digest,
 		"diagnostic_truncated":      originalBytes > len(sample),
 	})
 }
@@ -147,10 +144,6 @@ func writeLinuxProviderDiagnostic(record map[string]any) {
 		record["diagnostic_original_bytes"],
 		len([]byte(raw)),
 	)
-	digest, _ := record["diagnostic_sha256"].(string)
-	if strings.TrimSpace(digest) == "" {
-		digest = fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))
-	}
 	text, locallyTruncated := truncateLinuxDiagnostic(
 		text,
 		linuxProviderDiagnosticLimit,
@@ -159,7 +152,6 @@ func writeLinuxProviderDiagnostic(record map[string]any) {
 	truncated = truncated || locallyTruncated || originalBytes > len([]byte(raw))
 	record["diagnostic"] = text
 	record["diagnostic_original_bytes"] = originalBytes
-	record["diagnostic_sha256"] = digest
 	if truncated {
 		record["diagnostic_truncated"] = true
 	}
@@ -172,9 +164,8 @@ func writeLinuxProviderDiagnostic(record map[string]any) {
 	truncation := ""
 	if truncated {
 		truncation = fmt.Sprintf(
-			" truncated=true original_bytes=%d sha256=%s",
+			" truncated=true original_bytes=%d",
 			originalBytes,
-			digest,
 		)
 	}
 	fmt.Fprintf(

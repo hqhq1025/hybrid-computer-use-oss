@@ -101,7 +101,7 @@ func (registry *FindCursorRegistry) Create(
 	registry.resultSets[setID] = &AXFindResultSet{
 		ID:           setID,
 		Snapshot:     compactSnapshot,
-		Matches:      append([]elementRecord(nil), matches...),
+		Matches:      cloneFindRecords(matches),
 		Query:        query,
 		LastUsedTick: registry.tick,
 		CreatedAt:    now,
@@ -261,6 +261,46 @@ func (registry *FindCursorRegistry) totalResultSetBytes() int {
 	return total
 }
 
+func cloneFindRecord(record elementRecord) elementRecord {
+	record.RuntimeID = append([]int(nil), record.RuntimeID...)
+	record.RuntimeIDAliases = copyRuntimeIDs(record.RuntimeIDAliases)
+	record.Actions = append([]string(nil), record.Actions...)
+	record.VisibilityEvidence = cloneVisibilityEvidence(record.VisibilityEvidence)
+	for _, field := range []**bool{&record.Showing, &record.Visible, &record.SetValueSupported} {
+		if *field != nil {
+			value := **field
+			*field = &value
+		}
+	}
+	if record.Frame != nil {
+		value := *record.Frame
+		record.Frame = &value
+	}
+	if record.TextAttributes != nil {
+		attributes := make(map[string]string, len(record.TextAttributes))
+		for key, value := range record.TextAttributes {
+			attributes[key] = value
+		}
+		record.TextAttributes = attributes
+	}
+	if record.Relations != nil {
+		relations := make(map[string][]axRelationTarget, len(record.Relations))
+		for key, value := range record.Relations {
+			relations[key] = append([]axRelationTarget(nil), value...)
+		}
+		record.Relations = relations
+	}
+	return record
+}
+
+func cloneFindRecords(records []elementRecord) []elementRecord {
+	clones := make([]elementRecord, len(records))
+	for index, record := range records {
+		clones[index] = cloneFindRecord(record)
+	}
+	return clones
+}
+
 func compactFindSnapshot(snapshot *appSnapshot) *appSnapshot {
 	if snapshot == nil {
 		return nil
@@ -276,6 +316,12 @@ func compactFindSnapshot(snapshot *appSnapshot) *appSnapshot {
 	clone.Refs = nil
 	clone.Annotations = nil
 	clone.DesktopLayout = nil
+	if snapshot.findHiddenRecords != nil {
+		clone.findHiddenRecords = make(map[int]elementRecord, len(snapshot.findHiddenRecords))
+		for index, record := range snapshot.findHiddenRecords {
+			clone.findHiddenRecords[index] = cloneFindRecord(record)
+		}
+	}
 	if snapshot.axSnapshot != nil {
 		axClone := *snapshot.axSnapshot
 		axClone.CanonicalRoots = cloneAXForest(
@@ -325,8 +371,9 @@ func estimateFindResultSet(
 			len(match.ControlType) + len(match.ProviderObjectPath)
 	}
 	if encoded, err := json.Marshal(struct {
-		Snapshot *AXSnapshotV1   `json:"snapshot"`
-		Matches  []elementRecord `json:"matches"`
+		Snapshot      *AXSnapshotV1         `json:"snapshot"`
+		Matches       []elementRecord       `json:"matches"`
+		HiddenRecords map[int]elementRecord `json:"hidden_records"`
 	}{
 		Snapshot: func() *AXSnapshotV1 {
 			if snapshot == nil {
@@ -335,6 +382,12 @@ func estimateFindResultSet(
 			return snapshot.axSnapshot
 		}(),
 		Matches: matches,
+		HiddenRecords: func() map[int]elementRecord {
+			if snapshot == nil {
+				return nil
+			}
+			return snapshot.findHiddenRecords
+		}(),
 	}); err == nil && len(encoded) > bytes {
 		bytes = len(encoded)
 	}

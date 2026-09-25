@@ -73,6 +73,9 @@ def validate_config(config: dict) -> None:
     unknown = sorted(set(config) - CONFIG_KEYS)
     if unknown:
         raise ValueError("Unknown config keys: " + ", ".join(unknown))
+    benchmark_version = str(config.get("benchmark_version") or "v2")
+    if benchmark_version not in {"v1", "v2"}:
+        raise ValueError("config.benchmark_version must be v1 or v2")
     for task in normalized_tasks(config):
         unknown = sorted(set(task) - TASK_KEYS)
         if unknown:

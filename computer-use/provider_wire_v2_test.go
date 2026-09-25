@@ -20,9 +20,224 @@ type providerV2FixtureManifest struct {
 }
 
 type providerV2FixtureEntry struct {
-	Name      string `json:"name"`
-	Direction string `json:"direction"`
-	File      string `json:"file"`
+	Name          string `json:"name"`
+	Direction     string `json:"direction"`
+	File          string `json:"file"`
+	RequestFile   string `json:"request_file,omitempty"`
+	ErrorContains string `json:"error_contains,omitempty"`
+}
+
+type providerV2NativeFixtureManifest struct {
+	SchemaVersion         int                      `json:"schema_version"`
+	Protocol              string                   `json:"protocol"`
+	OrderedInputPlatforms map[string]bool          `json:"ordered_input_platforms"`
+	Fixtures              []providerV2FixtureEntry `json:"fixtures"`
+}
+
+func readProviderV2Fixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := providerV2FixtureFS.ReadFile("testdata/provider-v2/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestProviderV2NativeFixtureCorpus(t *testing.T) {
+	var manifest providerV2NativeFixtureManifest
+	if err := strictFixtureDecode(readProviderV2Fixture(t, "native-manifest.json"), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Protocol != providerProtocolName || manifest.SchemaVersion != providerProtocolV2 {
+		t.Fatalf("invalid native fixture protocol: %+v", manifest)
+	}
+	if !reflect.DeepEqual(manifest.OrderedInputPlatforms, map[string]bool{"darwin": true, "windows": false, "linux": false}) {
+		t.Fatalf("optional operation support changed: %v", manifest.OrderedInputPlatforms)
+	}
+	seen := map[string]bool{}
+	invalid := map[string]string{}
+	for _, fixture := range manifest.Fixtures {
+		if fixture.Direction == "invalid_request" {
+			invalid[fixture.File] = fixture.ErrorContains
+		}
+	}
+	for _, fixture := range manifest.Fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			data := readProviderV2Fixture(t, fixture.File)
+			switch fixture.Direction {
+			case "request":
+				request, err := DecodeProviderWireRequest(data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if request.OrderedInput == nil || request.Operation != ProviderWireOrderedInput {
+					t.Fatal("native request must exercise the optional ordered-input operation")
+				}
+				assertProviderFixtureRoundTrip(t, data, request)
+				seen["request"] = true
+			case "invalid_request":
+				var request ProviderWireRequest
+				if err := strictFixtureDecode(data, &request); err != nil {
+					t.Fatal(err)
+				}
+				if request.Protocol != providerProtocolName || request.SchemaVersion != providerProtocolV2 || request.Operation != ProviderWireOrderedInput {
+					t.Fatal("negative fixture must reach ordered-input validation with a valid envelope")
+				}
+				if _, err := DecodeProviderWireRequest(data); err == nil || fixture.ErrorContains == "" || !strings.Contains(err.Error(), fixture.ErrorContains) {
+					t.Fatalf("invalid request rejected for wrong reason: %v", err)
+				}
+				seen["invalid_request"] = true
+			case "response":
+				response, err := DecodeProviderWireResponse(data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var request ProviderWireRequest
+				if err := strictFixtureDecode(readProviderV2Fixture(t, fixture.RequestFile), &request); err != nil {
+					t.Fatal(err)
+				}
+				if response.RequestID != request.RequestID || response.Operation != request.Operation {
+					t.Fatal("response is not correlated to its request fixture")
+				}
+				assertProviderFixtureRoundTrip(t, data, response)
+				if response.RequestRejection != nil {
+					want := invalid[fixture.RequestFile]
+					if err := request.Validate(); err == nil || want == "" || !strings.Contains(err.Error(), want) {
+						t.Fatalf("rejection fixture must bind a recognized invalid payload: %v", err)
+					}
+					seen["request_rejection"] = true
+					return
+				}
+				if request.OrderedInput == nil || response.OrderedInput == nil {
+					t.Fatal("ordered-input payload is missing")
+				}
+				if err := response.OrderedInput.ValidateFor(request.OrderedInput.ProviderOrderedInputRequest); err != nil {
+					t.Fatal(err)
+				}
+				switch {
+				case response.OrderedInput.OK:
+					seen["success"] = true
+				case response.OrderedInput.RetrySameRequest:
+					if !response.ProviderResetRequired || providerMutationCanInvalidate(&response.OrderedInput.Mutation) {
+						t.Fatal("retry fixture must exercise a zero-mutation provider reset")
+					}
+					seen["retry"] = true
+				case response.OrderedInput.Mutation.PartialInputPossible:
+					seen["partial"] = true
+				default:
+					t.Fatal("unclassified native response fixture")
+				}
+			default:
+				t.Fatalf("unknown native fixture direction %q", fixture.Direction)
+			}
+		})
+	}
+	for _, required := range []string{"request", "invalid_request", "success", "partial", "retry", "request_rejection"} {
+		if !seen[required] {
+			t.Errorf("native fixtures do not exercise %s", required)
+		}
+	}
+}
+
+func TestProviderV2NativeOrderedRequestBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*ProviderOrderedInputRequest)
+		want   string
+	}{
+		{"contract", func(r *ProviderOrderedInputRequest) { r.ContractVersion++ }, "contract version"},
+		{"identity", func(r *ProviderOrderedInputRequest) { r.AppIdentity = nil }, "exact app_identity"},
+		{"owner", func(r *ProviderOrderedInputRequest) { r.AppIdentity.ProcessGeneration = "other" }, "ownership"},
+		{"window", func(r *ProviderOrderedInputRequest) { r.ExpectedWindow.WindowHandle += "b" }, "match the private window_handle"},
+		{"steps", func(r *ProviderOrderedInputRequest) { r.Steps[1].ActionIndex++ }, "strictly contiguous"},
+		{"boundary", func(r *ProviderOrderedInputRequest) { *r.FinalObservation.CaptureSnapshot = false }, "canonical snapshot boundary"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := DecodeProviderWireRequest(readProviderV2Fixture(t, "ordered-input.request.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&request.OrderedInput.ProviderOrderedInputRequest)
+			data, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeProviderWireRequest(data); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("changed ordered request rejected for wrong reason: %v", err)
+			}
+		})
+	}
+}
+
+func TestProviderV2NativeOrderedResponseBoundaries(t *testing.T) {
+	request, err := DecodeProviderWireRequest(readProviderV2Fixture(t, "ordered-input.request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, file, want string
+		mutate           func(*ProviderOrderedInputResult)
+	}{
+		{"step correlation", "success", "action_index", func(r *ProviderOrderedInputResult) { r.Steps[1].ActionIndex++ }},
+		{"final window", "success", "expected window", func(r *ProviderOrderedInputResult) { r.Snapshot.WindowHandle += "b" }},
+		{"aggregate emission", "success", "contradicts step evidence", func(r *ProviderOrderedInputResult) { r.Mutation.InputEventsEmitted = false }},
+		{"partial uncertainty", "partial", "mutation_unknown", func(r *ProviderOrderedInputResult) { r.Mutation.MutationUnknown = false }},
+		{"partial replay", "partial", "same-request retry", func(r *ProviderOrderedInputResult) { r.RetrySameRequest = true }},
+		{"continue after failure", "partial", "continued after", func(r *ProviderOrderedInputResult) { r.Steps[2] = r.Steps[0]; r.Steps[2].ActionIndex = 4 }},
+		{"retry continuity", "retry", "same-request retry", func(r *ProviderOrderedInputResult) { r.Steps[0].WindowContinuity = ProviderOrderedInputWindowUnknown }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := DecodeProviderWireResponse(readProviderV2Fixture(t, "ordered-input-"+test.file+".response.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := response.OrderedInput.ValidateFor(request.OrderedInput.ProviderOrderedInputRequest); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(response.OrderedInput)
+			data, err := json.Marshal(response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := DecodeProviderWireResponse(data)
+			if err != nil {
+				t.Fatalf("must reach result correlation, not fail envelope decoding: %v", err)
+			}
+			if err := decoded.OrderedInput.ValidateFor(request.OrderedInput.ProviderOrderedInputRequest); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("changed ordered result rejected for wrong reason: %v", err)
+			}
+		})
+	}
+}
+
+func TestProviderV2NativeRequestRejectionBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*ProviderWireResponse)
+		want   string
+	}{
+		{"missing dispatch fact", func(r *ProviderWireResponse) { r.RequestRejection.DispatchAttempted = nil }, "pre-dispatch validation facts"},
+		{"dispatch attempted", func(r *ProviderWireResponse) { *r.RequestRejection.DispatchAttempted = true }, "pre-dispatch validation facts"},
+		{"wrong phase", func(r *ProviderWireResponse) { r.RequestRejection.Phase = "emission" }, "pre-dispatch validation facts"},
+		{"missing reason", func(r *ProviderWireResponse) { r.RequestRejection.Message = "" }, "pre-dispatch validation facts"},
+		{"reset", func(r *ProviderWireResponse) { r.ProviderResetRequired = true }, "cannot accompany"},
+		{"domain result", func(r *ProviderWireResponse) { r.Accessibility = &ProviderAccessibilityResult{OK: true} }, "cannot accompany"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := DecodeProviderWireResponse(readProviderV2Fixture(t, "request-rejection.response.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&response)
+			data, err := json.Marshal(response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeProviderWireResponse(data); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("changed rejection rejected for wrong reason: %v", err)
+			}
+		})
+	}
 }
 
 type providerV2InvalidFixture struct {
@@ -707,17 +922,6 @@ func TestProviderV2WireExcludesGoOwnedPolicyFields(t *testing.T) {
 		*action.Target.SourceIndex != sourceIndex {
 		t.Fatalf("typed provider request lost private source index: %#v", action)
 	}
-}
-
-func DecodeProviderWireRequest(data []byte) (ProviderWireRequest, error) {
-	var request ProviderWireRequest
-	if err := decodeProviderWireJSON(data, &request); err != nil {
-		return ProviderWireRequest{}, err
-	}
-	if err := request.Validate(); err != nil {
-		return ProviderWireRequest{}, err
-	}
-	return request, nil
 }
 
 func TestProviderDesktopSettleBound(t *testing.T) {

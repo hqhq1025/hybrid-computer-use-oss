@@ -41,6 +41,52 @@ strict-mode error messages, error context files and file output mode. Code
 comments name the design they follow. This repository contains no Playwright
 source files.
 
+## Native desktop dependencies
+
+`computer-use/vendor/golang.org/x/text` contains the packages needed for
+Unicode key-name validation, from Go's x/text v0.22.0. Its BSD-style LICENSE
+and PATENTS are retained in that directory. Vendoring permits offline builds.
+
+The Windows provider references FlaUI.UIA3 5.0.0 and its FlaUI.Core dependency,
+which are MIT licensed, through NuGet. Native builds restore those packages;
+their source is not vendored here. Self-contained Windows packages also
+include the Microsoft .NET runtime and must retain its third-party notices.
+The macOS provider links system Apple frameworks and uses the Swift toolchain.
+
+### Cua Driver and yabai
+
+The macOS SkyLight bridge and event recipes derive from these MIT-licensed
+implementations. Their copyright and permission notices follow.
+
+- Cua Driver: https://github.com/trycua/cua, source revision
+  `b8a0f32a06c75225ba24ebb5ab14f6507fa90d15`.
+- yabai: https://github.com/asmvik/yabai, source revision
+  `dd845723416f5fe92af49fad5ebab00369e07edd`.
+
+MIT License
+
+Copyright (c) 2025 Cua AI, Inc.
+
+Copyright (c) 2019 Åsmund Vikane
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## Agent CLIs
 
 `make agents` downloads the agent releases listed in

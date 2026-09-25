@@ -5,7 +5,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -268,7 +267,7 @@ func (worker *linuxProviderWorker) forwardStderr(stderr io.Reader) {
 	defer close(worker.stderrDone)
 	reader := bufio.NewReaderSize(stderr, 4*1024)
 	for {
-		line, originalBytes, digest, truncated, err :=
+		line, originalBytes, truncated, err :=
 			readLinuxProviderDiagnosticLine(
 				reader,
 				maxLinuxProviderStderrLineBytes,
@@ -281,7 +280,6 @@ func (worker *linuxProviderWorker) forwardStderr(stderr io.Reader) {
 					"stage":                     "process_stderr",
 					"diagnostic":                string(line),
 					"diagnostic_original_bytes": originalBytes,
-					"diagnostic_sha256":         digest,
 					"diagnostic_truncated":      true,
 				})
 			} else {
@@ -302,11 +300,10 @@ func (worker *linuxProviderWorker) forwardStderr(stderr io.Reader) {
 func readLinuxProviderDiagnosticLine(
 	reader *bufio.Reader,
 	limit int,
-) (line []byte, originalBytes int, digest string, truncated bool, err error) {
+) (line []byte, originalBytes int, truncated bool, err error) {
 	if limit <= 0 {
 		limit = 1
 	}
-	hasher := sha256.New()
 	for {
 		fragment, readErr := reader.ReadSlice('\n')
 		content := fragment
@@ -315,7 +312,6 @@ func readLinuxProviderDiagnosticLine(
 			content = content[:len(content)-1]
 		}
 		originalBytes += len(content)
-		_, _ = hasher.Write(content)
 		if remaining := limit - len(line); remaining > 0 {
 			if len(content) > remaining {
 				line = append(line, content[:remaining]...)
@@ -328,13 +324,11 @@ func readLinuxProviderDiagnosticLine(
 		}
 		switch {
 		case readErr == nil:
-			return line, originalBytes,
-				fmt.Sprintf("%x", hasher.Sum(nil)), truncated, nil
+			return line, originalBytes, truncated, nil
 		case errors.Is(readErr, bufio.ErrBufferFull):
 			continue
 		default:
-			return line, originalBytes,
-				fmt.Sprintf("%x", hasher.Sum(nil)), truncated, readErr
+			return line, originalBytes, truncated, readErr
 		}
 	}
 }

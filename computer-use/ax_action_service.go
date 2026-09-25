@@ -58,20 +58,29 @@ func semanticTargetFromRefEntry(entry *AXRefEntry) (*semanticTarget, error) {
 	}
 	var target *semanticTarget
 	var err error
-	if strings.TrimSpace(entry.SemanticTarget) != "" {
+	if entry.LocatorKind == AXLocatorProviderBound {
+		target = &semanticTarget{
+			Selector: selectorHead(string(entry.Role), entry.Name),
+			Role:     firstNonEmpty(entry.ProviderRole, string(entry.Role)),
+			Name:     entry.Name,
+			HasName:  strings.TrimSpace(entry.Name) != "",
+		}
+	} else if strings.TrimSpace(entry.SemanticTarget) != "" {
 		target, err = semanticTargetFromAddress(entry.SemanticTarget)
 		if err != nil {
 			return nil, err
 		}
-	} else if entry.LocatorKind == AXLocatorProviderBound {
-		target = &semanticTarget{
-			Selector: selectorHead(string(entry.Role), entry.Name),
-			Role:     string(entry.Role),
-			Name:     entry.Name,
-			HasName:  strings.TrimSpace(entry.Name) != "",
-		}
 	} else {
 		return nil, errors.New("the AX ref has no stable target identity")
+	}
+	if target.WindowHandle != "" && entry.WindowHandle != "" &&
+		target.WindowHandle != entry.WindowHandle {
+		return nil, errors.New("the AX ref selector belongs to another window")
+	}
+	// The selector is presentation text; exact provider checks need raw labels.
+	if target.HasName && entry.ProviderBusName != "" &&
+		entry.ProviderObjectPath != "" && entry.ProcessGeneration != "" {
+		target.Name = entry.Name
 	}
 	target.WindowHandle = firstNonEmpty(
 		target.WindowHandle,
@@ -82,6 +91,7 @@ func semanticTargetFromRefEntry(entry *AXRefEntry) (*semanticTarget, error) {
 	target.ProviderObjectPath = entry.ProviderObjectPath
 	target.ProcessGeneration = entry.ProcessGeneration
 	target.ProviderIdentityScope = entry.ProviderIdentityScope
+	target.AutomationID = entry.AutomationID
 	target.ProviderWindowBusName = entry.ProviderWindowBusName
 	target.ProviderWindowObjectPath = entry.ProviderWindowObjectPath
 	target.ProviderWindowProcessGeneration =
@@ -91,6 +101,9 @@ func semanticTargetFromRefEntry(entry *AXRefEntry) (*semanticTarget, error) {
 	target.ProviderRoleAliases = providerAliasesForCanonicalRole(
 		string(entry.Role),
 	)
+	if entry.ProviderRole != "" {
+		target.ProviderRoleAliases = append(target.ProviderRoleAliases, entry.ProviderRole)
+	}
 	target.RuntimeID = append([]int(nil), entry.RuntimeID...)
 	target.RuntimeIDAliases = make([][]int, 0, len(entry.RuntimeIDAliases))
 	for _, path := range entry.RuntimeIDAliases {
@@ -107,9 +120,27 @@ func (s *service) authorizeProviderRebind(
 	entry *AXRefEntry,
 	target *semanticTarget,
 ) {
+	if target != nil && entry != nil &&
+		(strings.TrimSpace(entry.ProviderIdentityScope) == "process_instance" ||
+			strings.TrimSpace(target.ProviderIdentityScope) == "process_instance") {
+		target.AllowProviderRebind = false
+		return
+	}
 	if s == nil || entry == nil || target == nil ||
-		entry.LocatorKind != AXLocatorSemantic ||
 		!validInternalWindowHandle(entry.WindowHandle) {
+		return
+	}
+	stableProviderAnchor := entry.LocatorKind == AXLocatorProviderBound &&
+		strings.TrimSpace(entry.AutomationID) != "" && len(entry.RuntimeID) > 0 &&
+		entry.ProviderWindowBusName != "" && entry.ProviderWindowObjectPath != "" &&
+		entry.ProviderWindowProcessGeneration != ""
+	if stableProviderAnchor {
+		// The native resolver must prove the same role, control ID, runtime
+		// lineage and owner before replacing a transient provider wrapper.
+		target.AllowProviderRebind = true
+		return
+	}
+	if entry.LocatorKind != AXLocatorSemantic {
 		return
 	}
 	snapshot := s.currentSnapshot(app)

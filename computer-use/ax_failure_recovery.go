@@ -152,6 +152,9 @@ func (s *service) consumeFailedObservation(app string, snapshot *appSnapshot) st
 			s.pendingFailedObservations[:index],
 			s.pendingFailedObservations[index+1:]...,
 		)
+		if entry.continuityNote != "" {
+			return entry.continuityNote
+		}
 		return "[continuity] This explicit observation follows a stale-reference " +
 			"action that failed during precondition checking. That action emitted " +
 			"no input and did not cause any UI change. The current UI state is an " +

@@ -3,6 +3,9 @@ FROM golang:1.22 AS builder
 WORKDIR /src
 COPY VERSION /VERSION
 COPY computer-use/ ./
+COPY LICENSE THIRD_PARTY_NOTICES.md /out/
+COPY licenses/ /out/licenses/
+COPY computer-use/vendor/golang.org/x/text/LICENSE computer-use/vendor/golang.org/x/text/PATENTS /out/licenses/golang.org/x/text/
 RUN version="$(cat /VERSION)" \
     && test -z "$(gofmt -l .)" \
     && go test ./... \
@@ -13,4 +16,4 @@ RUN version="$(cat /VERSION)" \
     && test "$(/out/computer-use --version)" = "${version}"
 
 FROM scratch AS export
-COPY --from=builder /out/computer-use /computer-use
+COPY --from=builder /out/ /

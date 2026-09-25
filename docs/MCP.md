@@ -1,6 +1,6 @@
 # Computer Use MCP
 
-`computer-use` is a stdio MCP server that controls an already-running Linux
+`computer-use` is a stdio MCP server that controls an already-running
 desktop. This page covers building it, running it, configuring Codex and
 Claude Code, the public contract and troubleshooting. For the internal design
 see [Architecture](ARCHITECTURE.md); for the desktop session and the browser
@@ -15,7 +15,7 @@ channel see [AX, GUI and CDP](AX_AND_CDP.md).
 | Version | the repository `VERSION` file, reported by `--version` and `serverInfo.version` |
 
 One `computer-use mcp` process serves one desktop session. It starts one
-persistent Python provider and keeps AX snapshots, element references and the
+persistent platform provider and keeps AX snapshots, element references and the
 GUI layout lease in memory, so never share a process between benchmark tasks.
 
 ## Source layout
@@ -32,9 +32,12 @@ computer-use/
   ax_*.go                  AX requests, batches, refs, projections, evidence
   gui_service.go           GUI batches and layout-lease checks
   runtime_backend*.go      platform backend boundary
-  provider_*.go            typed Go/Python provider protocol
+  provider_*.go            typed private provider protocol
   linux_*.go               Linux backend: provider process and host runtime
   native/linux/provider/   AT-SPI, X11, screenshot and input provider (Python)
+  native/macos/            Accessibility and CoreGraphics provider (Swift)
+  native/windows/          UIA3 and Win32 provider (C#)
+  *_sidecar_transport.go   native worker lifecycle and bounded transport
   runtime.py               provider entry point
 ```
 
@@ -51,9 +54,16 @@ make test         # gofmt, go vet, Go tests, provider tests, Python tests
 version from `VERSION` and checks that `--version` reports it. A plain
 `go build` reports `dev`.
 
+Those release targets build Linux. [Platform support](PLATFORMS.md) covers
+the macOS app bundle, Windows self-contained executable, and native tests.
+When redistributing a build, include its `LICENSE`, `THIRD_PARTY_NOTICES.md`
+and `licenses/` directory alongside the executable. The Linux output directory
+can also contain downloaded agent CLIs; those are separate dependencies, not
+part of the Computer Use package.
+
 ## Desktop runtime
 
-Run the server as the signed-in desktop user with that session's environment:
+Run the server as the signed-in desktop user. On Linux, bind its environment:
 
 ```text
 DISPLAY
@@ -81,7 +91,7 @@ diagnostics to stderr.
 ```text
 computer-use mcp               start the stdio MCP server
 computer-use call AX|GUI       call one tool, or a JSON array of calls with --calls
-computer-use doctor            print Linux runtime notes
+computer-use doctor            print platform runtime requirements
 computer-use version           print the version
 computer-use help [command]
 ```
@@ -107,15 +117,25 @@ startup_timeout_sec = 60
 tool_timeout_sec = 180
 ```
 
-To reproduce the runner's complete Codex profile outside OSWorld:
+To generate the Codex tool profile and selected skill outside OSWorld:
 
 ```bash
 python3 -m hcu.render_agent_config --agent codex \
   --model gpt-5.5 --effort xhigh \
   --gateway http://127.0.0.1:8611 \
   --mcp "$PWD/artifacts/computer-use" \
+  --codex-home /tmp/codex-home \
   --output /tmp/codex-home/config.toml
+
+CODEX_HOME=/tmp/codex-home codex
 ```
+
+The standalone configuration embeds the selected `--skill` text in
+`developer_instructions`; it does not write or overwrite a workspace
+`AGENTS.md`. The OSWorld runner continues to inject its task-local `AGENTS.md`
+inside the disposable guest. Set `--codex-home` to the home the client will
+actually use so bundled-skill paths match. Local generation does not reproduce
+guest isolation or grant permission to automate the desktop.
 
 The profile turns off Codex's built-in `computer_use` feature, so desktop
 input comes only from this server, the shell or the browser runtime. See
@@ -133,7 +153,7 @@ validates the original schemas before any side effect.
   "mcpServers": {
     "computer_use": {
       "type": "stdio",
-      "command": "/usr/bin/python3",
+      "command": "/absolute/path/to/python",
       "args": ["/path/to/claude_mcp_schema_adapter.py", "/path/to/computer-use", "mcp"]
     }
   }
@@ -141,7 +161,11 @@ validates the original schemas before any side effect.
 ```
 
 `python3 -m hcu.render_agent_config --agent claude-code ...` writes this file
-and the replacement system prompt. The runner allows the tools `Bash`,
+and the replacement system prompt, selecting the Python interpreter running
+the generator. On Windows, run the generator with the local Python installation;
+the generated executable and adapter paths are native paths. Keep that Python
+installation available when launching Claude. The Linux guest runner retains
+its guest-specific Python path. The runner allows the tools `Bash`,
 `Edit`, `Read`, `mcp__computer_use__AX` and `mcp__computer_use__GUI`.
 
 `python3 -m hcu.render_agent_config` also renders the Gemini CLI and Grok

@@ -149,6 +149,51 @@ class CoordinateActionabilityGateTests(unittest.TestCase):
 
 
 class ProviderWireV2Tests(unittest.TestCase):
+    def test_optional_ordered_input_fixtures_reject_before_provider_startup(self):
+        fixture_root = Path(__file__).resolve().parents[1] / "testdata" / "provider-v2"
+        manifest = json.loads((fixture_root / "native-manifest.json").read_text())
+        self.assertEqual(manifest["protocol"], wire_v2.PROTOCOL)
+        self.assertEqual(manifest["schema_version"], wire_v2.SCHEMA_VERSION)
+        self.assertFalse(manifest["ordered_input_platforms"]["linux"])
+        rejected = 0
+        for fixture in manifest["fixtures"]:
+            if fixture["direction"] not in {"request", "invalid_request"}:
+                continue
+            request = json.loads((fixture_root / fixture["file"]).read_text())
+            self.assertEqual(request["protocol"], wire_v2.PROTOCOL)
+            self.assertEqual(request["schema_version"], wire_v2.SCHEMA_VERSION)
+            self.assertEqual(request["operation"], "ordered_input")
+            # The full fixture fails strict envelope validation. Removing only
+            # its optional payload also exercises unsupported-operation rejection.
+            header_only = dict(request)
+            del header_only["ordered_input"]
+            for candidate, message in [
+                (request, "unknown field(s): ordered_input"),
+                (header_only, "unsupported provider operation 'ordered_input'"),
+            ]:
+                with self.subTest(fixture=fixture["name"], message=message):
+                    with self.assertRaises(wire_v2.ProviderRequestError) as raised:
+                        wire_v2.validate_request(candidate)
+                    self.assertEqual(raised.exception.code, "invalid_provider_request")
+                    self.assertIn(message, str(raised.exception))
+                    with mock.patch.object(
+                        wire_v2, "_initialize_provider"
+                    ) as initialize, mock.patch.object(
+                        wire_v2, "perform_provider_request"
+                    ) as dispatch, mock.patch.object(wire_v2, "_write_operator_exception"):
+                        response = wire_v2._execute_serialized_request(json.dumps(candidate))
+                    initialize.assert_not_called()
+                    dispatch.assert_not_called()
+                    self.assertEqual(response["request_id"], request["request_id"])
+                    self.assertEqual(response["protocol"], wire_v2.PROTOCOL)
+                    failure = response["accessibility"]
+                    self.assertFalse(failure["ok"])
+                    self.assertEqual(failure["failure"]["code"], "invalid_provider_request")
+                    self.assertIn(message, failure["error"])
+                    self.assertFalse(any(failure.get("mutation", {}).values()))
+            rejected += 1
+        self.assertEqual(rejected, 2)
+
     def test_observation_capture_snapshot_requires_boolean(self):
         request = {
             "protocol": "computer-use-provider-v2",

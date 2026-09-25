@@ -1,0 +1,831 @@
+import AppKit
+import ApplicationServices
+import CoreGraphics
+import Foundation
+
+final class ElementRecord {
+    private(set) var boundProviderObjectPath: String?
+
+    func bindProviderObjectPath(_ path: String) {
+        precondition(boundProviderObjectPath == nil)
+        boundProviderObjectPath = path
+    }
+    let index: Int
+    let runtimeID: [Int]
+    let identifier: String?
+    let element: AXUIElement?
+    let localFrame: CGRect?
+    let rawActions: [String]
+    let prettyActions: [String]
+    let isSyntheticText: Bool
+    let providerRole: String?
+    let localizedRole: String?
+    let name: String?
+    let description: String?
+    let placeholder: String?
+    let value: String?
+    let setValueSupported: Bool?
+    let states: String?
+
+    init(
+        index: Int,
+        runtimeID: [Int]? = nil,
+        identifier: String?,
+        element: AXUIElement?,
+        localFrame: CGRect?,
+        rawActions: [String],
+        prettyActions: [String],
+        isSyntheticText: Bool = false,
+        providerRole: String? = nil,
+        localizedRole: String? = nil,
+        name: String? = nil,
+        description: String? = nil,
+        placeholder: String? = nil,
+        value: String? = nil,
+        setValueSupported: Bool? = nil,
+        states: String? = nil
+    ) {
+        self.index = index
+        self.runtimeID = runtimeID ?? [index]
+        self.identifier = identifier
+        self.element = element
+        self.localFrame = localFrame
+        self.rawActions = rawActions
+        self.prettyActions = prettyActions
+        self.isSyntheticText = isSyntheticText
+        self.providerRole = providerRole
+        self.localizedRole = localizedRole
+        self.name = name
+        self.description = description
+        self.placeholder = placeholder
+        self.value = value
+        self.setValueSupported = setValueSupported
+        self.states = states
+    }
+}
+
+enum SnapshotRecoveryPolicy: Equatable {
+    case allowActivation
+    case readOnly
+}
+
+func shouldRecoverMissingWindowCapture(
+    includeScreenshot: Bool,
+    recoveryPolicy: SnapshotRecoveryPolicy
+) -> Bool {
+    includeScreenshot && recoveryPolicy == .allowActivation
+}
+
+func isSystemFocusedElementOwnedByTarget(
+    appPID: pid_t,
+    focusedElementPID: pid_t?
+) -> Bool {
+    focusedElementPID == appPID
+}
+
+func cachedWindowFallbackMatches(
+    appPID: pid_t,
+    candidatePID: pid_t?,
+    candidateWindowHandle: String,
+    expectedWindowHandle: String?
+) -> Bool {
+    guard candidatePID == appPID else {
+        return false
+    }
+    guard let expectedWindowHandle, !expectedWindowHandle.isEmpty else {
+        return true
+    }
+    return candidateWindowHandle == expectedWindowHandle
+}
+
+func nearestLogicalWindow<Node>(
+    from start: Node?,
+    roleOf: (Node) -> String?,
+    parentOf: (Node) -> Node?
+) -> Node? {
+    var current = start
+    for _ in 0..<64 {
+        guard let element = current else {
+            return nil
+        }
+        if roleOf(element) == kAXWindowRole as String {
+            return element
+        }
+        current = parentOf(element)
+    }
+    return nil
+}
+
+func containingAXWindow(from element: AXUIElement?) -> AXUIElement? {
+    nearestLogicalWindow(
+        from: element,
+        roleOf: {
+            stringValue(of: $0, attribute: kAXRoleAttribute)
+        },
+        parentOf: {
+            copyElement($0, attribute: kAXParentAttribute)
+        }
+    )
+}
+
+func strictFocusedWindowCandidate<Node>(
+    targetPID: pid_t,
+    systemFocusedWindow: Node?,
+    systemFocusedElement: Node?,
+    applicationFocusedWindow: Node?,
+    pidOf: (Node) -> pid_t?,
+    containingWindow: (Node) -> Node?,
+    isUsableWindow: (Node) -> Bool
+) -> Node? {
+    if let systemFocusedWindow,
+       pidOf(systemFocusedWindow) == targetPID,
+       let window = containingWindow(systemFocusedWindow),
+       isUsableWindow(window)
+    {
+        return window
+    }
+    if let systemFocusedElement,
+       pidOf(systemFocusedElement) == targetPID,
+       let window = containingWindow(systemFocusedElement),
+       isUsableWindow(window)
+    {
+        return window
+    }
+    if let applicationFocusedWindow,
+       pidOf(applicationFocusedWindow) == targetPID,
+       let window = containingWindow(applicationFocusedWindow),
+       isUsableWindow(window)
+    {
+        return window
+    }
+    return nil
+}
+
+func strictFocusedAXWindow(
+    appElement: AXUIElement,
+    appPID: pid_t,
+    systemWide: AXUIElement
+) -> AXUIElement? {
+    strictFocusedWindowCandidate(
+        targetPID: appPID,
+        systemFocusedWindow: copyElement(
+            systemWide,
+            attribute: kAXFocusedWindowAttribute
+        ),
+        systemFocusedElement: copyElement(
+            systemWide,
+            attribute: kAXFocusedUIElementAttribute
+        ),
+        applicationFocusedWindow: copyElement(
+            appElement,
+            attribute: kAXFocusedWindowAttribute
+        ),
+        pidOf: pid,
+        containingWindow: containingAXWindow,
+        isUsableWindow: {
+            stringValue(of: $0, attribute: kAXRoleAttribute) ==
+                kAXWindowRole as String &&
+                boolValue(of: $0, attribute: kAXMinimizedAttribute) != true
+        }
+    )
+}
+
+func uniqueUsableWindowCandidate<Node>(
+    _ windows: [Node],
+    isUsableWindow: (Node) -> Bool
+) -> Node? {
+    let usable = windows.filter(isUsableWindow)
+    return usable.count == 1 ? usable[0] : nil
+}
+
+func boundedAncestry<Node>(
+    from start: Node?,
+    parentOf: (Node) -> Node?,
+    isSame: (Node, Node) -> Bool
+) -> [Node] {
+    var ancestry: [Node] = []
+    var current = start
+    for _ in 0..<64 {
+        guard let element = current else {
+            break
+        }
+        guard !ancestry.contains(where: { isSame($0, element) }) else {
+            break
+        }
+        ancestry.append(element)
+        current = parentOf(element)
+    }
+    return ancestry
+}
+
+func prioritizeFocusedBranchChild<Node>(
+    _ children: [Node],
+    parent: Node,
+    focusedAncestry: [Node],
+    isSame: (Node, Node) -> Bool
+) -> [Node] {
+    prioritizeFocusedBranchChild(
+        children, parent: parent, focusedAncestry: focusedAncestry,
+        elementOf: { $0 }, isSame: isSame
+    )
+}
+
+func prioritizeFocusedBranchChild<Node, Child>(
+    _ children: [Child],
+    parent: Node,
+    focusedAncestry: [Node],
+    elementOf: (Child) -> Node,
+    isSame: (Node, Node) -> Bool
+) -> [Child] {
+    guard let parentIndex = focusedAncestry.firstIndex(
+        where: { isSame($0, parent) }
+    ),
+    parentIndex > 0
+    else {
+        return children
+    }
+
+    let focusedChild = focusedAncestry[parentIndex - 1]
+    guard let childIndex = children.firstIndex(
+        where: { isSame(elementOf($0), focusedChild) }
+    ),
+    childIndex > 0
+    else {
+        return children
+    }
+
+    var prioritized = children
+    prioritized.remove(at: childIndex)
+    prioritized.insert(children[childIndex], at: 0)
+    return prioritized
+}
+
+func focusedAXAncestry(from element: AXUIElement?) -> [AXUIElement] {
+    boundedAncestry(
+        from: element,
+        parentOf: {
+            copyElement($0, attribute: kAXParentAttribute)
+        },
+        isSame: {
+            CFEqual($0, $1)
+        }
+    )
+}
+
+public struct AccessibilityTreeLimits: Equatable, Sendable {
+    public static let defaultMaxNodeCount = 1200
+    public static let defaultMaxDepth = 64
+    public static let defaults = AccessibilityTreeLimits(
+        maxNodeCount: defaultMaxNodeCount,
+        maxDepth: defaultMaxDepth
+    )
+
+    public let maxNodeCount: Int
+    public let maxDepth: Int
+
+    public init(maxNodeCount: Int = defaultMaxNodeCount, maxDepth: Int = defaultMaxDepth) {
+        self.maxNodeCount = maxNodeCount
+        self.maxDepth = maxDepth
+    }
+
+    public func replacing(maxNodeCount: Int? = nil, maxDepth: Int? = nil) -> AccessibilityTreeLimits {
+        AccessibilityTreeLimits(
+            maxNodeCount: maxNodeCount ?? self.maxNodeCount,
+            maxDepth: maxDepth ?? self.maxDepth
+        )
+    }
+}
+
+@usableFromInline
+let defaultTextLimit = 500
+
+public struct SnapshotTextLimit: Equatable, Sendable {
+    public static let maxKeyword = "max"
+    public static let defaults = SnapshotTextLimit(maxCount: defaultTextLimit)
+    public static let max = SnapshotTextLimit(maxCount: nil)
+
+    public let maxCount: Int?
+
+    public init(maxCount: Int = defaultTextLimit) {
+        precondition(maxCount > 0, "text limit must be positive")
+        self.maxCount = maxCount
+    }
+
+    private init(maxCount: Int?) {
+        self.maxCount = maxCount
+    }
+}
+
+let accessibilityTreeMaxNodeCount = AccessibilityTreeLimits.defaultMaxNodeCount
+let accessibilityTreeMaxDepth = AccessibilityTreeLimits.defaultMaxDepth
+let screenshotCaptureTimeout: TimeInterval = 5
+let screenshotResultMaxPNGBytes = 900_000
+let screenshotResultMaxDimension: CGFloat = 1280
+let screenshotResultMinScale: CGFloat = 0.25
+let guiScreenshotResultMaxWidth: CGFloat = 1920
+let guiScreenshotResultMaxHeight: CGFloat = 1080
+private let windowVisibilityRecoveryDelay: TimeInterval = 0.7
+let axWebAreaRole = "AXWebArea"
+let axContentsAttribute = "AXContents"
+let axVisibleChildrenAttribute = "AXVisibleChildren"
+let compactGenericActionTargetMaxWidth: CGFloat = 240
+let compactGenericActionTargetMaxHeight: CGFloat = 120
+
+public struct AppSnapshot {
+    public let app: RunningAppDescriptor
+    public let windowTitle: String?
+    public let windowBounds: CGRect?
+    let rootWindowElement: AXUIElement
+    let targetWindowID: CGWindowID?
+    let targetWindowHandle: String?
+    let targetWindowLayer: Int?
+    public let screenshotPNGData: Data?
+    let treeLines: [String]
+    let focusedSummary: String?
+    let focusedElement: AXUIElement?
+    let selectedText: String?
+
+    let elements: [Int: ElementRecord]
+    var providerProcessGeneration: String? = nil
+    var diagnosticSnapshotSerial: Int = 0
+
+    public var renderedText: String {
+        renderedText(style: .fullState)
+    }
+
+    public func renderedText(style: SnapshotTextStyle) -> String {
+        var lines: [String] = []
+        let displayTitle = displayWindowTitle(windowTitle, appName: app.name)
+        let appReference = app.bundleIdentifier ?? app.name
+
+        lines.append("App=\(appReference) (pid \(app.pid))")
+        lines.append("Window: \(quoted(displayTitle)), App: \(app.name).")
+        lines.append(contentsOf: treeLines)
+
+        if let selectedText, !selectedText.isEmpty {
+            lines.append("")
+            lines.append("Selected text: [\(selectedText)]")
+        } else if let focusedSummary {
+            lines.append("")
+            lines.append("The focused UI element is \(focusedSummary).")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+}
+
+public enum SnapshotTextStyle {
+    case fullState
+    case actionResult
+}
+
+enum TargetWindowLiveness: Equatable {
+    case present
+    case absent
+    case unknown
+}
+
+func classifyTargetWindowDiscovery(
+    hasExpectedWindowHandle: Bool,
+    exactWindowFound: Bool,
+    appWindowInventoryComplete: Bool,
+    systemFocusInventoryComplete: Bool
+) -> TargetWindowLiveness {
+    guard hasExpectedWindowHandle else {
+        return .unknown
+    }
+    if exactWindowFound {
+        return .present
+    }
+    return appWindowInventoryComplete && systemFocusInventoryComplete
+        ? .absent
+        : .unknown
+}
+
+func postActionTargetWindowTransitionProven(
+    targetDestroyed: Bool,
+    currentLiveness: TargetWindowLiveness
+) -> Bool {
+    targetDestroyed || currentLiveness == .absent
+}
+
+enum SnapshotBuilder {
+    static func build(
+        for app: RunningAppDescriptor,
+        textLimit: SnapshotTextLimit = .defaults,
+        treeLimits: AccessibilityTreeLimits = .defaults,
+        recoveryPolicy: SnapshotRecoveryPolicy = .allowActivation,
+        includeScreenshot: Bool = false,
+        fallbackWindow: AXUIElement? = nil,
+        expectedWindowHandle: String? = nil
+    ) throws -> AppSnapshot {
+        let diagnosticContext = Thread.current.threadDictionary
+        if diagnosticContext["computer-use.liveness.request"] != nil {
+            diagnosticContext["computer-use.failure.snapshot"] =
+                (diagnosticContext["computer-use.failure.snapshot"] as? Int ?? 0) + 1
+        }
+        let permissions = PermissionDiagnostics.current()
+        guard permissions.accessibilityTrusted else {
+            throw ComputerUseError.permissionDenied("Accessibility permission is required. Run `computer-use doctor` and grant access to Computer Use.")
+        }
+
+        let appElement = AXUIElementCreateApplication(app.pid)
+        enableBestEffortAccessibilityModes(appElement)
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedApplication = copyElement(systemWide, attribute: kAXFocusedApplicationAttribute)
+        var focusedWindow = preferredFocusedWindow(
+            appElement: appElement,
+            appPID: app.pid,
+            focusedApplication: focusedApplication,
+            systemWide: systemWide
+        ) ?? firstAnyWindow(for: appElement)
+        if focusedWindow == nil {
+            focusedWindow = reusableFallbackWindow(
+                fallbackWindow,
+                appPID: app.pid,
+                expectedWindowHandle: expectedWindowHandle
+            )
+        }
+        if focusedWindow == nil,
+           recoveryPolicy == .allowActivation,
+           recoverVisibleWindow(for: app, appElement: appElement, preferredWindow: nil) {
+            focusedApplication = copyElement(systemWide, attribute: kAXFocusedApplicationAttribute)
+            focusedWindow = preferredFocusedWindow(
+                appElement: appElement,
+                appPID: app.pid,
+                focusedApplication: focusedApplication,
+                systemWide: systemWide
+            ) ?? firstAnyWindow(for: appElement)
+        }
+
+        var rootWindow: AXUIElement
+        guard let resolvedFocusedWindow = focusedWindow else {
+            windowLivenessDiagnostic("snapshot_no_ax_root", [:])
+            throw ComputerUseError.stateUnavailable(computerUseNoWindowFoundMessage)
+        }
+        rootWindow = resolvedFocusedWindow
+
+        var captureTitleHint = stringValue(of: rootWindow, attribute: kAXTitleAttribute)
+        var windowCapture = WindowCapture.resolve(
+            for: app.pid,
+            windowIDHint: windowNumber(rootWindow),
+            titleHint: captureTitleHint,
+            includeScreenshot: includeScreenshot
+        )
+        if windowCapture == nil,
+           shouldRecoverMissingWindowCapture(
+               includeScreenshot: includeScreenshot,
+               recoveryPolicy: recoveryPolicy
+           ),
+           recoverVisibleWindow(for: app, appElement: appElement, preferredWindow: rootWindow) {
+            focusedApplication = copyElement(systemWide, attribute: kAXFocusedApplicationAttribute)
+            if let recoveredWindow = preferredFocusedWindow(
+                appElement: appElement,
+                appPID: app.pid,
+                focusedApplication: focusedApplication,
+                systemWide: systemWide
+            ) ?? firstAnyWindow(for: appElement) {
+                rootWindow = recoveredWindow
+                captureTitleHint = stringValue(of: recoveredWindow, attribute: kAXTitleAttribute)
+                windowCapture = WindowCapture.resolve(
+                    for: app.pid,
+                    windowIDHint: windowNumber(recoveredWindow),
+                    titleHint: captureTitleHint,
+                    includeScreenshot: includeScreenshot
+                )
+            }
+        }
+        if windowCapture == nil, includeScreenshot {
+            throw ComputerUseError.stateUnavailable(computerUseNoWindowFoundMessage)
+        }
+
+        return try buildAccessibilitySnapshot(
+            app: app,
+            appElement: appElement,
+            rootElement: rootWindow,
+            windowCapture: windowCapture,
+            focusedApplication: focusedApplication,
+            systemWide: systemWide,
+            textLimit: textLimit,
+            treeLimits: treeLimits,
+            includeScreenshot: includeScreenshot
+        )
+    }
+
+    static func targetWindowLiveness(
+        _ snapshot: AppSnapshot,
+        expectedWindowHandle: String?
+    ) -> TargetWindowLiveness {
+        guard let expectedWindowHandle,
+              !expectedWindowHandle.isEmpty,
+              snapshot.targetWindowHandle == expectedWindowHandle else {
+            return .unknown
+        }
+
+        let appElement = AXUIElementCreateApplication(snapshot.app.pid)
+        var appWindowsValue: CFTypeRef?
+        let appWindowsResult = AXUIElementCopyAttributeValue(
+            appElement,
+            kAXWindowsAttribute as CFString,
+            &appWindowsValue
+        )
+        let appWindows: [AXUIElement]
+        let appWindowInventoryComplete: Bool
+        switch appWindowsResult {
+        case .success:
+            guard let windows = appWindowsValue as? [AXUIElement] else {
+                return .unknown
+            }
+            appWindows = windows
+            appWindowInventoryComplete = true
+        case .noValue, .attributeUnsupported:
+            appWindows = []
+            appWindowInventoryComplete = true
+        default:
+            appWindows = []
+            appWindowInventoryComplete = false
+        }
+
+        let systemWide = AXUIElementCreateSystemWide()
+        let focusedWindowRead = readOptionalAXElement(
+            systemWide,
+            attribute: kAXFocusedWindowAttribute as String
+        )
+        let focusedElementRead = readOptionalAXElement(
+            systemWide,
+            attribute: kAXFocusedUIElementAttribute as String
+        )
+        var candidates = appWindows
+        if let focusedWindow = focusedWindowRead.element {
+            candidates.append(focusedWindow)
+        }
+        if let focusedElement = focusedElementRead.element,
+           let focusedElementWindow = containingAXWindow(from: focusedElement) {
+            candidates.append(focusedElementWindow)
+        }
+        let exactWindowFound = candidates.contains { candidate in
+            pid(of: candidate) == snapshot.app.pid &&
+                stringValue(
+                    of: candidate,
+                    attribute: kAXRoleAttribute
+                ) == kAXWindowRole as String &&
+                macAXWindowHandle(
+                    pid: snapshot.app.pid,
+                    window: candidate
+                ) == expectedWindowHandle
+        }
+        return classifyTargetWindowDiscovery(
+            hasExpectedWindowHandle: true,
+            exactWindowFound: exactWindowFound,
+            appWindowInventoryComplete: appWindowInventoryComplete,
+            systemFocusInventoryComplete:
+                focusedWindowRead.complete && focusedElementRead.complete
+        )
+    }
+
+    private static func readOptionalAXElement(
+        _ element: AXUIElement,
+        attribute: String
+    ) -> (element: AXUIElement?, complete: Bool) {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            element,
+            attribute as CFString,
+            &value
+        )
+        switch result {
+        case .success:
+            guard let value,
+                  let resolved = checkedAXElement(value) else {
+                return (nil, false)
+            }
+            return (resolved, true)
+        case .noValue, .attributeUnsupported:
+            return (nil, true)
+        default:
+            return (nil, false)
+        }
+    }
+
+    private static func buildAccessibilitySnapshot(
+        app: RunningAppDescriptor,
+        appElement: AXUIElement,
+        rootElement: AXUIElement,
+        windowCapture: WindowCapture?,
+        focusedApplication: AXUIElement?,
+        systemWide: AXUIElement,
+        textLimit: SnapshotTextLimit,
+        treeLimits: AccessibilityTreeLimits,
+        includeScreenshot: Bool
+    ) throws -> AppSnapshot {
+        let generation = macProcessGeneration(pid: app.pid)
+        let windowBounds = windowCapture?.bounds ??
+            resolveLocalFrame(of: rootElement, windowBounds: nil)
+        let screenshotPNGData = includeScreenshot
+            ? windowCapture?.pngDataIfAvailable()
+            : nil
+        let focusedElement = preferredFocusedElement(appElement: appElement, appPID: app.pid, focusedApplication: focusedApplication, systemWide: systemWide)
+        let selectedText = focusedElement.flatMap { copySelectedText($0, textLimit: textLimit) }
+        let context = RenderContext(
+            windowBounds: windowBounds,
+            focusedElement: focusedElement,
+            focusedAncestry: focusedAXAncestry(from: focusedElement),
+            textLimit: textLimit,
+            treeLimits: treeLimits
+        )
+
+        var renderer = TreeRenderer(context: context, selectedRoot: rootElement)
+        try renderer.render(rootElement)
+        if let menuBar = copyElement(appElement, attribute: kAXMenuBarAttribute),
+           !CFEqual(menuBar, rootElement)
+        {
+            try renderer.render(menuBar, relativeRuntimeID: [1])
+        }
+
+        try bindMacProviderObjectIdentities(
+            Array(renderer.records.values),
+            scope: "mac:\(app.pid):\(generation)"
+        )
+        guard generation == macProcessGeneration(pid: app.pid) else {
+            throw ComputerUseError.staleAppRef(
+                "Application process changed during native identity binding."
+            )
+        }
+        return AppSnapshot(
+            app: app,
+            windowTitle: renderer.selectedRootTitle,
+            windowBounds: windowBounds,
+            rootWindowElement: rootElement,
+            targetWindowID: windowCapture?.windowID ?? windowNumber(rootElement),
+            targetWindowHandle: canonicalMacAXWindowHandle(
+                pid: app.pid,
+                window: rootElement
+            ),
+            targetWindowLayer: windowCapture?.layer,
+            screenshotPNGData: screenshotPNGData,
+            treeLines: renderer.lines,
+            focusedSummary: renderer.focusedSummary,
+            focusedElement: focusedElement,
+            selectedText: selectedText,
+            elements: renderer.records,
+            providerProcessGeneration: generation,
+            diagnosticSnapshotSerial: Thread.current.threadDictionary[
+                "computer-use.failure.snapshot"
+            ] as? Int ?? 0
+        )
+    }
+
+    private static func recoverVisibleWindow(for app: RunningAppDescriptor, appElement: AXUIElement, preferredWindow: AXUIElement?) -> Bool {
+        var recovered = false
+
+        if let runningApplication = NSRunningApplication(processIdentifier: app.pid) {
+            recovered = runningApplication.unhide() || recovered
+            recovered = runningApplication.activate(options: [.activateAllWindows]) || recovered
+        }
+
+        if let bundleIdentifier = app.bundleIdentifier {
+            recovered = openBundleIdentifier(bundleIdentifier) || recovered
+        }
+
+        if let window = preferredWindow ?? firstAnyWindow(for: appElement) {
+            recovered = unminimize(window) || recovered
+            recovered = raise(window) || recovered
+            recovered = setBoolAttribute(named: kAXMainAttribute as String, on: window) || recovered
+            recovered = setBoolAttribute(named: kAXFocusedAttribute as String, on: window) || recovered
+        }
+
+        if recovered {
+            Thread.sleep(forTimeInterval: windowVisibilityRecoveryDelay)
+        }
+
+        return recovered
+    }
+
+    private static func openBundleIdentifier(_ bundleIdentifier: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-b", bundleIdentifier]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    private static func firstWindow(for appElement: AXUIElement) -> AXUIElement? {
+        guard let windows = copyArray(appElement, attribute: kAXWindowsAttribute) else {
+            return nil
+        }
+
+        return windows.first(where: isUsableWindowElement(_:))
+    }
+
+    private static func firstAnyWindow(for appElement: AXUIElement) -> AXUIElement? {
+        copyElement(appElement, attribute: kAXFocusedWindowAttribute)
+            ?? copyArray(appElement, attribute: kAXWindowsAttribute)?.first
+    }
+
+    private static func unminimize(_ window: AXUIElement) -> Bool {
+        guard boolValue(of: window, attribute: kAXMinimizedAttribute) == true else {
+            return false
+        }
+
+        return AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse) == .success
+    }
+
+    private static func raise(_ window: AXUIElement) -> Bool {
+        guard copyActions(window)?.contains(where: { $0.caseInsensitiveCompare(kAXRaiseAction as String) == .orderedSame }) == true else {
+            return false
+        }
+
+        return AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success
+    }
+
+    private static func setBoolAttribute(named attribute: String, on element: AXUIElement) -> Bool {
+        AXUIElementSetAttributeValue(element, attribute as CFString, kCFBooleanTrue) == .success
+    }
+
+    private static func preferredFocusedWindow(appElement: AXUIElement, appPID: pid_t, focusedApplication: AXUIElement?, systemWide: AXUIElement) -> AXUIElement? {
+        if let systemWindow = strictFocusedAXWindow(
+            appElement: appElement,
+            appPID: appPID,
+            systemWide: systemWide
+        ) {
+            return systemWindow
+        }
+
+        if let focusedApplication, pid(of: focusedApplication) == appPID {
+            return usableWindowElement(from: copyElement(focusedApplication, attribute: kAXFocusedWindowAttribute))
+                ?? firstWindow(for: focusedApplication)
+                ?? usableWindowElement(from: copyElement(appElement, attribute: kAXFocusedWindowAttribute))
+                ?? firstWindow(for: appElement)
+        }
+
+        return usableWindowElement(from: copyElement(appElement, attribute: kAXFocusedWindowAttribute)) ?? firstWindow(for: appElement)
+    }
+
+    private static func reusableFallbackWindow(
+        _ window: AXUIElement?,
+        appPID: pid_t,
+        expectedWindowHandle: String?
+    ) -> AXUIElement? {
+        guard let window, isUsableWindowElement(window) else {
+            return nil
+        }
+        let handle = macAXWindowHandle(pid: appPID, window: window)
+        guard cachedWindowFallbackMatches(
+            appPID: appPID,
+            candidatePID: pid(of: window),
+            candidateWindowHandle: handle,
+            expectedWindowHandle: expectedWindowHandle
+        ) else {
+            return nil
+        }
+        return window
+    }
+
+    private static func usableWindowElement(from element: AXUIElement?) -> AXUIElement? {
+        guard let element, isUsableWindowElement(element) else {
+            return nil
+        }
+
+        return element
+    }
+
+    private static func isUsableWindowElement(_ element: AXUIElement) -> Bool {
+        stringValue(of: element, attribute: kAXRoleAttribute) == kAXWindowRole as String
+            && boolValue(of: element, attribute: kAXMinimizedAttribute) != true
+    }
+
+    private static func preferredFocusedElement(appElement: AXUIElement, appPID: pid_t, focusedApplication: AXUIElement?, systemWide: AXUIElement) -> AXUIElement? {
+        if let focusedApplication, pid(of: focusedApplication) == appPID {
+            return copyElement(systemWide, attribute: kAXFocusedUIElementAttribute)
+                ?? copyElement(focusedApplication, attribute: kAXFocusedUIElementAttribute)
+                ?? copyElement(appElement, attribute: kAXFocusedUIElementAttribute)
+        }
+
+        return copyElement(appElement, attribute: kAXFocusedUIElementAttribute)
+    }
+
+}
+
+private func displayWindowTitle(_ value: String?, appName: String) -> String {
+    guard let value, !value.isEmpty else {
+        return appName
+    }
+
+    if value.hasPrefix("\(appName) –") {
+        return appName
+    }
+
+    return value
+}
+
+private func quoted(_ value: String) -> String {
+    "\"\(value)\""
+}

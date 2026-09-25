@@ -156,6 +156,7 @@ func providerTargetFromOperation(
 		ProviderWindowName:              target.ProviderWindowName,
 		ProviderRoleAliases:             append([]string(nil), target.ProviderRoleAliases...),
 		ProviderIdentityScope:           target.ProviderIdentityScope,
+		AutomationID:                    target.AutomationID,
 		RuntimeID:                       append([]int(nil), target.RuntimeID...),
 		RuntimeIDAliases:                append([][]int(nil), target.RuntimeIDAliases...),
 		Role:                            target.Role,

@@ -146,6 +146,9 @@ func compactAXBatchResult(value any) map[string]any {
 		}
 		if callError, _ := action["call_error"].(bool); callError {
 			entry["type"] = action["action_type"]
+			for _, key := range []string{"focus_preparation", "pointer_preparation"} {
+				nonDefaultStringEvidence(entry, action, key, "", "none")
+			}
 			nonDefaultStringEvidence(
 				entry, action, "failure_code", "", "none",
 			)
@@ -183,6 +186,16 @@ func compactAXModelEvidence(
 ) map[string]any {
 	compact := map[string]any{}
 	mode := strings.TrimSpace(fmt.Sprint(full["ax_mode"]))
+	if mode == a11yModeFind {
+		for _, key := range []string{
+			"find_match_count", "find_page_start", "find_page_count", "next_cursor",
+			"find_delivery_complete", "find_context_omitted", "find_display_excerpt",
+		} {
+			if value, present := full[key]; present {
+				compact[key] = value
+			}
+		}
+	}
 	coverageIncomplete := false
 	if count, ok := intEvidence(full["coverage_incomplete_nodes"]); ok &&
 		count > 0 {
@@ -195,7 +208,7 @@ func compactAXModelEvidence(
 	}
 	structuralOmitted := false
 	if count, ok := intEvidence(full["structural_budget_omitted_nodes"]); ok &&
-		count > 0 {
+		count > 0 && full["find_delivery_complete"] != true {
 		structuralOmitted = true
 		compact["tree_complete"] = false
 	}
@@ -229,6 +242,8 @@ func compactAXModelEvidence(
 		"failure_code",
 		"underlying_failure_code",
 		"failure_phase",
+		"focus_preparation",
+		"pointer_preparation",
 		"failure_subject",
 		"input_events_emitted",
 		"partial_input_possible",
@@ -377,6 +392,9 @@ func prepareAXEvidence(
 		result = appendAXContinuationText(result, continuation)
 	}
 	result.StructuredContent = compactAXModelEvidence(full, result.IsError)
+	if full["find_delivery_budget_exhausted"] == true {
+		result = boundFindBudgetFailure(result, fmt.Sprint(full["find_read_scope"]))
+	}
 	return result
 }
 

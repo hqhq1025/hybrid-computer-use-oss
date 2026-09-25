@@ -63,8 +63,6 @@ def main() -> int:
     tasks = normalized_tasks(config)
     run_id = str(config.get("run_id") or config_path.stem)
     benchmark_version = str(config.get("benchmark_version") or "v2")
-    if benchmark_version not in {"v1", "v2"}:
-        raise ValueError("config.benchmark_version must be v1 or v2")
     output_root = results_root() / f"osworld-{benchmark_version}" / run_id
     log_root = output_root / "logs"
     if args.dry_run:

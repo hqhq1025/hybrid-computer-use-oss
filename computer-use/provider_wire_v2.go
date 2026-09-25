@@ -17,22 +17,24 @@ const (
 	ProviderWireObserveApps   ProviderWireOperation = "observe_apps"
 	ProviderWireObserve       ProviderWireOperation = "observe"
 	ProviderWireResolveAndAct ProviderWireOperation = "resolve_and_act"
+	ProviderWireOrderedInput  ProviderWireOperation = "ordered_input"
 	ProviderWireDesktopBatch  ProviderWireOperation = "desktop_execute_batch"
 	ProviderWireWindowList    ProviderWireOperation = "window_list"
 	ProviderWireWindowAction  ProviderWireOperation = "window_action"
 )
 
 type ProviderWireRequest struct {
-	Protocol      string                       `json:"protocol"`
-	SchemaVersion int                          `json:"schema_version"`
-	RequestID     string                       `json:"request_id"`
-	Operation     ProviderWireOperation        `json:"operation"`
-	ObserveApps   *ProviderObserveAppsRequest  `json:"observe_apps,omitempty"`
-	Observe       *ProviderObserveRequest      `json:"observe,omitempty"`
-	Action        *ProviderActionRequest       `json:"action,omitempty"`
-	Desktop       *ProviderDesktopRequest      `json:"desktop,omitempty"`
-	WindowList    *ProviderWindowListRequest   `json:"window_list,omitempty"`
-	WindowAction  *ProviderWindowActionRequest `json:"window_action,omitempty"`
+	Protocol      string                           `json:"protocol"`
+	SchemaVersion int                              `json:"schema_version"`
+	RequestID     string                           `json:"request_id"`
+	Operation     ProviderWireOperation            `json:"operation"`
+	ObserveApps   *ProviderObserveAppsRequest      `json:"observe_apps,omitempty"`
+	Observe       *ProviderObserveRequest          `json:"observe,omitempty"`
+	Action        *ProviderActionRequest           `json:"action,omitempty"`
+	OrderedInput  *ProviderOrderedInputWireRequest `json:"ordered_input,omitempty"`
+	Desktop       *ProviderDesktopRequest          `json:"desktop,omitempty"`
+	WindowList    *ProviderWindowListRequest       `json:"window_list,omitempty"`
+	WindowAction  *ProviderWindowActionRequest     `json:"window_action,omitempty"`
 }
 
 type ProviderWireResponse struct {
@@ -42,8 +44,10 @@ type ProviderWireResponse struct {
 	Operation             ProviderWireOperation        `json:"operation"`
 	ProviderResetRequired bool                         `json:"provider_reset_required,omitempty"`
 	Accessibility         *ProviderAccessibilityResult `json:"accessibility,omitempty"`
+	OrderedInput          *ProviderOrderedInputResult  `json:"ordered_input,omitempty"`
 	Desktop               *ProviderDesktopResult       `json:"desktop,omitempty"`
 	Window                *ProviderWindowResult        `json:"window,omitempty"`
+	RequestRejection      *ProviderRequestRejection    `json:"request_rejection,omitempty"`
 }
 
 func newProviderWireRequest(
@@ -74,12 +78,26 @@ func decodeProviderWireJSON(data []byte, target any) error {
 	return nil
 }
 
+func DecodeProviderWireRequest(data []byte) (ProviderWireRequest, error) {
+	var request ProviderWireRequest
+	if err := decodeProviderWireJSON(data, &request); err != nil {
+		return ProviderWireRequest{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return ProviderWireRequest{}, err
+	}
+	return request, nil
+}
+
 func DecodeProviderWireResponse(data []byte) (ProviderWireResponse, error) {
 	var response ProviderWireResponse
 	if err := decodeProviderWireJSON(data, &response); err != nil {
 		return ProviderWireResponse{}, err
 	}
 	if err := response.Validate(); err != nil {
+		return ProviderWireResponse{}, err
+	}
+	if err := validateProviderPreparationWire(data); err != nil {
 		return ProviderWireResponse{}, err
 	}
 	return response, nil
@@ -103,6 +121,7 @@ func (request ProviderWireRequest) Validate() error {
 		ProviderWireObserveApps:   request.ObserveApps != nil,
 		ProviderWireObserve:       request.Observe != nil,
 		ProviderWireResolveAndAct: request.Action != nil,
+		ProviderWireOrderedInput:  request.OrderedInput != nil,
 		ProviderWireDesktopBatch:  request.Desktop != nil,
 		ProviderWireWindowList:    request.WindowList != nil,
 		ProviderWireWindowAction:  request.WindowAction != nil,
@@ -133,6 +152,8 @@ func (request ProviderWireRequest) Validate() error {
 		payloadVersion = request.Observe.ProtocolVersion
 	case ProviderWireResolveAndAct:
 		payloadVersion = request.Action.ProtocolVersion
+	case ProviderWireOrderedInput:
+		payloadVersion = request.OrderedInput.ProtocolVersion
 	case ProviderWireDesktopBatch:
 		payloadVersion = request.Desktop.ProtocolVersion
 	case ProviderWireWindowList:
@@ -156,6 +177,8 @@ func (request ProviderWireRequest) Validate() error {
 		return validateProviderObserveRequest(*request.Observe)
 	case ProviderWireResolveAndAct:
 		return validateProviderActionRequest(*request.Action)
+	case ProviderWireOrderedInput:
+		return request.OrderedInput.ProviderOrderedInputRequest.Validate()
 	case ProviderWireDesktopBatch:
 		return validateProviderDesktopRequest(*request.Desktop)
 	case ProviderWireWindowList:
@@ -181,8 +204,14 @@ func (response ProviderWireResponse) Validate() error {
 	if response.RequestID == "" {
 		return errors.New("provider response request_id is required")
 	}
+	if err := validateProviderPreparationEnvelope(response); err != nil {
+		return err
+	}
 	active := 0
 	if response.Accessibility != nil {
+		active++
+	}
+	if response.OrderedInput != nil {
 		active++
 	}
 	if response.Desktop != nil {
@@ -190,6 +219,19 @@ func (response ProviderWireResponse) Validate() error {
 	}
 	if response.Window != nil {
 		active++
+	}
+	if response.RequestRejection != nil {
+		if active != 0 || response.ProviderResetRequired {
+			return errors.New("provider request rejection cannot accompany domain results or reset")
+		}
+		switch response.Operation {
+		case ProviderWireObserveApps, ProviderWireObserve, ProviderWireResolveAndAct,
+			ProviderWireOrderedInput, ProviderWireDesktopBatch,
+			ProviderWireWindowList, ProviderWireWindowAction:
+			return response.RequestRejection.Validate()
+		default:
+			return fmt.Errorf("unknown provider rejection operation %q", response.Operation)
+		}
 	}
 	if active != 1 {
 		return fmt.Errorf(
@@ -210,6 +252,10 @@ func (response ProviderWireResponse) Validate() error {
 			response.Accessibility.RecoveryContext,
 		); err != nil {
 			return err
+		}
+	case ProviderWireOrderedInput:
+		if response.OrderedInput == nil {
+			return errors.New("provider ordered-input response payload is required")
 		}
 	case ProviderWireDesktopBatch:
 		if response.Desktop == nil {

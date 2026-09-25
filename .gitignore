@@ -11,3 +11,8 @@
 *.qcow2.sha256
 .env
 /computer-use/computer-use
+/computer-use/computer-use.exe
+/computer-use/native/macos/.build/
+/computer-use/native/macos/build/
+/computer-use/native/windows/**/bin/
+/computer-use/native/windows/**/obj/

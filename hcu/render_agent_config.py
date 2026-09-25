@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+import sys
 
 from hcu.osworld import agents
-from hcu.osworld.guest import GUEST_CODEX_HOME
 from hcu.paths import DEFAULT_BASE_INSTRUCTIONS_FILE, DEFAULT_SKILL_FILE, REPO_ROOT
 
 CLAUDE_MCP_ADAPTER = (
@@ -32,7 +33,11 @@ AGENTS = ("codex", "claude-code", "gemini-cli", "grok-build")
 def render(args: argparse.Namespace) -> None:
     gateway = args.gateway.rstrip("/")
     base_instructions = args.base_instructions.read_text(encoding="utf-8")
-    skill = args.skill.read_text(encoding="utf-8") if args.skill.is_file() else ""
+    skill = (
+        args.skill.read_text(encoding="utf-8")
+        if args.agent == "codex" or args.skill.is_file()
+        else ""
+    )
     if args.agent == "codex":
         args.output.write_text(
             agents.codex_config(
@@ -40,9 +45,10 @@ def render(args: argparse.Namespace) -> None:
                 effort=args.effort,
                 base_url=f"{gateway}/t/{args.task_id}/v1",
                 codex_home=args.codex_home,
-                base_instructions=str(args.base_instructions),
-                mcp_command=str(args.mcp),
+                base_instructions=str(args.base_instructions.expanduser().resolve()),
+                mcp_command=str(args.mcp.expanduser().absolute()),
                 channels=args.channels,
+                developer_instructions=skill,
             ),
             encoding="utf-8",
         )
@@ -50,8 +56,9 @@ def render(args: argparse.Namespace) -> None:
         args.output.write_text(
             agents.claude_mcp_config(
                 adapter=str(CLAUDE_MCP_ADAPTER),
-                mcp_command=str(args.mcp),
+                mcp_command=str(args.mcp.expanduser().absolute()),
                 channels=args.channels,
+                python_executable=sys.executable,
             ),
             encoding="utf-8",
         )
@@ -153,11 +160,20 @@ def main() -> int:
         choices=("", "a11y,keyboard", "gui,keyboard"),
         help="Expose only one desktop channel; empty exposes both tools.",
     )
-    parser.add_argument("--codex-home", default=GUEST_CODEX_HOME)
+    parser.add_argument(
+        "--codex-home",
+        default=os.environ.get("CODEX_HOME") or str(Path.home() / ".codex"),
+        help="Local Codex home; defaults to CODEX_HOME or ~/.codex.",
+    )
     args = parser.parse_args()
     profile = agents.AGENT_PROFILES[args.agent]
     args.model = args.model or profile["default_model"]
     args.effort = args.effort or profile["default_effort"]
+    args.codex_home = str(Path(args.codex_home).expanduser().absolute())
+    if args.agent in ("codex", "claude-code"):
+        args.output = args.output.expanduser()
+        args.base_instructions = args.base_instructions.expanduser()
+        args.skill = args.skill.expanduser()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     render(args)
     return 0

@@ -25,10 +25,59 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test ./...
+      - name: Native transport regressions
+        run: go test -race -tags 'darwin_sidecar_test windows_sidecar_test' ./...
       - name: Tests compile for macOS and Windows
         run: |
           GOOS=darwin go vet ./...
           GOOS=windows go vet ./...
+
+  macos-native:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: computer-use/go.mod
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2.3"
+      - name: Native unit tests
+        run: swift test --package-path computer-use/native/macos
+      - name: Go platform selection (no desktop input)
+        working-directory: computer-use
+        run: go test -run TestDefaultServiceUsesDarwinBackend ./...
+      - name: Build native package
+        run: make build-macos
+      - name: MCP contract smoke (no desktop input)
+        run: python3 scripts/smoke-mcp.py artifacts/macos/computer-use
+
+  windows-native:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: computer-use/go.mod
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Native protocol and policy tests
+        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.ProviderV2.Tests -- computer-use/testdata/provider-v2
+      - name: Native visibility policy tests
+        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.VisibilityRead.Tests
+      - name: Native pointer policy tests
+        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.PointerEnvelope.Tests
+      - name: Native desktop stillness tests
+        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.DesktopStillness.Tests
+      - name: Go platform selection (no desktop input)
+        working-directory: computer-use
+        run: go test -run TestDefaultServiceUsesWindowsBackend ./...
+      - name: Build native package
+        shell: pwsh
+        run: ./computer-use/native/windows/build.ps1 -OutputDirectory "$PWD/artifacts/windows"
+      - name: MCP contract smoke (no desktop input)
+        run: python scripts/smoke-mcp.py artifacts/windows/computer-use.exe
 
   provider:
     runs-on: ubuntu-24.04

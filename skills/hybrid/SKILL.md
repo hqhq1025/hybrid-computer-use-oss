@@ -116,6 +116,11 @@ only when `observation_required=true`; for transient dialogs, prefer `find` to
 obtain a fresh `rN` ref instead of guessing a numeric index or rebuilding a
 selector.
 
+An explicit stop response takes precedence over ordinary refresh and retry
+guidance. Stop desktop automation and report the uncertainty; do not replay
+input or issue recovery observations. Known zero requested input does not
+prove that an earlier focus or activation request cannot still take effect.
+
 If the failure is `stale_element_ref`, treat every target from the failed call
 as expired. Never resubmit the old ref unchanged. If the same response includes
 a current observation, continue from its refs. Otherwise start recovery with

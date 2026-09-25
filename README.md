@@ -1,13 +1,13 @@
 # Hybrid Computer Use
 
-Hybrid Computer Use lets a coding agent operate a Linux desktop through the
+Hybrid Computer Use lets a coding agent operate a desktop through the
 Model Context Protocol (MCP), and runs Codex, Claude Code, Gemini CLI or Grok
 Build with it on OSWorld and OSWorld-V2 tasks.
 
 The `computer-use` MCP server exposes exactly two tools:
 
 - `AX`: app-scoped accessibility observation, lookup, assertion and action
-  through AT-SPI.
+  through the operating system's accessibility provider.
 - `GUI`: full-desktop screenshots and absolute-pixel mouse and keyboard input.
 
 During an evaluation the agent also keeps its shell, file editing and, for
@@ -34,7 +34,9 @@ flowchart LR
     AD --> MCP
     GM --> MCP
     GK --> MCP
-    MCP --> P[Persistent Linux provider]
+    MCP --> P[Platform backend]
+    P --> MAC[macOS Swift AX provider]
+    P --> WIN[Windows C# UIA3 provider]
     P --> ATSPI[AT-SPI accessibility tree]
     P --> X11[X11 capture and input]
     ATSPI --> D[Guest desktop]
@@ -44,19 +46,19 @@ flowchart LR
 ```
 
 The Go process owns the MCP protocol, tool schemas, batching, element
-references, evidence and state caches. It embeds and starts one persistent
-Python provider, which owns AT-SPI discovery, X11 window identity,
-screenshots and synthesized input. GUI coordinates are always pixels of the
+references, evidence and state caches. It selects one persistent native
+provider: embedded Python AT-SPI/X11 on Linux, a Swift Accessibility app on
+macOS, or a C# UIA3 executable on Windows. GUI coordinates are pixels of the
 full-desktop image the tool returned. See [Architecture](docs/ARCHITECTURE.md).
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `computer-use/` | Go MCP server and its embedded Python AT-SPI/X11 provider |
+| `computer-use/` | Go MCP server and Linux, macOS and Windows providers |
 | `hcu/osworld/` | OSWorld runner: one QEMU guest, agent and MCP process per task, then the official evaluator |
 | `hcu/gateway/` | Task-scoped model gateways that route and meter the agents' model requests |
-| `osworld-overlay/` | Patches installed into a pinned OSWorld-V2 checkout |
+| `osworld-overlay/` | Patches installed into a structurally compatible OSWorld-V2 checkout |
 | `skills/` | Agent instructions: hybrid, AX-only and GUI-only skills and shared base instructions |
 | `docker/`, `scripts/` | Release build, installers and smoke tests |
 | `configs/` | Agent release lock file, environment template and example batch configs |
@@ -72,7 +74,13 @@ make smoke    # starts the stdio server and requires exactly AX and GUI
 
 `make build-local` builds with a local Go 1.22+ toolchain instead.
 
-The server must run inside the signed-in desktop session, with Python 3,
+These two targets build the Linux binary. Native desktop packages use
+`make build-macos` on macOS or the PowerShell build script on Windows.
+See [Platform support](docs/PLATFORMS.md) for prerequisites, permissions,
+packaging, and validation limits. The native integration is experimental;
+OSWorld runners remain Linux-based.
+
+On Linux, the server must run inside the signed-in desktop session, with Python 3,
 PyGObject, the AT-SPI, GTK and GdkPixbuf typelibs, `xdotool`, `wmctrl` and
 `x11-utils` installed:
 
@@ -119,6 +127,7 @@ gateways, setup canaries, single tasks, batches and result files.
 
 - [Architecture](docs/ARCHITECTURE.md): process model, AX and GUI state, evidence.
 - [Computer Use MCP](docs/MCP.md): build, run, client setup, contract, troubleshooting.
+- [Platform support](docs/PLATFORMS.md): native packages, permissions and tests.
 - [Running OSWorld](docs/OSWORLD.md): the evaluation runbook.
 - [Agent profiles](docs/AGENT_PROFILES.md): how the four task agents are configured.
 - [AX, GUI and CDP](docs/AX_AND_CDP.md): desktop session and browser channels.
@@ -128,7 +137,7 @@ gateways, setup canaries, single tasks, batches and result files.
 
 ## Versioning
 
-The release version lives in `VERSION` and is currently 1.0.0. The build
+The release version lives in `VERSION`. The build
 injects it into the binary (`computer-use --version` and the MCP
 `serverInfo.version`) and into the Python package metadata.
 

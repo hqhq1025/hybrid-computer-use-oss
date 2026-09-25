@@ -459,7 +459,7 @@ for line in sys.stdin:
 	}
 }
 
-func TestLinuxProviderDiagnosticIsBoundedAndHasDigest(t *testing.T) {
+func TestLinuxProviderDiagnosticIsBoundedAndRetainsOriginalLength(t *testing.T) {
 	tracePath := filepath.Join(t.TempDir(), "operator.jsonl")
 	t.Setenv("COMPUTER_USE_TRACE_FILE", tracePath)
 
@@ -492,13 +492,40 @@ func TestLinuxProviderDiagnosticIsBoundedAndHasDigest(t *testing.T) {
 			len(raw),
 		)
 	}
-	if digest, _ := record["diagnostic_sha256"].(string); len(digest) != 64 {
-		t.Fatalf("diagnostic_sha256 = %q", digest)
+	if _, exists := record["diagnostic_sha256"]; exists {
+		t.Fatal("diagnostic record contains an unused digest")
 	}
 	for _, field := range []string{"request_id", "operation", "stage"} {
 		if len(record[field].(string)) > linuxProviderDiagnosticLabelLimit {
 			t.Fatalf("%s was not bounded: %d", field, len(record[field].(string)))
 		}
+	}
+}
+
+func TestLinuxRuntimeDiagnosticBytesRetainsOriginalLength(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "operator.jsonl")
+	t.Setenv("COMPUTER_USE_TRACE_FILE", tracePath)
+	raw := bytes.Repeat([]byte("error details\n"), linuxProviderDiagnosticLimit)
+	request := newProviderWireRequest("malformed-response", ProviderWireObserveApps)
+	writeLinuxRuntimeDiagnosticBytes(request, "decode_response", raw)
+
+	data, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["diagnostic"] != strings.TrimSpace(string(raw[:linuxProviderDiagnosticLimit])) ||
+		record["diagnostic_original_bytes"] != float64(len(raw)) ||
+		record["diagnostic_truncated"] != true ||
+		record["request_id"] != request.RequestID ||
+		record["stage"] != "decode_response" {
+		t.Fatal("byte diagnostic lost its bounded sample, length or error context")
+	}
+	if _, exists := record["diagnostic_sha256"]; exists {
+		t.Fatal("byte diagnostic contains an unused digest")
 	}
 }
 
@@ -556,7 +583,7 @@ func TestReadLinuxProviderDiagnosticLineRecoversAfterOversize(t *testing.T) {
 		strings.NewReader(first+"\nnext diagnostic\n"),
 		8,
 	)
-	line, originalBytes, digest, truncated, err :=
+	line, originalBytes, truncated, err :=
 		readLinuxProviderDiagnosticLine(reader, 32)
 	if err != nil {
 		t.Fatal(err)
@@ -567,14 +594,11 @@ func TestReadLinuxProviderDiagnosticLineRecoversAfterOversize(t *testing.T) {
 	if originalBytes != len(first) {
 		t.Fatalf("original bytes = %d, want %d", originalBytes, len(first))
 	}
-	if len(digest) != 64 {
-		t.Fatalf("diagnostic digest = %q", digest)
-	}
 	if !truncated {
 		t.Fatal("oversized diagnostic was not marked truncated")
 	}
 
-	line, originalBytes, _, truncated, err =
+	line, originalBytes, truncated, err =
 		readLinuxProviderDiagnosticLine(reader, 32)
 	if err != nil {
 		t.Fatal(err)
@@ -586,6 +610,87 @@ func TestReadLinuxProviderDiagnosticLineRecoversAfterOversize(t *testing.T) {
 			originalBytes,
 			truncated,
 		)
+	}
+}
+
+func TestReadLinuxProviderDiagnosticLineBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		raw       string
+		limit     int
+		want      string
+		original  int
+		truncated bool
+		err       error
+	}{
+		{"empty", "", 8, "", 0, false, io.EOF},
+		{"empty_line", "\n", 8, "", 0, false, nil},
+		{"exact_limit", "abcdefgh\n", 8, "abcdefgh", 8, false, nil},
+		{"unterminated", "abcdefgh", 8, "abcdefgh", 8, false, io.EOF},
+		{"oversize_eof", strings.Repeat("x", 97), 32, strings.Repeat("x", 32), 97, true, io.EOF},
+		{"zero_limit", "ab\n", 0, "a", 2, true, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reader := bufio.NewReaderSize(strings.NewReader(test.raw), 16)
+			line, original, truncated, err := readLinuxProviderDiagnosticLine(reader, test.limit)
+			if string(line) != test.want || original != test.original ||
+				truncated != test.truncated || !errors.Is(err, test.err) {
+				t.Fatalf("line=%q original=%d truncated=%v err=%v", line, original, truncated, err)
+			}
+		})
+	}
+}
+
+func TestLinuxProviderStderrDrainsOversizeAndRetainsStreamError(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "operator.jsonl")
+	t.Setenv("COMPUTER_USE_TRACE_FILE", tracePath)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	raw := strings.Repeat("x", maxLinuxProviderStderrLineBytes+1024)
+	go func() {
+		_, _ = io.WriteString(writer, raw+"\nlast diagnostic")
+		_ = writer.CloseWithError(errors.New("diagnostic stream interrupted"))
+	}()
+	worker := &linuxProviderWorker{stderrDone: make(chan struct{})}
+	worker.forwardStderr(reader)
+	select {
+	case <-worker.stderrDone:
+	default:
+		t.Fatal("stderr completion was not signalled")
+	}
+
+	data, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+	if len(lines) != 3 {
+		t.Fatalf("got %d diagnostic records, want oversized line, final line and stream error", len(lines))
+	}
+	for i, line := range lines {
+		var record map[string]any
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := record["diagnostic_sha256"]; exists {
+			t.Fatal("stream diagnostic contains an unused digest")
+		}
+		switch i {
+		case 0:
+			if record["diagnostic"] != raw[:linuxProviderDiagnosticLimit] ||
+				record["diagnostic_original_bytes"] != float64(len(raw)) ||
+				record["diagnostic_truncated"] != true {
+				t.Fatal("oversized stream diagnostic lost sample, original length or truncation")
+			}
+		case 1:
+			if record["diagnostic"] != "last diagnostic" {
+				t.Fatal("oversized line was not fully drained before the final line")
+			}
+		case 2:
+			if record["diagnostic"] != "provider stderr stream failed: diagnostic stream interrupted" {
+				t.Fatal("stream error evidence was lost")
+			}
+		}
 	}
 }
 

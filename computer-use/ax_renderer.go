@@ -130,6 +130,15 @@ func renderAXNodeLabel(node *AXNode) string {
 	if len(states) > 0 {
 		label += " [" + strings.Join(states, " ") + "]"
 	}
+	if evidence := node.VisibilityEvidence; evidence != nil {
+		switch {
+		case evidence.State == "unknown" &&
+			(evidence.Reason == "unsupported" || evidence.Reason == "read_error"):
+			label += " [visibility=unknown reason=" + evidence.Reason + "]"
+		case evidence.State == "offscreen" && evidence.Reason == "focus_geometry_override":
+			label += " [visibility=offscreen reason=focus_geometry_override]"
+		}
+	}
 	if node.Ref != "" {
 		label += " [ref=" + node.Ref + "]"
 	} else if node.AddressabilityEvaluated &&
