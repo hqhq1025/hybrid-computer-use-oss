@@ -2,9 +2,7 @@
 
 Guest-local Claude Code sends ``/t/<task>/v1/messages`` requests; the gateway
 forwards them with the operator's upstream credential, records usage in the
-token log and enforces the per-task budget. The budget counts successful
-responses that reached the agent, so a request that failed upstream or was
-never delivered does not consume a model step.
+token log and enforces the per-task budget.
 
 Usage::
 

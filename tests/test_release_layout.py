@@ -6,7 +6,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# Host paths and addresses of the machines this project was developed on.
+# Patterns that must not appear in tracked files.
 PRIVATE_MARKERS = ("/datadrive", "/home/v-", "172.28.", "10.1.0.", "20.225.")
 
 
