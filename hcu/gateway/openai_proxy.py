@@ -1,7 +1,10 @@
-"""Task-scoped, accounting passthrough to Azure OpenAI ``/v1/responses``.
+"""Task-scoped, accounting passthrough to an OpenAI Responses API.
 
-The gateway authenticates with an Azure CLI (AAD) token and forwards request
-bodies byte for byte. It exists for two reasons:
+The upstream is either Azure OpenAI, authenticated with an Azure CLI (AAD)
+token, or any OpenAI-compatible ``/v1/responses`` endpoint authenticated with
+a bearer token (``--upstream-kind openai``). Codex and Grok Build both speak
+this API. Request bodies are forwarded byte for byte. The gateway exists for
+two reasons:
 
 * Accounting. Some agents drop reasoning-token counts before reporting usage,
   so usage is recorded on the wire, one JSONL row per request.
@@ -20,6 +23,11 @@ Usage::
 
     python -m hcu.gateway.openai_proxy --host <bridge-ip> --ports 8611 \\
         --out runs/openai-tokens.jsonl --upstreams <resource>.openai.azure.com
+
+    OSW_OPENAI_UPSTREAM_TOKEN=<secret> \\
+    python -m hcu.gateway.openai_proxy --host <bridge-ip> --ports 8611 \\
+        --out runs/openai-tokens.jsonl --upstream-kind openai \\
+        --upstreams api.x.ai
 """
 
 from __future__ import annotations
@@ -48,8 +56,12 @@ from hcu.gateway.common import (
     split_task_path,
 )
 
-UPSTREAM_PREFIX = "/openai"  # /v1/responses -> /openai/v1/responses
-EXTRA_QUERY = "api-version=preview"
+# Azure serves the Responses API under /openai with an api-version query;
+# OpenAI-compatible upstreams take the path unchanged.
+UPSTREAM_KINDS = {
+    "azure": {"prefix": "/openai", "query": "api-version=preview"},
+    "openai": {"prefix": "", "query": ""},
+}
 AAD_RESOURCE = "https://cognitiveservices.azure.com"
 REQUEST_TIMEOUT = urllib3.Timeout(connect=15, read=1800)
 BUDGETED_PATH = "/v1/responses"
@@ -117,6 +129,22 @@ class AzureToken:
         threading.Thread(target=loop, daemon=True).start()
 
 
+class StaticToken:
+    """A fixed bearer token for OpenAI-compatible upstreams."""
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def refresh(self) -> str:
+        return self._value
+
+    def refresh_in_background(self) -> None:
+        return
+
+    def get(self) -> str:
+        return self._value
+
+
 class OpenAIGateway:
     """Routing, budget and accounting state shared by all request threads."""
 
@@ -127,13 +155,17 @@ class OpenAIGateway:
         model_upstreams: dict[str, list[str]],
         token_log: TokenLog,
         max_requests_per_task: int,
-        token: AzureToken,
+        token: AzureToken | StaticToken,
+        upstream_kind: str = "azure",
     ) -> None:
+        if upstream_kind not in UPSTREAM_KINDS:
+            raise ValueError(f"unknown upstream kind {upstream_kind!r}")
         self.upstreams = upstreams
         self.model_upstreams = model_upstreams
         self.token_log = token_log
         self.max_requests_per_task = max_requests_per_task
         self.token = token
+        self.upstream_kind = upstream_kind
         self.stats = new_stats()
         self._affinity_lock = threading.Lock()
         self._affinity: dict[tuple[str, str], str] = {}
@@ -319,8 +351,9 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
         def proxy(self, method: str) -> None:
             task, local_path = split_task_path(self.path)
             parsed = urllib.parse.urlparse(local_path)
-            query = (parsed.query + "&" if parsed.query else "") + EXTRA_QUERY
-            upstream_path = f"{UPSTREAM_PREFIX}{parsed.path}?{query}"
+            kind = UPSTREAM_KINDS[gateway.upstream_kind]
+            query = "&".join(part for part in (parsed.query, kind["query"]) if part)
+            upstream_path = kind["prefix"] + parsed.path + (f"?{query}" if query else "")
             length = int(self.headers.get("content-length") or 0)
             body = self.rfile.read(length) if length else b""
 
@@ -458,9 +491,23 @@ def main() -> int:
         "--upstreams",
         required=True,
         help=(
-            "Comma-separated Azure OpenAI hosts such as "
-            "<resource>.openai.azure.com, without scheme or path."
+            "Comma-separated upstream hosts such as "
+            "<resource>.openai.azure.com or api.x.ai, without scheme or path."
         ),
+    )
+    parser.add_argument(
+        "--upstream-kind",
+        choices=sorted(UPSTREAM_KINDS),
+        default="azure",
+        help=(
+            "azure: Azure OpenAI with an Azure CLI token. openai: any "
+            "OpenAI-compatible /v1/responses host with a bearer token from "
+            "--upstream-token or OSW_OPENAI_UPSTREAM_TOKEN."
+        ),
+    )
+    parser.add_argument(
+        "--upstream-token",
+        default=os.environ.get("OSW_OPENAI_UPSTREAM_TOKEN", ""),
     )
     parser.add_argument(
         "--model-upstreams",
@@ -502,19 +549,25 @@ def main() -> int:
             + ", ".join(invalid)
         )
 
+    if args.upstream_kind == "openai" and not args.upstream_token:
+        parser.error("--upstream-kind openai needs --upstream-token or OSW_OPENAI_UPSTREAM_TOKEN")
+    token = (
+        AzureToken() if args.upstream_kind == "azure" else StaticToken(args.upstream_token)
+    )
     token_log = TokenLog(Path(args.out))
     gateway = OpenAIGateway(
         upstreams=upstreams,
         model_upstreams=model_upstreams,
         token_log=token_log,
         max_requests_per_task=args.max_requests_per_task,
-        token=AzureToken(),
+        token=token,
+        upstream_kind=args.upstream_kind,
     )
     gateway.restore()
     try:
         gateway.token.refresh()
     except Exception as exc:
-        log(f"FATAL initial AAD token acquisition failed: {exc}")
+        log(f"FATAL initial token acquisition failed: {exc}")
         return 2
     gateway.token.refresh_in_background()
 

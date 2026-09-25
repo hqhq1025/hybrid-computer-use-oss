@@ -6,7 +6,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from hcu.gateway import anthropic_proxy, openai_proxy
+from hcu.gateway import anthropic_proxy, gemini_proxy, openai_proxy
 from hcu.gateway.common import TokenLog, split_task_path
 
 
@@ -183,3 +183,72 @@ def test_anthropic_sse_usage_takes_the_maximum_per_field():
     assert usage["input_tokens"] == 20
     assert usage["output_tokens"] == 9
     assert usage["cached_tokens"] == 4
+
+
+def test_openai_compatible_upstream_keeps_the_path_and_bearer_token(tmp_path):
+    pools = {}
+    gateway = openai_proxy.OpenAIGateway(
+        upstreams=["api.x.ai"],
+        model_upstreams={},
+        token_log=TokenLog(tmp_path / "tokens.jsonl"),
+        max_requests_per_task=0,
+        token=openai_proxy.StaticToken("xai-secret"),
+        upstream_kind="openai",
+    )
+    gateway.pool = lambda host: pools.setdefault(host, FakeUpstream(host))
+    server, base = serve(openai_proxy.make_handler(gateway))
+    try:
+        assert post(base, "/t/task-g/v1/responses", {"model": "grok-4.7"}) == 200
+    finally:
+        server.shutdown()
+    assert pools["api.x.ai"].calls == [
+        ("api.x.ai", "POST", "/v1/responses", "Bearer xai-secret")
+    ]
+
+
+class FakeGeminiUpstream:
+    def __init__(self):
+        self.calls = []
+
+    def request(self, method, url, body=None, headers=None, **_kwargs):
+        self.calls.append((method, url, headers["x-goog-api-key"]))
+        events = (
+            b'data: {"candidates":[{"content":{"parts":[{"text":"OK"}]}}],'
+            b'"usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":2,'
+            b'"cachedContentTokenCount":5,"thoughtsTokenCount":1,"totalTokenCount":33},'
+            b'"responseId":"g1"}\n\n'
+        )
+        return FakeResponse(200, events, "text/event-stream")
+
+
+def test_gemini_gateway_budgets_generate_calls_and_records_usage(tmp_path):
+    log = tmp_path / "tokens.jsonl"
+    upstream = FakeGeminiUpstream()
+    gateway = gemini_proxy.GeminiGateway(
+        upstream_base="https://generativelanguage.googleapis.com",
+        upstream_token="google-secret",
+        token_log=TokenLog(log),
+        max_requests_per_task=1,
+        pool=upstream,
+    )
+    server, base = serve(gemini_proxy.make_handler(gateway))
+    path = "/t/task-g/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse"
+    try:
+        statuses = [post(base, path, {"contents": []}) for _ in range(2)]
+        count_status = post(base, "/t/task-g/v1beta/models/gemini-3.8-flash:countTokens", {})
+    finally:
+        server.shutdown()
+    assert statuses == [200, 429]
+    assert count_status == 200
+    assert upstream.calls[0] == (
+        "POST",
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-3.8-flash:streamGenerateContent?alt=sse",
+        "google-secret",
+    )
+    rows = log_rows(log)
+    assert rows[0]["model"] == "gemini-3.8-flash"
+    assert rows[0]["input_tokens"] == 30 and rows[0]["cached_tokens"] == 5
+    assert rows[0]["reasoning_tokens"] == 1 and rows[0]["response_id"] == "g1"
+    assert rows[1]["budget_rejected"] is True
+    assert "request_ordinal" not in rows[2]
