@@ -1,5 +1,5 @@
 ---
-name: computer-use-desktop-hybrid
+name: hybrid-computer-use
 description: Complete computer tasks with Bash, files, browser automation, application APIs, and the Computer Use AX and GUI tools, then verify each requested outcome.
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: computer-use-desktop-ax-only
+name: hybrid-computer-use-ax-only
 description: Complete desktop tasks with Bash, files, browser automation, application APIs, and the Computer Use AX tool when GUI is unavailable.
 ---
 
