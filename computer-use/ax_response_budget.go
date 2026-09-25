@@ -55,7 +55,7 @@ func capInline(text string) string {
 			"token-saving trim — MCP clients replace oversized tool results with an "+
 			"unreadable file pointer, so an untruncated tree would have reached you as "+
 			"nothing at all. Use `find` to query the part you need instead of reading "+
-			"the whole tree, or raise COMPUTER_USE_MAX_INLINE_CHARS.]",
+			"the whole tree.]",
 		len(kept), len(lines), used, len(text))
 }
 

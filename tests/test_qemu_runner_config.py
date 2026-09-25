@@ -144,7 +144,7 @@ args = argparse.Namespace(
 )
 run = run_task.TaskRun(
     args=args, run_tag="RUN", result_dir=out,
-    token_log=out / "tokens.jsonl", affinity_task="osworld-v1-hybrid-RUN",
+    token_log=out / "tokens.jsonl", affinity_task="task-RUN",
     codex_binary=out / "codex", claude_code_binary=out / "claude",
     mcp_binary=out / "computer-use",
     skill_file=root / "skills/hybrid/SKILL.md",
@@ -159,7 +159,7 @@ print(json.dumps({"claude_endpoint": run.claude_endpoint}))
 """
 
 
-def test_gateway_affinity_names_the_selected_benchmark(tmp_path):
+def test_gateway_affinity_uses_the_neutral_task_prefix(tmp_path):
     python = require_osworld_checkout()
     result = subprocess.run(
         [str(python), "-c", GATEWAY_AFFINITY_PROBE, str(ROOT), str(tmp_path)],
@@ -171,7 +171,7 @@ def test_gateway_affinity_names_the_selected_benchmark(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     config = (tmp_path / "guest-config.toml").read_text(encoding="utf-8")
-    assert 'base_url = "http://gateway:8600/t/osworld-v1-hybrid-RUN/v1"' in config
+    assert 'base_url = "http://gateway:8600/t/task-RUN/v1"' in config
     assert json.loads(result.stdout)["claude_endpoint"] == (
-        "http://gateway:8537/t/osworld-v1-hybrid-RUN"
+        "http://gateway:8537/t/task-RUN"
     )

@@ -120,7 +120,7 @@ class AgentWatchdog:
                 "elif rm -f \"$probe\" 2>/dev/null "
                 f"&& pgrep -x {shlex.quote(self.process_name)} >/dev/null; then "
                 f"echo {shlex.quote(self.process_name)}; "
-                "elif pgrep -f '^/bin/bash /tmp/osworld-v2-hybrid-run.sh' "
+                f"elif pgrep -f '^/bin/bash {GUEST_LAUNCHER}' "
                 ">/dev/null; then "
                 "echo launcher; "
                 "else echo absent; fi",

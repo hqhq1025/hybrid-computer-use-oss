@@ -195,8 +195,8 @@ python3 -m hcu.gateway.anthropic_proxy \
 
 ### Budgets
 
-Only task agents are budgeted, identified by the `osworld-v1-hybrid-` and
-`osworld-v2-hybrid-` task prefixes; other traffic is not. The OpenAI gateway
+Only task agents are budgeted, identified by the `task-` prefix of their
+affinity ID; other traffic is not. The OpenAI gateway
 counts admitted requests. The Anthropic gateway counts successful responses
 that reached the agent, so an upstream failure or a dropped connection does
 not use up a step. Both gateways rebuild their counters from the token log

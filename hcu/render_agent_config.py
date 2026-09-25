@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from hcu.osworld.guest import GUEST_CODEX_HOME
 from hcu.osworld.agents import (
     CLAUDE_BUILTIN_TOOLS,
     claude_mcp_config,
@@ -45,7 +46,7 @@ def main() -> int:
         default=DEFAULT_BASE_INSTRUCTIONS_FILE,
     )
     parser.add_argument("--skill", type=Path, default=DEFAULT_SKILL_FILE)
-    parser.add_argument("--codex-home", default="/opt/osw-runtime/codex-task")
+    parser.add_argument("--codex-home", default=GUEST_CODEX_HOME)
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.agent == "codex":

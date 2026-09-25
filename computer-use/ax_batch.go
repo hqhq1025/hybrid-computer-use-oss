@@ -681,7 +681,7 @@ func compactAXActionContent(result toolCallResult) toolCallResult {
 
 func a11yBatchValidationError(message string, requested int) toolCallResult {
 	result := textResult(
-		"A11Y BATCH REJECTED BEFORE ACTION 1: "+message+
+		"AX BATCH REJECTED BEFORE ACTION 1: "+message+
 			"\naction_outcome=not_executed\n"+
 			"actions_completed_without_call_error=0\n"+
 			"No accessibility action was attempted.",
@@ -858,7 +858,7 @@ func (s *service) a11yBatch(
 			return prependA11yBatchSummary(
 				result,
 				fmt.Sprintf(
-					"A11Y BATCH STOPPED AT ACTION %d/%d (%s). "+
+					"AX BATCH STOPPED AT ACTION %d/%d (%s). "+
 						"%d earlier action call(s) returned without a call error. "+
 						"This does not verify their delivery or task effect. "+
 						"%s",

@@ -14,8 +14,10 @@ from pathlib import Path
 import threading
 import urllib.parse
 
-# Task agents of the OSWorld runner; other traffic is not budgeted.
-BUDGETED_TASK_PREFIXES = ("osworld-v1-hybrid-", "osworld-v2-hybrid-")
+# Task agents of the OSWorld runner use this prefix; other traffic is not
+# budgeted. The prefix reaches the guest as part of the gateway URL, so it
+# names nothing about the benchmark.
+TASK_AFFINITY_PREFIX = "task-"
 HOP_BY_HOP_RESPONSE_HEADERS = frozenset({
     "transfer-encoding",
     "content-length",
@@ -36,7 +38,7 @@ def split_task_path(path: str) -> tuple[str | None, str]:
 
 
 def is_budgeted_task(task: str | None) -> bool:
-    return bool(task) and task.startswith(BUDGETED_TASK_PREFIXES)
+    return bool(task) and task.startswith(TASK_AFFINITY_PREFIX)
 
 
 def read_log_rows(path: Path) -> Iterator[dict]:

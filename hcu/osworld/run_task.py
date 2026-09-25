@@ -37,6 +37,7 @@ from hcu.osworld.agents import (
     task_gateway_base,
 )
 from hcu.osworld.diagnostics import collect_guest_infra_diagnostic
+from hcu.gateway.common import TASK_AFFINITY_PREFIX
 from hcu.osworld.evaluation import run_official_evaluator
 from hcu.osworld.guest import (
     GUEST_BASE_INSTRUCTIONS,
@@ -364,7 +365,7 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
         raise FileNotFoundError(
             f"--max-model-calls requires the proxy token log: {token_log}"
         )
-    affinity_task = f"osworld-{args.benchmark_version}-hybrid-{run_tag}"
+    affinity_task = f"{TASK_AFFINITY_PREFIX}{run_tag}"
 
     artifact_dir = Path(args.artifact_dir).resolve()
     codex_binary = Path(
@@ -446,7 +447,7 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
 def stage_local_files(run: TaskRun) -> None:
     """Write the agent configuration, prompt, skill and launcher locally."""
     args = run.args
-    affinity_prefix = f"osworld-{args.benchmark_version}-hybrid"
+    affinity_prefix = TASK_AFFINITY_PREFIX.rstrip("-")
     if args.agent == "codex":
         write_local(
             run.config_path,

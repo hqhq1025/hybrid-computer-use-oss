@@ -327,7 +327,7 @@ func (s *service) stopA11yBatchForActionPostcondition(
 	return prependA11yBatchSummary(
 		stopped,
 		fmt.Sprintf(
-			"A11Y BATCH STOPPED AFTER ACTION %d/%d (%s): its declared "+
+			"AX BATCH STOPPED AFTER ACTION %d/%d (%s): its declared "+
 				"postcondition did not pass, so %d later action(s) were not emitted. "+
 				"A fresh current-state observation is included when available.",
 			index+1,

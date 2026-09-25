@@ -1,6 +1,6 @@
 ---
-name: computer-use-desktop-v014-hybrid
-description: Complete computer tasks with Bash, files, browser automation, application APIs, and the Computer Use v0.14 AX and GUI tools, then verify each requested outcome.
+name: computer-use-desktop-hybrid
+description: Complete computer tasks with Bash, files, browser automation, application APIs, and the Computer Use AX and GUI tools, then verify each requested outcome.
 ---
 
 # Hybrid Desktop Computer Use

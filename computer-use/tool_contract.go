@@ -771,7 +771,7 @@ func guiActionProperty(includeScreenshot bool) map[string]any {
 		branch("wait", "Wait exactly one second without an intermediate observation; do not stack waits.", nil, nil),
 	)
 	return map[string]any{
-		"description": "One ComputerAction.",
+		"description": "One GUI action.",
 		"oneOf":       branches,
 	}
 }
@@ -796,7 +796,7 @@ func guiInputSchema() map[string]any {
 			"minItems":    1,
 			"maxItems":    guiMaxActions,
 			"items":       guiActionProperty(false),
-			"description": "Ordered ComputerAction-compatible actions.",
+			"description": "Ordered GUI actions.",
 		},
 		"settle_ms": integerRangeProperty(
 			fmt.Sprintf(
@@ -844,7 +844,7 @@ func allToolDefinitions() []toolDefinition {
 		{
 			Name: publicToolGUI,
 			Description: fmt.Sprintf(
-				"Full-desktop ComputerAction batch; screenshot alone observes. "+
+				"Full-desktop action batch; screenshot alone observes. "+
 					"Batch validates before input and returns one final screenshot. "+
 					"Coordinates are delivered-image pixels. AX activates/closes windows. "+
 					"type/keypress use current focus. wait is one second, no observation, max %ds/batch. "+

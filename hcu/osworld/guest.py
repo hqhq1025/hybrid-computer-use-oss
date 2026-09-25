@@ -22,25 +22,23 @@ import requests
 GUEST_CODEX = "/home/user/.local/bin/codex"
 GUEST_CLAUDE_CODE = "/home/user/.local/bin/claude"
 GUEST_MCP = "/home/user/.local/bin/computer-use"
-GUEST_MCP_RUNTIME_ROOT = "/opt/osw-runtime/mcp"
-GUEST_CODEX_HOME = "/opt/osw-runtime/codex-task"
-GUEST_CLAUDE_CONFIG_DIR = "/opt/osw-runtime/claude-task"
-GUEST_CLAUDE_MCP_ADAPTER = (
-    f"{GUEST_CLAUDE_CONFIG_DIR}/mcp_schema_adapter.py"
-)
+GUEST_RUNTIME_ROOT = "/opt/agent-runtime"
+GUEST_MCP_RUNTIME_ROOT = f"{GUEST_RUNTIME_ROOT}/mcp"
+GUEST_CODEX_HOME = f"{GUEST_RUNTIME_ROOT}/codex"
+GUEST_CLAUDE_CONFIG_DIR = f"{GUEST_RUNTIME_ROOT}/claude"
+GUEST_CLAUDE_MCP_ADAPTER = f"{GUEST_CLAUDE_CONFIG_DIR}/mcp_schema_adapter.py"
 GUEST_CONFIG = f"{GUEST_CODEX_HOME}/config.toml"
 GUEST_CLAUDE_MCP_CONFIG = f"{GUEST_CLAUDE_CONFIG_DIR}/mcp.json"
-GUEST_BASE_INSTRUCTIONS = (
-    f"{GUEST_CODEX_HOME}/osw-base-instructions.md"
-)
+GUEST_BASE_INSTRUCTIONS = f"{GUEST_CODEX_HOME}/base-instructions.md"
 GUEST_SKILL = "/home/user/AGENTS.md"
-GUEST_PROMPT = "/tmp/osworld-v2-hybrid-prompt.txt"
-GUEST_LAUNCHER = "/tmp/osworld-v2-hybrid-run.sh"
-GUEST_TRACE = "/tmp/osworld-v2-hybrid-agent.jsonl"
-GUEST_STDERR = "/tmp/osworld-v2-hybrid-agent.stderr"
-GUEST_FINAL = "/tmp/osworld-v2-hybrid-final.txt"
-GUEST_DONE = "/tmp/osworld-v2-hybrid-done.json"
-GUEST_LAUNCHER_STATUS = "/tmp/osworld-v2-hybrid-launcher-status.json"
+GUEST_TASK_DIR = "/tmp/agent-task"
+GUEST_PROMPT = f"{GUEST_TASK_DIR}/prompt.txt"
+GUEST_LAUNCHER = f"{GUEST_TASK_DIR}/run.sh"
+GUEST_TRACE = f"{GUEST_TASK_DIR}/agent.jsonl"
+GUEST_STDERR = f"{GUEST_TASK_DIR}/agent.stderr"
+GUEST_FINAL = f"{GUEST_TASK_DIR}/final.txt"
+GUEST_DONE = f"{GUEST_TASK_DIR}/done.json"
+GUEST_LAUNCHER_STATUS = f"{GUEST_TASK_DIR}/launcher-status.json"
 
 
 GUEST_FILE_ATTEMPTS = 5

@@ -88,10 +88,9 @@ def test_split_task_path():
     assert split_task_path("/v1/responses") == (None, "/v1/responses")
 
 
-@pytest.mark.parametrize("benchmark", ["v1", "v2"])
-def test_openai_budget_caps_task_agents_of_both_benchmarks(openai_gateway, benchmark):
+def test_openai_budget_caps_task_agents(openai_gateway):
     gateway, base, _pools = openai_gateway
-    path = f"/t/osworld-{benchmark}-hybrid-task/v1/responses"
+    path = "/t/task-abc/v1/responses"
     statuses = [post(base, path, {"model": "m"}) for _ in range(3)]
     assert statuses == [200, 200, 429]
     rows = log_rows(gateway.token_log.path)
@@ -113,7 +112,7 @@ def test_openai_non_task_traffic_is_not_capped(openai_gateway):
 def test_openai_pins_each_task_to_one_upstream(openai_gateway):
     _gateway, base, pools = openai_gateway
     for task in ("one", "two", "one", "two"):
-        post(base, f"/t/osworld-v2-hybrid-{task}/v1/responses", {"model": "m"})
+        post(base, f"/t/task-{task}/v1/responses", {"model": "m"})
     assert [call[0] for call in pools["east.example"].calls] == ["east.example"] * 2
     assert [call[0] for call in pools["west.example"].calls] == ["west.example"] * 2
     assert pools["east.example"].calls[0][2] == "/openai/v1/responses?api-version=preview"
@@ -123,7 +122,7 @@ def test_openai_pins_each_task_to_one_upstream(openai_gateway):
 def test_openai_restores_affinity_and_budget_from_the_log(tmp_path):
     log = tmp_path / "tokens.jsonl"
     log.write_text(
-        json.dumps({"task": "osworld-v1-hybrid-t", "model": "m",
+        json.dumps({"task": "task-t", "model": "m",
                     "endpoint": "west.example", "path": "/v1/responses"}) + "\n"
     )
     gateway = openai_proxy.OpenAIGateway(
@@ -134,15 +133,15 @@ def test_openai_restores_affinity_and_budget_from_the_log(tmp_path):
         token=StaticToken(),
     )
     gateway.restore()
-    assert gateway.host_for_task("osworld-v1-hybrid-t", "m") == "west.example"
-    assert gateway.admit("osworld-v1-hybrid-t", "/v1/responses") == (True, 2)
-    assert gateway.admit("osworld-v1-hybrid-t", "/v1/responses") == (False, 3)
+    assert gateway.host_for_task("task-t", "m") == "west.example"
+    assert gateway.admit("task-t", "/v1/responses") == (True, 2)
+    assert gateway.admit("task-t", "/v1/responses") == (False, 3)
 
 
 def test_anthropic_budget_counts_delivered_responses(tmp_path):
     log = tmp_path / "tokens.jsonl"
     log.write_text(json.dumps({
-        "task": "osworld-v1-hybrid-t", "path": "/v1/messages",
+        "task": "task-t", "path": "/v1/messages",
         "model_step_completed": True,
     }) + "\n")
     upstream = FakeUpstream()
@@ -157,7 +156,7 @@ def test_anthropic_budget_counts_delivered_responses(tmp_path):
     server, base = serve(anthropic_proxy.make_handler(gateway))
     try:
         statuses = [
-            post(base, "/t/osworld-v1-hybrid-t/v1/messages?beta=true", {"model": "c"})
+            post(base, "/t/task-t/v1/messages?beta=true", {"model": "c"})
             for _ in range(2)
         ]
     finally:

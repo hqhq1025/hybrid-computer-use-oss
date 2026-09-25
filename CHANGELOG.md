@@ -10,9 +10,10 @@ this repository started from:
 - The version is 1.0.0 and comes from `VERSION`. The v0.14 binary reported
   `0.70.0-beta.70+osw-v013-gui-native-1080p`; a plain `go build` now reports
   `dev`.
-- The model-visible contract is unchanged: `initialize` apart from the
-  version, `tools/list`, the argument-validation errors and the CLI help are
-  byte-identical to v0.14. A golden test now guards them.
+- The tool schemas, descriptions and error texts no longer mention
+  ComputerAction, A11Y BATCH or `COMPUTER_USE_MAX_INLINE_CHARS`; batch
+  errors say AX BATCH. Everything else the model sees is byte-identical to
+  v0.14, and a golden test now guards the whole contract.
 - The provider package moved to `computer-use/native/linux/provider/`, and
   the private provider protocol ID is `computer-use-provider-v2` (was
   `osw-provider-v2`). MCP clients do not see either.
@@ -27,6 +28,11 @@ this repository started from:
   `--judge-*` options, the `judge_*` config keys, `live_judge` in
   `result.json` and the queue's Judge columns). The official evaluator is the
   only scorer.
+- Nothing the task agent sees names the benchmark or a release any more:
+  guest files live under `/opt/agent-runtime` and `/tmp/agent-task`, the
+  gateway affinity ID is `task-<run>`, the skills no longer carry a version,
+  and the AX and GUI tool texts no longer mention A11Y BATCH, ComputerAction
+  or `COMPUTER_USE_MAX_INLINE_CHARS`.
 - The runner is the `hcu` Python package. `python -m hcu.osworld.run_task`
   replaces `integrations/osworld-v2/hybrid/run_hybrid.py`, and `run_batch`,
   `run_queue`, `setup_canary` and `setup_canary_queue` moved the same way.

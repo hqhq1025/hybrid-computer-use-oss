@@ -1451,7 +1451,7 @@
           "name": "AX"
         },
         {
-          "description": "Full-desktop ComputerAction batch; screenshot alone observes. Batch validates before input and returns one final screenshot. Coordinates are delivered-image pixels. AX activates/closes windows. type/keypress use current focus. wait is one second, no observation, max 20s/batch. scroll_x/scroll_y are Computer deltas. settle_ms checks visual stillness, not semantic success; omitted default 800ms, max 3000ms.",
+          "description": "Full-desktop action batch; screenshot alone observes. Batch validates before input and returns one final screenshot. Coordinates are delivered-image pixels. AX activates/closes windows. type/keypress use current focus. wait is one second, no observation, max 20s/batch. scroll_x/scroll_y are Computer deltas. settle_ms checks visual stillness, not semantic success; omitted default 800ms, max 3000ms.",
           "inputSchema": {
             "description": "One screenshot action observes; otherwise run an input batch.",
             "oneOf": [
@@ -1487,9 +1487,9 @@
                 "additionalProperties": false,
                 "properties": {
                   "actions": {
-                    "description": "Ordered ComputerAction-compatible actions.",
+                    "description": "Ordered GUI actions.",
                     "items": {
-                      "description": "One ComputerAction.",
+                      "description": "One GUI action.",
                       "oneOf": [
                         {
                           "additionalProperties": false,
@@ -1972,7 +1972,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: mode=\"act\" requires actions\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: mode=\"act\" requires actions\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],
@@ -1998,7 +1998,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: mode=\"act\" requires at least one action; use mode=\"observe\" for a read-only observation\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: mode=\"act\" requires at least one action; use mode=\"observe\" for a read-only observation\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],
@@ -2028,7 +2028,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: actions[0] click requires target\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0] click requires target\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],
@@ -2091,7 +2091,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: an all-untargeted batch requires window_ref; app names do not prove keyboard focus\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: an all-untargeted batch requires window_ref; app names do not prove keyboard focus\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],
@@ -2122,7 +2122,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: actions[0].type \"bogus\" is unsupported; use activate, close, click, keypress, scroll, set_value, or type\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0].type \"bogus\" is unsupported; use activate, close, click, keypress, scroll, set_value, or type\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],
@@ -2157,7 +2157,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: actions[0].target: target must be an object: {\"index\": N}, {\"ref\": \"rN\"}, or {\"selector\": {...}}\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0].target: target must be an object: {\"index\": N}, {\"ref\": \"rN\"}, or {\"selector\": {...}}\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],
@@ -2188,7 +2188,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: actions[0].target: target must be an object: {\"index\": N}, {\"ref\": \"rN\"}, or {\"selector\": {...}}\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0].target: target must be an object: {\"index\": N}, {\"ref\": \"rN\"}, or {\"selector\": {...}}\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],
@@ -2220,7 +2220,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: actions[0]: keys must contain between 1 and 8 key names\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0]: keys must contain between 1 and 8 key names\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],
@@ -2252,7 +2252,7 @@
               "type": "text"
             },
             {
-              "text": "A11Y BATCH REJECTED BEFORE ACTION 1: mode=\"act\" observe must be none, diff, or screenshot. No action was executed. Retry this same act with observe omitted or set to diff; do not add a separate observe first.\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "AX BATCH REJECTED BEFORE ACTION 1: mode=\"act\" observe must be none, diff, or screenshot. No action was executed. Retry this same act with observe omitted or set to diff; do not add a separate observe first.\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
               "type": "text"
             }
           ],

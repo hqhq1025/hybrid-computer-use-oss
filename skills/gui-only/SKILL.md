@@ -1,6 +1,6 @@
 ---
-name: computer-use-desktop-v014-gui-only
-description: Complete desktop tasks with Bash, files, browser automation, application APIs, and the Computer Use v0.14 GUI tool when AX is unavailable.
+name: computer-use-desktop-gui-only
+description: Complete desktop tasks with Bash, files, browser automation, application APIs, and the Computer Use GUI tool when AX is unavailable.
 ---
 
 # GUI-Only Desktop Computer Use
