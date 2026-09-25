@@ -71,8 +71,7 @@ sudo apt-get install python3 python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 \
 ```
 
 OSWorld guests provide `/home/user/a11y-env.sh`, which the runner sources
-before it starts the agent. The dependency images in
-[Guest dependencies](GUEST_DEPENDENCIES.md) include all packages above.
+before it starts the agent.
 
 The server speaks MCP on stdout. A wrapper must never print to stdout; send
 diagnostics to stderr.

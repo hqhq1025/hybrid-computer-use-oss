@@ -49,7 +49,7 @@ RUNNER_KEYS = frozenset(
         "task_domain",
     }
 )
-# Scheduling and host-safety options read only by run_queue.
+# Scheduling options read only by run_queue.
 QUEUE_KEYS = frozenset({
     "max_active_tasks",
     "max_total_live_tasks",
@@ -60,24 +60,6 @@ QUEUE_KEYS = frozenset({
     "run_timezone",
     "environment_file",
     "required_environment",
-    "docker_root_path",
-    "container_cleanup_lock",
-    "container_cleanup_lock_timeout_seconds",
-    "max_host_d_state",
-    "max_inode_switch_wbs_workers",
-    "runc_delete_age_seconds",
-    "host_pressure_guard_enabled",
-    "host_pressure_abort_enabled",
-    "host_pressure_cache_seconds",
-    "max_io_full_avg10",
-    "critical_host_pressure_abort_min_d_state",
-    "critical_host_pressure_abort_confirmation_samples",
-    "critical_host_pressure_abort_confirmation_seconds",
-    "max_load_1m",
-    "min_available_memory_gb",
-    "min_free_disk_gb",
-    "min_free_inodes",
-    "min_docker_free_gb",
     "rate_limit_circuit_window_seconds",
     "rate_limit_circuit_threshold",
     "rate_limit_circuit_pause_seconds",

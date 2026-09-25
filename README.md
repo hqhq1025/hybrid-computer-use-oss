@@ -58,7 +58,6 @@ full-desktop image the tool returned. See [Architecture](docs/ARCHITECTURE.md).
 | `hcu/gateway/` | Task-scoped model gateways that route and meter the agents' model requests |
 | `osworld-overlay/` | Patches installed into a pinned OSWorld-V2 checkout |
 | `skills/` | Agent instructions: hybrid, AX-only and GUI-only skills and shared base instructions |
-| `guest-images/` | Scripts that add workstation dependencies to the official guest images |
 | `docker/`, `scripts/` | Release build, installers and smoke tests |
 | `configs/` | Agent release lock file, environment template and example batch configs |
 
@@ -121,10 +120,9 @@ gateways, setup canaries, single tasks, batches and result files.
 - [Architecture](docs/ARCHITECTURE.md): process model, AX and GUI state, evidence.
 - [Computer Use MCP](docs/MCP.md): build, run, client setup, contract, troubleshooting.
 - [Running OSWorld](docs/OSWORLD.md): the evaluation runbook.
-- [Agent profiles](docs/AGENT_PROFILES.md): how Codex and Claude Code are configured.
+- [Agent profiles](docs/AGENT_PROFILES.md): how the four task agents are configured.
 - [AX, GUI and CDP](docs/AX_AND_CDP.md): desktop session and browser channels.
 - [Skills](docs/SKILLS.md): the instructions the evaluated agent receives.
-- [Guest dependencies](docs/GUEST_DEPENDENCIES.md): building dependency images.
 - [Isolation](docs/ISOLATION.md): what an evaluated agent may and may not see.
 - [Contributing](CONTRIBUTING.md) and [Changelog](CHANGELOG.md).
 

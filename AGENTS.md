@@ -61,5 +61,3 @@ external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_batch \
   --config configs/osworld-v2-queue.example.json --dry-run
 ```
 
-For guest-image changes, run `scripts/smoke-qemu-guest.py` and a setup
-canary as described in [docs/GUEST_DEPENDENCIES.md](docs/GUEST_DEPENDENCIES.md).

@@ -615,10 +615,9 @@ func TestStabilityWaitPortsOnlyWhatLinuxCanSupport(t *testing.T) {
 	if !strings.Contains(linuxRuntimeScript, "require_stable_coordinate_geometry") {
 		t.Fatal("coordinate actions must require stable geometry")
 	}
-	// The limit is configurable: animation-heavy apps need longer, and
-	// latency-sensitive setups must be able to turn the wait off.
-	if !strings.Contains(linuxRuntimeScript, "COMPUTER_USE_STABLE_TIMEOUT_MS") {
-		t.Fatal("the stability wait limit must be configurable")
+	// The wait is a fixed budget, not an operator knob.
+	if !strings.Contains(linuxRuntimeScript, "STABLE_TIMEOUT_SECONDS") {
+		t.Fatal("actions must bound the stability wait")
 	}
 }
 

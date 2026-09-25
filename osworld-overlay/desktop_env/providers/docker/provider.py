@@ -19,8 +19,6 @@ from desktop_env.providers.volume import (
     normalize_volume_size,
     validate_guest_image_capacity,
 )
-from deploy.hybrid.host_pressure import sample_host_kernel_pressure
-
 logger = logging.getLogger("desktopenv.providers.docker.DockerProvider")
 logger.setLevel(logging.INFO)
 
@@ -51,16 +49,6 @@ DEFAULT_CREATE_LOCK = (
     )
 )
 DEFAULT_CREATE_LOCK_TIMEOUT = 300.0
-
-
-def _cleanup_monitored_block_devices() -> set[str] | None:
-    raw = os.getenv("OSWORLD_CLEANUP_MONITORED_BLOCK_DEVICES", "")
-    devices = {
-        value.strip()
-        for value in raw.split(",")
-        if value.strip()
-    }
-    return devices or None
 
 
 class ContainerCleanupDeferredError(RuntimeError):
@@ -444,40 +432,6 @@ class DockerProvider(Provider):
                         )
                     time.sleep(1)
 
-            pressure = sample_host_kernel_pressure(
-                max_d_state=int(
-                    os.getenv("OSWORLD_CLEANUP_MAX_D_STATE", "128")
-                ),
-                max_inode_switch_wbs=int(
-                    os.getenv(
-                        "OSWORLD_CLEANUP_MAX_INODE_SWITCH_WBS",
-                        "32",
-                    )
-                ),
-                runc_delete_age_seconds=float(
-                    os.getenv(
-                        "OSWORLD_CLEANUP_RUNC_DELETE_AGE_SECONDS",
-                        "30",
-                    )
-                ),
-                monitored_block_devices=(
-                    _cleanup_monitored_block_devices()
-                ),
-            )
-            if not pressure["healthy"]:
-                self.last_cleanup_status = {
-                    "state": "deferred",
-                    "reason": "host_kernel_pressure",
-                    "container_id": container_id,
-                    "container_name": container_name,
-                    "host_pressure": pressure,
-                    "wait_seconds": round(time.monotonic() - started, 1),
-                }
-                raise ContainerCleanupDeferredError(
-                    "Container cleanup deferred because host kernel pressure "
-                    f"is unsafe: {', '.join(pressure['reasons'])}"
-                )
-
             try:
                 try:
                     container.stop()
@@ -496,7 +450,6 @@ class DockerProvider(Provider):
                         time.monotonic() - started,
                         1,
                     ),
-                    "host_pressure": pressure,
                 }
             except Exception as exc:
                 self.last_cleanup_status = {
@@ -508,7 +461,6 @@ class DockerProvider(Provider):
                         time.monotonic() - started,
                         1,
                     ),
-                    "host_pressure": pressure,
                 }
                 raise
             finally:

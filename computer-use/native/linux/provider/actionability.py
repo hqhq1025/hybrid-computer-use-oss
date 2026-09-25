@@ -1,7 +1,6 @@
 """Action choice, geometry stability and coordinate-delivery checks."""
 
 import math
-import os
 import time
 from .foundation import (
     Atspi,
@@ -79,22 +78,10 @@ def window_relative(window_bounds, x, y):
 # frames.
 STABLE_SAMPLE_SECONDS = 0.08
 
-
-def stable_timeout_seconds():
-    """Return the maximum wait for an element to stop moving, in seconds.
-
-    COMPUTER_USE_STABLE_TIMEOUT_MS overrides the 1 second default. The default
-    covers most one-off relayouts without letting a permanently moving element
-    (progress bar, animation) delay a click by seconds. Animation-heavy
-    applications may need more; 0 disables the wait.
-    """
-    raw = os.environ.get("COMPUTER_USE_STABLE_TIMEOUT_MS", "").strip()
-    if not raw:
-        return 1.0
-    try:
-        return max(0.0, float(raw) / 1000.0)
-    except ValueError:
-        return 1.0
+# Maximum wait for an element to stop moving. One second covers most one-off
+# relayouts without letting a permanently moving element (progress bar,
+# animation) delay a click by seconds.
+STABLE_TIMEOUT_SECONDS = 1.0
 
 
 def wait_until_stable(element, window_bounds, first=None):
@@ -119,7 +106,7 @@ def wait_until_stable(element, window_bounds, first=None):
     samples = 1
     if previous is None:
         return None, samples, False
-    deadline = time.monotonic() + stable_timeout_seconds()
+    deadline = time.monotonic() + STABLE_TIMEOUT_SECONDS
     while True:
         time.sleep(STABLE_SAMPLE_SECONDS)
         current = safe(lambda: relative_frame(element, window_bounds))

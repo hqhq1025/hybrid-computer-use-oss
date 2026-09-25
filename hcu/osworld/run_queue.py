@@ -10,7 +10,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import platform
 import signal
 import subprocess
 import time
@@ -21,10 +20,6 @@ from hcu.osworld.batch_config import (
     normalized_tasks,
     runner_command,
     validate_config,
-)
-from hcu.osworld.host_pressure import (
-    block_device_names_for_paths,
-    sample_host_kernel_pressure,
 )
 from hcu.osworld.preflight import DEDICATED_DOCKER_HOST
 from desktop_env.providers.volume import (
@@ -148,25 +143,7 @@ class QueueRunner:
         self.retryable_interruptions: dict[tuple[str, str], dict] = {}
         self.rate_limit_events: list[float] = []
         self.rate_limit_pause_until = 0.0
-        self._host_pressure_cache = None
-        self._host_pressure_cache_at = 0.0
-        monitored_paths = [self.base]
-        docker_root = self.config.get("docker_root_path")
-        if docker_root:
-            monitored_paths.append(Path(str(docker_root)))
-        self.monitored_block_devices = block_device_names_for_paths(
-            monitored_paths
-        )
-        if not self.monitored_block_devices:
-            raise RuntimeError(
-                "Cannot resolve block devices for host-pressure monitoring: "
-                + ", ".join(str(path) for path in monitored_paths)
-            )
-        self._critical_pressure_signature: tuple[tuple[int, str], ...] = ()
-        self._critical_pressure_first_seen_at: float | None = None
-        self._critical_pressure_samples = 0
         self.stop_requested = False
-        self.stop_reason = None
         state_path = self.base / "QUEUE_STATE.json"
         if state_path.is_file():
             try:
@@ -200,29 +177,6 @@ class QueueRunner:
                 pass
         self.child_env["OSW_RUN_STARTED_AT_UTC"] = self.run_started_at_utc
         self.child_env["OSW_RUN_TIMEZONE"] = self.run_timezone
-        cleanup_environment = {
-            "OSWORLD_CONTAINER_CLEANUP_LOCK": self.config.get(
-                "container_cleanup_lock"
-            ),
-            "OSWORLD_CONTAINER_CLEANUP_LOCK_TIMEOUT_SECONDS": self.config.get(
-                "container_cleanup_lock_timeout_seconds"
-            ),
-            "OSWORLD_CLEANUP_MAX_D_STATE": self.config.get(
-                "max_host_d_state"
-            ),
-            "OSWORLD_CLEANUP_MAX_INODE_SWITCH_WBS": self.config.get(
-                "max_inode_switch_wbs_workers"
-            ),
-            "OSWORLD_CLEANUP_RUNC_DELETE_AGE_SECONDS": self.config.get(
-                "runc_delete_age_seconds"
-            ),
-            "OSWORLD_CLEANUP_MONITORED_BLOCK_DEVICES": ",".join(
-                sorted(self.monitored_block_devices)
-            ),
-        }
-        for key, value in cleanup_environment.items():
-            if value is not None:
-                self.child_env[key] = str(value)
         for key, pid in list(self.adopted_pids.items()):
             if self.pid_alive(pid):
                 self.failures.pop(key, None)
@@ -580,263 +534,7 @@ class QueueRunner:
                 launch_budget -= 1
 
     def launch_gate_open(self) -> bool:
-        if self.rate_limit_pause_remaining() > 0:
-            return False
-        if (
-            self.config.get("host_pressure_guard_enabled", False)
-            and not self.host_pressure()["healthy"]
-        ):
-            return False
-        max_load = self.config.get("max_load_1m")
-        if max_load is not None:
-            try:
-                if os.getloadavg()[0] > float(max_load):
-                    return False
-            except (AttributeError, OSError, ValueError):
-                return False
-        min_memory = self.config.get("min_available_memory_gb")
-        if min_memory is not None:
-            available = self.available_memory_gb()
-            if available is None or available < float(min_memory):
-                return False
-        min_free_disk = self.config.get("min_free_disk_gb")
-        min_free_inodes = self.config.get("min_free_inodes")
-        if min_free_disk is not None or min_free_inodes is not None:
-            capacity = self.filesystem_capacity(self.base)
-            if capacity is None:
-                return False
-            free_gb, free_inodes = capacity
-            if (
-                min_free_disk is not None
-                and free_gb < float(min_free_disk)
-            ):
-                return False
-            if (
-                min_free_inodes is not None
-                and free_inodes < int(min_free_inodes)
-            ):
-                return False
-        docker_root = self.config.get("docker_root_path")
-        min_docker_free = self.config.get("min_docker_free_gb")
-        if docker_root and min_docker_free is not None:
-            capacity = self.filesystem_capacity(Path(docker_root))
-            if capacity is None or capacity[0] < float(min_docker_free):
-                return False
-        return True
-
-    def host_pressure(self) -> dict:
-        now = time.monotonic()
-        cache_seconds = float(
-            self.config.get("host_pressure_cache_seconds", 5)
-        )
-        if (
-            self._host_pressure_cache is not None
-            and now - self._host_pressure_cache_at < cache_seconds
-        ):
-            return self._host_pressure_cache
-        self._host_pressure_cache = sample_host_kernel_pressure(
-            max_d_state=int(
-                self.config.get("max_host_d_state", 128)
-            ),
-            max_inode_switch_wbs=int(
-                self.config.get("max_inode_switch_wbs_workers", 32)
-            ),
-            runc_delete_age_seconds=float(
-                self.config.get("runc_delete_age_seconds", 30)
-            ),
-            max_io_full_avg10=(
-                float(self.config["max_io_full_avg10"])
-                if self.config.get("max_io_full_avg10") is not None
-                else None
-            ),
-            monitored_block_devices=self.monitored_block_devices,
-        )
-        self._host_pressure_cache_at = now
-        return self._host_pressure_cache
-
-    def host_pressure_requires_abort(self, pressure: dict) -> bool:
-        if not self.config.get("host_pressure_guard_enabled", False):
-            self.reset_critical_pressure_confirmation()
-            return False
-        if not self.config.get("host_pressure_abort_enabled", True):
-            self.reset_critical_pressure_confirmation()
-            return False
-        if pressure.get("aged_runc_delete"):
-            self.reset_critical_pressure_confirmation()
-            return True
-        try:
-            if int(pressure.get("d_state") or 0) > int(
-                self.config.get("max_host_d_state", 128)
-            ):
-                self.reset_critical_pressure_confirmation()
-                return True
-        except (TypeError, ValueError):
-            self.reset_critical_pressure_confirmation()
-            return True
-        critical = pressure.get("critical_d_state") or []
-        if not critical:
-            self.reset_critical_pressure_confirmation()
-            return False
-        has_rcu_critical = any(
-            str(record.get("comm") or "").startswith("rcu_exp_gp")
-            for record in critical
-        )
-        has_xfs_critical = any(
-            str(record.get("comm") or "").startswith("xfsaild/")
-            for record in critical
-        )
-        min_xfs_d_state = max(
-            1,
-            int(
-                self.config.get(
-                    "critical_host_pressure_abort_min_d_state",
-                    16,
-                )
-            ),
-        )
-        d_state = int(pressure.get("d_state") or 0)
-        pressure["abort_eligibility"] = {
-            "has_rcu_critical": has_rcu_critical,
-            "has_xfs_critical": has_xfs_critical,
-            "d_state": d_state,
-            "min_xfs_d_state": min_xfs_d_state,
-        }
-        if has_xfs_critical and not has_rcu_critical and d_state < min_xfs_d_state:
-            self.reset_critical_pressure_confirmation()
-            return False
-        signature = tuple(sorted(
-            (
-                int(record.get("pid") or 0),
-                str(record.get("comm") or ""),
-            )
-            for record in critical
-        ))
-        now = time.monotonic()
-        if signature != self._critical_pressure_signature:
-            self._critical_pressure_signature = signature
-            self._critical_pressure_first_seen_at = now
-            self._critical_pressure_samples = 1
-        else:
-            self._critical_pressure_samples += 1
-        first_seen = self._critical_pressure_first_seen_at or now
-        elapsed = max(0.0, now - first_seen)
-        required_samples = max(
-            1,
-            int(
-                self.config.get(
-                    "critical_host_pressure_abort_confirmation_samples",
-                    3,
-                )
-            ),
-        )
-        required_seconds = max(
-            0.0,
-            float(
-                self.config.get(
-                    "critical_host_pressure_abort_confirmation_seconds",
-                    15,
-                )
-            ),
-        )
-        pressure["abort_confirmation"] = {
-            "signature": [
-                {"pid": pid, "comm": comm}
-                for pid, comm in signature
-            ],
-            "samples": self._critical_pressure_samples,
-            "required_samples": required_samples,
-            "elapsed_seconds": round(elapsed, 3),
-            "required_seconds": required_seconds,
-        }
-        return (
-            self._critical_pressure_samples >= required_samples
-            and elapsed >= required_seconds
-        )
-
-    def reset_critical_pressure_confirmation(self) -> None:
-        self._critical_pressure_signature = ()
-        self._critical_pressure_first_seen_at = None
-        self._critical_pressure_samples = 0
-
-    def abort_owned_children_for_host_pressure(
-        self,
-        pressure: dict,
-    ) -> None:
-        if self.stop_reason is not None:
-            return
-        self.stop_reason = "critical_host_kernel_pressure"
-        terminated = []
-        timestamp_utc = time.strftime(
-            "%Y-%m-%dT%H:%M:%SZ",
-            time.gmtime(),
-        )
-        for task_id, child in list(self.children.items()):
-            if child.poll() is not None:
-                continue
-            child.terminate()
-            record = {
-                "task_id": task_id,
-                "pid": child.pid,
-                "source": "owned_child",
-            }
-            terminated.append(record)
-            self.retryable_interruptions[task_id] = {
-                **record,
-                "timestamp_utc": timestamp_utc,
-                "reason": self.stop_reason,
-            }
-        for task_id, pid in list(self.adopted_pids.items()):
-            if not self.pid_alive(pid):
-                continue
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                continue
-            record = {
-                "task_id": task_id,
-                "pid": pid,
-                "source": "adopted_child",
-            }
-            terminated.append(record)
-            self.retryable_interruptions[task_id] = {
-                **record,
-                "timestamp_utc": timestamp_utc,
-                "reason": self.stop_reason,
-            }
-        payload = {
-            "schema_version": 1,
-            "timestamp_utc": timestamp_utc,
-            "reason": self.stop_reason,
-            "pressure": pressure,
-            "terminated": terminated,
-            "container_cleanup_attempted": False,
-        }
-        atomic_write(
-            self.base / "HOST_PRESSURE_ABORT.json",
-            json.dumps(payload, indent=2) + "\n",
-        )
-        self.stop_requested = True
-
-    @staticmethod
-    def available_memory_gb() -> float | None:
-        try:
-            with open("/proc/meminfo", encoding="utf-8") as handle:
-                for line in handle:
-                    if line.startswith("MemAvailable:"):
-                        kib = int(line.split()[1])
-                        return kib / 1024 / 1024
-        except (OSError, ValueError, IndexError):
-            return None
-        return None
-
-    @staticmethod
-    def filesystem_capacity(path: Path) -> tuple[float, int] | None:
-        try:
-            stats = os.statvfs(path)
-        except OSError:
-            return None
-        free_gb = stats.f_bavail * stats.f_frsize / 1024**3
-        return free_gb, stats.f_favail
+        return self.rate_limit_pause_remaining() <= 0
 
     @staticmethod
     def display_stratum(value: object) -> str:
@@ -858,7 +556,6 @@ class QueueRunner:
         return text.replace("|", r"\|")
 
     def render_status(self) -> None:
-        host_pressure = self.host_pressure()
         rows = []
         completed = 0
         official_raw_scores = []
@@ -919,12 +616,6 @@ class QueueRunner:
             f"Available memory: {self.available_memory_gb():.1f} GiB",
             f"Rate-limit pause remaining: "
             f"{self.rate_limit_pause_remaining():.0f}s",
-            "Host kernel pressure: "
-            + (
-                "healthy"
-                if host_pressure["healthy"]
-                else "blocked: " + ", ".join(host_pressure["reasons"])
-            ),
             f"Launch gate: {'open' if self.launch_gate_open() else 'waiting'}",
             "",
             "| " + " | ".join(headers) + " |",
@@ -958,9 +649,6 @@ class QueueRunner:
             "failures": dict(self.failures),
             "retryable_interruptions": dict(self.retryable_interruptions),
             "external_active_processes": self.external_active_count(),
-            "host_pressure": self.host_pressure(),
-            "host_kernel_release": platform.release(),
-            "stop_reason": self.stop_reason,
             "guest_image_capacity": self.guest_image_capacity,
         }
         atomic_write(
@@ -983,17 +671,13 @@ class QueueRunner:
         signal.signal(signal.SIGTERM, self.stop)
         while not self.stop_requested:
             self.reap()
-            pressure = self.host_pressure()
-            if self.host_pressure_requires_abort(pressure):
-                self.abort_owned_children_for_host_pressure(pressure)
-                break
             self.schedule()
             self.render_status()
             if self.is_finished():
                 return 0
             time.sleep(self.poll_interval)
         self.render_status()
-        return 75 if self.stop_reason else 130
+        return 130
 
 
 def main() -> int:

@@ -49,7 +49,7 @@ this repository started from:
   or `COMPUTER_USE_MAX_INLINE_CHARS`.
 - The runner is the `hcu` Python package. `python -m hcu.osworld.run_task`
   replaces `integrations/osworld-v2/hybrid/run_hybrid.py`, and `run_batch`,
-  `run_queue`, `setup_canary` and `setup_canary_queue` moved the same way.
+  `run_queue` and `setup_canary` moved the same way.
   `python -m hcu.render_agent_config` replaces
   `scripts/render-agent-config.py`.
 - Removed the SHA-256 admission and provenance checks together with their
@@ -68,6 +68,12 @@ this repository started from:
   `require_approved_host_kernel`, `approved_host_kernel_releases`) are gone.
 - Removed `scripts/prepare-agent-artifacts.sh`; `--agent-binary` covers using
   a local agent build.
+- Removed `hcu/osworld/host_pressure.py`, the queue's host-safety thresholds
+  (load, memory, disk, inode, I/O pressure and the critical-pressure abort)
+  and the overlay Docker provider's pressure gate around container cleanup.
+  `setup_canary_queue` and `guest-images/` with `scripts/smoke-qemu-guest.py`
+  are removed as well; the queue keeps bounded concurrency, launch staggering,
+  the rate-limit circuit and restart recovery.
 - `python -m hcu.render_agent_config` renders all four agent profiles.
 - Fixed: an exception in the official evaluator is recorded as an evaluator
   error; before, it aborted the run before `result.json` was written.
@@ -105,8 +111,6 @@ this repository started from:
 - Removed the direct-container desktop image and its smoke test
   (`make image-v1`, `make smoke-v1-direct`); they needed a private base
   image and the QEMU runtime is the only evaluation path.
-- `guest-images/workstation-deps-v014-beta1` became
-  `guest-images/workstation-deps`.
 - Files modified from OSWorld-V2 carry Apache-2.0 headers, and
   `THIRD_PARTY_NOTICES.md` lists them.
 - Rewrote the documentation and added CI.

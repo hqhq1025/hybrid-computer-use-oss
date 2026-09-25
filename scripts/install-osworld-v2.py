@@ -40,14 +40,6 @@ def main() -> int:
         destination = checkout / source.relative_to(overlay)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-    # The overlay Docker provider imports the host-pressure sampler that the
-    # queue also uses, so both read one source file.
-    deploy_target = checkout / "deploy/hybrid"
-    deploy_target.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(
-        ROOT / "hcu/osworld/host_pressure.py",
-        deploy_target / "host_pressure.py",
-    )
     print(f"OSWorld V2 runtime overlay installed into {checkout}")
     return 0
 

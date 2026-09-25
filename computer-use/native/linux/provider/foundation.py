@@ -454,13 +454,13 @@ def state_value(node, state):
 # (about 1.7e10), and the count reaches clients clamped to the int32
 # maximum. A naive traversal of such a node never finishes. See LibreOffice
 # sc/source/ui/Accessibility/AccessibleTableBase.cxx.
-HARD_CHILD_CAP = int(os.environ.get("COMPUTER_USE_MAX_CHILDREN", "4096"))
+HARD_CHILD_CAP = 4096
 
 # Maximum child_at() calls per container. HARD_CHILD_CAP decides whether to
 # enumerate at all; this bounds how many children are enumerated, covering
 # implementations that misreport their child count without declaring
 # MANAGES_DESCENDANTS.
-MAX_CHILD_FANOUT = int(os.environ.get("COMPUTER_USE_MAX_FANOUT", "512"))
+MAX_CHILD_FANOUT = 512
 
 # Containers that declare MANAGES_DESCENDANTS are still enumerated when they
 # report at most this many children. The state hints that a container may be
@@ -468,12 +468,12 @@ MAX_CHILD_FANOUT = int(os.environ.get("COMPUTER_USE_MAX_FANOUT", "512"))
 # children and does not implement Table, so coordinate addressing fails and
 # the whole sidebar would be invisible. Truly huge containers (a Calc sheet
 # reports about 2.1 billion children) are stopped by HARD_CHILD_CAP instead.
-MANAGED_ENUMERATE_CAP = int(os.environ.get("COMPUTER_USE_MANAGED_CAP", "256"))
+MANAGED_ENUMERATE_CAP = 256
 
 # Node budget for find_first(), which focused_summary() and selected_text()
 # use to locate focus; without it, a predicate that never matches walks the
 # whole tree.
-FIND_FIRST_BUDGET = int(os.environ.get("COMPUTER_USE_FIND_BUDGET", "4000"))
+FIND_FIRST_BUDGET = 4000
 
 # Semantic action names that the click tool invokes. preferred_action_index()
 # uses this set to choose the action, and node_actions() uses it to avoid

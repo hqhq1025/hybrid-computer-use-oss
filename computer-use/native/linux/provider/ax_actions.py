@@ -1,7 +1,6 @@
 """Linux provider module: ax actions."""
 
 import math
-import os
 import time
 from .foundation import (
     Atspi,
@@ -478,10 +477,8 @@ def set_element_value_outcome(node, value):
 # Enumeration can fail transiently while an application rebuilds its
 # windows, and treating "unreadable" as "absent" sends the agent down an
 # entirely wrong path.
-RESOLVE_APP_ATTEMPTS = int(os.environ.get("COMPUTER_USE_RESOLVE_ATTEMPTS", "3"))
-RESOLVE_APP_RETRY_SECONDS = float(
-    os.environ.get("COMPUTER_USE_RESOLVE_RETRY", "0.3")
-)
+RESOLVE_APP_ATTEMPTS = 3
+RESOLVE_APP_RETRY_SECONDS = 0.3
 
 
 # Wheel clicks per scrolled "page". One click usually scrolls three lines,

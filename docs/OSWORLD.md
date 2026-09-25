@@ -125,9 +125,6 @@ Relative path arguments are resolved against your working directory.
   that no task resolves assets online.
 - V2 guest image and task websites: follow the OSWorld-V2 README for the
   guest image and for the websites that some tasks use.
-- Dependency images: [Guest dependencies](GUEST_DEPENDENCIES.md) describes how
-  to derive `v1-core` and `v2-full` images that add common workstation
-  packages to the official images. Never modify an official image in place.
 
 ## Environment
 
@@ -264,8 +261,7 @@ $PY -m hcu.osworld.setup_canary \
 
 A healthy canary reports a ready VM and a successful setup on the first
 attempt and a writable guest root. `--run-evaluator` also runs the evaluator
-on the untouched setup state. `hcu.osworld.setup_canary_queue` runs canaries
-for many tasks with bounded concurrency.
+on the untouched setup state.
 
 ## Run one task
 
@@ -336,11 +332,10 @@ override `volume_size`, `ram_size` and `task_domain`. Unknown keys are
 rejected.
 
 `hcu.osworld.run_queue --queue CONFIG` reads the same config and adds a
-rolling queue with host-safety limits: memory, disk, inode, load and I/O
-pressure thresholds, launch staggering, a rate-limit circuit breaker, and
-restart recovery that adopts live attempts, re-queues interrupted ones and
-renders `QUEUE_STATUS.md`. Concurrency is `max_active_tasks`. The queue-only
-keys are listed in `hcu/osworld/batch_config.py`.
+rolling queue: bounded concurrency, launch staggering, a rate-limit circuit
+breaker, and restart recovery that adopts live attempts, re-queues interrupted
+ones and renders `QUEUE_STATUS.md`. Concurrency is `max_active_tasks`. The
+queue-only keys are listed in `hcu/osworld/batch_config.py`.
 
 Give every experiment its own `run_id` and token log, and do not mix guest
 images, MCP binaries, skills, prompts, agent versions or model routes in one

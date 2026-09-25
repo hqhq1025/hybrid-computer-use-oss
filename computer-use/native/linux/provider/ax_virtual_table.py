@@ -1,6 +1,5 @@
 """Bounded virtual-table discovery and rendering."""
 
-import os
 from .foundation import (
     Atspi,
     DEFAULT_TEXT_LIMIT,
@@ -18,7 +17,7 @@ from .ax_records import record_for
 # Maximum cells rendered per self-managed table container. A typical viewport
 # is about 37 rows x 21 columns = 777 cells, fetched with text in about 0.12 s
 # (under 0.2 ms per cell). The cap bounds very wide tables.
-MAX_TABLE_CELLS = int(os.environ.get("COMPUTER_USE_MAX_TABLE_CELLS", "1200"))
+MAX_TABLE_CELLS = 1200
 
 
 def visible_cell_range(node):
