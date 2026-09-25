@@ -23,6 +23,7 @@ RUNNER_VALUE_OPTIONS = (
     ("claude_code_binary", "--claude-code-binary"),
     ("mcp_binary", "--mcp-binary"),
     ("skill_file", "--skill-file"),
+    ("channels", "--channels"),
     ("base_instructions_file", "--base-instructions-file"),
     ("client_password", "--client-password"),
     ("token_log", "--token-log"),
@@ -36,6 +37,7 @@ RUNNER_KEYS = frozenset(
     {key for key, _flag in RUNNER_VALUE_OPTIONS}
     | {key for key, _flag in RUNNER_SWITCHES}
     | {
+        "no_skill",
         "benchmark_version",
         "agent",
         "model",
@@ -151,6 +153,10 @@ def runner_command(config: dict, task: dict, result_dir: Path) -> list[str]:
         str(result_dir),
     ]
     for key, flag in RUNNER_VALUE_OPTIONS:
+        if key == "skill_file" and config.get("no_skill"):
+            # The runner reads an empty --skill-file as "no skill".
+            command.extend((flag, ""))
+            continue
         append_option(command, config, key, flag)
     task_domain = task.get("task_domain", config.get("task_domain"))
     if task_domain:

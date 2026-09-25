@@ -11,8 +11,10 @@ benchmark skill:
 | `skills/base/CODEX_BASE_INSTRUCTIONS.md` | replaces coding-oriented agent defaults | defines task completion, honesty and environment rules |
 
 Select a skill with `--skill-file` and the base instructions with
-`--base-instructions-file`. The AX-only and GUI-only profiles are ablations;
-do not report them as the hybrid result.
+`--base-instructions-file`; `--skill-file ""` runs the agent without a skill.
+The AX-only and GUI-only profiles are ablations, run together with
+`--channels a11y,keyboard` or `--channels gui,keyboard`, which remove the other
+tool from the agent's tool list. Do not report them as the hybrid result.
 
 The skills are model input. Editing them changes what the agent sees, so treat
 an edit like a change to the MCP contract: give the run a new ID and never mix

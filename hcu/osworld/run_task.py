@@ -33,6 +33,7 @@ from hcu.osworld.agents import (
     claude_mcp_config,
     claude_system_prompt,
     codex_config,
+    public_tools,
     launcher_script,
     task_gateway_base,
 )
@@ -96,7 +97,6 @@ from hcu.osworld.usage import (
 from desktop_env.cache import run_scoped_cache_dir
 from desktop_env.desktop_env import DesktopEnv
 
-MCP_PUBLIC_TOOLS = ("AX", "GUI")
 CLAUDE_MCP_ADAPTER = (
     Path(__file__).resolve().parent
     / "guest_files"
@@ -185,6 +185,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skill-file",
         default=str(DEFAULT_SKILL_FILE),
+        help="Skill given to the agent; pass an empty string for no skill.",
+    )
+    parser.add_argument(
+        "--channels",
+        default="",
+        choices=("", "a11y,keyboard", "gui,keyboard"),
+        help=(
+            "Expose only the AX channel (a11y,keyboard) or only the GUI "
+            "channel (gui,keyboard); empty exposes both."
+        ),
     )
     parser.add_argument(
         "--base-instructions-file",
@@ -271,7 +281,7 @@ class TaskRun:
     codex_binary: Path
     claude_code_binary: Path
     mcp_binary: Path
-    skill_file: Path
+    skill_file: Path | None
     base_instructions_file: Path
     task: Any
     phases: list[dict]
@@ -305,6 +315,10 @@ class TaskRun:
     @property
     def skill_copy(self) -> Path:
         return self.result_dir / "AGENTS.md"
+
+    @property
+    def mcp_public_tools(self) -> list[str]:
+        return list(public_tools(self.args.channels))
 
     @property
     def base_instructions_copy(self) -> Path:
@@ -377,11 +391,13 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
     mcp_binary = Path(
         args.mcp_binary or artifact_dir / "computer-use"
     ).resolve()
-    skill_file = Path(args.skill_file).resolve()
+    skill_file = Path(args.skill_file).resolve() if args.skill_file else None
     base_instructions_file = Path(
         args.base_instructions_file
     ).resolve()
-    required_files = [mcp_binary, skill_file, base_instructions_file]
+    required_files = [mcp_binary, base_instructions_file]
+    if skill_file is not None:
+        required_files.append(skill_file)
     if args.agent == "codex":
         required_files.append(codex_binary)
     if args.agent == "claude-code":
@@ -462,10 +478,11 @@ def stage_local_files(run: TaskRun) -> None:
                 codex_home=GUEST_CODEX_HOME,
                 base_instructions=GUEST_BASE_INSTRUCTIONS,
                 mcp_command=GUEST_MCP,
+                channels=args.channels,
             ),
         )
     else:
-        write_local(run.config_path, claude_mcp_config())
+        write_local(run.config_path, claude_mcp_config(channels=args.channels))
     write_local(
         run.prompt_path,
         task_prompt(
@@ -474,9 +491,10 @@ def stage_local_files(run: TaskRun) -> None:
             can_ask_user=task_value(run.task, "user_simulator") is not None,
         ),
     )
-    run.skill_copy.write_bytes(run.skill_file.read_bytes())
+    if run.skill_file is not None:
+        run.skill_copy.write_bytes(run.skill_file.read_bytes())
     base_instructions = run.base_instructions_file.read_text(encoding="utf-8")
-    if args.agent == "claude-code":
+    if args.agent == "claude-code" and run.skill_file is not None:
         base_instructions = claude_system_prompt(
             base_instructions,
             run.skill_file.read_text(encoding="utf-8"),
@@ -494,7 +512,7 @@ def stage_local_files(run: TaskRun) -> None:
             model=args.model,
             effort=args.effort,
             claude_gateway_base=run.claude_endpoint,
-            public_mcp_tools=list(MCP_PUBLIC_TOOLS),
+            public_mcp_tools=run.mcp_public_tools,
         ),
     )
 
@@ -553,8 +571,9 @@ def initial_meta(
             else None
         ),
         "mcp_binary": str(run.mcp_binary),
-        "mcp_public_tools": list(MCP_PUBLIC_TOOLS),
-        "skill_file": str(run.skill_file),
+        "mcp_channels": args.channels or None,
+        "mcp_public_tools": run.mcp_public_tools,
+        "skill_file": str(run.skill_file) if run.skill_file else None,
         "base_instructions_file": str(run.base_instructions_file),
         "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "initializing",
@@ -580,8 +599,11 @@ def runtime_uploads(run: TaskRun) -> tuple[list[dict], list[str]]:
         upload_rows.extend([
             {"local_path": str(run.codex_binary), "path": GUEST_CODEX},
             {"local_path": str(run.config_path), "path": GUEST_CONFIG},
-            {"local_path": str(run.skill_copy), "path": GUEST_SKILL},
         ])
+        if run.skill_file is not None:
+            upload_rows.append(
+                {"local_path": str(run.skill_copy), "path": GUEST_SKILL}
+            )
         executable_paths.append(GUEST_CODEX)
     else:
         upload_rows.extend([
@@ -756,7 +778,7 @@ def prepare_guest(run: TaskRun, env: DesktopEnv) -> str:
             "-c",
             public_mcp_probe_script(),
             GUEST_MCP,
-            json.dumps(list(MCP_PUBLIC_TOOLS)),
+            json.dumps(run.mcp_public_tools),
         ],
         timeout=180,
     )

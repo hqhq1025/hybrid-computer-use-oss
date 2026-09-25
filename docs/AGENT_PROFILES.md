@@ -10,7 +10,8 @@ Both agents use:
 - the same `computer-use` binary;
 - the agent releases pinned in `configs/agent-artifacts.lock.json`
   (currently Codex 0.151.0 and Claude Code 2.1.251);
-- the base instructions in `skills/base/` and one selected benchmark skill;
+- the base instructions in `skills/base/` and one selected benchmark skill, or
+  none for the no-skill ablation;
 - one fresh task environment and one MCP process per task;
 - a task-scoped model gateway URL and a placeholder credential;
 - Bash, which the hybrid profile keeps enabled.

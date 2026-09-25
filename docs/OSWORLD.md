@@ -265,7 +265,8 @@ Other useful options:
 
 | Option | Default | Effect |
 | --- | --- | --- |
-| `--skill-file` | `skills/hybrid/SKILL.md` | skill given to the agent |
+| `--skill-file` | `skills/hybrid/SKILL.md` | skill given to the agent; an empty string gives no skill |
+| `--channels` | both | `a11y,keyboard` exposes only `AX`, `gui,keyboard` only `GUI`; the other tool is absent from the agent's tool list |
 | `--base-instructions-file` | `skills/base/CODEX_BASE_INSTRUCTIONS.md` | replacement base instructions |
 | `--mcp-binary` | `$HCU_ARTIFACT_DIR/computer-use` | MCP server uploaded to the guest |
 | `--max-model-calls` | `0` | task-agent request budget; `0` disables it, so set it for real runs |
@@ -289,7 +290,7 @@ $PY -m hcu.osworld.run_batch --config configs/osworld-v2-queue.example.json \
 
 `--dry-run` validates the config and prints the generated commands; remove it
 to launch. Config keys map to `run_task` options (`gateway_base`,
-`guest_image`, `max_model_calls`, and so on), string values may reference
+`guest_image`, `max_model_calls`, `channels`, `no_skill`, and so on), string values may reference
 environment variables such as `${HCU_ARTIFACT_DIR}`, and each task may
 override `volume_size`, `ram_size` and `task_domain`. Unknown keys are
 rejected.

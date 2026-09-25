@@ -140,7 +140,7 @@ args = argparse.Namespace(
     agent="codex", model="gpt-5.5", effort="xhigh",
     gateway_base="http://gateway:8600",
     claude_gateway_base="http://gateway:8537",
-    benchmark_version="v1",
+    benchmark_version="v1", channels="",
 )
 run = run_task.TaskRun(
     args=args, run_tag="RUN", result_dir=out,
@@ -175,3 +175,39 @@ def test_gateway_affinity_uses_the_neutral_task_prefix(tmp_path):
     assert json.loads(result.stdout)["claude_endpoint"] == (
         "http://gateway:8537/t/task-RUN"
     )
+
+
+def test_channel_ablation_exposes_one_tool_to_each_agent():
+    from hcu.osworld.agents import claude_mcp_config, codex_config, public_tools
+
+    assert public_tools("") == ("AX", "GUI")
+    assert public_tools("a11y,keyboard") == ("AX",)
+    assert public_tools("gui,keyboard") == ("GUI",)
+    with pytest.raises(ValueError):
+        public_tools("a11y")
+
+    codex = codex_config(
+        model="m", effort="xhigh", base_url="http://g/v1", codex_home="/h",
+        base_instructions="/b.md", mcp_command="/computer-use",
+        channels="a11y,keyboard",
+    )
+    assert "[mcp_servers.computer_use.env]" in codex
+    assert 'COMPUTER_USE_CHANNELS = "a11y,keyboard"' in codex
+    assert "computer_use.env" not in codex_config(
+        model="m", effort="xhigh", base_url="http://g/v1", codex_home="/h",
+        base_instructions="/b.md", mcp_command="/computer-use",
+    )
+
+    claude = json.loads(claude_mcp_config(channels="gui,keyboard"))
+    assert claude["mcpServers"]["computer_use"]["env"] == {
+        "COMPUTER_USE_CHANNELS": "gui,keyboard"
+    }
+    assert "env" not in json.loads(claude_mcp_config())["mcpServers"]["computer_use"]
+
+
+def test_batch_forwards_channels_and_an_empty_skill(tmp_path):
+    command = runner_command(
+        {"channels": "gui,keyboard", "no_skill": True}, {"id": "001"}, tmp_path
+    )
+    assert command[command.index("--channels") + 1] == "gui,keyboard"
+    assert command[command.index("--skill-file") + 1] == ""

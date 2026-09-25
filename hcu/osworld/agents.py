@@ -60,6 +60,25 @@ def task_gateway_base(
     )
 
 
+# Ablation configurations expose one desktop channel. The MCP server reads
+# COMPUTER_USE_CHANNELS and lists only that channel's tool, so the agent never
+# sees the other one. The values are the server's channel names.
+CHANNEL_TOOLS = {
+    "": ("AX", "GUI"),
+    "a11y,keyboard": ("AX",),
+    "gui,keyboard": ("GUI",),
+}
+
+
+def public_tools(channels: str) -> tuple[str, ...]:
+    if channels not in CHANNEL_TOOLS:
+        raise ValueError(
+            "channels must be empty, a11y,keyboard or gui,keyboard, "
+            f"got {channels!r}"
+        )
+    return CHANNEL_TOOLS[channels]
+
+
 def codex_config(
     *,
     model: str,
@@ -68,8 +87,15 @@ def codex_config(
     codex_home: str,
     base_instructions: str,
     mcp_command: str,
+    channels: str = "",
 ) -> str:
     """Codex ``config.toml`` with ambient features off and the MCP required."""
+    public_tools(channels)
+    mcp_env = (
+        f'\n[mcp_servers.computer_use.env]\nCOMPUTER_USE_CHANNELS = {json.dumps(channels)}\n'
+        if channels
+        else ""
+    )
     disabled_system_skills = "\n\n".join(
         (
             "[[skills.config]]\n"
@@ -161,27 +187,25 @@ args = ["mcp"]
 required = true
 startup_timeout_sec = 60
 tool_timeout_sec = 180
-"""
+{mcp_env}"""
 
 
 def claude_mcp_config(
     *,
     adapter: str = GUEST_CLAUDE_MCP_ADAPTER,
     mcp_command: str = GUEST_MCP,
+    channels: str = "",
 ) -> str:
     """Claude Code MCP configuration that runs the MCP behind the adapter."""
-    return json.dumps(
-        {
-            "mcpServers": {
-                "computer_use": {
-                    "type": "stdio",
-                    "command": "/usr/bin/python3",
-                    "args": [adapter, mcp_command, "mcp"],
-                }
-            }
-        },
-        indent=2,
-    ) + "\n"
+    public_tools(channels)
+    server: dict = {
+        "type": "stdio",
+        "command": "/usr/bin/python3",
+        "args": [adapter, mcp_command, "mcp"],
+    }
+    if channels:
+        server["env"] = {"COMPUTER_USE_CHANNELS": channels}
+    return json.dumps({"mcpServers": {"computer_use": server}}, indent=2) + "\n"
 
 
 def claude_system_prompt(base_instructions: str, skill: str) -> str:

@@ -24,6 +24,10 @@ this repository started from:
 
 ### OSWorld runner
 
+- Added the ablation options used in the paper: `--channels a11y,keyboard`
+  or `gui,keyboard` exposes one desktop tool (via `COMPUTER_USE_CHANNELS` in
+  the agent's MCP configuration), and `--skill-file ""` runs without a skill.
+  Batch configs accept `channels` and `no_skill`.
 - Removed the interactive outcome Judge (`hcu/osworld/judge`, the
   `--judge-*` options, the `judge_*` config keys, `live_judge` in
   `result.json` and the queue's Judge columns). The official evaluator is the
