@@ -9,7 +9,6 @@ read back through ``/file``.
 from __future__ import annotations
 
 from contextlib import contextmanager
-import json
 import os
 from pathlib import Path
 import signal
@@ -211,39 +210,9 @@ def fetch_guest_file(
     raise AssertionError("unreachable")
 
 
-def guest_json_file(base_url: str, path: str) -> dict | None:
-    raw = fetch_guest_file(base_url, path)
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
 def save_guest_artifact(base_url: str, guest_path: str, local_path: Path) -> bytes | None:
     data = fetch_guest_file(base_url, guest_path)
     if data is not None:
         local_path.write_bytes(data)
     return data
 
-
-def save_guest_artifact_best_effort(
-    base_url: str,
-    guest_path: str,
-    local_path: Path,
-) -> tuple[bytes | None, str | None]:
-    try:
-        return save_guest_artifact(
-            base_url,
-            guest_path,
-            local_path,
-        ), None
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-        local_path.with_suffix(local_path.suffix + ".fetch-error").write_text(
-            error + "\n",
-            encoding="utf-8",
-        )
-        return None, error

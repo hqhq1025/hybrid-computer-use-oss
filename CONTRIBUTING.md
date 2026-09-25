@@ -7,7 +7,7 @@
   AT-SPI, GTK and GdkPixbuf typelibs (`python3-gi gir1.2-atspi-2.0
   gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0` on Debian or Ubuntu).
 - `pip install -e '.[test]'` for the runner and gateway tests.
-- Docker for `make build` and the desktop smoke image.
+- Docker for `make build`.
 
 ## Checks
 

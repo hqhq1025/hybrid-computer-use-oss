@@ -31,9 +31,9 @@ directory. Nothing is shared between tasks.
 | --- | --- | --- |
 | `--benchmark-version` | `v1` | `v2` |
 | Task IDs | UUIDs; `--task-domain` is optional when the UUID is unique | `001` to the last task number |
-| Guest image | official `Ubuntu.qcow2` or a `v1-core` dependency image | official V2 image or a `v2-full` dependency image |
+| Guest image | the official `Ubuntu.qcow2` | the official OSWorld-V2 image |
 | `--client-password` | `password` | `osworld-public-evaluation` (the default) |
-| `--volume-size` | 50 for the official image, 64 for `v1-core` | 100 for `v2-full` |
+| `--volume-size` | 64 in the example configuration | 100 in the example configuration |
 
 `--client-password` is the guest user's sudo password from the upstream
 OSWorld image, not a secret. Setup uses it for privileged commands, and the
@@ -320,7 +320,7 @@ existing one.
 concurrency, one `run_task` process per task:
 
 ```bash
-$PY -m hcu.osworld.run_batch --config configs/osworld-v2-queue.example.json \
+$PY -m hcu.osworld.run_batch --config configs/osworld-v2-codex-queue.example.json \
   --concurrency 1 --dry-run
 ```
 

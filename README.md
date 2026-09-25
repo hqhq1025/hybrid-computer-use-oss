@@ -97,7 +97,7 @@ python3 -m venv external/OSWorld-V2/.venv
 external/OSWorld-V2/.venv/bin/pip install -e external/OSWorld-V2
 python3 scripts/install-osworld-v2.py external/OSWorld-V2
 
-make agents   # downloads the pinned Codex and Claude Code releases
+make agents   # downloads the pinned agent CLIs and the Node runtime
 make build
 cp configs/env.example .env   # then fill in the paths
 ```

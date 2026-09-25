@@ -4,10 +4,11 @@ Each benchmark task uses a fresh desktop, task-agent session, MCP process and
 result directory. Do not mount this repository, host credentials, user
 configuration or another task's artifacts into the evaluated environment.
 
-Before the agent starts, the runner removes inherited `.codex`, `.claude`,
-`.claude.json`, `AGENTS.md` and `CLAUDE.md` state and injects only the
-selected base instructions, skill, MCP configuration and task-scoped gateway
-settings.
+Before the agent starts, the runner removes inherited agent state for every
+supported harness — `.codex`, `.claude`, `.claude.json`, `.gemini`, `.grok`
+and the context files `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` — and injects
+only the selected base instructions, skill, MCP configuration and task-scoped
+gateway settings.
 
 Model credentials stay in the host-side gateway. The guest receives a
 placeholder token and a task-scoped endpoint. The gateway has to listen on an

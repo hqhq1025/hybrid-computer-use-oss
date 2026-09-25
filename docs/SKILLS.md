@@ -1,7 +1,9 @@
 # Skills
 
 The evaluated agent receives the shared base instructions and exactly one
-benchmark skill:
+benchmark skill. Every supported harness gets the same text, delivered
+through that harness's own mechanism (see
+[Agent profiles](AGENT_PROFILES.md)):
 
 | File | Purpose | Computer-use channels |
 | --- | --- | --- |

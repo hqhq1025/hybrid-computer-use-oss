@@ -462,7 +462,6 @@ func TestAppArgumentHelpDefinesStrictBootstrapIdentity(t *testing.T) {
 }
 
 func TestModelContractHasBoundedFixedContext(t *testing.T) {
-	t.Setenv("COMPUTER_USE_LEGACY_A11Y_TOOLS", "off")
 	if len(serverInstructions) > 1500 {
 		t.Fatalf("server instructions grew to %d bytes", len(serverInstructions))
 	}

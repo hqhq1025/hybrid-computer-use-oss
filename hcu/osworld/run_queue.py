@@ -29,12 +29,19 @@ from desktop_env.providers.volume import (
 
 RUNNER_MODULE = "hcu.osworld.run_task"
 
-DEFAULT_QUEUE = Path(
-    os.environ.get(
-        "HCU_V2_QUEUE",
-        REPO_ROOT / "configs" / "osworld-v2-queue.example.json",
+def default_queue_path() -> Path:
+    """Queue configuration to read when ``--queue`` is not given.
+
+    Both benchmark generations use this queue, so the variable has no
+    generation in its name; ``HCU_V2_QUEUE`` is still accepted.
+    """
+    configured = os.environ.get("HCU_QUEUE") or os.environ.get("HCU_V2_QUEUE")
+    return Path(
+        configured or REPO_ROOT / "configs" / "osworld-v2-codex-queue.example.json"
     )
-)
+
+
+DEFAULT_QUEUE = default_queue_path()
 REQUIRED_CONFIG_KEYS = (
     "model",
     "effort",

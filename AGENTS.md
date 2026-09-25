@@ -56,8 +56,8 @@ with the OSWorld-V2 virtual environment:
 
 ```bash
 external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_batch \
-  --config configs/osworld-v1-queue.example.json --dry-run
+  --config configs/osworld-v1-codex-queue.example.json --dry-run
 external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_batch \
-  --config configs/osworld-v2-queue.example.json --dry-run
+  --config configs/osworld-v2-codex-queue.example.json --dry-run
 ```
 

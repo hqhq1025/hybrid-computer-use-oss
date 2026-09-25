@@ -28,10 +28,6 @@ const (
 	AccessibilitySetValue      AccessibilityOperation = "set_value"
 )
 
-type DesktopOperation string
-
-const ()
-
 type WindowOperation string
 
 const (

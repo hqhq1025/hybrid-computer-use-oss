@@ -67,23 +67,60 @@ def test_batch_expands_environment_backed_paths(tmp_path, monkeypatch):
     assert command[command.index("--max-model-calls") + 1] == "200"
 
 
-def test_example_queues_bind_guest_password_and_capacity():
-    v1 = json.loads(
-        (ROOT / "configs/osworld-v1-queue.example.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    v2 = json.loads(
-        (ROOT / "configs/osworld-v2-queue.example.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert v1["client_password"] == "password"
-    assert {task["volume_size"] for task in v1["tasks"]} == {64}
-    assert v2["client_password"] == "osworld-public-evaluation"
-    assert {task["volume_size"] for task in v2["tasks"]} == {100}
-    validate_config(v1)
-    validate_config(v2)
+# The cross-model comparison runs four harnesses on V1; the V2 main
+# experiment runs Codex and Claude Code.
+EXAMPLE_AGENTS = {
+    "v1": ("codex", "claude-code", "gemini-cli", "grok-build"),
+    "v2": ("codex", "claude-code"),
+}
+V1_PASSWORD = "password"
+V1_VOLUME_SIZE = 64
+V2_PASSWORD = "osworld-public-evaluation"
+V2_VOLUME_SIZE = 100
+
+
+def example_configs():
+    """Every example queue, keyed by its benchmark version and agent."""
+    found = {}
+    for path in sorted((ROOT / "configs").glob("osworld-*-queue.example.json")):
+        config = json.loads(path.read_text(encoding="utf-8"))
+        found.setdefault(config["benchmark_version"], {})[config["agent"]] = config
+    return found
+
+
+def test_example_queues_cover_the_harnesses_and_bind_their_guests():
+    configs = example_configs()
+    assert set(configs) == set(EXAMPLE_AGENTS)
+    for version, agents in EXAMPLE_AGENTS.items():
+        assert tuple(sorted(configs[version])) == tuple(sorted(agents))
+        for agent, config in configs[version].items():
+            validate_config(config)
+            assert config["benchmark_version"] == version
+            assert config["agent"] == agent
+            assert config["run_id"] == f"example-osworld-{version}-{agent}"
+    for config in configs["v1"].values():
+        assert config["client_password"] == V1_PASSWORD
+        assert {task["volume_size"] for task in config["tasks"]} == {V1_VOLUME_SIZE}
+    for config in configs["v2"].values():
+        assert config["client_password"] == V2_PASSWORD
+        assert {task["volume_size"] for task in config["tasks"]} == {V2_VOLUME_SIZE}
+
+
+def test_example_queues_point_each_agent_at_its_own_gateway():
+    from hcu.osworld.agents import AGENT_PROFILES
+
+    for version, configs in example_configs().items():
+        for agent, config in configs.items():
+            gateway = AGENT_PROFILES[agent]["gateway"]
+            key = {
+                "openai": "gateway_base",
+                "anthropic": "claude_gateway_base",
+                "gemini": "gemini_gateway_base",
+            }[gateway]
+            assert config[key].startswith("${HCU_")
+            assert config["token_log"].endswith(
+                f"{gateway}-tokens.jsonl"
+            )
 
 
 def test_config_rejects_unknown_keys():

@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=REPO_ROOT / "configs/osworld-v2-queue.example.json",
+        default=REPO_ROOT / "configs/osworld-v2-codex-queue.example.json",
     )
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument(

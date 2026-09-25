@@ -18,16 +18,17 @@ flowchart TB
     V1 --> O[Official Docker QEMU wrapper]
     V2 --> O
     O --> Q[Isolated qcow2 guest]
-    Q --> A[Codex or Claude Code]
+    Q --> A[Task agent]
     A --> M[computer-use MCP]
     M --> D[Guest desktop]
     A -.model requests.-> G[hcu.gateway task-scoped gateway]
 ```
 
-Codex and Claude Code receive the original OSWorld instruction plus a minimal
-completion contract. Codex loads the benchmark skill as `AGENTS.md`. Claude
-Code receives the same skill appended to a replacement system prompt, because
-a `CLAUDE.md` would be merged with ambient configuration.
+Every task agent receives the original OSWorld instruction plus a minimal
+completion contract. The four supported agents (Codex, Claude Code, Gemini
+CLI and Grok Build) each read the base instructions and the benchmark skill
+through their own harness mechanism; [Agent profiles](AGENT_PROFILES.md) lists
+them, including why the skill cannot travel the same way for all four.
 
 ## MCP process
 

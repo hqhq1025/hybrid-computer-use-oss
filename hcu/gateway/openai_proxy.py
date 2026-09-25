@@ -157,6 +157,7 @@ class OpenAIGateway:
         max_requests_per_task: int,
         token: AzureToken | StaticToken,
         upstream_kind: str = "azure",
+        upstream_scheme: str = "https",
     ) -> None:
         if upstream_kind not in UPSTREAM_KINDS:
             raise ValueError(f"unknown upstream kind {upstream_kind!r}")
@@ -166,6 +167,7 @@ class OpenAIGateway:
         self.max_requests_per_task = max_requests_per_task
         self.token = token
         self.upstream_kind = upstream_kind
+        self.upstream_scheme = upstream_scheme
         self.stats = new_stats()
         self._affinity_lock = threading.Lock()
         self._affinity: dict[tuple[str, str], str] = {}
@@ -248,8 +250,14 @@ class OpenAIGateway:
         with self._pool_lock:
             pool = self._pools.get(host)
             if pool is None:
-                pool = urllib3.HTTPSConnectionPool(
-                    host, port=443, maxsize=64, block=False, retries=False
+                name, port = split_host(host)
+                pool_class = (
+                    urllib3.HTTPConnectionPool
+                    if self.upstream_scheme == "http"
+                    else urllib3.HTTPSConnectionPool
+                )
+                pool = pool_class(
+                    name, port=port, maxsize=64, block=False, retries=False
                 )
                 self._pools[host] = pool
             return pool
@@ -468,7 +476,20 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
 
 
 def parse_hosts(value: str) -> list[str]:
+    """Split a comma-separated upstream list.
+
+    A host may carry a port for a local relay (``127.0.0.1:8537``); a scheme
+    and a path stay rejected, because the scheme is chosen by
+    ``--upstream-scheme`` and the path comes from the client.
+    """
     return [host.strip() for host in value.split(",") if host.strip()]
+
+
+def split_host(host: str) -> tuple[str, int]:
+    name, separator, port = host.rpartition(":")
+    if not separator or not port.isdigit():
+        return host, 443
+    return name, int(port)
 
 
 def main() -> int:
@@ -510,6 +531,12 @@ def main() -> int:
         default=os.environ.get("OSW_OPENAI_UPSTREAM_TOKEN", ""),
     )
     parser.add_argument(
+        "--upstream-scheme",
+        choices=("https", "http"),
+        default="https",
+        help="Scheme for upstream requests; http serves a local relay.",
+    )
+    parser.add_argument(
         "--model-upstreams",
         action="append",
         default=[],
@@ -545,7 +572,8 @@ def main() -> int:
     ]
     if invalid:
         parser.error(
-            "upstreams must be bare hosts without scheme, path or whitespace: "
+            "upstreams must be bare hosts, optionally with a port, without "
+            "scheme, path or whitespace: "
             + ", ".join(invalid)
         )
 
@@ -562,6 +590,7 @@ def main() -> int:
         max_requests_per_task=args.max_requests_per_task,
         token=token,
         upstream_kind=args.upstream_kind,
+        upstream_scheme=args.upstream_scheme,
     )
     gateway.restore()
     try:
