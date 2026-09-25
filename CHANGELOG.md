@@ -79,9 +79,9 @@ this repository started from:
   `MIT AND Apache-2.0`.
 - `make build` builds with `--network none`. `make verify` is gone, and
   `make test` also runs gofmt, `go vet` and the provider tests.
-- `make image-v1` and `make smoke-v1-direct` became `make desktop-image` and
-  `make smoke-desktop`. `docker/Dockerfile.desktop` reuses the release binary
-  and requires `OSWORLD_BASE_IMAGE`.
+- Removed the direct-container desktop image and its smoke test
+  (`make image-v1`, `make smoke-v1-direct`); they needed a private base
+  image and the QEMU runtime is the only evaluation path.
 - `guest-images/workstation-deps-v014-beta1` became
   `guest-images/workstation-deps`.
 - Files modified from OSWorld-V2 carry Apache-2.0 headers, and

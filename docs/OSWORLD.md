@@ -333,8 +333,7 @@ or the timeout, counts as a failure even if the evaluator happens to pass.
 - `OSWORLD_FILE_BASE_URL` must be an absolute local directory containing
   `task_001`.
 - Hosts whose Docker daemon lost its default `docker0` bridge can still build
-  the release binary (`make build` uses `--network none`); the desktop image
-  build uses `DOCKER_BUILD_NETWORK=host` by default.
+  the release binary: `make build` uses `--network none`.
 - A passing evaluator does not prove that the task was done as asked; read
   the trace and the artifacts as well.
 - This repository's `AGENTS.md` is written for developers and must never

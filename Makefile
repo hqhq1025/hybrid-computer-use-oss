@@ -1,10 +1,7 @@
 SHELL := /bin/bash
 VERSION := $(shell cat VERSION)
-DESKTOP_IMAGE ?= hybrid-computer-use-desktop:$(VERSION)
-DOCKER_BUILD_NETWORK ?= host
-SMOKE_NETWORK ?= bridge
 
-.PHONY: agents build build-local test smoke desktop-image smoke-desktop
+.PHONY: agents build build-local test smoke
 
 agents:
 	python3 scripts/download-agent-artifacts.py
@@ -25,16 +22,3 @@ test:
 
 smoke:
 	python3 scripts/smoke-mcp.py artifacts/computer-use
-
-desktop-image: build
-	@test -n "$(OSWORLD_BASE_IMAGE)" || { \
-		echo "Set OSWORLD_BASE_IMAGE to a desktop image that runs the OSWorld guest server." >&2; \
-		exit 1; }
-	docker build \
-		--network "$(DOCKER_BUILD_NETWORK)" \
-		--build-arg OSWORLD_BASE_IMAGE="$(OSWORLD_BASE_IMAGE)" \
-		-t "$(DESKTOP_IMAGE)" \
-		-f docker/Dockerfile.desktop .
-
-smoke-desktop:
-	python3 scripts/smoke-desktop.py --image "$(DESKTOP_IMAGE)" --network "$(SMOKE_NETWORK)"

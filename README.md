@@ -53,7 +53,7 @@ full-desktop image the tool returned. See [Architecture](docs/ARCHITECTURE.md).
 | `osworld-overlay/` | Patches installed into a pinned OSWorld-V2 checkout |
 | `skills/` | Agent instructions: hybrid, AX-only and GUI-only skills and shared base instructions |
 | `guest-images/` | Scripts that add workstation dependencies to the official guest images |
-| `docker/`, `scripts/` | Release build, desktop smoke image, installers and smoke tests |
+| `docker/`, `scripts/` | Release build, installers and smoke tests |
 | `configs/` | Agent release lock file, environment template and example batch configs |
 
 ## Quick start: the MCP server

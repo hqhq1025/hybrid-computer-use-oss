@@ -46,8 +46,7 @@ source files.
 `make agents` downloads the Codex CLI and Claude Code release archives listed
 in `configs/agent-artifacts.lock.json` from their publishers. They are not
 part of this repository and keep their own licenses; Claude Code is
-proprietary. Check its terms before publishing an image built with
-`docker/Dockerfile.desktop`, which copies both CLIs into the image.
+proprietary.
 
 ## Not redistributed
 

@@ -199,22 +199,6 @@ cd computer-use && go test -run TestPublicContractMatchesGolden -update-contract
 The contract test clears the variables that change model-visible output, so
 it always checks the defaults.
 
-## Desktop image smoke test
-
-`docker/Dockerfile.desktop` adds the binary, its provider dependencies and the
-agent CLIs to a desktop image that already runs the OSWorld guest server on
-port 5000 as user `user`. This repository does not publish such a base image.
-
-```bash
-make agents
-make desktop-image OSWORLD_BASE_IMAGE=<desktop-image>
-make smoke-desktop SMOKE_NETWORK=bridge
-```
-
-The smoke test starts a container, waits for the guest server's screenshot
-endpoint, checks the binary and agent versions, lists the tools and calls
-`AX` and `GUI` once each.
-
 ## Troubleshooting
 
 AX sees no applications:

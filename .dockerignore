@@ -5,6 +5,3 @@ runs
 **/__pycache__
 **/*.pyc
 artifacts/*
-!artifacts/computer-use
-!artifacts/codex
-!artifacts/claude-code
