@@ -238,8 +238,8 @@ def summarize_grok_trace(raw: bytes | None) -> dict:
                 summary, name, "computer_use__", "run_terminal_command"
             )
         elif kind == "end":
-            # Grok reports cache reads apart from input_tokens; the summary
-            # counts input with cached tokens included, as the gateways do.
+            # Grok reports cache reads apart from input_tokens, and the
+            # summary counts cumulative input with cached history included.
             usage = event.get("usage") or {}
             cached = int(usage.get("cache_read_input_tokens") or 0)
             summary["input_tokens"] = (
