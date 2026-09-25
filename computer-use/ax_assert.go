@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// assert_ax: assertions that retry until a timeout
-//
 // Post-action readback is passive: it reports what changed after an action.
 // Confirming a condition actively (has the save dialog closed?) otherwise
 // means pulling another tree and comparing once, which gives the wrong answer
@@ -26,7 +23,6 @@ import (
 // with a 400ms interval, and the first sample always runs: one snapshot of a
 // large app can take longer than the whole budget, and checking the deadline
 // first would fail without sampling once.
-// ---------------------------------------------------------------------------
 
 type verifyGoal struct {
 	state           string

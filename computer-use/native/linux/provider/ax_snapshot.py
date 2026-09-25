@@ -194,21 +194,15 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         child_count_hint = no_child_count_hint
 
         # Pruning keeps only nodes with an interactive role that are visible
-        # on screen; in offline replay this reduced trees to 22% of their size
-        # while keeping every action target. Only the node's own line is
-        # dropped and its children are still visited: intermediate containers
-        # are often the parents of valuable controls, so cutting the subtree
-        # would backfire.
+        # on screen. Only the node's own line is dropped and its children are
+        # still visited: intermediate containers are often the parents of
+        # valuable controls, so cutting the subtree would backfire.
         #
         # The decision reads only the fields it uses (strict_prune_probe)
-        # instead of building the full record first. On GIMP (GAIL), a full
-        # record_for cost 8.45 ms per node; one render_tree call built 3162
-        # records but kept 157, so 95% of the cost (87% of rendering time) was
-        # thrown away and the tree took 38 s, beyond the Go layer's 30 s
-        # timeout. The probe fields cost about 2.3 ms; states (2.52 ms),
-        # actions (1.78 ms), value (0.92 ms), placeholder (0.58 ms) and
-        # automationId (0.57 ms) are read only for kept nodes. Kept nodes read
-        # the probe fields again, which is negligible at a 5% survival rate.
+        # instead of building the full record first: most nodes are pruned,
+        # and building full records for them (about 8 ms each on GIMP) can
+        # push a tree past the Go layer's 30 s timeout. States, actions,
+        # value, placeholder and automationId are read only for kept nodes.
         if prune and depth > 0:
             probe, probe_errors = strict_prune_probe(
                 node, window_bounds, text_limit
@@ -242,9 +236,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             #
             # Keeping every visible named node suits desktop dialogs (see the
             # Line Spacing case above), but on web pages every text node is
-            # named. On chrome://flags, 212 of 521 text nodes (41%) repeated
-            # their parent's text word for word, adding no information at the
-            # same byte cost.
+            # named, and a large share (about 40% on chrome://flags) repeats
+            # the parent's text word for word at the same byte cost.
             #
             # Only childless text roles are dropped: a container may still be
             # the only way to identify an unnamed control.
@@ -293,11 +286,10 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         # every later index. See StableIndexer.
         #
         # Assign the index only once the node is known to be kept. Assigning
-        # it before pruning consumed indices for discarded nodes that never
-        # reached records or refs (one Nautilus snapshot of 91 elements used
-        # indices spread over 0..670). Pruned nodes are not in `known`, so
-        # they took fresh indices on every snapshot and the numbers grew
-        # steadily over a session.
+        # it before pruning would consume indices for discarded nodes that
+        # never reach records or refs; pruned nodes are not in `known`, so
+        # they would take fresh indices on every snapshot and the numbers
+        # would grow steadily over a session.
         record["index"] = (indexer.index_for(path, record["controlType"],
                                              record["name"],
                                              record.get("nameHash", ""))

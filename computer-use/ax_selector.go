@@ -38,13 +38,10 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 	// alt text at 140-160 (lower wins), all far ahead of nth= at 10000.
 	//
 	// The tiers here are name, then description. Description is a tier of its
-	// own because some toolkits describe many nodes that have no name: across
-	// seven sampled desktop apps it raised the share of uniquely addressable
-	// nodes from 55% to 66%, and it doubled that share in an app whose nodes
-	// mostly carry a description but no name.
+	// own because some toolkits describe many nodes that have no name.
 	//
-	// AT-SPI accessible_id, the counterpart of Playwright's test-id tier, was
-	// unset in every sampled app, so that tier is unavailable on the desktop.
+	// AT-SPI accessible_id, the counterpart of Playwright's test-id tier, is
+	// unset in practice, so that tier is unavailable on the desktop.
 	var byName, byDescription []elementRecord
 	for _, record := range snapshot.Elements {
 		if !selectorRoleMatches(&record, role) {

@@ -558,7 +558,7 @@ def x11_active_client_size():
     screen coordinates, and the secondary dialog in front may have no title.
     The X11 size includes the invisible shadow border drawn by GTK; after
     subtracting ``_GTK_FRAME_EXTENTS`` it matches the accessibility size
-    exactly (for example 827x291 minus (61,61,55,67) gives 705x169).
+    exactly.
     """
     try:
         active = subprocess.run(["xdotool", "getactivewindow"],

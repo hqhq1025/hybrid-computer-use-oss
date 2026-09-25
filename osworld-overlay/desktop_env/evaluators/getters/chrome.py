@@ -59,14 +59,13 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
                 - attribute (str): optional for 'attribute' and 'click_and_attribute', the attribute to be extracted.
             - backups (Any): The backup information to be returned if the extraction fails.
     """
-    # 添加函数开始日志
     logger.info(f"[INFO_FROM_WEBSITE] Starting to get information from website: {config.get('url', 'N/A')}")
     logger.info(f"[INFO_FROM_WEBSITE] Total info operations to perform: {len(config.get('infos', []))}")
     logger.debug(f"[INFO_FROM_WEBSITE] Full config: {config}")
 
     try:
         host = env.vm_ip
-        port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+        port = env.chromium_port
         server_port = env.server_port
         remote_debugging_url = f"http://{host}:{port}"
         backend_url = f"http://{host}:{server_port}"
@@ -75,7 +74,6 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
         logger.info(f"[INFO_FROM_WEBSITE] Connecting to Chrome at {remote_debugging_url}")
 
         with sync_playwright() as p:
-            # connect to remote Chrome instance
             try:
                 browser = connect_over_cdp_with_retry(
                     p.chromium, remote_debugging_url, logger=logger
@@ -98,7 +96,6 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
                 logger.info(f"[INFO_FROM_WEBSITE] Starting browser with command: {' '.join(command)}")
                 payload = json.dumps({"command": command, "shell": False})
                 headers = {"Content-Type": "application/json"}
-                #requests.post("http://" + host + ":" + server_port + "/setup" + "/launch", headers=headers, data=payload)
                 requests.post(backend_url + "/setup" + "/launch", headers=headers, data=payload)
                 time.sleep(5)
                 browser = connect_over_cdp_with_retry(
@@ -112,7 +109,6 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
             page.goto(config["url"])
             page.wait_for_load_state('load')
 
-            # 记录页面加载完成后的信息
             logger.info(f"[INFO_FROM_WEBSITE] Page loaded successfully")
             logger.info(f"[INFO_FROM_WEBSITE] Page title: '{page.title()}'")
             logger.info(f"[INFO_FROM_WEBSITE] Current URL: '{page.url}'")
@@ -191,7 +187,6 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
 
                 logger.info(f"[INFO_FROM_WEBSITE] Completed info operation {idx + 1}")
 
-            # 记录最终提取的所有信息
             logger.info(f"[INFO_FROM_WEBSITE] All operations completed successfully")
             logger.info(f"[INFO_FROM_WEBSITE] Total extracted information count: {len(infos)}")
             logger.info(f"[INFO_FROM_WEBSITE] Final extracted information: {infos}")
@@ -207,7 +202,6 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
         return backup_data
 
 
-# The following ones just need to load info from the files of software, no need to connect to the software
 def get_default_search_engine(env, config: Dict[str, str]):
     os_type = env.vm_platform
     if os_type == 'Windows':
@@ -277,7 +271,6 @@ def get_cookie_data(env, config: Dict[str, str]):
         conn = sqlite3.connect(_path)
         cursor = conn.cursor()
 
-        # Query to check for OpenAI cookies
         cursor.execute("SELECT * FROM cookies")
         cookies = cursor.fetchall()
         return cookies
@@ -318,7 +311,6 @@ def get_history(env, config: Dict[str, str]):
         conn = sqlite3.connect(_path)
         cursor = conn.cursor()
 
-        # Query to check for OpenAI cookies
         cursor.execute("SELECT url, title, last_visit_time FROM urls")
         history_items = cursor.fetchall()
         return history_items
@@ -502,7 +494,6 @@ def get_bookmarks(env, config: Dict[str, str]):
     return bookmarks
 
 
-# todo: move this to the main.py
 def get_extensions_installed_from_shop(env, config: Dict[str, str]):
     """Find the Chrome extensions directory based on the operating system."""
     os_type = env.vm_platform
@@ -529,7 +520,6 @@ def get_extensions_installed_from_shop(env, config: Dict[str, str]):
     for extension_id in os.listdir(chrome_extension_dir):
         extension_path = os.path.join(chrome_extension_dir, extension_id)
         if os.path.isdir(extension_path):
-            # Iterate through version-named subdirectories
             for version_dir in os.listdir(extension_path):
                 version_path = os.path.join(extension_path, version_dir)
                 manifest_path = os.path.join(version_path, 'manifest.json')
@@ -548,22 +538,20 @@ def get_extensions_installed_from_shop(env, config: Dict[str, str]):
 
 def get_page_info(env, config: Dict[str, str]):
     host = env.vm_ip
-    port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+    port = env.chromium_port
     server_port = env.server_port
     url = config["url"]
 
     remote_debugging_url = f"http://{host}:{port}"
 
-    # Configuration for retry and timeout
     max_retries = 2
-    timeout_ms = 60000  # Increase timeout to 60 seconds
+    timeout_ms = 60000
 
     for attempt in range(max_retries):
         try:
             logger.info(f"[PAGE_INFO] Attempt {attempt + 1}/{max_retries} for URL: {url}")
 
             with sync_playwright() as p:
-                # connect to remote Chrome instance
                 try:
                     browser = connect_over_cdp_with_retry(
                         p.chromium, remote_debugging_url, logger=logger
@@ -574,7 +562,6 @@ def get_page_info(env, config: Dict[str, str]):
                     # If the connection fails, start a new browser instance
                     platform.machine()
                     if "arm" in platform.machine():
-                        # start a new browser instance if the connection fails
                         payload = json.dumps({"command": [
                             "chromium",
                             "--remote-debugging-port=1337"
@@ -595,7 +582,6 @@ def get_page_info(env, config: Dict[str, str]):
 
                 page = browser.new_page()
 
-                # Set longer timeout for navigation
                 page.set_default_timeout(timeout_ms)
 
                 logger.info(f"[PAGE_INFO] Navigating to URL: {url}")
@@ -603,7 +589,7 @@ def get_page_info(env, config: Dict[str, str]):
 
                 try:
                     # Wait for the page to finish loading, this prevents the "execution context was destroyed" issue
-                    page.wait_for_load_state('networkidle', timeout=timeout_ms)  # Wait for the 'load' event to complete
+                    page.wait_for_load_state('networkidle', timeout=timeout_ms)
                     title = page.title()
                     url = page.url
                     page_info = {'title': title, 'url': url, 'content': page.content()}
@@ -631,27 +617,24 @@ def get_page_info(env, config: Dict[str, str]):
                 logger.error(f"[PAGE_INFO] All {max_retries} attempts failed. Returning error info.")
                 return {'title': 'Connection failed', 'url': url, 'content': ''}
 
-    # This should never be reached, but just in case
     return {'title': 'Unknown error', 'url': url, 'content': ''}
 
 
 def get_open_tabs_info(env, config: Dict[str, str]):
     host = env.vm_ip
-    port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+    port = env.chromium_port
     server_port = env.server_port
 
     remote_debugging_url = f"http://{host}:{port}"
 
-    # Configuration for retry and timeout
     max_retries = 2
-    timeout_ms = 30000  # 30 seconds for tab info
+    timeout_ms = 30000
 
     for attempt in range(max_retries):
         try:
             logger.info(f"[OPEN_TABS_INFO] Attempt {attempt + 1}/{max_retries}")
 
             with sync_playwright() as p:
-                # connect to remote Chrome instance
                 try:
                     browser = connect_over_cdp_with_retry(
                         p.chromium, remote_debugging_url, logger=logger
@@ -662,7 +645,6 @@ def get_open_tabs_info(env, config: Dict[str, str]):
                     # If the connection fails, start a new browser instance
                     platform.machine()
                     if "arm" in platform.machine():
-                        # start a new browser instance if the connection fails
                         payload = json.dumps({"command": [
                             "chromium",
                             "--remote-debugging-port=1337"
@@ -689,11 +671,10 @@ def get_open_tabs_info(env, config: Dict[str, str]):
                 for context in browser.contexts:
                     for page in context.pages:
                         try:
-                            # Set timeout for each page
                             page.set_default_timeout(timeout_ms)
 
                             # Wait for the page to finish loading, this prevents the "execution context was destroyed" issue
-                            page.wait_for_load_state('networkidle', timeout=timeout_ms)  # Wait for the 'load' event to complete
+                            page.wait_for_load_state('networkidle', timeout=timeout_ms)
                             title = page.title()
                             url = page.url
                             tabs_info.append({'title': title, 'url': url})
@@ -722,7 +703,6 @@ def get_open_tabs_info(env, config: Dict[str, str]):
                 logger.error(f"[OPEN_TABS_INFO] All {max_retries} attempts failed. Returning empty list.")
                 return []
 
-    # This should never be reached, but just in case
     return []
 
 
@@ -733,11 +713,6 @@ def get_active_url_from_accessTree(env, config):
         This function is used to get the active tab url from the accessibility tree.
         config:
             Dict[str, str]{
-                # we no longer need to specify the xpath or selectors, since we will use defalut value
-                # 'xpath':
-                #     the same as in metrics.general.accessibility_tree.
-                # 'selectors':
-                #     the same as in metrics.general.accessibility_tree.
                 'goto_prefix':
                     the prefix you want to add to the beginning of the url to be opened, default is "https://",
                     (the url we get from accTree does not have prefix)
@@ -746,7 +721,6 @@ def get_active_url_from_accessTree(env, config):
         Return
             url: str
     """
-    # Ensure the controller and its method are accessible and return a valid result
     if hasattr(env, 'controller') and callable(getattr(env.controller, 'get_accessibility_tree', None)):
         accessibility_tree = env.controller.get_accessibility_tree()
         if accessibility_tree is None:
@@ -765,7 +739,6 @@ def get_active_url_from_accessTree(env, config):
         logger.error(f"Error parsing accessibility tree: {e}")
         return None
 
-    # Determine the correct selector based on system architecture
     selector = None
     arch = platform.machine()
     print(f"Your architecture is: {arch}")
@@ -789,7 +762,6 @@ def get_active_url_from_accessTree(env, config):
         print("No text found in the latest element.")
         return None
 
-    # Use a default prefix if 'goto_prefix' is not specified in the config
     goto_prefix = config.get("goto_prefix", "https://")
 
     active_tab_url = f"{goto_prefix}{elements[0].text}"
@@ -816,13 +788,12 @@ def get_active_tab_info(env, config: Dict[str, str]):
     logger.info(f"[ACTIVE_TAB_INFO] Active tab URL: {active_tab_url}")
 
     host = env.vm_ip
-    port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+    port = env.chromium_port
 
     remote_debugging_url = f"http://{host}:{port}"
 
-    # Configuration for retry and timeout
     max_retries = 2
-    timeout_ms = 60000  # 60 seconds for active tab
+    timeout_ms = 60000
 
     for attempt in range(max_retries):
         try:
@@ -840,21 +811,19 @@ def get_active_tab_info(env, config: Dict[str, str]):
                     return None
 
                 active_tab_info = {}
-                # go to the target URL page
                 page = browser.new_page()
 
-                # Set longer timeout for navigation
                 page.set_default_timeout(timeout_ms)
 
                 try:
                     logger.info(f"[ACTIVE_TAB_INFO] Navigating to URL: {active_tab_url}")
                     page.goto(active_tab_url, wait_until='networkidle', timeout=timeout_ms)
-                    page.wait_for_load_state('networkidle', timeout=timeout_ms)  # Wait for the 'load' event to complete
+                    page.wait_for_load_state('networkidle', timeout=timeout_ms)
 
                     active_tab_info = {
                         'title': page.title(),
                         'url': page.url,
-                        'content': page.content()  # get the HTML content of the page
+                        'content': page.content()
                     }
 
                     logger.info(f"[ACTIVE_TAB_INFO] Successfully loaded page. Title: '{active_tab_info['title']}'")
@@ -885,7 +854,6 @@ def get_active_tab_info(env, config: Dict[str, str]):
                 logger.error(f"[ACTIVE_TAB_INFO] All {max_retries} attempts failed.")
                 return None
 
-    # This should never be reached, but just in case
     return None
 
 
@@ -896,19 +864,17 @@ def get_pdf_from_url(env, config: Dict[str, str]) -> str:
     _url = config["path"]
     _path = os.path.join(env.cache_dir, config["dest"])
 
-    # Add logging for debugging
     logger.info(f"[PDF_FROM_URL] Starting PDF download from URL: {_url}")
     logger.info(f"[PDF_FROM_URL] Target path: {_path}")
 
     host = env.vm_ip
-    port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+    port = env.chromium_port
     server_port = env.server_port
 
     remote_debugging_url = f"http://{host}:{port}"
 
-    # Configuration for retry and timeout
     max_retries = 3
-    timeout_ms = 60000  # Increase timeout to 60 seconds
+    timeout_ms = 60000
 
     for attempt in range(max_retries):
         try:
@@ -927,7 +893,6 @@ def get_pdf_from_url(env, config: Dict[str, str]) -> str:
                     # If the connection fails, start a new browser instance
                     platform.machine()
                     if "arm" in platform.machine():
-                        # start a new browser instance if the connection fails
                         payload = json.dumps({"command": [
                             "chromium",
                             "--remote-debugging-port=1337"
@@ -948,30 +913,25 @@ def get_pdf_from_url(env, config: Dict[str, str]) -> str:
 
                 page = browser.new_page()
 
-                # Set longer timeout for navigation
                 page.set_default_timeout(timeout_ms)
 
                 logger.info(f"[PDF_FROM_URL] Navigating to URL: {_url}")
                 page.goto(_url, wait_until='networkidle', timeout=timeout_ms)
 
-                # Wait for page to be fully loaded
                 logger.info(f"[PDF_FROM_URL] Waiting for page to be fully loaded...")
                 page.wait_for_load_state('networkidle', timeout=timeout_ms)
 
-                # Additional wait to ensure all content is rendered
                 time.sleep(3)
 
                 logger.info(f"[PDF_FROM_URL] Page loaded successfully. Title: '{page.title()}'")
                 logger.info(f"[PDF_FROM_URL] Current URL: '{page.url}'")
 
-                # Generate PDF
                 logger.info(f"[PDF_FROM_URL] Generating PDF...")
                 page.pdf(path=_path)
 
                 logger.info(f"[PDF_FROM_URL] PDF generated successfully at: {_path}")
                 browser.close()
 
-                # Verify PDF file was created
                 if os.path.exists(_path):
                     file_size = os.path.getsize(_path)
                     logger.info(f"[PDF_FROM_URL] PDF file created successfully. Size: {file_size} bytes")
@@ -990,40 +950,34 @@ def get_pdf_from_url(env, config: Dict[str, str]) -> str:
             else:
                 logger.error(f"[PDF_FROM_URL] All {max_retries} attempts failed. Giving up.")
 
-                # Create a placeholder file or return a default path
                 try:
-                    # Create an empty PDF file as fallback
                     with open(_path, 'w') as f:
                         f.write("%PDF-1.4\n%EOF\n")
                     logger.warning(f"[PDF_FROM_URL] Created empty PDF file as fallback: {_path}")
                     return _path
                 except Exception as fallback_error:
                     logger.error(f"[PDF_FROM_URL] Failed to create fallback file: {fallback_error}")
-                    # Return the path anyway, even if file creation failed
                     return _path
 
-    # This should never be reached, but just in case
     return _path
 
 
 # fixme: needs to be changed (maybe through post-processing) since it's not working
 def get_chrome_saved_address(env, config: Dict[str, str]):
     host = env.vm_ip
-    port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+    port = env.chromium_port
     server_port = env.server_port
 
     remote_debugging_url = f"http://{host}:{port}"
 
-    # Configuration for retry and timeout
     max_retries = 2
-    timeout_ms = 30000  # 30 seconds for settings page
+    timeout_ms = 30000
 
     for attempt in range(max_retries):
         try:
             logger.info(f"[CHROME_SAVED_ADDRESS] Attempt {attempt + 1}/{max_retries}")
 
             with sync_playwright() as p:
-                # connect to remote Chrome instance
                 try:
                     browser = connect_over_cdp_with_retry(
                         p.chromium, remote_debugging_url, logger=logger
@@ -1034,7 +988,6 @@ def get_chrome_saved_address(env, config: Dict[str, str]):
                     # If the connection fails, start a new browser instance
                     platform.machine()
                     if "arm" in platform.machine():
-                        # start a new browser instance if the connection fails
                         payload = json.dumps({"command": [
                             "chromium",
                             "--remote-debugging-port=1337"
@@ -1055,17 +1008,13 @@ def get_chrome_saved_address(env, config: Dict[str, str]):
 
                 page = browser.new_page()
 
-                # Set longer timeout for navigation
                 page.set_default_timeout(timeout_ms)
 
-                # Navigate to Chrome's settings page for autofill
                 logger.info(f"[CHROME_SAVED_ADDRESS] Navigating to Chrome settings page")
                 page.goto("chrome://settings/addresses", wait_until='networkidle', timeout=timeout_ms)
 
-                # Wait for page to be fully loaded
                 page.wait_for_load_state('networkidle', timeout=timeout_ms)
 
-                # Get the HTML content of the page
                 content = page.content()
 
                 logger.info(f"[CHROME_SAVED_ADDRESS] Successfully retrieved settings page content")
@@ -1084,15 +1033,12 @@ def get_chrome_saved_address(env, config: Dict[str, str]):
                 logger.error(f"[CHROME_SAVED_ADDRESS] All {max_retries} attempts failed. Returning empty content.")
                 return ""
 
-    # This should never be reached, but just in case
     return ""
 
 
 def get_shortcuts_on_desktop(env, config: Dict[str, str]):
-    # Find out the operating system
     os_name = env.vm_platform
 
-    # Depending on the OS, define the shortcut file extension
     if os_name == 'Windows':
         # Windows shortcuts are typically .url or .lnk files
         shortcut_extension = '.lnk'
@@ -1106,7 +1052,6 @@ def get_shortcuts_on_desktop(env, config: Dict[str, str]):
         logger.error(f"Unsupported operating system: {os_name}")
         return []
 
-    # Get the path to the desktop folder
     desktop_path = env.controller.get_vm_desktop_path()
     desktop_directory_tree = env.controller.get_vm_directory_tree(desktop_path)
 
@@ -1124,17 +1069,15 @@ def get_shortcuts_on_desktop(env, config: Dict[str, str]):
 
 
 def get_number_of_search_results(env, config: Dict[str, str]):
-    # todo: move into the config file
     url, result_selector = "https://google.com/search?q=query", '.search-result'
     host = env.vm_ip
-    port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+    port = env.chromium_port
     server_port = env.server_port
 
     remote_debugging_url = f"http://{host}:{port}"
 
-    # Configuration for retry and timeout
     max_retries = 2
-    timeout_ms = 45000  # 45 seconds for search results
+    timeout_ms = 45000
 
     for attempt in range(max_retries):
         try:
@@ -1151,7 +1094,6 @@ def get_number_of_search_results(env, config: Dict[str, str]):
                     # If the connection fails, start a new browser instance
                     platform.machine()
                     if "arm" in platform.machine():
-                        # start a new browser instance if the connection fails
                         payload = json.dumps({"command": [
                             "chromium",
                             "--remote-debugging-port=1337"
@@ -1172,13 +1114,11 @@ def get_number_of_search_results(env, config: Dict[str, str]):
 
                 page = browser.new_page()
 
-                # Set longer timeout for navigation
                 page.set_default_timeout(timeout_ms)
 
                 logger.info(f"[SEARCH_RESULTS] Navigating to URL: {url}")
                 page.goto(url, wait_until='networkidle', timeout=timeout_ms)
 
-                # Wait for page to be fully loaded
                 page.wait_for_load_state('networkidle', timeout=timeout_ms)
 
                 search_results = page.query_selector_all(result_selector)
@@ -1200,7 +1140,6 @@ def get_number_of_search_results(env, config: Dict[str, str]):
                 logger.error(f"[SEARCH_RESULTS] All {max_retries} attempts failed. Returning 0.")
                 return 0
 
-    # This should never be reached, but just in case
     return 0
 
 
@@ -1569,16 +1508,14 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
         if attempt < 2:
             time.sleep(0.5)
     host = env.vm_ip
-    port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+    port = env.chromium_port
     server_port = env.server_port
 
     remote_debugging_url = f"http://{host}:{port}"
 
-    # DEBUG: Add logging for configuration
     logger.info(f"[DEBUG] get_active_tab_html_parse called with config: {config}")
 
     with sync_playwright() as p:
-        # connect to remote Chrome instance
         try:
             browser = connect_over_cdp_with_retry(
                 p.chromium, remote_debugging_url, logger=logger
@@ -1587,7 +1524,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
             # If the connection fails, start a new browser instance
             platform.machine()
             if "arm" in platform.machine():
-                # start a new browser instance if the connection fails
                 payload = json.dumps({"command": [
                     "chromium",
                     "--remote-debugging-port=1337"
@@ -1627,10 +1563,8 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
         for context in browser.contexts:
             for page in context.pages:
                 try:
-                    # Wait for page to be stable before checking URL
                     page.wait_for_load_state("networkidle", timeout=60000)
 
-                    # Check if page is still valid before accessing properties
                     if page.is_closed():
                         logger.debug(f"[DEBUG] Page is closed, skipping")
                         continue
@@ -1640,7 +1574,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                     def normalize_url(url):
                         return unquote(url).rstrip('/')
 
-                    # Safely get page URL with error handling
                     try:
                         page_url = page.url
                     except Exception as url_error:
@@ -1651,7 +1584,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                         target_page = page
                         print("\33[32mtartget page url: ", target_page.url, "\33[0m")
 
-                        # Safely get page title with error handling
                         try:
                             page_title = target_page.title()
                             print("\33[32mtartget page title: ", page_title, "\33[0m")
@@ -1709,7 +1641,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                             .filter(Boolean)
                     ''')
                     results.append(texts)
-                # Safety check: return empty list if no elements found
                 return results[0] if results else []
             except Exception as e:
                 logger.warning(f"[DEBUG] Error getting direct text nodes for selector '{selector}': {e}")
@@ -1757,7 +1688,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                     return [] if get_all else ""
 
                 if get_all:
-                    # 获取所有匹配元素的属性值
                     values = []
                     for i in range(locator.count()):
                         value = locator.nth(i).get_attribute(attribute)
@@ -1765,7 +1695,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                             values.append(value.strip())
                     return values
                 else:
-                    # 只获取第一个
                     value = locator.first.get_attribute(attribute)
                     if value is None:
                         logger.warning(f"[DEBUG] Attribute '{attribute}' is None for selector '{selector}'")
@@ -1786,7 +1715,7 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                         return_json[key] = elements_texts[index]
                     else:
                         logger.warning(f"[DEBUG] Element at index {index} not found for class '{class_name}'. Found {len(elements_texts)} elements.")
-                        return_json[key] = ""  # Return empty string instead of None
+                        return_json[key] = ""
 
             class_multiObject_child = config.get("class_multiObject_child", {})
             for class_name, object_dict in class_multiObject_child.items():
@@ -1797,7 +1726,7 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                         return_json[key] = elements_texts[index]
                     else:
                         logger.warning(f"[DEBUG] Child element at index {index} not found for class '{class_name}'. Found {len(elements_texts)} elements.")
-                        return_json[key] = ""  # Return empty string instead of None
+                        return_json[key] = ""
 
             class_multiObject_only_child = config.get("class_multiObject_only_child", {})
             for class_name, object_dict in class_multiObject_only_child.items():
@@ -1808,7 +1737,7 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                         return_json[key] = elements_texts[index]
                     else:
                         logger.warning(f"[DEBUG] Only child element at index {index} not found for class '{class_name}'. Found {len(elements_texts)} elements.")
-                        return_json[key] = ""  # Return empty string instead of None
+                        return_json[key] = ""
 
             class_multiObject_search_exist = config.get("class_multiObject_search_exist", {})
             for class_name, object_list in class_multiObject_search_exist.items():
@@ -1846,10 +1775,9 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                     logger.info(f"[DEBUG] Class extraction for key '{key}': '{element_text[0]}'")
                 else:
                     logger.warning(f"[DEBUG] No elements found for class: {class_name}")
-                    return_json[key] = ""  # Return empty string instead of None
+                    return_json[key] = ""
 
         elif category == "label":
-            # Assuming get_by_label is a custom function or part of the framework being used
             labelObject = config.get("labelObject", {})
             for labelSelector, key in labelObject.items():
                 try:
@@ -1875,7 +1803,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
             for xpath, key in xpathObject.items():
                 logger.info(f"[DEBUG] Processing xpath: {xpath} -> key: {key}")
 
-                # Check if page is still valid
                 try:
                     if target_page.is_closed():
                         logger.warning(f"[DEBUG] Target page is closed, cannot process xpath for key '{key}'")
@@ -1893,10 +1820,8 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                                 text_content = text_content.strip()
                             logger.info(f"[DEBUG] Raw text content for key '{key}': '{text_content}' (type: {type(text_content)})")
 
-                            # 处理空文本内容的情况
                             if text_content is None or text_content == "":
                                 logger.warning(f"[DEBUG] Element found but text content is empty for key '{key}' xpath: {xpath}")
-                                # 尝试获取更多信息
                                 try:
                                     element_html = elements.first.inner_html()
                                     element_text = elements.first.inner_text()
@@ -1911,9 +1836,7 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                             return_json[key] = ""
                     else:
                         logger.warning(f"[DEBUG] No elements found for xpath: {xpath}")
-                        # 尝试一些备用的xpath查找方法
                         try:
-                            # 尝试不使用xpath前缀
                             fallback_elements = target_page.locator(xpath)
                             fallback_count = fallback_elements.count()
                             logger.info(f"[DEBUG] Fallback search (without xpath prefix) found {fallback_count} elements")
@@ -1973,7 +1896,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                         return_json[each_key.lower()] = True
 
                 for each_key in elements_texts:
-                    # each_key.lower() not in object_list.lower():
                     if all(each_key.lower() not in item.lower() for item in object_list):
                         return_json["is_other_exist"] = True
                         break
@@ -1988,7 +1910,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                         return_json[each_key.lower()] = True
 
                 for each_key in elements_texts:
-                    # each_key.lower() not in object_list.lower():
                     if all(each_key.lower() not in item.lower() for item in object_list):
                         return_json["is_other_exist"] = True
                         break
@@ -2061,7 +1982,6 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                 logger.warning(f"[DEBUG] attributeObject missing selector/attribute: {attr_conf}")
                 continue
 
-            # Optionally wait for the selector to appear before querying
             wait_timeout = attr_conf.get("wait_timeout")
             if wait_timeout and target_page and not target_page.is_closed():
                 try:
@@ -2074,15 +1994,12 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
 
         browser.close()
 
-        # DEBUG: Add logging for final result and check for None values
         logger.info(f"[DEBUG] get_active_tab_html_parse final result: {return_json}")
 
-        # 检查是否有None值
         none_keys = [key for key, value in return_json.items() if value is None]
         if none_keys:
             logger.warning(f"[DEBUG] Found None values for keys: {none_keys}")
 
-        # 检查是否期望的键都存在
         if category == "xpath":
             expected_keys = set(config.get("xpathObject", {}).values())
             actual_keys = set(return_json.keys())
@@ -2106,7 +2023,7 @@ def get_activate_tab_json(env, config: Dict[str, Any]) -> Any:
         return None
 
     host = env.vm_ip
-    port = env.chromium_port  # fixme: hard-coded port
+    port = env.chromium_port
     server_port = env.server_port
     remote_debugging_url = f"http://{host}:{port}"
 
@@ -2156,14 +2073,12 @@ def get_activate_tab_json(env, config: Dict[str, Any]) -> Any:
                 logger.debug(f"[ACTIVATE_TAB_JSON] bring_to_front failed: {e}")
 
             try:
-                # Ensure getJSON exists before invoking
                 has_fn = target_page.evaluate("typeof getJSON === 'function'")
                 if not has_fn:
                     logger.error("[ACTIVATE_TAB_JSON] getJSON is not defined in target page")
                     browser.close()
                     return None
 
-                # Call getJSON and get the result directly
                 result = target_page.evaluate("getJSON()")
 
                 # If result is already a string, use it; otherwise serialize to JSON string
@@ -2172,7 +2087,6 @@ def get_activate_tab_json(env, config: Dict[str, Any]) -> Any:
                 else:
                     json_str = json.dumps(result, indent=2, ensure_ascii=False)
 
-                # Save JSON to file
                 dest_name = config.get("dest", "form.json")
                 dest_path = os.path.join(env.cache_dir, dest_name)
                 try:
@@ -2302,23 +2216,20 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
     """
     especially used for www.recreation.gov examples
     """
-    # Add logging for debugging
     logger.info(f"[RECREATION_PAGE] Starting recreation.gov page processing")
     logger.debug(f"[RECREATION_PAGE] Config: {config}")
 
     host = env.vm_ip
-    port = env.chromium_port  # fixme: this port is hard-coded, need to be changed from config file
+    port = env.chromium_port
     server_port = env.server_port
     use_proxy = env.current_use_proxy
 
     remote_debugging_url = f"http://{host}:{port}"
     backend_url = f"http://{host}:{server_port}"
 
-    # Configuration for retry and timeout
     max_retries = 3
-    timeout_ms = 60000  # Increase timeout to 60 seconds
+    timeout_ms = 60000
 
-    # Test basic connectivity first
     logger.info(f"[RECREATION_PAGE] Testing basic network connectivity...")
     try:
         import urllib.request
@@ -2333,7 +2244,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
             logger.info(f"[RECREATION_PAGE] Attempt {attempt + 1}/{max_retries}")
 
             with sync_playwright() as p:
-                # Connect to remote Chrome instance
                 try:
                     browser = connect_over_cdp_with_retry(
                         p.chromium, remote_debugging_url, logger=logger
@@ -2363,7 +2273,7 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     payload = json.dumps({"command": command, "shell": False})
                     headers = {"Content-Type": "application/json"}
                     requests.post(backend_url + "/setup/launch", headers=headers, data=payload)
-                    time.sleep(8)  # Give more time for browser to start
+                    time.sleep(8)
                     browser = connect_over_cdp_with_retry(
                         p.chromium, remote_debugging_url, logger=logger
                     )
@@ -2371,7 +2281,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
 
                 page = browser.new_page()
 
-                # Set longer timeout for all operations
                 page.set_default_timeout(timeout_ms)
 
                 # Set additional headers to appear more like a real browser
@@ -2384,7 +2293,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     'Upgrade-Insecure-Requests': '1',
                 })
 
-                # Try multiple URLs to test connectivity
                 test_urls = [
                     "https://www.recreation.gov/",
                     "http://www.recreation.gov/",
@@ -2394,10 +2302,8 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                 successful_url = None
                 for test_url in test_urls:
                     try:
-                        # Step 1: Navigate to recreation.gov with better error handling
                         logger.info(f"[RECREATION_PAGE] Trying to navigate to: {test_url}")
 
-                        # Try different wait strategies
                         wait_strategies = ['domcontentloaded', 'load', 'networkidle']
 
                         for wait_until in wait_strategies:
@@ -2423,7 +2329,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                 if not successful_url:
                     raise Exception("Failed to navigate to any recreation.gov URL variant")
 
-                # Additional wait to ensure page is fully loaded
                 try:
                     page.wait_for_load_state('networkidle', timeout=30000)
                     logger.info(f"[RECREATION_PAGE] Page fully loaded and idle")
@@ -2431,7 +2336,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     logger.warning(f"[RECREATION_PAGE] NetworkIdle wait failed, continuing: {e}")
 
                 try:
-                    # Step 2: Fill search input
                     logger.info(f"[RECREATION_PAGE] Filling search input with 'Diamond'...")
                     page.wait_for_selector("input#hero-search-input", state='visible', timeout=timeout_ms)
                     page.fill("input#hero-search-input", "Diamond")
@@ -2442,14 +2346,12 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     raise e
 
                 try:
-                    # Step 3: Click search button
                     logger.info(f"[RECREATION_PAGE] Clicking search button...")
                     page.wait_for_selector("button.nav-search-button", state='visible', timeout=timeout_ms)
                     page.click("button.nav-search-button")
                     logger.info(f"[RECREATION_PAGE] Successfully clicked search button")
                     print("after first click")
 
-                    # Wait for search results to load
                     time.sleep(10)
 
                 except Exception as e:
@@ -2457,14 +2359,13 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     raise e
 
                 try:
-                    # Step 4: Click on search result
                     logger.info(f"[RECREATION_PAGE] Waiting for and clicking search result...")
                     page.wait_for_selector(".search-result-highlight--success", state='visible', timeout=timeout_ms)
 
                     with page.expect_popup() as popup_info:
                         page.click(".search-result-highlight--success")
 
-                    time.sleep(30)  # Wait for popup to fully load
+                    time.sleep(30)
                     print("after second click")
                     logger.info(f"[RECREATION_PAGE] Successfully clicked search result")
 
@@ -2473,7 +2374,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     raise e
 
                 try:
-                    # Step 5: Handle new page
                     newpage = popup_info.value
                     newpage.set_default_timeout(timeout_ms)
                     newpage.wait_for_load_state('networkidle', timeout=timeout_ms)
@@ -2490,10 +2390,8 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     raise e
 
                 try:
-                    # Step 6: Click next-available button with better error handling
                     logger.info(f"[RECREATION_PAGE] Looking for next-available button...")
 
-                    # Try multiple selectors for the button
                     selectors_to_try = [
                         "button.next-available",
                         "button[class*='next-available']",
@@ -2526,7 +2424,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     logger.info(f"[RECREATION_PAGE] Continuing execution despite button click failure")
                     print("Continuing without clicking next-available button")
 
-                # Step 7: Extract content based on config
                 return_json = {}
                 return_json["expected"] = {}
 
@@ -2576,7 +2473,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
 
                 except Exception as e:
                     logger.error(f"[RECREATION_PAGE] Error during content extraction: {e}")
-                    # Return a structure indicating extraction failed
                     return_json["expected"] = {"extraction_error": "__EVALUATION_FAILED__"}
 
                 browser.close()
@@ -2591,7 +2487,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                 time.sleep(5)
             else:
                 logger.error(f"[RECREATION_PAGE] All {max_retries} attempts failed. Returning error result.")
-                # Return a structure that indicates complete failure
                 return {
                     "expected": {
                         "error": "__EVALUATION_FAILED__",
@@ -2599,7 +2494,6 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     }
                 }
 
-    # This should never be reached, but just in case
     logger.error(f"[RECREATION_PAGE] Unexpected code path reached")
     return {
         "expected": {
@@ -2623,14 +2517,10 @@ def get_active_tab_url_parse(env, config: Dict[str, Any]):
     if active_tab_url is None:
         return None
 
-    # connect to remote Chrome instance
     # parse in a hard-coded way to find the specific info about task
     parsed_url = urlparse(active_tab_url)
-    # Extract the query parameters
     query_params = parse_qs(parsed_url.query)
-    # Define the keys of interest
     keys_of_interest = [key for key in config["parse_keys"]]
-    # Extract the parameters of interest
     extracted_params = {key: query_params.get(key, [''])[0] for key in keys_of_interest}
     if "replace" in config:
         for key in config["replace"].keys():
@@ -2658,7 +2548,6 @@ def get_url_dashPart(env, config: Dict[str, str]):
         return None
 
     # extract the last dash-separated part of the URL, and delete all the characters after "id"
-    # Ensure partIndex is an integer
     try:
         part_index = int(config["partIndex"])
     except (ValueError, TypeError):
@@ -2695,20 +2584,17 @@ def get_macys_product_url_parse(env, config: Dict[str, str]):
     """
     from urllib.parse import urlparse, unquote
     result = {}
-    # 1. Parse URL
     active_tab_url = get_active_url_from_accessTree(env, config)
     if active_tab_url is None:
         return None
     parsed = urlparse(active_tab_url)
     path = unquote(parsed.path)
     result = {}
-    # mens_clothing
     result['mens_clothing'] = True if 'mens-clothing' in path else None
-    # key-value
     path_parts = path.strip('/').split('/')
     key_value_json = {}
     shirts_flag = False
-    short_sleeve_flag = False  # Initialize short_sleeve_flag to avoid UnboundLocalError
+    short_sleeve_flag = False
     if "shirts" in path:
         shirts_flag = True
     if "short-sleeve" in path:
@@ -2732,7 +2618,6 @@ def get_macys_product_url_parse(env, config: Dict[str, str]):
             key_value_json[field] = None
     result['shirts'] = shirts_flag if shirts_flag else None
     result['short_sleeve'] = short_sleeve_flag if short_sleeve_flag else None
-    # parse_keys
     for key in config["parse_keys"]:
         if key in key_value_json:
             if key == "Price_discount_range":

@@ -90,7 +90,7 @@ def labelled_by_name(node):
 
     get_relation_set costs one D-Bus round trip per node (about 1 ms), so it
     is queried only for nodes without their own name, where all of the
-    benefit lies; querying all 3261 nodes of a GIMP window would add 3.4 s.
+    benefit lies; querying every node of a large window would add seconds.
     For the same reason the pruning predicate, which runs on every node, does
     not consult relations. A node worth keeping only for its borrowed name
     can therefore be pruned. This has not been observed (such spin buttons
@@ -254,7 +254,7 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT):
         # snapshot, so comparing the two costs no extra AT-SPI calls. Reading
         # them from the focused text node does not work because the
         # LibreOffice root pane also reports FOCUSED, and a separate full-tree
-        # scan took 551 ms and could miss the target paragraph.
+        # scan is slow and could miss the target paragraph.
         "textAttributes": text_attributes(node),
         "relations": relations,
         "relationReadComplete": relations_complete,

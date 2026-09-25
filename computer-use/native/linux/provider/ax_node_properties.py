@@ -41,7 +41,7 @@ def node_actions(node):
     # Check for the Action interface before asking for the action count.
     # get_n_actions() on an object without it triggers the ATK assertion
     # above, and most nodes (panels, fillers, labels, other containers) lack
-    # the interface, so a single dialog round trip logged 3482 assertions.
+    # the interface.
     if safe(node.get_action_iface) is None:
         return [], False
     count = int(safe(node.get_n_actions, 0) or 0)
@@ -202,11 +202,9 @@ NOTABLE_STATES = (
 def plain_text_from_rich_text(value):
     """Convert a Qt rich-text tooltip to plain text.
 
-    Qt stores tooltips as complete HTML documents with CSS in `<head>`. In
-    VLC's preferences, 19 such tooltips totalled 9149 characters, 56% of one
-    observation, while the actual information was often one sentence.
-    Unconverted, the description segments would consume the whole
-    observation budget.
+    Qt stores tooltips as complete HTML documents with CSS in `<head>`;
+    unconverted, a handful of them (VLC's preferences) can consume most of an
+    observation budget while carrying one sentence of information each.
 
     Only text starting with `<html`, the Qt rich-text marker, is converted.
     Ordinary text may legitimately contain angle brackets (code, templates,
@@ -404,9 +402,8 @@ def state_segment(node, has_click_action=False, borrowed_name=False):
     # and the model would alternate between two tools). With them hidden, a
     # node with a semantic click and a node without an Action interface
     # would render identically, and the agent would fall back to coordinates
-    # for both. Clickable nodes are the minority (10 of 113 in Nautilus, 7 of
-    # 37 in gedit), so marking them is an order of magnitude cheaper than
-    # marking the rest.
+    # for both. Clickable nodes are the minority, so marking them is far
+    # cheaper than marking the rest.
     #
     # The mark must use the same criteria as the entry point that the click
     # tool invokes (preferred_action_index), or it would mislead.

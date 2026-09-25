@@ -25,8 +25,7 @@ def capture_window_pixels(bounds):
     happened.
 
     Use ``read_pixel_bytes()`` rather than ``get_pixels()``: under PyGObject
-    the latter returns truncated data (under 100 KB instead of 5.85 MB for a
-    1850x1053 capture).
+    the latter returns truncated data.
     """
     if Gdk is None or bounds is None:
         return None
@@ -122,9 +121,8 @@ def persistent_pixel_change(before, after_one, after_two):
     off in the other), so requiring both to differ from the pre-action capture
     filters it out, while a real UI change appears in both.
 
-    Building the snapshot fills the gap between the two captures (resolve_app
-    alone takes 0.15-0.3 s), so the extra capture (about 23 ms) adds almost
-    no latency.
+    Building the snapshot fills the gap between the two captures, so the
+    extra capture adds almost no latency.
     """
     if not before or not after_one or not after_two:
         return None

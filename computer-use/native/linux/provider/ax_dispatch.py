@@ -609,7 +609,6 @@ def dispatch_provider_operation(
     elif action_intent == "scroll":
         direction = action_input.get("direction", "down")
         pages = action_input.get("pages", 1)
-        # Scroll at the target's position when its geometry is known.
         point = None
         if action_input.get("window_centre") and bounds is not None:
             point = (
@@ -692,7 +691,6 @@ def dispatch_provider_operation(
                 semantic_input_emitted,
             ) = insert_text_outcome_on_node(element, action_input.get("text", ""))
         else:
-            # Without a target, resolve the unique focused editable control.
             (
                 write_outcome,
                 before_chars,
@@ -941,9 +939,8 @@ def dispatch_provider_operation(
     if element_record is not None:
         response["resolvedElement"] = public_element_record(element_record)
     # Take the second post-action capture after building the snapshot. That
-    # work (resolve_app alone takes 0.15-0.3 s) spaces the two captures far
-    # enough apart for a 1 Hz caret blink to toggle, so the blink is not
-    # reported as a persistent change.
+    # work spaces the two captures far enough apart for a 1 Hz caret blink to
+    # toggle, so the blink is not reported as a persistent change.
     change_note = pixel_change_note(persistent_pixel_change(
         pixels_before, pixels_after_one,
         safe(lambda: capture_window_pixels(after_pixel_bounds))),

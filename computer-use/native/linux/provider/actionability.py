@@ -108,9 +108,8 @@ def wait_until_stable(element, window_bounds, first=None):
     is unreliable over AT-SPI: Nautilus file icons expose neither ENABLED nor
     SENSITIVE (only SHOWING, VISIBLE and FOCUSABLE) yet offer working "open"
     and "menu" actions, so an ENABLED gate would reject usable targets. A
-    "receives events" hit test is skipped for the same reason: measured hit
-    rates were 11/11 in gedit, 19/25 in Nautilus and 12/25 in LibreOffice, so
-    such a gate would block about half of valid LibreOffice clicks.
+    "receives events" hit test is skipped for the same reason: it would block
+    about half of valid LibreOffice clicks.
     """
     if element is None:
         return None, 0, True

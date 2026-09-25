@@ -132,11 +132,9 @@ def render_visible_cells(
                 text_unavailable += 1
                 continue
             if not value:
-                # Empty cells are left out of the tree. In one measured sheet
-                # with 3 columns x 4 rows of data, 1069 of the 1081 cells in
-                # view were empty and took 19971 of 23182 tokens (86%). An
-                # empty cell carries nothing but its RxCy coordinate, which
-                # the range summary below already implies.
+                # Empty cells are left out of the tree: they are most of a
+                # viewport, and an empty cell carries nothing but its RxCy
+                # coordinate, which the range summary below already implies.
                 #
                 # Omitted cells get no ref, so the summary names the verified
                 # alternative: move the cell cursor with press_key, then

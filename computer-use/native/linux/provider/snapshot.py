@@ -224,9 +224,9 @@ def build_snapshot(
     False forces the choice. Callers request AX screenshots explicitly with
     observe=screenshot or observe=full.
 
-    A window screenshot is costly (about 1014 tokens for a gedit window, 35%
-    of an observation and about 80% once the tree is pruned), but the tree
-    and the screenshot are complementary rather than redundant: the tree
+    A window screenshot is costly (about a thousand tokens, most of a pruned
+    observation), but the tree and the screenshot are complementary rather
+    than redundant: the tree
     provides actionability and the screenshot verifiability. Some effects
     never reach the tree (saving a file in LibreOffice Impress, for example),
     while the tree's description identifies controls, such as which spin

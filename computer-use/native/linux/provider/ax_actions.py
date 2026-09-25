@@ -494,9 +494,7 @@ WHEEL_CLICKS_PER_PAGE = 5
 def scroll_element(direction, pages, point=None):
     """Scroll with the mouse wheel at `point`, or send Page keys to the focus.
 
-    Wheel scrolling acts at a position: six wheel clicks at the center of a
-    600-line gedit document changed 23% of the text area's pixels, against
-    0% without scrolling. It acts on the scrollable ancestor under the
+    Wheel scrolling acts at a position: on the scrollable ancestor under the
     pointer, which is not necessarily the requested element itself. That is
     the meaning of "scroll here", but not quite "scroll this control", and
     notes must say so.

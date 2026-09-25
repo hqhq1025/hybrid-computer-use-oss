@@ -26,25 +26,20 @@ MAX_ELEMENTS = 1200
 
 # Upper bound on the characters of one rendered tree.
 #
-# MAX_ELEMENTS bounds nodes, but MCP clients limit bytes: a full 1200-node
-# chrome://flags tree averaged 112 characters per line (135327 characters,
-# about 132 KB), and clients replace tool results larger than about 100 KB
-# with a file pointer, which leaves the agent with nothing when it cannot
-# read files. Node counts do not bound size (1200 short nodes are about
-# 40 KB, 1200 long ones 135 KB), so this budget is enforced while rendering.
-# Truncating afterwards would waste the per-node record cost (8.45 ms per
-# node on GIMP, 6.7 s for 800 discarded nodes).
+# MAX_ELEMENTS bounds nodes, but MCP clients limit bytes: clients replace
+# tool results larger than about 100 KB with a file pointer, which leaves the
+# agent with nothing when it cannot read files, and a 1200-node tree can
+# exceed that when lines are long. The budget is enforced while rendering
+# because truncating afterwards would waste the per-node record cost.
 MAX_RENDERED_CHARS = 40000
 
 # Wall-clock budget for one tree traversal.
 #
 # Node budgets do not bound time because per-node cost varies by an order of
-# magnitude. A full record_for on GIMP (GAIL) cost 8.45 ms per node; one
-# render_tree call built 3162 records and took 38 s, beyond the Go layer's
-# 30 s timeout. Cross-process accessor calls can cost 20-25 ms per node, so
-# an unbounded walk of 1500 nodes takes about 35 s. The cheap pruning probe
-# lowers the typical cost; this deadline bounds the worst case regardless of
-# the cost distribution.
+# magnitude (cross-process accessor calls can cost 20-25 ms per node), so a
+# full walk of a large GIMP window can exceed the Go layer's 30 s timeout.
+# The cheap pruning probe lowers the typical cost; this deadline bounds the
+# worst case regardless of the cost distribution.
 TREE_DEADLINE_SECONDS = 20.0
 MAX_DEPTH = 64
 DEFAULT_TEXT_LIMIT = 500
@@ -60,19 +55,18 @@ MAX_SANE_EXTENT = 100000
 # of top-level windows is unchanged, this is the whole wait.
 SETTLE_MIN_SECONDS = 0.12
 # Maximum extra wait for focus to settle after a window opens or closes.
-# Measured focus transfers take about 0.053 s, so this leaves a wide margin.
+# Focus transfers take about 0.05 s, so this leaves a wide margin.
 # A timeout means the new window never took focus (for example a
 # non-focusable tooltip); the current state is then returned with an
 # explicit "not settled" note instead of blocking the tool.
 SETTLE_FOCUS_TIMEOUT_SECONDS = 0.8
 SETTLE_POLL_SECONDS = 0.02
 SCREENSHOT_SCOPE_SCREEN = "screen"
-# Sampling stride and threshold for pixel comparison. On a 1850x1053 window a
-# capture takes 23 ms, and a comparison 67 ms at a 4 px stride but 16 ms at
-# 8 px. The 8 px stride adds about 40 ms per action, negligible next to app
-# resolution (about 0.3 s), and still detects moved text or an opened or
-# closed dialog. Changes are judged by persistence across two post-action
-# captures rather than by a percentage threshold; see persistent_pixel_change.
+# Sampling stride and threshold for pixel comparison. An 8 px stride keeps
+# a full-window comparison to a few tens of milliseconds, negligible next to
+# app resolution, and still detects moved text or an opened or closed
+# dialog. Changes are judged by persistence across two post-action captures
+# rather than by a percentage threshold; see persistent_pixel_change.
 PIXEL_DIFF_STRIDE = 8
 PIXEL_DIFF_THRESHOLD = 30
 SCREENSHOT_MAX_BASE64_CHARS = 480000
@@ -245,9 +239,8 @@ def a11y_screenshots_enabled():
 BUDGET_PRESSURE_RATIO = 0.8
 
 # Role criteria for pruning: prefix and suffix matches plus an exact set,
-# combined with a visibility requirement. On an offline replay set with
-# complete dialog flows, this kept every action target while reducing trees
-# to 22% of their size, the most aggressive lossless option tested. It relies
+# combined with a visibility requirement. This is the most aggressive option
+# that still keeps every action target in complete dialog flows. It relies
 # on rendering fidelity: table cells must carry frames and roles must not be
 # hard-coded.
 PRUNE_ROLE_SUFFIXES = (

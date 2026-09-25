@@ -176,7 +176,6 @@ def get_state_file_with_cookie(env, config: Dict[str, Any]) -> Any:
     if not entry:
         return None
 
-    # Build the full file URL
     file_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", file_path)
 
     cookie_header = entry.get("cookie")
@@ -199,7 +198,6 @@ def get_state_file_with_cookie(env, config: Dict[str, Any]) -> Any:
         logger.error(f"[GET_STATE_FILE_WITH_COOKIE] Failed to download file from {file_url}: {e}")
         return None
 
-    # Determine local save name
     save_name = config.get("save_name")
     if not save_name:
         # Extract filename from file_path (e.g., "59cdd713__2307.13854v4.pdf" from "/api/files/59cdd713__2307.13854v4.pdf")

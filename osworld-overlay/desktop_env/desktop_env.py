@@ -27,7 +27,7 @@ logger = logging.getLogger("desktopenv.env")
 Metric = Callable[[Any, Any], float]
 Getter = Callable[[gym.Env, Dict[str, Any]], Any]
 
-MAX_RETRIES = 5 # Maximum retries for environment setup
+MAX_RETRIES = 5
 
 
 class EnvironmentSetupError(RuntimeError):
@@ -82,10 +82,9 @@ class DesktopEnv(gym.Env):
             force_disable_vnc (bool): globally disable VNC for all tasks regardless of per-task settings, default to False
             force_disable_recording (bool): globally disable recording for all tasks regardless of per-task settings, default to False
         """
-        # Initialize VM manager and vitualization provider
         self.region = region
         self.provider_name = provider_name
-        self.enable_proxy = enable_proxy  # Store proxy enablement setting
+        self.enable_proxy = enable_proxy
         self.force_disable_vnc = force_disable_vnc
         self.force_disable_recording = force_disable_recording
         self.before_task_setup = before_task_setup
@@ -95,13 +94,11 @@ class DesktopEnv(gym.Env):
         self.screen_width = screen_size[0]
         self.screen_height = screen_size[1]
 
-        # Default
         self.server_port = 5000
         self.chromium_port = 9222
         self.vnc_port = 8006
         self.vlc_port = 8080
 
-        # Initialize with default (no proxy) provider
         self.current_use_proxy = False
         self.manager, self.provider = create_vm_manager_and_provider(provider_name, region, use_proxy=False, use_public_ip=use_public_ip)
 
@@ -117,12 +114,10 @@ class DesktopEnv(gym.Env):
         else:
             raise ValueError(f"Invalid provider name: {self.provider_name}")
 
-        # Initialize environment variables
         if path_to_vm:
             self.path_to_vm = os.path.abspath(os.path.expandvars(os.path.expanduser(path_to_vm))) \
                 if provider_name in {"vmware", "virtualbox"} else path_to_vm
         else:
-            # For AWS, pass snapshot_name as ami_id parameter and instance_type
             if provider_name == "aws":
                 self.path_to_vm = self.manager.get_vm_path(os_type=self.os_type, region=region, screen_size=(self.screen_width, self.screen_height), ami_id=snapshot_name, instance_type=instance_type, volume_size=volume_size)
             else:
@@ -132,20 +127,17 @@ class DesktopEnv(gym.Env):
         self.cache_dir_base: str = (
             cache_dir if cache_dir is not None else isolated_default_cache_dir()
         )
-        # todo: add the logic to get the screen size from the VM
         self.headless = headless
         self.require_a11y_tree = require_a11y_tree
         self.require_terminal = require_terminal
 
-        # Initialize emulator and controller
         logger.info("Initializing...")
         self._prepare_volume()
         self._start_emulator()
 
-        # mode: human or machine
         self.instruction = None
         assert action_space in ["computer_13", "pyautogui", "claude_computer_use", "autoglm_computer_use"]
-        self.action_space = action_space  # todo: refactor it to the ActType
+        self.action_space = action_space
 
         # episodic stuffs, like counters, will be updated or reset
         # when calling self.reset()
@@ -188,13 +180,10 @@ class DesktopEnv(gym.Env):
 
     def _start_emulator(self):
         try:
-            # Power on the virtual machine
             self.provider.start_emulator(self.path_to_vm, self.headless, self.os_type)
 
-            # Get the ip from the virtual machine, and setup the controller
             vm_ip_ports = self.provider.get_ip_address(self.path_to_vm).split(':')
             self.vm_ip = vm_ip_ports[0]
-            # Get the ports from the virtual machine (for Docker provider only)
             if len(vm_ip_ports) > 1:
                 self.server_port = int(vm_ip_ports[1])
                 self.chromium_port = int(vm_ip_ports[2])
@@ -246,7 +235,6 @@ class DesktopEnv(gym.Env):
             self.path_to_vm = path_to_vm
 
     def _save_state(self, snapshot_name=None):
-        # Save the current virtual machine state to a certain snapshot name
         self.provider.save_state(self.path_to_vm, snapshot_name)
 
     @staticmethod
@@ -314,7 +302,6 @@ class DesktopEnv(gym.Env):
         return success, bool(self.config)
 
     def close(self):
-        # Close (release) the virtual machine
         self.provider.stop_emulator(self.path_to_vm)
 
     @staticmethod
@@ -404,7 +391,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
 
     def reset(self, task_config: Optional[Any] = None, seed=None, options=None) -> Dict[str, Any]:
 
-        # Reset to certain task in OSWorld
         logger.info("Resetting environment...")
         logger.info("Switching task...")
         logger.info("Setting counters...")
@@ -438,7 +424,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
                 logger.info("Starting emulator...")
                 self._start_emulator()
                 logger.info("Emulator started.")
-                # Reset the usage flag after reverting
                 self.is_environment_used = False
             else:
                 logger.info("Environment is clean, skipping snapshot revert (provider: {}).".format(self.provider_name))
@@ -449,7 +434,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
                 self.is_environment_used = True
                 use_proxy = self._task_get(task_config, "proxy", False) and self.enable_proxy
                 if use_proxy:
-                    # If using proxy and proxy is enabled, set up the proxy configuration
                     proxy_ready = self.setup_controller._proxy_setup(self.client_password)
                     if proxy_ready is False:
                         last_failure_reason = "Proxy setup failed before applying task runtime overrides"
@@ -703,14 +687,12 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
         self._step_no += 1
         self.action_history.append(action)
 
-        # Mark environment as used when step is called
         self.is_environment_used = True
 
-        reward = 0  # todo: Define reward calculation for each example
-        done = False  # todo: Define episode termination condition for each example
+        reward = 0
+        done = False
         info = {}
         logger.info(f"Step {self._step_no} in trajectory {self._traj_no} with action: {action}")
-        # handle the special actions
         if action in ['WAIT', 'FAIL', 'DONE'] or (type(action) == dict and action['action_type'] in ['WAIT', 'FAIL', 'DONE']):
             if action == 'WAIT' or (type(action) == dict and action.get('action_type') == 'WAIT'):
                 time.sleep(pause)
@@ -755,7 +737,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
 
         postconfig = self.evaluator.get("postconfig", [])
         self.setup_controller.setup(postconfig, self.enable_proxy)
-        # Mark environment as used if there were postconfig setup operations
         if postconfig:
             self.is_environment_used = True
 
@@ -772,7 +753,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
                     return 0
 
         if type(self.metric) == list:
-            # Multiple metrics to evaluate whether the task is successfully completed
             results = []
             assert len(self.metric) == len(self.result_getter), "The number of metrics and result getters must be the same"
             if "expected" in self.evaluator:
@@ -785,7 +765,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
             short_circuit = bool(self.evaluator.get("short_circuit", True))
 
             for idx, metric in enumerate(self.metric):
-                # Get result_state if result_getter exists
                 result_state = None
                 if self.result_getter[idx] is not None:
                     try:
@@ -798,7 +777,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
                             return 0
                         result_state = None
 
-                # Compute metric with robust error handling (metric exceptions -> 0.0)
                 try:
                     if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
                         expected_state = self.expected_getter[idx](self, self.evaluator["expected"][idx])
@@ -809,7 +787,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
                     logger.error("Metric %s failed with error: %s", getattr(metric, "__name__", str(metric)), e)
                     metric_val = 0.0
 
-                # Short-circuit behavior (optional)
                 if short_circuit:
                     if self.metric_conj == 'and' and metric_val == 0.0:
                         return 0.0
@@ -821,7 +798,6 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
             if not results:
                 return 0.0
 
-            # Aggregation
             if self.metric_conj in ('and', 'avg'):
                 return sum(results) / len(results)
             if self.metric_conj == 'or':
@@ -829,10 +805,8 @@ test "$(cat /etc/timezone)" = "$TIMEZONE"
             if self.metric_conj == 'sum':
                 return min(1.0, sum(results))
 
-            # Backward-compatible default
             return sum(results) / len(results)
         else:
-            # Single metric to evaluate whether the task is successfully completed
             try:
                 result_state = self.result_getter(self, self.evaluator["result"])
             except FileNotFoundError:

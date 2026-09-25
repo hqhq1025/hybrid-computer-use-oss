@@ -8,9 +8,6 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// expect: act, settle and verify in one call
-//
 // AX input synthesis (key presses, typing and the coordinate fallback for
 // clicks) goes through AT-SPI generate_*_event, which is fire-and-forget: it
 // returns once the event is queued, with no way to know whether the target
@@ -37,7 +34,6 @@ import (
 // poll is a full AT-SPI traversal, so the default budget (defaultSettleMS) is
 // short, and the first evaluation reuses the snapshot the action just built,
 // so the common case costs no extra read.
-// ---------------------------------------------------------------------------
 
 func recordHasState(record *elementRecord, state string) bool {
 	if record == nil {

@@ -17,7 +17,7 @@ UNVERIFIED_SYNTHESIS = (
     "global and reports success as soon as the event is queued."
 )
 
-# A semantic action is not evidence of effect either. Measured cases:
+# A semantic action is not evidence of effect either. Observed cases:
 #   Nautilus file icon `menu`:   do_action returns True but no menu opens,
 #                                regardless of prior focus or selection
 #   GIMP layer cell `activate`:  returns True, the active layer is unchanged

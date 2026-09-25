@@ -39,19 +39,13 @@ def wait_for_ui_to_settle(
 ):
     """Wait for the UI to settle after an action, before the caller snapshots.
 
-    This closes a race that silently targets the wrong window. Measured with
-    Thunderbird's Tools > Message Filters (AT-SPI 2.44, GNOME Shell):
-
-        t=0.070s  the new window is in the AT-SPI tree, but ACTIVE is still
-                  on the main window
-        t=0.123s  ACTIVE moves (X11 _NET_ACTIVE_WINDOW flips at the same time)
-
-    A fixed 0.12 s sleep lands on that boundary, so a snapshot built inside
-    the interval is complete and self-consistent, and `main_window()`
-    applies its criteria correctly, yet it selects the main window;
-    index-based actions then silently operate on the wrong window. A longer
-    fixed sleep only moves the boundary, which slower applications or busier
-    machines hit again, so the wait is based on state:
+    This closes a race that silently targets the wrong window: a new window
+    joins the AT-SPI tree tens of milliseconds before ACTIVE moves to it, so
+    a snapshot built in that interval is complete and self-consistent yet
+    `main_window()` still selects the main window, and index-based actions
+    silently operate on the wrong window. A longer fixed sleep only moves the
+    boundary, which slower applications or busier machines hit again, so the
+    wait is based on state:
 
     - If the set of top-level windows is unchanged, nothing opened or
       closed; return at once, so the common path is not slowed down.
@@ -63,13 +57,12 @@ def wait_for_ui_to_settle(
     caller expects.
 
     Limitation: a window that appears after `min_seconds` is not detected.
-    Dialogs measured in Gecko, VCL, GTK and Qt applications joined the
-    AT-SPI tree within 0.045-0.070 s, so the 0.12 s minimum leaves a 1.7x
-    margin over the slowest case, and no fixed observation period (which
-    would add hundreds of milliseconds to every action) is used. A slower
-    application yields a snapshot of the pre-action state without the new
-    window: a visible failure (the action seems to have had no effect)
-    rather than a consistent tree of the wrong window.
+    Dialogs in Gecko, VCL, GTK and Qt applications join the AT-SPI tree
+    within about 0.07 s, so the 0.12 s minimum leaves a margin without a
+    fixed observation period that would add hundreds of milliseconds to
+    every action. A slower application yields a snapshot of the pre-action
+    state without the new window: a visible failure rather than a consistent
+    tree of the wrong window.
     """
     sleep(min_seconds)
     if before is None:
