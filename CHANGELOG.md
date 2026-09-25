@@ -2,115 +2,124 @@
 
 ## 1.0.0
 
-First open-source release. Changes relative to the internal v0.14 packaging
-this repository started from:
+First open-source release. The MCP server, the runner, the configuration and
+the documentation are all described as they are in this release; the section
+at the end lists what operators of an earlier internal build need to change.
 
 ### MCP server
 
-- The version is 1.0.0 and comes from `VERSION`. The v0.14 binary reported
-  `0.70.0-beta.70+osw-v013-gui-native-1080p`; a plain `go build` now reports
+- The version is 1.0.0 and comes from `VERSION`; a plain `go build` reports
   `dev`.
-- The tool schemas, descriptions and error texts no longer mention
-  ComputerAction, A11Y BATCH or `COMPUTER_USE_MAX_INLINE_CHARS`; batch
-  errors say AX BATCH. Everything else the model sees is byte-identical to
-  v0.14, and a golden test now guards the whole contract.
-- The provider package moved to `computer-use/native/linux/provider/`, and
-  the private provider protocol ID is `computer-use-provider-v2` (was
-  `osw-provider-v2`). MCP clients do not see either.
+- Batch errors say AX BATCH, and the tool schemas, descriptions and error
+  texts no longer mention ComputerAction, A11Y BATCH or
+  `COMPUTER_USE_MAX_INLINE_CHARS`. A golden test guards the whole public
+  contract: `initialize`, `tools/list`, the argument-validation errors and
+  the CLI help.
+- The provider package lives at `computer-use/native/linux/provider/`, and
+  the private provider protocol ID is `computer-use-provider-v2`. MCP clients
+  see neither.
 - The binary no longer concatenates the provider source at startup; only the
-  tests use it.
+  tests read it.
 - Removed unreachable code in the server and the provider, including the
   unused resource-identity scan and the legacy trace converter.
+- Eight provider tuning variables became constants, because only tests ever
+  set them: the stability wait, the application-resolution attempts and
+  interval, and the table, child, fanout, managed-enumeration and find
+  budgets.
 
 ### OSWorld runner
 
 - Runs four agents: Codex, Claude Code, Gemini CLI and Grok Build. Each has
-  its own gateway (`hcu.gateway.openai_proxy`, `anthropic_proxy`,
-  `gemini_proxy`), model and effort defaults, guest configuration, version
-  probe and trace summarizer. The Gemini CLI npm package is unpacked in the
-  guest and runs on the Node runtime from `make agents`; Grok Build cannot
-  resume its session under the same system prompt, so it rejects a second
-  turn instead of continuing under different instructions. `make agents` now
-  also downloads the Gemini CLI package, Grok Build and Node 20.
-- Added the ablation options used in the paper: `--channels a11y,keyboard`
-  or `gui,keyboard` exposes one desktop tool (via `COMPUTER_USE_CHANNELS` in
-  the agent's MCP configuration), and `--skill-file ""` runs without a skill.
-  Batch configs accept `channels` and `no_skill`.
+  its own gateway, model and effort defaults, guest configuration, version
+  probe and trace summarizer, and there is one example queue per harness per
+  benchmark generation. The Gemini CLI npm package is unpacked in the guest
+  and runs on the Node runtime from `make agents`, which now downloads the
+  Gemini CLI package, Grok Build and Node 20 alongside Codex and Claude Code.
+- Grok Build 1.0.40 drops its system-prompt override when it resumes a
+  session, so it rejects a second turn instead of continuing under different
+  instructions.
+- Added the ablation options: `--channels a11y,keyboard` or `gui,keyboard`
+  exposes one desktop tool (through `COMPUTER_USE_CHANNELS` in the agent's MCP
+  configuration), and `--skill-file ""` runs without a skill. Batch and queue
+  configs accept `channels` and `no_skill`.
 - The default token log is `<gateway>-tokens.jsonl` under the results root,
   matching the logs the gateways write.
-- Removed the interactive outcome Judge (`hcu/osworld/judge`, the
-  `--judge-*` options, the `judge_*` config keys, `live_judge` in
-  `result.json` and the queue's Judge columns). The official evaluator is the
-  only scorer.
-- Nothing the task agent sees names the benchmark or a release any more:
-  guest files live under `/opt/agent-runtime` and `/tmp/agent-task`, the
-  gateway affinity ID is `task-<run>`, the skills no longer carry a version,
-  and the AX and GUI tool texts no longer mention A11Y BATCH, ComputerAction
-  or `COMPUTER_USE_MAX_INLINE_CHARS`.
-- The runner is the `hcu` Python package. `python -m hcu.osworld.run_task`
-  replaces `integrations/osworld-v2/hybrid/run_hybrid.py`, and `run_batch`,
-  `run_queue` and `setup_canary` moved the same way.
-  `python -m hcu.render_agent_config` replaces
-  `scripts/render-agent-config.py`.
-- Removed the SHA-256 admission and provenance checks together with their
-  options: `--expected-*-sha256`, `--precomputed-guest-image-sha256`,
-  `--tool-version`, `--release-manifest`, `--mcp-profile`,
-  `--mcp-contract-manifest`, `--provider-name`,
-  `--audited-evaluator-overrides`, the queue's implementation and benchmark
-  bindings, and `releases/`. `make agents` still verifies the archive
-  checksums of the agent CLIs.
-- Removed the legacy direct-container V1 runner (`integrations/osworld-v1`).
-- `run_queue` no longer runs the upstream OSWorld-V2 OpenAI agent as a second
-  side per task: tasks run once, keyed by their own ID, and the concurrency
-  keys are `max_active_tasks`, `max_total_live_tasks` and `max_starting_tasks`.
-  The options that only described that side (`sides`,
-  `require_official_openai_runner_alignment`, `require_token_proxy_binding`,
-  `require_approved_host_kernel`, `approved_host_kernel_releases`) are gone.
-- Removed `scripts/prepare-agent-artifacts.sh`; `--agent-binary` covers using
-  a local agent build.
-- Removed `hcu/osworld/host_pressure.py`, the queue's host-safety thresholds
-  (load, memory, disk, inode, I/O pressure and the critical-pressure abort)
-  and the overlay Docker provider's pressure gate around container cleanup.
-  `setup_canary_queue` and `guest-images/` with `scripts/smoke-qemu-guest.py`
-  are removed as well; the queue keeps bounded concurrency, launch staggering,
-  the rate-limit circuit and restart recovery.
-- `python -m hcu.render_agent_config` renders all four agent profiles.
+- Removed the interactive outcome Judge: the queue step, its command-line
+  options, its config keys, its field in `result.json` and its columns in the
+  queue status. The official evaluator is the only scorer.
+- Nothing the task agent sees names the benchmark or a release: guest files
+  live under `/opt/agent-runtime` and `/tmp/agent-task`, the gateway affinity
+  ID is `task-<run>`, the skills carry no version, and the tool texts avoid
+  the internal names listed above.
+- The runner is the `hcu` Python package, with `python -m
+  hcu.osworld.run_task`, `run_batch`, `run_queue` and `setup_canary` as the
+  entry points, and `python -m hcu.render_agent_config` rendering any of the
+  four agent profiles.
+- Removed the SHA-256 admission and provenance checks and the options that
+  only served them (expected-digest, tool-version, release-manifest, provider
+  and audited-override options, the queue's implementation and benchmark
+  bindings, and the `releases/` directory). `make agents` still verifies the
+  archive checksums it downloads.
+- Removed the legacy direct-container V1 runner; the QEMU guest is the only
+  evaluation path.
+- `run_queue` runs each task once, keyed by its own ID. The concurrency keys
+  are `max_active_tasks`, `max_total_live_tasks` and `max_starting_tasks`.
+- Removed the queue's host-safety layer: kernel, load, memory, disk, inode and
+  I/O pressure thresholds, the critical-pressure abort, and the Docker
+  provider's pressure gate around container cleanup. The queue keeps bounded
+  concurrency, launch staggering, the rate-limit circuit and restart
+  recovery. `setup_canary_queue` and the guest-image builders are gone as
+  well; the dependency images themselves still exist.
+- `--agent-binary` replaces the per-agent binary options and the helper script
+  that copied local builds into `artifacts/`.
 - Fixed: an exception in the official evaluator is recorded as an evaluator
   error; before, it aborted the run before `result.json` was written.
 - Fixed: relative path arguments are resolved against the caller's directory
   instead of the OSWorld checkout.
-- Fixed: `run_queue` used its own config key names, did not pass
-  `--benchmark-version`, `--task-domain`, `--client-password` or
-  `--artifact-dir`, and did not expand `${VAR}` references, so V1 configs
-  ran as V2. `run_batch` and `run_queue` now share one config schema and
-  reject unknown keys.
+- Fixed: `run_queue` used its own config key names, did not pass the benchmark
+  version, task domain, client password or artifact directory, and did not
+  expand `${VAR}` references, so V1 configs ran as V2. `run_batch` and
+  `run_queue` now share one config schema and reject unknown keys.
 - Fixed: the overlay lacked `desktop_env/cache.py`, so installing it into a
   clean OSWorld-V2 checkout failed.
 - The default MCP binary is `artifacts/computer-use`.
-- The Codex model provider in the generated config is `osworld_gateway`
-  ("OSWorld task-scoped model gateway"), and the Claude Code launcher's
-  placeholder credential is `hcu-task-gateway`.
+- The generated Codex config names its model provider, and the Claude Code
+  launcher uses a placeholder credential; neither carries a secret.
 - Failure summaries no longer end with a digest.
 
 ### Gateways
 
-- Fixed: the per-task request budget did not apply to V1 task agents
-  (`osworld-v1-hybrid-` tasks). The legacy `osw-hybrid-` prefix is no longer
-  budgeted.
-- The OpenAI gateway requires `--upstreams` instead of defaulting to
-  internal Azure resources. The default ports match the runner: 8611 for
-  OpenAI and 8537 for Anthropic.
+- The per-task request budget now applies to every task agent. The OpenAI
+  gateway counts admitted requests; the Anthropic and Gemini gateways count
+  successful responses that reached the agent.
+- The OpenAI gateway reaches an OpenAI-compatible upstream as well as Azure
+  OpenAI, and its upstream list is always explicit rather than defaulting to a
+  hosted resource. The gateway can serve a local relay over plain HTTP. The
+  default ports match the runner: 8611 for OpenAI, 8537 for Anthropic and
+  8571 for Gemini.
 
 ### Build and repository
 
-- `VERSION` is the only version source for the binary, the desktop image and
-  the Python package, which is now `hybrid-computer-use` 1.0.0 under
-  `MIT AND Apache-2.0`.
-- `make build` builds with `--network none`. `make verify` is gone, and
-  `make test` also runs gofmt, `go vet` and the provider tests.
-- Removed the direct-container desktop image and its smoke test
-  (`make image-v1`, `make smoke-v1-direct`); they needed a private base
-  image and the QEMU runtime is the only evaluation path.
+- `VERSION` is the only version source for the binary and the Python package,
+  which is `hybrid-computer-use` 1.0.0 under `MIT AND Apache-2.0`.
+- `make build` builds with `--network none`, and `make test` runs gofmt,
+  `go vet`, the Go tests, the provider tests and the Python tests.
+- Removed the direct-container desktop image and its smoke test; they needed a
+  base image that is not redistributed, and the QEMU runtime is the only
+  evaluation path.
 - Files modified from OSWorld-V2 carry Apache-2.0 headers, and
   `THIRD_PARTY_NOTICES.md` lists them.
 - Rewrote the documentation and added CI.
+
+### Upgrading from an earlier internal build
+
+- Entry points moved into the `hcu` package: `python -m hcu.osworld.run_task`,
+  `run_batch`, `run_queue`, `setup_canary`, and `python -m
+  hcu.render_agent_config`. The old integration paths and their wrapper
+  scripts are gone.
+- `run_batch` and `run_queue` share one config schema that rejects unknown
+  keys, so configurations carrying Judge keys, queue-side keys, digest
+  options or per-agent binary paths must be updated. The queue's default
+  configuration path is `HCU_QUEUE`; `HCU_V2_QUEUE` still works.
+- The OpenAI gateway needs `--upstreams`, and a non-Azure upstream needs
+  `--upstream-kind openai` with a bearer token.

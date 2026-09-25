@@ -153,7 +153,7 @@ def transient_workload_command(
 
 def request_launch(base_url: str, command: list[str]) -> str:
     unit_name = (
-        f"osw-workload-{os.getpid()}-{time.time_ns()}"
+        f"agent-workload-{os.getpid()}-{time.time_ns()}"
     )
     wrapped = transient_workload_command(
         command,

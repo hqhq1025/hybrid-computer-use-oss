@@ -5,6 +5,10 @@ benchmark skill. Every supported harness gets the same text, delivered
 through that harness's own mechanism (see
 [Agent profiles](AGENT_PROFILES.md)):
 
+"Hybrid" is the product's own name for the full configuration (see the
+package name and the repository title); it is not a benchmark or release
+label, and the skill file itself carries no version.
+
 | File | Purpose | Computer-use channels |
 | --- | --- | --- |
 | `skills/hybrid/SKILL.md` | default profile | Bash, files, browser/CDP, AX, GUI |

@@ -605,7 +605,7 @@ class ProviderWireV2Tests(unittest.TestCase):
 
     def test_protocol_mismatch_has_specific_failure_code(self):
         request = {
-            "protocol": "osw-provider-v1",
+            "protocol": "not-a-provider-protocol",
             "schema_version": 2,
             "request_id": "req-observe",
             "operation": "observe_apps",

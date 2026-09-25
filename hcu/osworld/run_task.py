@@ -776,7 +776,7 @@ def prepare_guest(run: TaskRun, env: DesktopEnv) -> str:
         base_url,
         transient_workload_command(
             ["/usr/bin/true"],
-            unit_name=f"osw-preflight-{run.run_tag}",
+            unit_name=f"agent-preflight-{run.run_tag}",
             wait=True,
         ),
         timeout=30,
