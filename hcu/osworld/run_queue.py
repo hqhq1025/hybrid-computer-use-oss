@@ -1,4 +1,8 @@
-"""Run a bounded rolling queue of hybrid and/or original OSWorld V2 tasks."""
+"""Run a bounded rolling queue of hybrid OSWorld V2 tasks.
+
+The queue keeps a fixed number of task runs going, retries interrupted runs
+and renders ``QUEUE_STATUS.md`` while it runs.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +13,7 @@ from pathlib import Path
 import platform
 import signal
 import subprocess
-import sys
 import time
-import urllib.error
-import urllib.request
 
 
 from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT, anchor_path_args
@@ -39,86 +40,13 @@ DEFAULT_QUEUE = Path(
         REPO_ROOT / "configs" / "osworld-v2-queue.example.json",
     )
 )
-OFFICIAL_OPENAI_MAX_STEPS = 200
-OFFICIAL_OPENAI_MAX_TOKENS = 8192
-OFFICIAL_OPENAI_TASK_TIMEOUT_SECONDS = 0
 REQUIRED_CONFIG_KEYS = (
     "model",
     "effort",
     "max_model_calls",
     "timeout_seconds",
-    "max_active_sides",
+    "max_active_tasks",
 )
-
-
-def validate_official_openai_runner_alignment(config: dict) -> None:
-    if not config.get("require_official_openai_runner_alignment", False):
-        return
-    expected = {
-        "max_steps": OFFICIAL_OPENAI_MAX_STEPS,
-        "max_model_calls": OFFICIAL_OPENAI_MAX_STEPS,
-        "max_tokens": OFFICIAL_OPENAI_MAX_TOKENS,
-        "timeout_seconds": OFFICIAL_OPENAI_TASK_TIMEOUT_SECONDS,
-    }
-    mismatches = {
-        key: {"expected": value, "actual": config.get(key)}
-        for key, value in expected.items()
-        if config.get(key) != value
-    }
-    if mismatches:
-        raise RuntimeError(
-            "Queue does not match the official OpenAI runner contract: "
-            + json.dumps(mismatches, sort_keys=True)
-        )
-
-
-def validate_token_proxy_binding(config: dict) -> dict | None:
-    if not config.get("require_token_proxy_binding", False):
-        return None
-    gateway_base = str(config.get("gateway_base") or "").rstrip("/")
-    token_log_value = str(config.get("token_log") or "").strip()
-    expected_limit = int(config.get("max_model_calls") or 0)
-    if not gateway_base or not token_log_value:
-        raise RuntimeError(
-            "Token proxy binding requires gateway_base and token_log"
-        )
-    try:
-        with urllib.request.urlopen(
-            gateway_base + "/healthz",
-            timeout=10,
-        ) as response:
-            payload = json.load(response)
-    except (
-        OSError,
-        urllib.error.URLError,
-        json.JSONDecodeError,
-    ) as exc:
-        raise RuntimeError(
-            f"Cannot validate token proxy binding at {gateway_base}: {exc}"
-        ) from exc
-    if not isinstance(payload, dict) or payload.get("ok") is not True:
-        raise RuntimeError("Token proxy health response is not healthy")
-    mismatches = {}
-    actual_out = str(payload.get("out") or "").strip()
-    if not actual_out or Path(actual_out).resolve() != Path(
-        token_log_value
-    ).resolve():
-        mismatches["token_log"] = {
-            "expected": str(Path(token_log_value).resolve()),
-            "actual": actual_out or None,
-        }
-    actual_limit = payload.get("max_requests_per_task")
-    if actual_limit != expected_limit:
-        mismatches["max_requests_per_task"] = {
-            "expected": expected_limit,
-            "actual": actual_limit,
-        }
-    if mismatches:
-        raise RuntimeError(
-            "Token proxy binding mismatch: "
-            + json.dumps(mismatches, sort_keys=True)
-        )
-    return payload
 
 
 def parse_args() -> argparse.Namespace:
@@ -189,22 +117,6 @@ class QueueRunner:
         self.guest_image_capacity = validate_queue_guest_image_capacity(
             self.config
         )
-        approved_kernels = [
-            str(value).strip()
-            for value in self.config.get(
-                "approved_host_kernel_releases",
-                [],
-            )
-            if str(value).strip()
-        ]
-        if self.config.get("require_approved_host_kernel", False):
-            current_kernel = platform.release()
-            if current_kernel not in approved_kernels:
-                raise RuntimeError(
-                    "Host kernel is not approved for this formal queue: "
-                    f"current={current_kernel!r}, "
-                    f"approved={approved_kernels!r}"
-                )
         configured_start = str(
             self.config.get("run_started_at_utc") or ""
         ).strip()
@@ -214,22 +126,11 @@ class QueueRunner:
         self.run_timezone = str(
             self.config.get("run_timezone") or "UTC"
         ).strip()
-        validate_official_openai_runner_alignment(self.config)
-        self.sides = tuple(self.config.get("sides") or ("hybrid", "original"))
-        invalid_sides = sorted(set(self.sides) - {"hybrid", "original"})
-        if invalid_sides:
-            raise ValueError(
-                "Unsupported queue sides: " + ", ".join(invalid_sides)
-            )
-        if not self.sides or len(set(self.sides)) != len(self.sides):
-            raise ValueError("Queue sides must be non-empty and unique")
         self.poll_interval = poll_interval
         self.logs = self.base / "logs"
         self.hybrid = self.base / "hybrid"
-        self.original = self.base / "original"
         self.logs.mkdir(parents=True, exist_ok=True)
         self.hybrid.mkdir(parents=True, exist_ok=True)
-        self.original.mkdir(parents=True, exist_ok=True)
         self.child_env = self.load_child_environment()
         self.child_env["PYTHONDONTWRITEBYTECODE"] = "1"
         token_log_value = str(self.config.get("token_log") or "").strip()
@@ -241,7 +142,6 @@ class QueueRunner:
             token_log = Path(token_log_value).resolve()
             token_log.parent.mkdir(parents=True, exist_ok=True)
             token_log.touch(exist_ok=True)
-        self.token_proxy_binding = validate_token_proxy_binding(self.config)
         self.children: dict[tuple[str, str], subprocess.Popen] = {}
         self.adopted_pids: dict[tuple[str, str], int] = {}
         self.failures: dict[tuple[str, str], str] = {}
@@ -271,20 +171,15 @@ class QueueRunner:
         if state_path.is_file():
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
-                for key, pid in (state.get("children") or {}).items():
-                    task_id, side = key.split(":", 1)
-                    self.adopted_pids[(task_id, side)] = int(pid)
-                for key, error in (state.get("failures") or {}).items():
-                    task_id, side = key.split(":", 1)
-                    self.failures[(task_id, side)] = str(error)
-                for key, interruption in (
+                for task_id, pid in (state.get("children") or {}).items():
+                    self.adopted_pids[task_id] = int(pid)
+                for task_id, error in (state.get("failures") or {}).items():
+                    self.failures[task_id] = str(error)
+                for task_id, interruption in (
                     state.get("retryable_interruptions") or {}
                 ).items():
-                    task_id, side = key.split(":", 1)
                     if isinstance(interruption, dict):
-                        self.retryable_interruptions[(task_id, side)] = dict(
-                            interruption
-                        )
+                        self.retryable_interruptions[task_id] = dict(interruption)
                 if not configured_start and state.get("run_started_at_utc"):
                     self.run_started_at_utc = str(
                         state["run_started_at_utc"]
@@ -334,17 +229,16 @@ class QueueRunner:
         self.adopt_live_attempts()
         self.recover_retryable_interruptions()
         for task in self.config["tasks"]:
-            for side in self.sides:
-                key = (task["id"], side)
-                if (
-                    self.root_path(*key).exists()
-                    and not self.result_path(*key).is_file()
-                    and key not in self.adopted_pids
-                    and key not in self.failures
-                ):
-                    self.failures[key] = (
-                        "attempt directory exists without a result or live process"
-                    )
+            task_id = task["id"]
+            if (
+                self.root_path(task_id).exists()
+                and not self.result_path(task_id).is_file()
+                and task_id not in self.adopted_pids
+                and task_id not in self.failures
+            ):
+                self.failures[task_id] = (
+                    "attempt directory exists without a result or live process"
+                )
 
     def load_child_environment(self) -> dict[str, str]:
         env = os.environ.copy()
@@ -384,7 +278,7 @@ class QueueRunner:
         docker_host = env.get("DOCKER_HOST", "")
         if docker_host != DEDICATED_DOCKER_HOST:
             raise RuntimeError(
-                "Paired formal queues require the dedicated OSWorld Docker "
+                "The queue requires the dedicated OSWorld Docker "
                 f"daemon: expected {DEDICATED_DOCKER_HOST}, "
                 f"got {docker_host or '<unset>'}"
             )
@@ -398,9 +292,8 @@ class QueueRunner:
 
     def adopt_live_attempts(self) -> None:
         roots = {
-            str(self.root_path(task["id"], side)): (task["id"], side)
+            str(self.root_path(task["id"])): task["id"]
             for task in self.config["tasks"]
-            for side in self.sides
         }
         try:
             proc_paths = sorted(
@@ -417,45 +310,27 @@ class QueueRunner:
                 args = [item.decode(errors="replace") for item in argv if item]
             except OSError:
                 continue
-            if not args or not any(
-                marker in argument
-                for argument in args
-                for marker in (
-                    RUNNER_MODULE,
-                    "scripts/python/run_multienv_gpt_response_api.py",
-                )
-            ):
+            if not args or RUNNER_MODULE not in " ".join(args):
                 continue
             command = " ".join(args)
-            for root, key in roots.items():
+            for root, task_id in roots.items():
                 if root in command:
-                    self.adopted_pids[key] = int(proc_path.name)
-                    self.failures.pop(key, None)
+                    self.adopted_pids[task_id] = int(proc_path.name)
+                    self.failures.pop(task_id, None)
                     break
 
-    def result_path(self, task_id: str, side: str) -> Path:
-        if side == "hybrid":
-            return self.hybrid / task_id / "result.txt"
-        return (
-            self.original
-            / task_id
-            / "pyautogui"
-            / "screenshot"
-            / self.config["model"]
-            / "tasks"
-            / task_id
-            / "result.txt"
-        )
+    def result_path(self, task_id: str) -> Path:
+        return self.hybrid / task_id / "result.txt"
 
-    def root_path(self, task_id: str, side: str) -> Path:
-        return (self.hybrid if side == "hybrid" else self.original) / task_id
+    def root_path(self, task_id: str) -> Path:
+        return self.hybrid / task_id
 
     def archive_retryable_interruption(
         self,
-        key: tuple[str, str],
+        task_id: str,
         interruption: dict,
     ) -> Path:
-        task_id, side = key
+        """Move one interrupted attempt aside and record why it stopped."""
         timestamp = str(
             interruption.get("timestamp_utc")
             or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -467,11 +342,7 @@ class QueueRunner:
             for character in timestamp
         ).strip("-")
         archive_base = (
-            self.base
-            / "interrupted_attempts"
-            / timestamp_slug
-            / side
-            / task_id
+            self.base / "interrupted_attempts" / timestamp_slug / task_id
         )
         archive = archive_base
         suffix = 1
@@ -480,10 +351,10 @@ class QueueRunner:
             archive = archive_base.with_name(f"{task_id}-attempt-{suffix}")
         archive.mkdir(parents=True)
 
-        root = self.root_path(task_id, side)
+        root = self.root_path(task_id)
         if root.exists():
             root.replace(archive / "task")
-        log_path = self.logs / f"{side}-{task_id}.log"
+        log_path = self.logs / f"{task_id}.log"
         if log_path.exists():
             log_path.replace(archive / "runner.log")
         atomic_write(
@@ -492,7 +363,6 @@ class QueueRunner:
                 {
                     "schema_version": 1,
                     "task_id": task_id,
-                    "side": side,
                     **interruption,
                 },
                 indent=2,
@@ -502,34 +372,32 @@ class QueueRunner:
         return archive
 
     def recover_retryable_interruptions(self) -> None:
-        for key, interruption in list(self.retryable_interruptions.items()):
-            if self.result_path(*key).is_file():
-                self.retryable_interruptions.pop(key, None)
+        for task_id, interruption in list(self.retryable_interruptions.items()):
+            if self.result_path(task_id).is_file():
+                self.retryable_interruptions.pop(task_id, None)
                 continue
-            pid = self.adopted_pids.get(key)
+            pid = self.adopted_pids.get(task_id)
             if pid is not None and self.pid_alive(pid):
-                self.failures.pop(key, None)
+                self.failures.pop(task_id, None)
                 continue
-            self.adopted_pids.pop(key, None)
-            self.archive_retryable_interruption(key, interruption)
-            self.failures.pop(key, None)
-            self.retryable_interruptions.pop(key, None)
+            self.adopted_pids.pop(task_id, None)
+            self.archive_retryable_interruption(task_id, interruption)
+            self.failures.pop(task_id, None)
+            self.retryable_interruptions.pop(task_id, None)
 
-    def side_status(self, task_id: str, side: str) -> str:
-        key = (task_id, side)
-        if self.result_path(task_id, side).is_file():
+    def task_status(self, task_id: str) -> str:
+        if self.result_path(task_id).is_file():
             return "completed"
-        if key in self.failures:
+        if task_id in self.failures:
             return "failed"
-        child = self.children.get(key)
+        child = self.children.get(task_id)
         if child is not None:
             return "running" if child.poll() is None else "failed"
-        pid = self.adopted_pids.get(key)
+        pid = self.adopted_pids.get(task_id)
         if pid is not None:
             return "external-running" if self.pid_alive(pid) else "failed"
         return "pending"
 
-    @staticmethod
     def pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
@@ -537,144 +405,60 @@ class QueueRunner:
         except (OSError, ProcessLookupError):
             return False
 
-    def command(self, task: dict, side: str) -> list[str]:
+    def command(self, task: dict) -> list[str]:
         task_id = task["id"]
-        if side == "hybrid":
-            return runner_command(self.config, task, self.hybrid / task_id)
-        volume_size = str(task.get("volume_size", 40))
-        model = self.config["model"]
-        effort = self.config["effort"]
-        return [
-            sys.executable,
-            str(
-                self.execution_root
-                / "scripts/python/run_multienv_gpt_response_api.py"
-            ),
-            "--provider_name",
-            "docker",
-            "--headless",
-            "--action_space",
-            "pyautogui",
-            "--observation_type",
-            "screenshot",
-            "--model",
-            model,
-            "--reasoning_effort",
-            effort,
-            "--max_steps",
-            str(self.config["max_steps"]),
-            "--max_tokens",
-            str(
-                self.config.get(
-                    "max_tokens",
-                    OFFICIAL_OPENAI_MAX_TOKENS,
-                )
-            ),
-            "--specific_task_id",
-            task_id,
-            "--eval_version",
-            "v2",
-            "--test_all_meta_path",
-            "evaluation_examples/test_v2.json",
-            "--test_config_base_dir",
-            "evaluation_examples",
-            "--result_dir",
-            str(self.original / task_id),
-            "--num_envs",
-            "1",
-            "--client_password",
-            "osworld-public-evaluation",
-            "--volume_size",
-            volume_size,
-        ]
+        return runner_command(self.config, task, self.hybrid / task_id)
 
-    def original_base_url(self, task_id: str) -> str:
-        run_id = str(self.config.get("run_id") or "unversioned")
-        affinity = "".join(
-            char if char.isalnum() or char in "._-" else "-"
-            for char in f"original-{run_id}-{task_id}"
-        )
-        gateway = os.environ.get(
-            "HCU_OPENAI_GATEWAY",
-            "http://172.17.0.1:8611",
-        ).rstrip("/")
-        return f"{gateway}/t/{affinity}/v1"
-
-    def evaluator_base_url(self, task_id: str) -> str:
-        run_id = str(self.config.get("run_id") or "unversioned")
-        affinity = "".join(
-            char if char.isalnum() or char in "._-" else "-"
-            for char in f"evaluator-{run_id}-{task_id}"
-        )
-        gateway = os.environ.get(
-            "HCU_EVALUATOR_GATEWAY",
-            "http://172.17.0.1:8612",
-        ).rstrip("/")
-        return f"{gateway}/t/{affinity}/v1"
-
-    def launch(self, task: dict, side: str) -> None:
+    def launch(self, task: dict) -> None:
         task_id = task["id"]
-        key = (task_id, side)
-        log_path = self.logs / f"{side}-{task_id}.log"
+        log_path = self.logs / f"{task_id}.log"
         log_handle = log_path.open("ab", buffering=0)
         env = self.child_env.copy()
-        if side == "original":
-            env["OPENAI_API_KEY"] = "dummy"
-            env["OPENAI_BASE_URL"] = self.original_base_url(task_id)
-        else:
-            evaluator_base = self.evaluator_base_url(task_id)
-            env["OSWORLD_EVAL_MODEL_BASE_URL"] = evaluator_base
-            env["OPENAI_BASE_URL"] = evaluator_base
         child = subprocess.Popen(
-            self.command(task, side),
-            # The hybrid runner is a module of this repository; the upstream
-            # runner resolves its task paths relative to the OSWorld checkout.
-            cwd=REPO_ROOT if side == "hybrid" else self.execution_root,
+            self.command(task),
+            cwd=REPO_ROOT,
             env=env,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
         log_handle.close()
-        self.children[key] = child
-        self.adopted_pids.pop(key, None)
-        self.retryable_interruptions.pop(key, None)
+        self.children[task_id] = child
+        self.adopted_pids.pop(task_id, None)
+        self.retryable_interruptions.pop(task_id, None)
         self.write_state()
         stagger = float(self.config.get("launch_stagger_seconds", 0))
         if stagger > 0:
             time.sleep(stagger)
 
     def reap(self) -> None:
-        for key, child in list(self.children.items()):
+        for task_id, child in list(self.children.items()):
             returncode = child.poll()
             if returncode is None:
                 continue
-            task_id, side = key
-            if not self.result_path(task_id, side).is_file():
+            if not self.result_path(task_id).is_file():
                 failure = f"process exited with code {returncode}"
-                classification = self.failure_classification(task_id, side)
+                classification = self.failure_classification(task_id)
                 if classification:
                     failure += f" ({classification})"
-                self.failures[key] = failure
+                self.failures[task_id] = failure
                 if classification == "upstream_rate_limit":
                     self.record_rate_limit_event()
-            del self.children[key]
-        for key, pid in list(self.adopted_pids.items()):
-            if self.result_path(*key).is_file():
-                del self.adopted_pids[key]
+            del self.children[task_id]
+        for task_id, pid in list(self.adopted_pids.items()):
+            if self.result_path(task_id).is_file():
+                del self.adopted_pids[task_id]
             elif not self.pid_alive(pid):
-                if key in self.retryable_interruptions:
+                if task_id in self.retryable_interruptions:
                     self.recover_retryable_interruptions()
                 else:
-                    self.failures[key] = (
+                    self.failures[task_id] = (
                         f"adopted process {pid} exited without result"
                     )
-                    del self.adopted_pids[key]
+                    del self.adopted_pids[task_id]
 
-    def failure_classification(self, task_id: str, side: str) -> str | None:
-        if side != "hybrid":
-            return None
-        meta = self.root_path(task_id, side) / "meta.json"
+    def failure_classification(self, task_id: str) -> str | None:
+        meta = self.root_path(task_id) / "meta.json"
         try:
             payload = json.loads(meta.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -716,67 +500,44 @@ class QueueRunner:
         return max(0.0, self.rate_limit_pause_until - timestamp)
 
     def active_count(self) -> int:
-        """Return bounded Task-side load."""
+        """Return the number of task runs this queue owns."""
         active = 0
         for task in self.config["tasks"]:
-            for side in self.sides:
-                task_id = task["id"]
-                if (
-                    self.side_status(task_id, side) in {
-                        "running",
-                        "external-running",
-                    }
-                ):
-                    active += 1
+            if self.task_status(task["id"]) in {"running", "external-running"}:
+                active += 1
         return active + self.external_active_count()
 
     def total_live_count(self) -> int:
         active = 0
         for task in self.config["tasks"]:
-            for side in self.sides:
-                if self.side_status(task["id"], side) in {
-                    "running",
-                    "external-running",
-                }:
-                    active += 1
+            if self.task_status(task["id"]) in {"running", "external-running"}:
+                active += 1
         return active + self.external_active_count()
 
-    def side_ready(self, task_id: str, side: str) -> bool:
-        if self.result_path(task_id, side).is_file():
+    def task_ready(self, task_id: str) -> bool:
+        if self.result_path(task_id).is_file():
             return True
-        if side == "hybrid":
-            meta = self.root_path(task_id, side) / "meta.json"
-            payload = {}
-            try:
-                payload = json.loads(meta.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                pass
-            return payload.get("status") in {
-                "agent_running",
-                "completed",
-                "truncated",
-            }
-        log_path = self.logs / f"original-{task_id}.log"
+        meta = self.root_path(task_id) / "meta.json"
+        payload = {}
         try:
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return False
-        return (
-            "Sending GPT-5.4 request" in text
-            or "Sending GPT-5.5 request" in text
-            or "Step 1:" in text
-        )
+            payload = json.loads(meta.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+        return payload.get("status") in {
+            "agent_running",
+            "completed",
+            "truncated",
+        }
 
     def starting_count(self) -> int:
         starting = 0
         for task in self.config["tasks"]:
             task_id = task["id"]
-            for side in self.sides:
-                if self.side_status(task_id, side) in {
-                    "running",
-                    "external-running",
-                } and not self.side_ready(task_id, side):
-                    starting += 1
+            if self.task_status(task_id) in {
+                "running",
+                "external-running",
+            } and not self.task_ready(task_id):
+                starting += 1
         return starting
 
     def external_active_count(self) -> int:
@@ -794,70 +555,29 @@ class QueueRunner:
     def schedule(self) -> None:
         if not self.launch_gate_open():
             return
-        capacity = self.config["max_active_sides"] - self.active_count()
-        max_total_live_sides = self.config.get("max_total_live_sides")
-        if max_total_live_sides is not None:
+        capacity = self.config["max_active_tasks"] - self.active_count()
+        max_total_live_tasks = self.config.get("max_total_live_tasks")
+        if max_total_live_tasks is not None:
             capacity = min(
                 capacity,
-                int(max_total_live_sides) - self.total_live_count(),
+                int(max_total_live_tasks) - self.total_live_count(),
             )
         startup_capacity = (
-            int(self.config.get("max_starting_sides", 6))
+            int(self.config.get("max_starting_tasks", 6))
             - self.starting_count()
         )
         launch_budget = min(capacity, startup_capacity)
         if launch_budget <= 0:
             return
-
-        if set(self.sides) == {"hybrid", "original"}:
-            # Complete existing pairs before starting new paired work.
-            for task in self.config["tasks"]:
-                statuses = {
-                    side: self.side_status(task["id"], side)
-                    for side in self.sides
-                }
-                for side, other in (
-                    ("hybrid", "original"),
-                    ("original", "hybrid"),
-                ):
-                    if (
-                        launch_budget > 0
-                        and statuses[side] == "pending"
-                        and statuses[other] != "pending"
-                        and self.launch_gate_open()
-                    ):
-                        self.launch(task, side)
-                        statuses[side] = "running"
-                        capacity -= 1
-                        launch_budget -= 1
-
-            # Start new tasks only when both sides fit.
-            for task in self.config["tasks"]:
-                if capacity < 2 or launch_budget < 2:
-                    break
-                if not self.launch_gate_open():
-                    break
-                statuses = [
-                    self.side_status(task["id"], side)
-                    for side in self.sides
-                ]
-                if statuses == ["pending", "pending"]:
-                    for side in self.sides:
-                        self.launch(task, side)
-                    capacity -= 2
-                    launch_budget -= 2
-            return
-
         for task in self.config["tasks"]:
-            for side in self.sides:
-                if capacity <= 0 or launch_budget <= 0:
-                    return
-                if not self.launch_gate_open():
-                    return
-                if self.side_status(task["id"], side) == "pending":
-                    self.launch(task, side)
-                    capacity -= 1
-                    launch_budget -= 1
+            if capacity <= 0 or launch_budget <= 0:
+                return
+            if not self.launch_gate_open():
+                return
+            if self.task_status(task["id"]) == "pending":
+                self.launch(task)
+                capacity -= 1
+                launch_budget -= 1
 
     def launch_gate_open(self) -> bool:
         if self.rate_limit_pause_remaining() > 0:
@@ -1050,23 +770,22 @@ class QueueRunner:
             "%Y-%m-%dT%H:%M:%SZ",
             time.gmtime(),
         )
-        for key, child in list(self.children.items()):
+        for task_id, child in list(self.children.items()):
             if child.poll() is not None:
                 continue
             child.terminate()
             record = {
-                "task_id": key[0],
-                "side": key[1],
+                "task_id": task_id,
                 "pid": child.pid,
                 "source": "owned_child",
             }
             terminated.append(record)
-            self.retryable_interruptions[key] = {
+            self.retryable_interruptions[task_id] = {
                 **record,
                 "timestamp_utc": timestamp_utc,
                 "reason": self.stop_reason,
             }
-        for key, pid in list(self.adopted_pids.items()):
+        for task_id, pid in list(self.adopted_pids.items()):
             if not self.pid_alive(pid):
                 continue
             try:
@@ -1074,13 +793,12 @@ class QueueRunner:
             except ProcessLookupError:
                 continue
             record = {
-                "task_id": key[0],
-                "side": key[1],
+                "task_id": task_id,
                 "pid": pid,
                 "source": "adopted_child",
             }
             terminated.append(record)
-            self.retryable_interruptions[key] = {
+            self.retryable_interruptions[task_id] = {
                 **record,
                 "timestamp_utc": timestamp_utc,
                 "reason": self.stop_reason,
@@ -1142,35 +860,28 @@ class QueueRunner:
     def render_status(self) -> None:
         host_pressure = self.host_pressure()
         rows = []
-        complete_sides = 0
+        completed = 0
         official_raw_scores = []
-        total_sides = len(self.config["tasks"]) * len(self.sides)
+        total_tasks = len(self.config["tasks"])
         for task in self.config["tasks"]:
             cells = []
-            for side in self.sides:
-                status = self.side_status(task["id"], side)
-                score = load_score(self.result_path(task["id"], side))
-                result_payload = (
-                    load_result_payload(
-                        self.root_path(task["id"], side) / "result.json"
-                    )
-                    if side == "hybrid"
-                    else None
-                )
-                if status == "completed":
-                    complete_sides += 1
-                if (
-                    result_payload is not None
-                    and result_payload.get("raw_evaluator_status") == "error"
-                ):
-                    score_text = " ERR=evaluator"
-                else:
-                    score_text = (
-                        "" if score is None else f" RAW={score:.4f}"
-                    )
-                    if score is not None:
-                        official_raw_scores.append(score)
-                cells.append(f"{status}{score_text}")
+            status = self.task_status(task["id"])
+            score = load_score(self.result_path(task["id"]))
+            result_payload = load_result_payload(
+                self.root_path(task["id"]) / "result.json"
+            )
+            if status == "completed":
+                completed += 1
+            if (
+                result_payload is not None
+                and result_payload.get("raw_evaluator_status") == "error"
+            ):
+                score_text = " ERR=evaluator"
+            else:
+                score_text = "" if score is None else f" RAW={score:.4f}"
+                if score is not None:
+                    official_raw_scores.append(score)
+            cells.append(f"{status}{score_text}")
             rows.append(
                 "| "
                 + " | ".join(
@@ -1182,17 +893,13 @@ class QueueRunner:
                 )
                 + " |"
             )
-        side_headers = [
-            "Hybrid" if side == "hybrid" else "Original GUI"
-            for side in self.sides
-        ]
-        headers = ["Task", "Static stratum", *side_headers]
+        headers = ["Task", "Static stratum", "Hybrid"]
         lines = [
             "# Rolling OSWorld V2 Queue Status",
             "",
             f"Updated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}",
             "",
-            f"Completed sides: {complete_sides}/{total_sides}",
+            f"Completed tasks: {completed}/{total_tasks}",
             "Official RAW: "
             + (
                 f"{sum(official_raw_scores) / len(official_raw_scores):.4f} "
@@ -1200,13 +907,13 @@ class QueueRunner:
                 if official_raw_scores
                 else "no completed scores"
             ),
-            f"Active Task sides: {self.active_count()}/"
-            f"{self.config['max_active_sides']}",
-            "Total live sides: "
+            f"Active task runs: {self.active_count()}/"
+            f"{self.config['max_active_tasks']}",
+            "Total live runs: "
             f"{self.total_live_count()}/"
-            f"{self.config.get('max_total_live_sides', 'unbounded')}",
-            f"Starting sides: {self.starting_count()}/"
-            f"{self.config.get('max_starting_sides', 6)}",
+            f"{self.config.get('max_total_live_tasks', 'unbounded')}",
+            f"Starting runs: {self.starting_count()}/"
+            f"{self.config.get('max_starting_tasks', 6)}",
             f"External active processes: {self.external_active_count()}",
             f"Host load 1m: {os.getloadavg()[0]:.1f}",
             f"Available memory: {self.available_memory_gb():.1f} GiB",
@@ -1224,8 +931,7 @@ class QueueRunner:
             "| " + " | ".join(["---"] * len(headers)) + " |",
             *rows,
             "",
-            "Logs are under `logs/`; immutable task artifacts are under `hybrid/` "
-            "and `original/`.",
+            "Logs are under `logs/`; immutable task artifacts are under `hybrid/`.",
         ]
         atomic_write(self.base / "QUEUE_STATUS.md", "\n".join(lines) + "\n")
         self.write_state()
@@ -1239,31 +945,23 @@ class QueueRunner:
             "rate_limit_pause_until": self.rate_limit_pause_until,
             "children": {
                 **{
-                    f"{task_id}:{side}": pid
-                    for (task_id, side), pid in self.adopted_pids.items()
+                    task_id: pid
+                    for task_id, pid in self.adopted_pids.items()
                     if self.pid_alive(pid)
                 },
                 **{
-                    f"{task_id}:{side}": child.pid
-                    for (task_id, side), child in self.children.items()
+                    task_id: child.pid
+                    for task_id, child in self.children.items()
                     if child.poll() is None
                 },
             },
-            "failures": {
-                f"{task_id}:{side}": error
-                for (task_id, side), error in self.failures.items()
-            },
-            "retryable_interruptions": {
-                f"{task_id}:{side}": interruption
-                for (task_id, side), interruption
-                in self.retryable_interruptions.items()
-            },
+            "failures": dict(self.failures),
+            "retryable_interruptions": dict(self.retryable_interruptions),
             "external_active_processes": self.external_active_count(),
             "host_pressure": self.host_pressure(),
             "host_kernel_release": platform.release(),
             "stop_reason": self.stop_reason,
             "guest_image_capacity": self.guest_image_capacity,
-            "token_proxy_binding": self.token_proxy_binding,
         }
         atomic_write(
             self.base / "QUEUE_STATE.json",
@@ -1273,9 +971,8 @@ class QueueRunner:
     def is_finished(self) -> bool:
         terminal = {"completed", "failed"}
         return all(
-            self.side_status(task["id"], side) in terminal
+            self.task_status(task["id"]) in terminal
             for task in self.config["tasks"]
-            for side in self.sides
         )
 
     def stop(self, _signum=None, _frame=None) -> None:

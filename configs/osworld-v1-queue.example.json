@@ -9,9 +9,6 @@
       "ram_size": "4G"
     }
   ],
-  "sides": [
-    "hybrid"
-  ],
   "agent": "codex",
   "model": "gpt-5.5",
   "effort": "xhigh",
@@ -24,6 +21,6 @@
   "token_log": "${HCU_RESULTS_DIR}/osworld-v1/example-osworld-v1.tokens.jsonl",
   "max_model_calls": 200,
   "timeout_seconds": 0,
-  "max_active_sides": 1,
-  "retain_containers": false
+  "retain_containers": false,
+  "max_active_tasks": 1
 }

@@ -49,19 +49,13 @@ RUNNER_KEYS = frozenset(
         "task_domain",
     }
 )
-# Scheduling, paired-run and host-safety options read only by run_queue.
+# Scheduling and host-safety options read only by run_queue.
 QUEUE_KEYS = frozenset({
-    "sides",
-    "max_active_sides",
-    "max_total_live_sides",
-    "max_starting_sides",
+    "max_active_tasks",
+    "max_total_live_tasks",
+    "max_starting_tasks",
     "launch_stagger_seconds",
     "max_steps",
-    "max_tokens",
-    "require_official_openai_runner_alignment",
-    "require_token_proxy_binding",
-    "require_approved_host_kernel",
-    "approved_host_kernel_releases",
     "run_started_at_utc",
     "run_timezone",
     "environment_file",

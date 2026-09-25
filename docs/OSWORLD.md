@@ -337,10 +337,10 @@ rejected.
 
 `hcu.osworld.run_queue --queue CONFIG` reads the same config and adds a
 rolling queue with host-safety limits: memory, disk, inode, load and I/O
-pressure thresholds, launch staggering, a rate-limit circuit breaker, and a
-paired `original` side that runs the upstream OSWorld-V2 OpenAI agent on the
-same tasks for comparison. The queue-only keys are listed in
-`hcu/osworld/batch_config.py`.
+pressure thresholds, launch staggering, a rate-limit circuit breaker, and
+restart recovery that adopts live attempts, re-queues interrupted ones and
+renders `QUEUE_STATUS.md`. Concurrency is `max_active_tasks`. The queue-only
+keys are listed in `hcu/osworld/batch_config.py`.
 
 Give every experiment its own `run_id` and token log, and do not mix guest
 images, MCP binaries, skills, prompts, agent versions or model routes in one
