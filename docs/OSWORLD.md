@@ -87,11 +87,11 @@ refuses other OSWorld-V2 revisions unless you pass `--force`; review the
 upstream changes to the patched files first. Reinstall the overlay whenever
 you replace or clean the checkout.
 
-`make agents` downloads the Codex and Claude Code releases pinned in
+`make agents` downloads the agent releases and the Node runtime pinned in
 `configs/agent-artifacts.lock.json` and verifies their archive checksums. To
-use other binaries during development, run
-`CODEX_BINARY=... CLAUDE_CODE_BINARY=... scripts/prepare-agent-artifacts.sh`
-or pass `--codex-binary` and `--claude-code-binary` to the runner.
+use another build during development, pass `--agent-binary` to `run_task` (or
+`agent_binary` in a batch or queue config); it replaces the agent's file under
+the artifact directory.
 
 Run every `hcu.osworld` command from the repository root with the OSWorld-V2
 virtual environment, so that both `hcu` and `desktop_env` are importable.

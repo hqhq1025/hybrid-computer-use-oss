@@ -60,6 +60,15 @@ this repository started from:
   bindings, and `releases/`. `make agents` still verifies the archive
   checksums of the agent CLIs.
 - Removed the legacy direct-container V1 runner (`integrations/osworld-v1`).
+- `run_queue` no longer runs the upstream OSWorld-V2 OpenAI agent as a second
+  side per task: tasks run once, keyed by their own ID, and the concurrency
+  keys are `max_active_tasks`, `max_total_live_tasks` and `max_starting_tasks`.
+  The options that only described that side (`sides`,
+  `require_official_openai_runner_alignment`, `require_token_proxy_binding`,
+  `require_approved_host_kernel`, `approved_host_kernel_releases`) are gone.
+- Removed `scripts/prepare-agent-artifacts.sh`; `--agent-binary` covers using
+  a local agent build.
+- `python -m hcu.render_agent_config` renders all four agent profiles.
 - Fixed: an exception in the official evaluator is recorded as an evaluator
   error; before, it aborted the run before `result.json` was written.
 - Fixed: relative path arguments are resolved against the caller's directory

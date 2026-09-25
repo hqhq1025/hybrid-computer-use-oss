@@ -145,6 +145,13 @@ validates the original schemas before any side effect.
 and the replacement system prompt. The runner allows the tools `Bash`,
 `Edit`, `Read`, `mcp__computer_use__AX` and `mcp__computer_use__GUI`.
 
+`python3 -m hcu.render_agent_config` also renders the Gemini CLI and Grok
+Build profiles (`--agent gemini-cli`, `--agent grok-build`), writing the
+settings or config file plus the files each harness reads instead: a global
+`GEMINI.md` and an experiments file for Gemini CLI, a system prompt for Grok
+Build. `--channels a11y,keyboard` or `gui,keyboard` renders the one-channel
+ablation for any agent.
+
 ## Gemini CLI and Grok Build
 
 Both register the same server directly, without an adapter. Gemini CLI reads
