@@ -146,7 +146,7 @@ set -a; source .env; set +a
 | `HCU_RESULTS_DIR` | default result root; defaults to `runs/` |
 | `OSWORLD_FILE_BASE_URL` | local task asset snapshot |
 | `OSWORLD_V1_GUEST_IMAGE`, `OSWORLD_V2_GUEST_IMAGE` | guest images, used by the example configs |
-| `HCU_OPENAI_GATEWAY`, `HCU_ANTHROPIC_GATEWAY` | gateway base URLs reachable from the guest |
+| `HCU_OPENAI_GATEWAY`, `HCU_ANTHROPIC_GATEWAY`, `HCU_GEMINI_GATEWAY` | gateway base URLs reachable from the guest |
 | `OSWORLD_V2_REQUIRE_DEDICATED_DOCKER` | set to `1` to refuse any Docker daemon other than `OSWORLD_V2_DOCKER_HOST` |
 
 ## Model gateways
@@ -182,6 +182,19 @@ Responses-compatible endpoint that keeps `previous_response_id` working and
 accepts the `/t/<task-id>/v1` prefix can replace this proxy, but the runner's
 budget enforcement reads the proxy's token log.
 
+An OpenAI-compatible upstream that accepts the Responses API needs no Azure
+token. `--upstream-kind openai` keeps the request path unchanged and sends a
+bearer token, which is how Grok Build's model is served:
+
+```bash
+OSW_OPENAI_UPSTREAM_TOKEN="<secret>" \
+python3 -m hcu.gateway.openai_proxy \
+  --host 172.17.0.1 --ports 8611 \
+  --out "$HCU_RESULTS_DIR/openai-tokens.jsonl" \
+  --upstream-kind openai --upstreams api.x.ai \
+  --max-requests-per-task 200
+```
+
 ### Anthropic Messages (Claude Code)
 
 ```bash
@@ -193,14 +206,36 @@ python3 -m hcu.gateway.anthropic_proxy \
   --max-requests-per-task 200
 ```
 
+### Gemini API (Gemini CLI)
+
+Gemini CLI speaks Google's `generateContent` protocol with a placeholder key in
+`x-goog-api-key`, so it needs its own gateway:
+
+```bash
+export OSW_GEMINI_UPSTREAM_TOKEN="<secret>"
+python3 -m hcu.gateway.gemini_proxy \
+  --host 172.17.0.1 --port 8571 \
+  --out "$HCU_RESULTS_DIR/gemini-tokens.jsonl" \
+  --max-requests-per-task 200
+```
+
+`--upstream-base` defaults to `https://generativelanguage.googleapis.com`; any
+Gemini-compatible origin works. Request paths under `/v1beta` are forwarded
+unchanged, and the gateway budgets generation calls only: token counting does
+not use up a step.
+
 ### Budgets
 
 Only task agents are budgeted, identified by the `task-` prefix of their
-affinity ID; other traffic is not. The OpenAI gateway
-counts admitted requests. The Anthropic gateway counts successful responses
-that reached the agent, so an upstream failure or a dropped connection does
-not use up a step. Both gateways rebuild their counters from the token log
-when they restart, so keep one log per experiment.
+affinity ID; other traffic is not. The OpenAI gateway counts admitted
+requests. The Anthropic and Gemini gateways count successful responses that
+reached the agent, so an upstream failure or a dropped connection does not use
+up a step. Every gateway rebuilds its counters from the token log when it
+restarts, so keep one log per experiment.
+
+The runner derives its default token log from the agent's gateway
+(`<gateway>-tokens.jsonl` under the results root), and `--token-log` overrides
+it.
 
 ## Setup canaries
 
@@ -252,14 +287,19 @@ $PY -m hcu.osworld.run_task \
 For a V1 task, pass `--benchmark-version v1`, the task UUID, the V1 image,
 its volume size and `--client-password password`.
 
-For Claude Code, change the agent options and point `--token-log` at the
-Anthropic gateway's log:
+For the other agents, change the agent options and point the matching gateway
+option and token log:
 
 ```text
---agent claude-code --model claude-opus-5
---claude-gateway-base "$HCU_ANTHROPIC_GATEWAY"
---token-log "$HCU_RESULTS_DIR/anthropic-tokens.jsonl"
+--agent claude-code --model claude-opus-5 --claude-gateway-base "$HCU_ANTHROPIC_GATEWAY"
+--agent gemini-cli  --claude-gateway-base ignored --gemini-gateway-base "$HCU_GEMINI_GATEWAY"
+--agent grok-build  --gateway-base "$HCU_OPENAI_GATEWAY"
 ```
+
+`--model` and `--effort` default to the agent's own values (see
+[Agent profiles](AGENT_PROFILES.md)), so they can be omitted. Grok Build cannot
+resume a session, and Gemini CLI needs the Node runtime from `make agents`;
+both are described there.
 
 Other useful options:
 

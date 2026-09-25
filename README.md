@@ -1,8 +1,8 @@
 # Hybrid Computer Use
 
 Hybrid Computer Use lets a coding agent operate a Linux desktop through the
-Model Context Protocol (MCP), and runs Codex or Claude Code with it on
-OSWorld and OSWorld-V2 tasks.
+Model Context Protocol (MCP), and runs Codex, Claude Code, Gemini CLI or Grok
+Build with it on OSWorld and OSWorld-V2 tasks.
 
 The `computer-use` MCP server exposes exactly two tools:
 
@@ -22,12 +22,18 @@ flowchart LR
     Q --> A{Task agent}
     A -->|Codex| CX[Codex CLI]
     A -->|Claude Code| CC[Claude Code CLI]
+    A -->|Gemini CLI| GM[Gemini CLI]
+    A -->|Grok Build| GK[Grok Build]
     CX --> SH[Shell and file tools]
     CC --> SH
+    GM --> SH
+    GK --> SH
     CX --> CDP[Codex browser runtime]
     CX --> MCP[computer-use MCP over stdio]
     CC --> AD[Claude schema adapter]
     AD --> MCP
+    GM --> MCP
+    GK --> MCP
     MCP --> P[Persistent Linux provider]
     P --> ATSPI[AT-SPI accessibility tree]
     P --> X11[X11 capture and input]

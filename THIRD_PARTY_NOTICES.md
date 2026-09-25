@@ -43,10 +43,12 @@ source files.
 
 ## Agent CLIs
 
-`make agents` downloads the Codex CLI and Claude Code release archives listed
-in `configs/agent-artifacts.lock.json` from their publishers. They are not
-part of this repository and keep their own licenses; Claude Code is
-proprietary.
+`make agents` downloads the agent releases listed in
+`configs/agent-artifacts.lock.json` from their publishers, together with the
+Node runtime Gemini CLI needs. They are not part of this repository and keep
+their own licenses: Codex (Apache-2.0), Claude Code (proprietary),
+`@google/gemini-cli` (Apache-2.0), `@xai-official/grok-linux-x64`
+(Apache-2.0, bundled THIRD_PARTY_NOTICES) and Node.js (MIT).
 
 ## Not redistributed
 

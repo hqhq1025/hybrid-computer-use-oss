@@ -24,10 +24,20 @@ this repository started from:
 
 ### OSWorld runner
 
+- Runs four agents: Codex, Claude Code, Gemini CLI and Grok Build. Each has
+  its own gateway (`hcu.gateway.openai_proxy`, `anthropic_proxy`,
+  `gemini_proxy`), model and effort defaults, guest configuration, version
+  probe and trace summarizer. The Gemini CLI npm package is unpacked in the
+  guest and runs on the Node runtime from `make agents`; Grok Build cannot
+  resume its session under the same system prompt, so it rejects a second
+  turn instead of continuing under different instructions. `make agents` now
+  also downloads the Gemini CLI package, Grok Build and Node 20.
 - Added the ablation options used in the paper: `--channels a11y,keyboard`
   or `gui,keyboard` exposes one desktop tool (via `COMPUTER_USE_CHANNELS` in
   the agent's MCP configuration), and `--skill-file ""` runs without a skill.
   Batch configs accept `channels` and `no_skill`.
+- The default token log is `<gateway>-tokens.jsonl` under the results root,
+  matching the logs the gateways write.
 - Removed the interactive outcome Judge (`hcu/osworld/judge`, the
   `--judge-*` options, the `judge_*` config keys, `live_judge` in
   `result.json` and the queue's Judge columns). The official evaluator is the

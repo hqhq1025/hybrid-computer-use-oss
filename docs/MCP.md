@@ -145,6 +145,15 @@ validates the original schemas before any side effect.
 and the replacement system prompt. The runner allows the tools `Bash`,
 `Edit`, `Read`, `mcp__computer_use__AX` and `mcp__computer_use__GUI`.
 
+## Gemini CLI and Grok Build
+
+Both register the same server directly, without an adapter. Gemini CLI reads
+`mcpServers` from its `settings.json` and is served by
+`hcu.gateway.gemini_proxy`; Grok Build reads `[mcp_servers.computer_use]` from
+its `config.toml` and is served by `hcu.gateway.openai_proxy` on the Responses
+API. [Agent profiles](AGENT_PROFILES.md) describes the rest of each profile,
+including the tool lists each harness disables.
+
 ## Public contract
 
 `AX` takes a `mode`: `observe`, `find`, `act` or `assert_ax`. The server
