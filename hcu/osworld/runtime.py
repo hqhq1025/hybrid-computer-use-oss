@@ -103,8 +103,12 @@ def runtime_bootstrap_command(client_password: str) -> list[str]:
         f"printf '%s\\n' {shlex.quote(client_password)} "
         "| sudo -S sh -c "
         + shlex.quote(
+            # .mcp.json ships in the guest images and registers MCP servers
+            # that are not part of this runner; a client that reads it would
+            # start them alongside the task MCP.
             "rm -rf /home/user/.codex /home/user/.claude "
             "/home/user/.claude.json /home/user/.gemini /home/user/.grok "
+            "/home/user/.mcp.json "
             "/home/user/AGENTS.md /home/user/CLAUDE.md /home/user/GEMINI.md"
         )
         + " "

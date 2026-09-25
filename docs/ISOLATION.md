@@ -5,10 +5,11 @@ result directory. Do not mount this repository, host credentials, user
 configuration or another task's artifacts into the evaluated environment.
 
 Before the agent starts, the runner removes inherited agent state for every
-supported harness — `.codex`, `.claude`, `.claude.json`, `.gemini`, `.grok`
-and the context files `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` — and injects
-only the selected base instructions, skill, MCP configuration and task-scoped
-gateway settings.
+supported harness — `.codex`, `.claude`, `.claude.json`, `.gemini`, `.grok`,
+the context files `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, and the guest
+image's own `.mcp.json`, whose MCP servers are not part of this runner — and
+injects only the selected base instructions, skill, MCP configuration and
+task-scoped gateway settings.
 
 Model credentials stay in the host-side gateway. The guest receives a
 placeholder token and a task-scoped endpoint. The gateway has to listen on an

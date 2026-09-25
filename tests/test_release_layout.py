@@ -115,7 +115,7 @@ def test_documented_guest_cleanup_covers_every_harness():
     """The isolation page must list the state the runner actually removes."""
     runtime = (ROOT / "hcu/osworld/runtime.py").read_text(encoding="utf-8")
     isolation = (ROOT / "docs/ISOLATION.md").read_text(encoding="utf-8")
-    for state in (".codex", ".claude", ".gemini", ".grok",
+    for state in (".codex", ".claude", ".gemini", ".grok", ".mcp.json",
                   "AGENTS.md", "CLAUDE.md", "GEMINI.md"):
         assert state in runtime, f"{state} is not cleaned in the guest"
         assert state in isolation, f"{state} is not documented as cleaned"
