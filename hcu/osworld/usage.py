@@ -1,8 +1,9 @@
 """Task-scoped model usage from the gateway token log.
 
 Gateways append one JSON row per model request. Rows carry the task
-affinity ID, so a run can count its own requests for the model-call budget
-and reconcile token usage against the agent trace.
+affinity ID and explicit successful-generation delivery markers. Budget
+counts use those markers; accounting retains attempts and reconciles token
+usage against the agent trace.
 """
 
 from __future__ import annotations
@@ -10,17 +11,32 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from hcu.gateway.common import read_log_rows
+
 
 def collect_task_proxy_usage(
     token_log: Path,
     affinity_task: str,
 ) -> tuple[dict, bytes]:
+    """Separate request classes from delivery steps and token accounting.
+
+    ``model_requests`` counts admitted generation attempts, including failures;
+    ``non_generation_requests`` counts auxiliary calls. All explicit usage is
+    retained (for example, Responses compaction can report billable tokens).
+    Missing usage is a coverage gap for generations, not for token-count calls.
+    Unclassified records remain evidence but cannot establish complete coverage.
+    """
     summary = {
         "status": "missing",
         "request_attempts": 0,
         "model_requests": 0,
+        "non_generation_requests": 0,
+        "unclassified_requests": 0,
+        "completed_model_responses": 0,
         "budget_rejected_requests": 0,
+        "gateway_rejected_requests": 0,
         "accounted_responses": 0,
+        "accounted_model_responses": 0,
         "unaccounted_requests": 0,
         "input_tokens": 0,
         "cached_input_tokens": 0,
@@ -37,65 +53,62 @@ def collect_task_proxy_usage(
 
     matching_lines = []
     endpoints = set()
-    with token_log.open(
-        "r",
-        encoding="utf-8",
-        errors="replace",
-    ) as handle:
-        for line in handle:
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if row.get("task") != affinity_task:
-                continue
-            matching_lines.append(
-                json.dumps(row, ensure_ascii=False, separators=(",", ":"))
-            )
-            summary["request_attempts"] += 1
-            if row.get("budget_rejected") is True:
-                summary["budget_rejected_requests"] += 1
-                continue
+    for row in read_log_rows(token_log):
+        if row.get("task") != affinity_task:
+            continue
+        matching_lines.append(
+            json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+        )
+        summary["request_attempts"] += 1
+        if row.get("budget_rejected") is True:
+            summary["budget_rejected_requests"] += 1
+            summary["gateway_rejected_requests"] += 1
+            continue
+        if row.get("budget_inflight") or (
+            row.get("generation_retry_exhausted") and not row.get("generation_admitted")
+        ):
+            summary["gateway_rejected_requests"] += 1
+            continue
+        generation = row.get("generation_request")
+        if generation is True:
             summary["model_requests"] += 1
-            if row.get("endpoint"):
-                endpoints.add(str(row["endpoint"]))
-            if (
-                row.get("error")
-                or row.get("accounting_error")
-                or row.get("upstream_error")
-                or int(row.get("http_status") or 0) >= 400
-            ):
-                summary["errors"] += 1
-            if row.get("rate_limited") or int(
-                row.get("http_status") or 0
-            ) == 429:
-                summary["rate_limited_requests"] += 1
-            if row.get("input_tokens") is None:
-                continue
-            summary["accounted_responses"] += 1
-            summary["input_tokens"] += int(
-                row.get("input_tokens") or 0
-            )
-            summary["cached_input_tokens"] += int(
-                row.get("cached_tokens") or 0
-            )
-            summary["output_tokens"] += int(
-                row.get("output_tokens") or 0
-            )
-            summary["reasoning_tokens"] += int(
-                row.get("reasoning_tokens") or 0
-            )
-            summary["total_tokens"] += int(
-                row.get("total_tokens") or 0
-            )
+            if row.get("model_step_completed") is True:
+                summary["completed_model_responses"] += 1
+        elif generation is False:
+            summary["non_generation_requests"] += 1
+        else:
+            summary["unclassified_requests"] += 1
+        if row.get("endpoint"):
+            endpoints.add(str(row["endpoint"]))
+        if (
+            row.get("error")
+            or row.get("generation_error")
+            or row.get("accounting_error")
+            or row.get("upstream_error")
+            or int(row.get("http_status") or 0) >= 400
+        ):
+            summary["errors"] += 1
+        if row.get("rate_limited") or int(row.get("http_status") or 0) == 429:
+            summary["rate_limited_requests"] += 1
+        if row.get("input_tokens") is None:
+            continue
+        summary["accounted_responses"] += 1
+        if generation is True:
+            summary["accounted_model_responses"] += 1
+        summary["input_tokens"] += int(row.get("input_tokens") or 0)
+        summary["cached_input_tokens"] += int(row.get("cached_tokens") or 0)
+        summary["output_tokens"] += int(row.get("output_tokens") or 0)
+        summary["reasoning_tokens"] += int(row.get("reasoning_tokens") or 0)
+        summary["total_tokens"] += int(row.get("total_tokens") or 0)
 
     summary["unaccounted_requests"] = (
-        summary["model_requests"] - summary["accounted_responses"]
+        summary["model_requests"] - summary["accounted_model_responses"]
     )
     summary["endpoints"] = sorted(endpoints)
     summary["endpoint_affinity_ok"] = len(endpoints) <= 1
     summary["status"] = (
-        "completed" if summary["request_attempts"] else "no_matching_rows"
+        "incomplete" if summary["unclassified_requests"]
+        else "completed" if summary["request_attempts"] else "no_matching_rows"
     )
     frozen_rows = (
         ("\n".join(matching_lines) + "\n").encode("utf-8")
@@ -162,34 +175,43 @@ def normalize_budget_termination(
 
 
 def count_model_requests(token_log: Path, affinity_task: str) -> int:
-    count = 0
-    with token_log.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if (
-                row.get("task") == affinity_task
-                and not row.get("budget_rejected")
-            ):
-                count += 1
-    return count
+    """Count delivered generations, never attempts or legacy admission rows."""
+    return sum(
+        row.get("task") == affinity_task and row.get("model_step_completed") is True
+        for row in read_log_rows(token_log)
+    )
+
+
+def task_generation_retry_exhausted(token_log: Path, affinity_task: str) -> bool:
+    return any(
+        row.get("task") == affinity_task and row.get("generation_retry_exhausted") is True
+        for row in read_log_rows(token_log)
+    )
+
+
+def validate_task_model_budget(token_log: Path, affinity_task: str, limit: int) -> None:
+    """Fail closed on a mismatched gateway cap, as soon as its log reports it.
+
+    The gateway owns admission so the runner cannot safely repair this mismatch
+    by killing an agent while it executes the last response's tools.
+    """
+    if limit <= 0:
+        return
+    for row in read_log_rows(token_log):
+        if row.get("task") == affinity_task and row.get("generation_request") is True:
+            if row.get("request_limit") != limit:
+                raise RuntimeError(
+                    "Task/gateway successful-response budget mismatch: "
+                    f"runner={limit}, gateway={row.get('request_limit')!r}. "
+                    "Set the gateway --max-requests-per-task to the runner budget."
+                )
 
 
 def task_model_budget_rejected(
     token_log: Path,
     affinity_task: str,
 ) -> bool:
-    with token_log.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if (
-                row.get("task") == affinity_task
-                and row.get("budget_rejected") is True
-            ):
-                return True
-    return False
+    return any(
+        row.get("task") == affinity_task and row.get("budget_rejected") is True
+        for row in read_log_rows(token_log)
+    )

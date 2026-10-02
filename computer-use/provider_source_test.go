@@ -596,14 +596,8 @@ func TestActionsReResolveGeometryAtActionTime(t *testing.T) {
 }
 
 func TestStabilityWaitPortsOnlyWhatLinuxCanSupport(t *testing.T) {
-	// Before an action Playwright waits for visible, enabled and stable, plus a
-	// hit test. Only stable is ported; enabled and the hit test fail on Linux:
-	//   enabled  - Nautilus file icons never set ENABLED/SENSITIVE (only
-	//              SHOWING/VISIBLE/FOCUSABLE) yet expose open and menu actions
-	//              and are fully clickable; gating on it skips usable targets.
-	//   hit test - measured hit rates were 11/11 in gedit, 19/25 in Nautilus
-	//              and 12/25 in LibreOffice, so gating on it would block about
-	//              half of the valid clicks in LibreOffice.
+	// Stability is a precondition; provider ENABLED flags and hit-test support
+	// are not reliable enough to gate every accessibility action.
 	if !strings.Contains(linuxRuntimeScript, "def wait_until_stable(") {
 		t.Fatal("actions must wait for the element to stop moving")
 	}

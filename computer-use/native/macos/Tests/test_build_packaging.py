@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -67,6 +68,10 @@ class MacPackagingTests(unittest.TestCase):
                 }
                 subprocess.run(["bash", str(runtime / "build.sh"), str(output)],
                                env=env, check=True, capture_output=True, timeout=30)
+                with (runtime / "ProviderInfo.plist").open("rb") as stream:
+                    expected_identity = plistlib.load(stream)["CFBundleIdentifier"]
+                with (output / "ComputerUseProvider.app/Contents/Info.plist").open("rb") as stream:
+                    self.assertEqual(plistlib.load(stream)["CFBundleIdentifier"], expected_identity)
                 for source in (repo / "licenses").rglob("*"):
                     if source.is_file():
                         self.assertEqual(source.read_bytes(), (output / source.relative_to(repo)).read_bytes())

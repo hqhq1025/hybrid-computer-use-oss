@@ -135,7 +135,7 @@ internal static class NativeDesktop
         return new JsonObject
         {
             ["app"] = new JsonObject { ["name"] = string.Empty, ["pid"] = 0 },
-            ["sampledAt"] = "2026-08-31T00:00:00.0000000+00:00",
+            ["sampledAt"] = "2000-01-01T00:00:00.0000000+00:00",
             ["screenshotPngBase64"] = "fixture-png",
             ["screenshotMimeType"] = "image/png",
             ["screenshotEncoding"] = "png",

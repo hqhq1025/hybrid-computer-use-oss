@@ -22,10 +22,8 @@ OSWORLD_ROOT = Path(
 DEFAULT_ARTIFACT_DIR = Path(
     os.environ.get("HCU_ARTIFACT_DIR", REPO_ROOT / "artifacts")
 ).expanduser()
-DEFAULT_SKILL_FILE = REPO_ROOT / "skills/hybrid/SKILL.md"
-DEFAULT_BASE_INSTRUCTIONS_FILE = (
-    REPO_ROOT / "skills/base/CODEX_BASE_INSTRUCTIONS.md"
-)
+DEFAULT_INSTRUCTIONS_FILE = REPO_ROOT / "instructions/hybrid.md"
+DEFAULT_BASE_INSTRUCTIONS_FILE = REPO_ROOT / "instructions/base.md"
 
 
 def results_root() -> Path:

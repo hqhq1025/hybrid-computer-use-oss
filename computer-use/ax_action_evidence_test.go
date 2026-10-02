@@ -197,7 +197,7 @@ func TestTextAttributeChanges(t *testing.T) {
 		t.Fatalf("unchanged attributes must not be reported: %s", changes[0])
 	}
 
-	// Regression: elements are paired by runtime ID path, not by role and name.
+	// Elements are paired by runtime ID path, not by role and name.
 	// The LibreOffice sidebar has several unnamed `text` nodes whose role/name
 	// keys collide, so one node's hover highlight would be attributed to another
 	// and even a no-op would report a formatting change.

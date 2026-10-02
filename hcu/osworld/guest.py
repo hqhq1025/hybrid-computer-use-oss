@@ -42,7 +42,7 @@ GUEST_GROK_CONFIG = f"{GUEST_GROK_HOME}/config.toml"
 GUEST_CONFIG = f"{GUEST_CODEX_HOME}/config.toml"
 GUEST_CLAUDE_MCP_CONFIG = f"{GUEST_CLAUDE_CONFIG_DIR}/mcp.json"
 GUEST_BASE_INSTRUCTIONS = f"{GUEST_CODEX_HOME}/base-instructions.md"
-GUEST_SKILL = "/home/user/AGENTS.md"
+GUEST_INSTRUCTIONS = "/home/user/AGENTS.md"
 GUEST_TASK_DIR = "/tmp/agent-task"
 GUEST_PROMPT = f"{GUEST_TASK_DIR}/prompt.txt"
 GUEST_LAUNCHER = f"{GUEST_TASK_DIR}/run.sh"
@@ -215,4 +215,3 @@ def save_guest_artifact(base_url: str, guest_path: str, local_path: Path) -> byt
     if data is not None:
         local_path.write_bytes(data)
     return data
-

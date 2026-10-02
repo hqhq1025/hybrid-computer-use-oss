@@ -25,10 +25,13 @@ flowchart TB
 ```
 
 Every task agent receives the original OSWorld instruction plus a minimal
-completion contract. The four supported agents (Codex, Claude Code, Gemini
-CLI and Grok Build) each read the base instructions and the benchmark skill
-through their own harness mechanism; [Agent profiles](AGENT_PROFILES.md) lists
-them, including why the skill cannot travel the same way for all four.
+runner contract for `TASK_COMPLETE`, `TASK_INFEASIBLE` and `ASK_USER`. The four
+supported agents (Codex, Claude Code, Gemini CLI and Grok Build) also receive
+the same base safety and outcome policy and selected interaction guide as
+plain text through their own context routes. These files are always injected,
+not discovered or activated as skills; omitting the profile keeps the base.
+[Agent profiles](AGENT_PROFILES.md) lists the routes, and
+[Instructions](INSTRUCTIONS.md) defines the separation from runner markers.
 
 ## MCP process
 
@@ -108,15 +111,13 @@ Runtime fingerprints remain private implementation details. Providers use
 them to distinguish window instances, detect layout changes and preserve exact
 element identity when displayed names are truncated. Semantic snapshot
 fingerprints support state comparison. These mechanisms are unrelated to
-release admission and must not be removed without preserving their safety
-properties.
+release selection.
 
 Release and run selection uses explicit versions and functional checks rather
 than project-enforced content-digest gates. Third-party downloads retain their
 recorded SHA256 checks to reject corrupted or substituted archives before
-installation. Provider diagnostics retain bounded text, original byte counts
-and truncation metadata without calculating unused text digests. Upstream
-package-manager integrity checks and vendored code remain unchanged.
+installation. Provider diagnostics include bounded text, original byte counts
+and truncation metadata.
 
 ## Evidence model
 

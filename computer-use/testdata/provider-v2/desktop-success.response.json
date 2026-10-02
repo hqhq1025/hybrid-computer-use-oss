@@ -7,7 +7,7 @@
     "ok": true,
     "snapshot": {
         "app": {"name": "", "pid": 0, "inputCapable": false},
-      "sampledAt": "2026-08-20T00:00:00Z",
+      "sampledAt": "2000-01-01T00:00:00Z",
       "screenshotPngBase64": "aW1hZ2U=",
       "screenshotMimeType": "image/png",
       "screenshotEncoding": "png",

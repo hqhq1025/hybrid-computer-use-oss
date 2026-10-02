@@ -37,12 +37,12 @@ func TestDarwinGUIBudgetCoversNativePacing(t *testing.T) {
 			}
 			request := darwinTimeoutDesktopRequest(actions, guiMaxSettleMS)
 			if err := request.Validate(); err != nil {
-				t.Fatalf("regression scenario must be a valid provider request: %v", err)
+				t.Fatalf("timeout scenario must be a valid provider request: %v", err)
 			}
 			budget := darwinProviderRequestTimeout(request)
 			required := time.Duration(len(actions))*test.pacing + time.Duration(guiMaxSettleMS)*time.Millisecond
 			if required <= darwinProviderRuntimeTimeout() {
-				t.Fatal("regression scenario must exceed the old fixed deadline")
+				t.Fatal("timeout scenario must exceed the default deadline")
 			}
 			if budget < required+darwinProviderRuntimeTimeout() || budget > 149*time.Second {
 				t.Fatalf("budget %s does not cover native waits %s plus base reserve within the cap", budget, required)

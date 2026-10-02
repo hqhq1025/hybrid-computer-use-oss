@@ -49,10 +49,8 @@ class VirtualTableCellResolutionTests(AtspiPatchedTestCase):
 class LabelledByTests(AtspiPatchedTestCase):
     """Unnamed controls borrow their name through LABELLED_BY.
 
-    In the LibreOffice 7.3 Position and Size dialog all 13 spin buttons are
-    unnamed, and each gets a name through this relation (Position Y,
-    Position X, Width, Height, Angle, Radius), so they can be selected by
-    name instead of by position.
+    Provider relation targets supply names for otherwise unnamed controls,
+    allowing name-based selection without inferring identity from position.
     """
 
     def _labelled(self, label_text, own_name=""):
@@ -72,7 +70,7 @@ class LabelledByTests(AtspiPatchedTestCase):
 
     def test_a_control_with_its_own_name_does_not_borrow(self):
         # Only unnamed nodes benefit. A label lookup for a button already
-        # named Save adds nothing but costs a D-Bus round trip (about 1 ms).
+        # named Save adds an unnecessary D-Bus round trip.
         node = self._labelled("Position Y:", own_name="Save")
         self.assertEqual(runtime.effective_name(node), "Save")
 
@@ -542,13 +540,7 @@ class ExactLogicalWindowReadTests(AtspiPatchedTestCase):
 
 
 class VisibleCellsIndexerTests(AtspiPatchedTestCase):
-    """render_visible_cells receives the indexer explicitly.
-
-    It is a module-level function and cannot see render_tree's local indexer.
-    Referring to that name raises NameError only when the line runs, and that
-    line is the rendering path for LibreOffice Calc sheets, the fallback used
-    when a self-managed container refuses enumeration.
-    """
+    """Virtual cells share the renderer's indexer for stable target indices."""
 
     def test_signature_accepts_indexer(self):
         import inspect
@@ -558,9 +550,7 @@ class VisibleCellsIndexerTests(AtspiPatchedTestCase):
                       "otherwise the free name in its body fails at runtime")
 
     def test_call_site_passes_indexer(self):
-        # The parameter alone is not enough: if the call site omits it, the
-        # None default falls back to traversal order and indices stop being
-        # stable across snapshots, which is a subtler bug.
+        # Passing the same indexer preserves identity across snapshots.
         import inspect
         source = inspect.getsource(runtime.render_tree)
         self.assertIn("render_visible_cells(", source)

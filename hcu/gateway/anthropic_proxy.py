@@ -24,6 +24,7 @@ from hcu.gateway.common import (
     add_passthrough_arguments,
     check_passthrough_arguments,
     make_passthrough_handler,
+    response_payloads,
     serve_passthrough,
 )
 
@@ -116,6 +117,16 @@ class AnthropicGateway(PassthroughGateway):
 
     def error_body(self, status: int, message: str) -> dict:
         return {"type": "error", "error": {"type": "api_error", "message": message}}
+
+    def generation_succeeded(self, body: bytes, headers) -> bool:
+        events = response_payloads(body, headers)
+        if any(event.get("type") == "error" or event.get("error") for event in events):
+            return False
+        if "text/event-stream" in headers.get("content-type", ""):
+            return any(event.get("type") == "message_stop" for event in events)
+        return bool(events) and events[-1].get("type") == "message" and bool(
+            events[-1].get("stop_reason")
+        )
 
 
 make_handler = make_passthrough_handler

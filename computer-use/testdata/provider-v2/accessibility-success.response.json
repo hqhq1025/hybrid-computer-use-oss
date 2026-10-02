@@ -10,7 +10,7 @@
       "windowTitle": "Document",
       "windowHandle": "w2:fixture",
       "snapshotId": "snapshot-v2-fixture",
-      "sampledAt": "2026-08-20T00:00:00Z",
+      "sampledAt": "2000-01-01T00:00:00Z",
       "treeLines": ["0 window Document", "  1 entry Name"],
       "elements": [
         {"index": 0, "runtimeId": [0], "name": "Document", "controlType": "window"},

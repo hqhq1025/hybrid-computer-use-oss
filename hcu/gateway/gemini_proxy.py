@@ -27,6 +27,7 @@ from hcu.gateway.common import (
     add_passthrough_arguments,
     check_passthrough_arguments,
     make_passthrough_handler,
+    response_payloads,
     serve_passthrough,
 )
 
@@ -82,6 +83,7 @@ def parse_sse_usage(raw: bytes) -> tuple[dict | None, str | None]:
 
 class GeminiGateway(PassthroughGateway):
     name = "gemini_proxy"
+    json_array_responses = True
     unforwarded_request_headers = (
         PassthroughGateway.unforwarded_request_headers | {"x-goog-api-key"}
     )
@@ -110,6 +112,16 @@ class GeminiGateway(PassthroughGateway):
             "status": "RESOURCE_EXHAUSTED" if status == 429 else "UNAVAILABLE",
             "message": message,
         }}
+
+    def generation_succeeded(self, body: bytes, headers) -> bool:
+        events = response_payloads(body, headers, allow_json_array=self.json_array_responses)
+        if any(event.get("error") for event in events):
+            return False
+        return any(
+            event.get("promptFeedback", {}).get("blockReason")
+            or any(candidate.get("finishReason") for candidate in event.get("candidates", []))
+            for event in events
+        )
 
 
 make_handler = make_passthrough_handler

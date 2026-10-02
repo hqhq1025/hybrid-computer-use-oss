@@ -29,7 +29,7 @@ func TestElementIntentCrossCheck(t *testing.T) {
 		}
 	}
 
-	// Regression: role words must not count as matches. Nearly every
+	// Role words must not count as matches. Nearly every
 	// declaration and every role contains "button", so matching on the role
 	// would let "the Save button" pass against the New button.
 	if elementIntentMismatch(&elementRecord{Index: 8, ControlType: "push button", Name: "New",

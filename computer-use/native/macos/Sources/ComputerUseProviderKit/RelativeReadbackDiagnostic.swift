@@ -290,6 +290,6 @@ func relativeReadbackScalarFacts(_ scalar: RelativeAdjustmentScalarReadback?) ->
 }
 
 private let providerReadbackLogger = Logger(
-    subsystem: "com.microsoft.computer-use.provider",
+    subsystem: "org.computer-use.provider",
     category: "provider-readback"
 )

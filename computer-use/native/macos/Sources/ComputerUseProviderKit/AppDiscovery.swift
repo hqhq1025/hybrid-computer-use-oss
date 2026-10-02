@@ -50,7 +50,7 @@ private struct ResolvedAppInfo {
 
 enum AppDiscovery {
     static let internalProviderBundleIdentifiers: Set<String> = [
-        "com.microsoft.computer-use.provider.v2",
+        "org.computer-use.provider.v2",
     ]
     private static let listAppsQuery = #"kMDItemContentType == "com.apple.application-bundle" && kMDItemFSName == "*.app""#
     private static let lastUsedDateRankingAttribute = "kMDItemLastUsedDate_Ranking"

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNativeVisibilityPortUnknownAliases(t *testing.T) {
+func TestNativeVisibilityUnknownAliases(t *testing.T) {
 	yes := true
 	known := elementRecord{Showing: &yes, Visible: &yes}
 	unsupported := elementRecord{VisibilityEvidence: &AXVisibilityEvidence{State: "unknown", Reason: "unsupported"}}
@@ -21,7 +21,7 @@ func TestNativeVisibilityPortUnknownAliases(t *testing.T) {
 		{override, readError, unsupported, known},
 		{unsupported, known, override, readError},
 	} {
-		snapshot := nativeAliasPortFixture("process")
+		snapshot := nativeAliasFixture("process")
 		base := snapshot.Elements[1]
 		snapshot.Elements = snapshot.Elements[:1]
 		for i, evidence := range records {
@@ -44,8 +44,8 @@ func TestNativeVisibilityPortUnknownAliases(t *testing.T) {
 	}
 }
 
-func TestNativeVisibilityPortCloneAndWire(t *testing.T) {
-	snapshot := nativeAliasPortFixture("process")
+func TestNativeVisibilityCloneAndWire(t *testing.T) {
+	snapshot := nativeAliasFixture("process")
 	snapshot.Elements = snapshot.Elements[:2]
 	yes := true
 	snapshot.Elements[1].Showing, snapshot.Elements[1].Visible = &yes, &yes
@@ -78,7 +78,7 @@ func TestNativeVisibilityPortCloneAndWire(t *testing.T) {
 	}
 }
 
-func TestNativeVisibilityPortDiagnosticConflict(t *testing.T) {
+func TestNativeVisibilityDiagnosticConflict(t *testing.T) {
 	a := &AXVisibilityEvidence{State: "unknown", Reason: "read_error", ExceptionType: "First", HResult: "0x80004005"}
 	b := &AXVisibilityEvidence{State: "unknown", Reason: "read_error", ExceptionType: "Second", HResult: "0x80070005"}
 	for _, pair := range [][2]*AXVisibilityEvidence{{a, b}, {b, a}} {
@@ -95,7 +95,7 @@ func TestNativeVisibilityPortDiagnosticConflict(t *testing.T) {
 	}
 }
 
-func TestNativeVisibilityPortExplicitSetValueCapability(t *testing.T) {
+func TestNativeVisibilityExplicitSetValueCapability(t *testing.T) {
 	for _, bus := range []string{":1.42", "mac:42", "uia3:pid:42"} {
 		for _, supported := range []bool{false, true} {
 			record := &elementRecord{ProviderBusName: bus, ControlType: "slider", SetValueSupported: &supported, Actions: []string{"set_value"}}

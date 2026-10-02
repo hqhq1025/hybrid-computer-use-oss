@@ -1,12 +1,10 @@
 {
   "schema_version": 1,
-  "updated_at_utc": "2026-09-25T00:00:00Z",
   "platform": "linux-x86_64",
   "agents": {
     "codex": {
       "version": "0.151.0",
       "release_tag": "rust-v0.151.0",
-      "published_at_utc": "2026-08-29T09:55:39Z",
       "archive": "codex-x86_64-unknown-linux-musl.tar.gz",
       "archive_url": "https://github.com/openai/codex/releases/download/rust-v0.151.0/codex-x86_64-unknown-linux-musl.tar.gz",
       "archive_sha256": "605b4b183f22c645f5def63a5b7191767407fb66a6feaec4eaf10b5b7e0058f6",
@@ -16,7 +14,6 @@
     "claude_code": {
       "version": "2.1.251",
       "release_tag": "v2.1.251",
-      "published_at_utc": "2026-08-28T18:19:32Z",
       "archive": "claude-linux-x64.tar.gz",
       "archive_url": "https://github.com/anthropics/claude-code/releases/download/v2.1.251/claude-linux-x64.tar.gz",
       "archive_sha256": "4fda59f47ab17c0e0c831b3144e3025c050397ba37d574388f52e92e1af81c74",

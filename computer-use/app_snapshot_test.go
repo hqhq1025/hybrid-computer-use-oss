@@ -29,7 +29,7 @@ func TestSnapshotModelTextOmitsInternalTimeAndIdentity(t *testing.T) {
 		WindowTitle:  "notes.txt",
 		WindowHandle: "pid7/win0/frame",
 		SnapshotID:   "abc123",
-		SampledAt:    "2026-08-02T10:00:00.000Z",
+		SampledAt:    "2000-01-01T00:00:00.000Z",
 		TreeLines:    []string{"0 frame Doc"},
 	}
 	text := snapshot.renderedText()
@@ -37,7 +37,7 @@ func TestSnapshotModelTextOmitsInternalTimeAndIdentity(t *testing.T) {
 		"pid 7",
 		"pid7/win0/frame",
 		"id=abc123",
-		"sampled_at=2026-08-02T10:00:00.000Z",
+		"sampled_at=2000-01-01T00:00:00.000Z",
 		"identical_to_previous=",
 		"comparison_baseline=model_visible",
 	} {

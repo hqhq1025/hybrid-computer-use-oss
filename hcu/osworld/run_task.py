@@ -19,11 +19,12 @@ import sys
 import time
 import traceback
 from typing import Any
+import uuid
 
 from hcu.paths import (
     DEFAULT_ARTIFACT_DIR,
     DEFAULT_BASE_INSTRUCTIONS_FILE,
-    DEFAULT_SKILL_FILE,
+    DEFAULT_INSTRUCTIONS_FILE,
     OSWORLD_ROOT,
     anchor_path_args,
     results_root,
@@ -67,7 +68,7 @@ from hcu.osworld.guest import (
     GUEST_LAUNCHER,
     GUEST_MCP,
     GUEST_PROMPT,
-    GUEST_SKILL,
+    GUEST_INSTRUCTIONS,
     request_execute,
     safe_tag,
     transient_workload_command,
@@ -106,7 +107,6 @@ from hcu.osworld.traces import (
 )
 from hcu.osworld.usage import (
     collect_task_proxy_usage,
-    count_model_requests,
     normalize_budget_termination,
     reconcile_trace_and_proxy_usage,
 )
@@ -217,9 +217,9 @@ def parse_args() -> argparse.Namespace:
         help="Optional QCOW2 override for the evaluated guest.",
     )
     parser.add_argument(
-        "--skill-file",
-        default=str(DEFAULT_SKILL_FILE),
-        help="Skill given to the agent; pass an empty string for no skill.",
+        "--instructions-file",
+        default=str(DEFAULT_INSTRUCTIONS_FILE),
+        help="Profile instructions given to the agent; empty disables the profile.",
     )
     parser.add_argument(
         "--channels",
@@ -246,15 +246,17 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help=(
             "Optional per-phase wall-clock timeout in seconds; 0 disables "
-            "the extra harness timeout and leaves termination to the model-call "
-            "budget, matching the upstream OpenAI runner."
+            "this deadline, not the 1800-second generation no-progress limit."
         ),
     )
     parser.add_argument(
         "--max-model-calls",
         type=int,
         default=0,
-        help="Stop after this many task-scoped model requests; 0 disables the limit.",
+        help=(
+            "Allow this many successful task-scoped generation responses; "
+            "the last response may finish its tools. 0 disables the count limit."
+        ),
     )
     parser.add_argument(
         "--retain-container",
@@ -267,7 +269,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--token-log",
         default="",
-        help="Host-side token proxy JSONL used for task-scoped request counting.",
+        help="Host-side gateway JSONL with successful-generation and usage evidence.",
     )
     parser.add_argument("--poll-interval", type=float, default=5.0)
     parser.add_argument(
@@ -284,7 +286,7 @@ def parse_args() -> argparse.Namespace:
         "--volume-size",
         type=int,
         default=40,
-        help="Guest root disk size in GB; prevents Codex from exhausting the base image.",
+        help="Required guest root-volume size class in GiB, within existing image capacity.",
     )
     parser.add_argument(
         "--ram-size",
@@ -312,7 +314,7 @@ class TaskRun:
     agent_binary: Path
     node_binary: Path | None
     mcp_binary: Path
-    skill_file: Path | None
+    instructions_file: Path | None
     base_instructions_file: Path
     task: Any
     phases: list[dict]
@@ -357,8 +359,8 @@ class TaskRun:
         return self.result_dir / "guest-launcher.sh"
 
     @property
-    def skill_copy(self) -> Path:
-        return self.result_dir / "AGENTS.md"
+    def instructions_copy(self) -> Path:
+        return self.result_dir / "operating-instructions.md"
 
     @property
     def mcp_public_tools(self) -> list[str]:
@@ -381,7 +383,7 @@ class PhaseOutcome:
 
     phase_results: list[dict] = field(default_factory=list)
     phase_details: list[dict] = field(default_factory=list)
-    total_score: float = 0.0
+    total_score: float | None = None
     official_evaluator_errors: list[dict] = field(default_factory=list)
     truncated: bool = False
     budget_exhausted: bool = False
@@ -397,7 +399,8 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
     """Resolve result paths, artifacts and the task before any guest work."""
     run_tag = (
         f"{time.strftime('%Y%m%d-%H%M%S')}-task-{safe_tag(args.task_id)}-"
-        f"{safe_tag(args.agent)}-{safe_tag(args.model)}-{safe_tag(args.effort)}"
+        f"{safe_tag(args.agent)}-{safe_tag(args.model)}-{safe_tag(args.effort)}-"
+        f"{uuid.uuid4()}"
     )
     results = results_root()
     benchmark_dir = f"osworld-{args.benchmark_version}"
@@ -430,13 +433,15 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
     mcp_binary = Path(
         args.mcp_binary or artifact_dir / "computer-use"
     ).resolve()
-    skill_file = Path(args.skill_file).resolve() if args.skill_file else None
+    instructions_file = (
+        Path(args.instructions_file).resolve() if args.instructions_file else None
+    )
     base_instructions_file = Path(
         args.base_instructions_file
     ).resolve()
     required_files = [agent_binary, mcp_binary, base_instructions_file]
-    if skill_file is not None:
-        required_files.append(skill_file)
+    if instructions_file is not None:
+        required_files.append(instructions_file)
     if args.agent == "claude-code":
         required_files.append(CLAUDE_MCP_ADAPTER)
     if node_binary is not None:
@@ -450,6 +455,7 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
         base_dir=str(OSWORLD_ROOT / "evaluation_examples"),
         domain=args.task_domain or None,
         eval_version=args.benchmark_version,
+        prefer_class=args.benchmark_version == "v2",
     )
     phases = task_phases(task)
     run_started_at_utc = (
@@ -485,7 +491,7 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
         agent_binary=agent_binary,
         node_binary=node_binary,
         mcp_binary=mcp_binary,
-        skill_file=skill_file,
+        instructions_file=instructions_file,
         base_instructions_file=base_instructions_file,
         task=task,
         phases=phases,
@@ -499,7 +505,7 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
 
 
 def stage_local_files(run: TaskRun) -> None:
-    """Write the agent configuration, prompt, skill and launcher locally."""
+    """Write the agent configuration, instructions and launcher locally."""
     args = run.args
     affinity_prefix = TASK_AFFINITY_PREFIX.rstrip("-")
     gateway_bases = {
@@ -521,6 +527,7 @@ def stage_local_files(run: TaskRun) -> None:
             base_instructions=GUEST_BASE_INSTRUCTIONS,
             mcp_command=GUEST_MCP,
             channels=args.channels,
+            execution_context="isolated-guest",
         )
     elif args.agent == "claude-code":
         config = claude_mcp_config(channels=args.channels)
@@ -544,18 +551,18 @@ def stage_local_files(run: TaskRun) -> None:
             can_ask_user=task_value(run.task, "user_simulator") is not None,
         ),
     )
-    # Codex reads the skill from a task-local AGENTS.md and Gemini CLI from
-    # its global GEMINI.md, both uploaded from skill_copy; Claude Code and
+    # Codex reads the profile from a task-local AGENTS.md and Gemini CLI from
+    # its global GEMINI.md, both uploaded from instructions_copy; Claude Code and
     # Grok Build get it inside their replacement system prompts.
-    if run.skill_file is not None:
-        run.skill_copy.write_bytes(run.skill_file.read_bytes())
+    if run.instructions_file is not None:
+        run.instructions_copy.write_bytes(run.instructions_file.read_bytes())
     base_instructions = run.base_instructions_file.read_text(encoding="utf-8")
-    if run.skill_file is not None:
-        skill = run.skill_file.read_text(encoding="utf-8")
+    if run.instructions_file is not None:
+        instructions = run.instructions_file.read_text(encoding="utf-8")
         if args.agent == "claude-code":
-            base_instructions = claude_system_prompt(base_instructions, skill)
+            base_instructions = claude_system_prompt(base_instructions, instructions)
         elif args.agent == "grok-build":
-            base_instructions = grok_system_prompt(base_instructions, skill)
+            base_instructions = grok_system_prompt(base_instructions, instructions)
     write_local(run.base_instructions_copy, base_instructions)
     if args.agent == "gemini-cli":
         write_local(
@@ -617,7 +624,7 @@ def initial_meta(
         "mcp_binary": str(run.mcp_binary),
         "mcp_channels": args.channels or None,
         "mcp_public_tools": run.mcp_public_tools,
-        "skill_file": str(run.skill_file) if run.skill_file else None,
+        "instructions_file": str(run.instructions_file) if run.instructions_file else None,
         "base_instructions_file": str(run.base_instructions_file),
         "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "initializing",
@@ -645,9 +652,9 @@ def runtime_uploads(run: TaskRun) -> tuple[list[dict], list[str]]:
         executable_paths.append(guest_binary)
     if args.agent == "codex":
         upload_rows.append({"local_path": str(run.config_path), "path": GUEST_CONFIG})
-        if run.skill_file is not None:
+        if run.instructions_file is not None:
             upload_rows.append(
-                {"local_path": str(run.skill_copy), "path": GUEST_SKILL}
+                {"local_path": str(run.instructions_copy), "path": GUEST_INSTRUCTIONS}
             )
     elif args.agent == "claude-code":
         upload_rows.extend([
@@ -664,9 +671,9 @@ def runtime_uploads(run: TaskRun) -> tuple[list[dict], list[str]]:
                 "path": GUEST_GEMINI_EXPERIMENTS,
             },
         ])
-        if run.skill_file is not None:
+        if run.instructions_file is not None:
             upload_rows.append(
-                {"local_path": str(run.skill_copy), "path": GUEST_GEMINI_CONTEXT}
+                {"local_path": str(run.instructions_copy), "path": GUEST_GEMINI_CONTEXT}
             )
         executable_paths.append(GUEST_GEMINI_NODE)
     else:
@@ -682,7 +689,7 @@ def start_guest(run: TaskRun) -> DesktopEnv:
     os_type = "Windows" if task_platform.startswith("win") else "Ubuntu"
     if os_type != "Ubuntu":
         raise ValueError(
-            "The hybrid MCP prototype currently supports Ubuntu tasks only"
+            "The OSWorld runner supports Ubuntu tasks only"
         )
 
     task_volume_size = task_value(run.task, "volume_size")
@@ -894,11 +901,6 @@ def run_phases(run: TaskRun, env: DesktopEnv, base_url: str) -> PhaseOutcome:
         meta["active_phase"] = phase_index
         meta["active_phase_name"] = phase_name
         run.write_meta(ensure_ascii=False)
-        phase_request_baseline = (
-            count_model_requests(run.token_log, run.affinity_task)
-            if args.max_model_calls > 0
-            else 0
-        )
         phase_deadline = (
             float("inf")
             if args.timeout == 0
@@ -916,7 +918,6 @@ def run_phases(run: TaskRun, env: DesktopEnv, base_url: str) -> PhaseOutcome:
             settings=turn_settings,
             token_log=run.token_log,
             affinity_task=run.affinity_task,
-            model_request_baseline=phase_request_baseline,
             deadline=phase_deadline,
             multi_phase=bool(run.phases),
         )
@@ -951,12 +952,13 @@ def run_phases(run: TaskRun, env: DesktopEnv, base_url: str) -> PhaseOutcome:
                 "score": None,
                 "error": official_channel["error"],
                 "traceback": official_channel["traceback"],
+                "result_repr": official_channel["result_repr"],
             }
         )
         phase_score = (
             official_channel["result"]["score"]
             if official_completed
-            else 0.0
+            else None
         )
         if not official_completed:
             outcome.official_evaluator_errors.append({
@@ -964,9 +966,13 @@ def run_phases(run: TaskRun, env: DesktopEnv, base_url: str) -> PhaseOutcome:
                 "phase_name": phase_name,
                 "error": official_channel["error"],
                 "traceback": official_channel["traceback"],
+                "result_repr": official_channel["result_repr"],
             })
         outcome.evaluator_payload = phase_evaluator_payload
-        outcome.total_score += phase_score
+        if phase_score is not None:
+            outcome.total_score = (
+                0.0 if outcome.total_score is None else outcome.total_score
+            ) + phase_score
         save_phase_screenshot(env, run.result_dir, phase_index, "after-eval")
 
         phase_result = {
@@ -1067,7 +1073,21 @@ def finish_run(
 ) -> int:
     """Write the evaluator result and seal the run."""
     args = run.args
-    score = round(max(0.0, min(1.0, outcome.total_score)), 4)
+    score = None
+    if not outcome.official_evaluator_errors:
+        # Validate again before clamping: finite phase scores can overflow in
+        # aggregate, and an unpopulated outcome must not become a valid zero.
+        aggregate_channel = run_official_evaluator(lambda: outcome.total_score)
+        if aggregate_channel["status"] == "completed":
+            total_score = aggregate_channel["result"]["score"]
+            score = round(max(0.0, min(1.0, total_score)), 4)
+        else:
+            outcome.official_evaluator_errors.append({
+                "stage": "aggregation",
+                "error": aggregate_channel["error"],
+                "traceback": aggregate_channel["traceback"],
+                "result_repr": aggregate_channel["result_repr"],
+            })
     raw_evaluator_status = (
         "error" if outcome.official_evaluator_errors else "completed"
     )
@@ -1130,7 +1150,7 @@ def finish_run(
         run.result_dir / "result.json",
         json.dumps(result_payload, ensure_ascii=False, indent=2),
     )
-    write_local(run.result_dir / "result.txt", f"{score}\n")
+    write_local(run.result_dir / "result.txt", json.dumps(score) + "\n")
 
     run.meta.update({
         "status": (
@@ -1289,15 +1309,15 @@ def main() -> int:
         "agent_binary",
         "mcp_binary",
         "guest_image",
-        "skill_file",
+        "instructions_file",
         "base_instructions_file",
         "result_dir",
         "token_log",
     )
     os.chdir(OSWORLD_ROOT)
-    docker_runtime = validate_dedicated_docker_runtime()
-    asset_runtime = validate_official_asset_runtime()
     run = prepare_run(args)
+    asset_runtime = validate_official_asset_runtime(args.benchmark_version, run.task)
+    docker_runtime = validate_dedicated_docker_runtime()
     stage_local_files(run)
     run.meta = initial_meta(run, docker_runtime, asset_runtime)
     run.write_meta()

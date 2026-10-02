@@ -2,7 +2,16 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-OUT="${ROOT}/artifacts"
+OUT="${1:-${ROOT}/artifacts}"
+if [[ $# -gt 1 ]]; then
+  echo "usage: build-release.sh [NEW_OUTPUT_DIRECTORY]" >&2
+  exit 2
+fi
+# An explicit output is a distribution directory, never a shared download cache.
+if [[ $# -eq 1 && -e "${OUT}" ]]; then
+  echo "Release output directory must not exist: ${OUT}" >&2
+  exit 2
+fi
 TMP=$(mktemp -d)
 trap 'rm -rf "${TMP}"' EXIT
 

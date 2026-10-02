@@ -43,7 +43,7 @@ def split_task_path(path: str) -> tuple[str | None, str]:
 
 
 def is_budgeted_task(task: str | None) -> bool:
-    return bool(task) and task.startswith(TASK_AFFINITY_PREFIX)
+    return isinstance(task, str) and task.startswith(TASK_AFFINITY_PREFIX)
 
 
 def read_log_rows(path: Path) -> Iterator[dict]:
@@ -115,12 +115,115 @@ def relay_response(handler, status: int, headers, body: bytes) -> bool:
         handler.send_header("content-length", str(len(body)))
         handler.end_headers()
         handler.wfile.write(body)
-    except (BrokenPipeError, ConnectionResetError):
+    except OSError:
         return False
     return True
 
 
 REQUEST_TIMEOUT = urllib3.Timeout(connect=15, read=1800)
+MAX_CONSECUTIVE_GENERATION_FAILURES = 5
+
+
+def response_payloads(body: bytes, headers, *, allow_json_array: bool = False) -> list[dict]:
+    """Decode JSON or SSE records; array streaming requires protocol opt-in."""
+    if "text/event-stream" not in headers.get("content-type", ""):
+        payload = json.loads(body)
+        if allow_json_array and isinstance(payload, list) and all(
+            isinstance(item, dict) for item in payload
+        ):
+            return payload
+        return [payload] if isinstance(payload, dict) else []
+    records = []
+    data = []
+    for line in body.splitlines() + [b""]:
+        if line.startswith(b"data:"):
+            data.append(line[5:].lstrip())
+        elif not line and data:
+            raw = b"\n".join(data)
+            data = []
+            if raw != b"[DONE]":
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    records.append(payload)
+    return records
+
+
+class GenerationBudget:
+    """Reserve concurrent slots, commit delivered generations, bound failures.
+
+    Delivery means the complete response was written to the client transport,
+    not that the client has executed its tools. No legacy admission count is
+    interpreted as delivery evidence.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self._lock = threading.Lock()
+        self._completed: dict[str, int] = {}
+        self._inflight: dict[str, int] = {}
+        self._failures: dict[str, int] = {}
+        self._exhausted: set[str] = set()
+
+    def restore(self, rows: Iterator[dict]) -> None:
+        with self._lock:
+            self._completed.clear()
+            self._failures.clear()
+            self._inflight.clear()
+            self._exhausted.clear()
+            for row in rows:
+                task = row.get("task")
+                if not is_budgeted_task(task):
+                    continue
+                if row.get("generation_retry_exhausted") is True:
+                    self._exhausted.add(task)
+                if row.get("model_step_completed") is True:
+                    self._completed[task] = self._completed.get(task, 0) + 1
+                    self._failures[task] = 0
+                elif row.get("generation_admitted") is True:
+                    self._failures[task] = self._failures.get(task, 0) + 1
+
+    def admit(self, row: dict, generation: bool) -> str | None:
+        row["generation_request"] = generation
+        if not generation or not is_budgeted_task(row["task"]):
+            return None
+        task = row["task"]
+        with self._lock:
+            completed = self._completed.get(task, 0)
+            inflight = self._inflight.get(task, 0)
+            row["request_ordinal"] = completed + inflight + 1
+            row["request_limit"] = self.limit
+            if self.limit > 0 and completed >= self.limit:
+                reason = "budget_rejected"
+            elif task in self._exhausted:
+                reason = "generation_retry_exhausted"
+            elif self.limit > 0 and completed + inflight >= self.limit:
+                reason = "budget_inflight"
+            else:
+                self._inflight[task] = inflight + 1
+                row["generation_admitted"] = True
+                return None
+            row[reason] = True
+            return reason
+
+    def finish(self, row: dict, token_log: TokenLog, succeeded: bool = False) -> None:
+        # Serialize completion and evidence so restart replay sees the same
+        # success/failure ordering as the live circuit breaker.
+        with self._lock:
+            if row.get("generation_admitted"):
+                task = row["task"]
+                self._inflight[task] -= 1
+                if succeeded:
+                    self._completed[task] = self._completed.get(task, 0) + 1
+                    self._failures[task] = 0
+                    row["model_step_completed"] = True
+                    row["request_ordinal"] = self._completed[task]
+                else:
+                    failures = self._failures.get(task, 0) + 1
+                    self._failures[task] = failures
+                    if failures >= MAX_CONSECUTIVE_GENERATION_FAILURES:
+                        self._exhausted.add(task)
+                        row["generation_retry_exhausted"] = True
+            token_log.record(row)
 
 
 class PassthroughGateway:
@@ -133,6 +236,7 @@ class PassthroughGateway:
     """
 
     name = "passthrough"
+    json_array_responses = False
     unforwarded_request_headers: frozenset[str] = frozenset({
         "host", "connection", "content-length", "authorization", "accept-encoding",
     })
@@ -152,8 +256,7 @@ class PassthroughGateway:
         self.max_requests_per_task = max_requests_per_task
         self.pool = pool or urllib3.PoolManager(maxsize=128, block=False, retries=False)
         self.stats = new_stats()
-        self._budget_lock = threading.Lock()
-        self._completed: dict[str, int] = {}
+        self.budget = GenerationBudget(max_requests_per_task)
 
     def is_budgeted_path(self, path: str) -> bool:
         raise NotImplementedError
@@ -174,48 +277,22 @@ class PassthroughGateway:
     def error_body(self, status: int, message: str) -> dict:
         raise NotImplementedError
 
+    def generation_succeeded(self, body: bytes, headers) -> bool:
+        raise NotImplementedError
+
     def restore(self) -> None:
         """Rebuild completed-response counts from the log."""
-        completed: dict[str, int] = {}
-        for row in read_log_rows(self.token_log.path):
-            task = row.get("task")
-            if (
-                isinstance(task, str)
-                and is_budgeted_task(task)
-                and self.is_budgeted_path(str(row.get("path") or ""))
-                and row.get("model_step_completed")
-            ):
-                completed[task] = completed.get(task, 0) + 1
-        with self._budget_lock:
-            self._completed.update(completed)
-
-    def _budgeted(self, task: str | None, path: str) -> bool:
-        return (
-            self.max_requests_per_task > 0
-            and is_budgeted_task(task)
-            and self.is_budgeted_path(path)
+        self.budget.restore(
+            row for row in read_log_rows(self.token_log.path)
+            if self.is_budgeted_path(str(row.get("path") or ""))
         )
-
-    def admit(self, task: str | None, path: str) -> tuple[bool, int | None]:
-        if not self._budgeted(task, path):
-            return True, None
-        with self._budget_lock:
-            completed = self._completed.get(task, 0)
-            return completed < self.max_requests_per_task, completed + 1
-
-    def complete(self, task: str | None, path: str, delivered: bool) -> int | None:
-        if not delivered or not self._budgeted(task, path):
-            return None
-        with self._budget_lock:
-            completed = self._completed.get(task, 0) + 1
-            self._completed[task] = completed
-            return completed
 
     def healthz(self) -> dict:
         return {
             "ok": True,
             "max_completed_responses_per_task": self.max_requests_per_task,
             "step_unit": "successful_task_agent_response",
+            "max_consecutive_generation_failures": MAX_CONSECUTIVE_GENERATION_FAILURES,
             **self.stats,
         }
 
@@ -242,8 +319,11 @@ def make_passthrough_handler(
             row["http_status"] = status
             row["error"] = message
             gateway.stats["errors"] += 1
-            gateway.token_log.record(row)
-            send_json(self, status, gateway.error_body(status, f"{gateway.name}: {message}"))
+            gateway.budget.finish(row, gateway.token_log)
+            try:
+                send_json(self, status, gateway.error_body(status, f"{gateway.name}: {message}"))
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def proxy(self, method: str) -> None:
             task, local_path = split_task_path(self.path)
@@ -255,18 +335,18 @@ def make_passthrough_handler(
                 "task": task,
                 "endpoint": gateway.upstream_base,
                 "path": parsed.path,
+                "method": method,
                 "model": gateway.request_model(parsed.path, body),
             }
-            admitted, ordinal = gateway.admit(task, parsed.path)
-            if ordinal is not None:
-                row["request_ordinal"] = ordinal
-                row["request_limit"] = gateway.max_requests_per_task
-            if not admitted:
-                row["budget_rejected"] = True
-                gateway.stats["budget_rejected"] += 1
+            rejection = gateway.budget.admit(
+                row, method == "POST" and gateway.is_budgeted_path(parsed.path)
+            )
+            if rejection:
+                if rejection == "budget_rejected":
+                    gateway.stats["budget_rejected"] += 1
                 self.fail(
                     429,
-                    "task model-call budget exhausted before upstream admission",
+                    rejection,
                     row,
                 )
                 return
@@ -320,11 +400,16 @@ def make_passthrough_handler(
                     row["response_id"] = response_id
                     if usage:
                         row.update(usage)
-                elif response_body[:1] == b"{":
-                    usage, response_id = gateway.json_usage(json.loads(response_body))
-                    row["response_id"] = response_id
-                    if usage:
-                        row.update(usage)
+                elif response_body.lstrip()[:1] in {b"{", b"["}:
+                    for payload in response_payloads(
+                        response_body, response.headers,
+                        allow_json_array=gateway.json_array_responses,
+                    ):
+                        usage, response_id = gateway.json_usage(payload)
+                        if response_id:
+                            row["response_id"] = response_id
+                        if usage:
+                            row.update(usage)
                 if row.get("input_tokens") is not None:
                     gateway.stats["accounted"] += 1
             except Exception as exc:
@@ -335,12 +420,15 @@ def make_passthrough_handler(
             )
             if not delivered:
                 row["client_disconnected"] = True
-            if 200 <= response.status < 300:
-                completed = gateway.complete(task, parsed.path, delivered)
-                if completed is not None:
-                    row["model_step_completed"] = True
-                    row["request_ordinal"] = completed
-            gateway.token_log.record(row)
+            succeeded = False
+            if delivered and 200 <= response.status < 300 and row["generation_request"]:
+                try:
+                    succeeded = gateway.generation_succeeded(response_body, response.headers)
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    pass
+                if not succeeded:
+                    row["generation_error"] = "missing successful generation terminal"
+            gateway.budget.finish(row, gateway.token_log, succeeded)
 
     return Handler
 
@@ -379,7 +467,13 @@ def add_passthrough_arguments(parser, *, port: int, upstream_env: str, token_env
         "--upstream-token",
         default=os.environ.get(token_env, ""),
     )
-    parser.add_argument("--max-requests-per-task", type=int, default=0)
+    parser.add_argument(
+        "--max-requests-per-task", type=int, default=0,
+        help=(
+            "Successful delivered generation responses per task agent; 0 "
+            "disables the response cap. Consecutive failures remain bounded."
+        ),
+    )
 
 
 def check_passthrough_arguments(parser, args, *, upstream_env: str, token_env: str) -> None:

@@ -1,14 +1,10 @@
 # Third-Party Notices
 
-## Computer Use lineage
+## Computer Use
 
-The Linux Computer Use implementation descends from
-`hqhq1025/unify-computer-use`, itself derived from
-`iFurySt/open-codex-computer-use`. The upstream repository carries the MIT
-license copied at the repository root.
-
-Upstream revision inspected while preparing this repository:
-`276cc718886dfe5fc086d69f1d0d1378bdbec401`.
+The Linux Computer Use implementation includes MIT-licensed code from
+`iFurySt/open-codex-computer-use`. Its copyright and license are retained
+in `LICENSE`.
 
 ## OSWorld V2
 
@@ -17,6 +13,7 @@ revision `d578d2d4e0dc82b43e270fdaa7fa89d9708cd154`, which is licensed under
 the Apache License 2.0 (copy in `licenses/Apache-2.0.txt`):
 
 - `osworld-overlay/desktop_env/controllers/setup.py`
+- `osworld-overlay/desktop_env/file_source.py`
 - `osworld-overlay/desktop_env/desktop_env.py`
 - `osworld-overlay/desktop_env/evaluators/getters/__init__.py`
 - `osworld-overlay/desktop_env/evaluators/getters/chrome.py`
@@ -26,20 +23,35 @@ the Apache License 2.0 (copy in `licenses/Apache-2.0.txt`):
 - `hcu/osworld/task_loader.py`
 
 Each file names its upstream path in its header and remains under the Apache
-License 2.0. The changes add bounded retries and diagnostics around guest
+License 2.0. The modifications provide bounded retries and diagnostics around guest
 startup, task setup and Chrome DevTools connections, per-task runtime
-settings, guest disk capacity checks, and task lookup without a domain;
-compare a file with the upstream revision for the exact changes.
+settings, guest disk capacity checks, and task lookup without a domain.
 `osworld-overlay/desktop_env/cache.py` and `osworld-overlay/desktop_env/cdp.py`
 are original to this repository.
 
+`configs/osworld-v1-tasks.json` is a normalized task-ID/domain index from
+`xlang-ai/OSWorld`'s public `evaluation_examples/test_all.json`.
+It contains no task definitions, assets, answers or
+evaluation results. The original benchmark is distributed under Apache-2.0.
+The separate exclusion list records this project's evaluation scope.
+
 ## Playwright
 
-Some behavior follows designs from Microsoft Playwright and Playwright MCP
-(Apache License 2.0), such as stable element references in aria snapshots,
-strict-mode error messages, error context files and file output mode. Code
-comments name the design they follow. This repository contains no Playwright
-source files.
+`StableIndexer` in `computer-use/native/linux/provider/ax_records.py` adapts
+the role/name-based reference retention rule from Microsoft Playwright's
+`packages/injected/src/ariaSnapshot.ts` (`computeAriaRef`). The Python adaptation
+uses caller-supplied AT-SPI path mappings, full-name fingerprints and an
+index-allocation set instead of state stored on DOM elements.
+The adapted portions retain Playwright's Apache License 2.0 attribution:
+Copyright (c) Microsoft Corporation.
+The license is in `licenses/Apache-2.0.txt` and the upstream notice is in
+`licenses/Playwright-NOTICE.txt`.
+
+Other behavior follows designs from Playwright and Playwright MCP, including
+strict-mode error messages, error context files and file output mode.
+Code comments identify those design references. Playwright is installed
+separately for OSWorld browser integration; it is not bundled as a runtime
+dependency of the native desktop provider.
 
 ## Native desktop dependencies
 
@@ -47,11 +59,17 @@ source files.
 Unicode key-name validation, from Go's x/text v0.22.0. Its BSD-style LICENSE
 and PATENTS are retained in that directory. Vendoring permits offline builds.
 
-The Windows provider references FlaUI.UIA3 5.0.0 and its FlaUI.Core dependency,
-which are MIT licensed, through NuGet. Native builds restore those packages;
+The Windows provider directly references FlaUI.Core 5.0.0, FlaUI.UIA3 5.0.0
+and System.Drawing.Common 8.0.10, which are MIT licensed, through NuGet.
+Native builds restore those packages;
 their source is not vendored here. Self-contained Windows packages also
 include the Microsoft .NET runtime and must retain its third-party notices.
 The macOS provider links system Apple frameworks and uses the Swift toolchain.
+
+The Python package requires `docker`, `requests` and `urllib3`, as declared in
+`pyproject.toml`. OSWorld integration additionally uses the dependencies of the
+external OSWorld checkout, including Playwright and its browser installation.
+These packages are installed separately, not vendored in this source package.
 
 ### Cua Driver and yabai
 
@@ -95,6 +113,9 @@ Node runtime Gemini CLI needs. They are not part of this repository and keep
 their own licenses: Codex (Apache-2.0), Claude Code (proprietary),
 `@google/gemini-cli` (Apache-2.0), `@xai-official/grok-linux-x64`
 (Apache-2.0, bundled THIRD_PARTY_NOTICES) and Node.js (MIT).
+The downloader prepares local executables; it is not a redistribution packager.
+Before distributing downloaded executables, obtain and retain their publishers'
+license and notice files and verify the applicable redistribution permissions.
 
 ## Not redistributed
 

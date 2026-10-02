@@ -50,7 +50,7 @@ public struct PermissionDiagnostics: Sendable {
 public enum PermissionSupport {
     public static let bundleDisplayName = "Computer Use Provider"
     public static let providerBundleIdentifier =
-        "com.microsoft.computer-use.provider.v2"
+        "org.computer-use.provider.v2"
 
     public static func currentPermissionClients(
         bundle: Bundle = .main

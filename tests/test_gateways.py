@@ -36,7 +36,8 @@ class FakeUpstream:
     def request(self, method, url, body=None, headers=None, **_kwargs):
         self.calls.append((method, url, headers["x-api-key"]))
         return FakeResponse(200, json.dumps({
-            "id": "msg", "usage": {"input_tokens": 5, "output_tokens": 3},
+            "id": "msg", "type": "message", "stop_reason": "end_turn",
+            "usage": {"input_tokens": 5, "output_tokens": 3},
         }).encode())
 
 
@@ -57,8 +58,10 @@ def post(base, path, payload):
     )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
+            response.read()
             return response.status
     except urllib.error.HTTPError as error:
+        error.read()
         return error.code
 
 
@@ -123,7 +126,8 @@ def test_openai_restores_affinity_and_budget_from_the_log(tmp_path):
     log = tmp_path / "tokens.jsonl"
     log.write_text(
         json.dumps({"task": "task-t", "model": "m",
-                    "endpoint": "west.example", "path": "/v1/responses"}) + "\n"
+                    "endpoint": "west.example", "path": "/v1/responses",
+                    "model_step_completed": True}) + "\n"
     )
     gateway = openai_proxy.OpenAIGateway(
         upstreams=["east.example", "west.example"],
@@ -134,8 +138,12 @@ def test_openai_restores_affinity_and_budget_from_the_log(tmp_path):
     )
     gateway.restore()
     assert gateway.host_for_task("task-t", "m") == "west.example"
-    assert gateway.admit("task-t", "/v1/responses") == (True, 2)
-    assert gateway.admit("task-t", "/v1/responses") == (False, 3)
+    row = {"task": "task-t"}
+    assert gateway.budget.admit(row, True) is None
+    assert row["request_ordinal"] == 2
+    gateway.budget.finish(row, gateway.token_log, True)
+    assert gateway.budget.admit({"task": "task-t"}, True) == "budget_rejected"
+    gateway.token_log.close()
 
 
 def test_anthropic_budget_counts_delivered_responses(tmp_path):
@@ -213,7 +221,7 @@ class FakeGeminiUpstream:
     def request(self, method, url, body=None, headers=None, **_kwargs):
         self.calls.append((method, url, headers["x-goog-api-key"]))
         events = (
-            b'data: {"candidates":[{"content":{"parts":[{"text":"OK"}]}}],'
+            b'data: {"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"OK"}]}}],'
             b'"usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":2,'
             b'"cachedContentTokenCount":5,"thoughtsTokenCount":1,"totalTokenCount":33},'
             b'"responseId":"g1"}\n\n'

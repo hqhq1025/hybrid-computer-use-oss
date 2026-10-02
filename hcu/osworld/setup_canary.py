@@ -94,8 +94,6 @@ def main() -> int:
     os.chdir(OSWORLD_ROOT)
     if args.evaluator_fixture and not args.run_evaluator:
         raise ValueError("--evaluator-fixture requires --run-evaluator")
-    docker_runtime = validate_dedicated_docker_runtime()
-    asset_runtime = validate_official_asset_runtime()
     image = args.guest_image.resolve()
     result_dir = args.result_dir.resolve()
     if not image.is_file():
@@ -107,7 +105,10 @@ def main() -> int:
         base_dir=str(OSWORLD_ROOT / "evaluation_examples"),
         domain=args.task_domain,
         eval_version=args.benchmark_version,
+        prefer_class=args.benchmark_version == "v2",
     )
+    asset_runtime = validate_official_asset_runtime(args.benchmark_version, task)
+    docker_runtime = validate_dedicated_docker_runtime()
     task_volume_size = task_value(task, "volume_size")
     volume_size = args.volume_size
     if task_volume_size is not None:
@@ -199,7 +200,7 @@ def main() -> int:
                     for local_path, guest_path in args.evaluator_fixture
                 ])
             evaluator_started = time.monotonic()
-            evaluator_result = task.evaluate(env)
+            evaluator_result = env.evaluate()
             report["evaluator_result"] = json.loads(
                 json.dumps(evaluator_result, default=str)
             )

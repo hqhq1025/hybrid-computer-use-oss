@@ -47,11 +47,13 @@ import urllib.parse
 import urllib3
 
 from hcu.gateway.common import (
+    GenerationBudget,
+    MAX_CONSECUTIVE_GENERATION_FAILURES,
     TokenLog,
-    is_budgeted_task,
     new_stats,
     read_log_rows,
     relay_response,
+    response_payloads,
     send_json,
     split_task_path,
 )
@@ -172,8 +174,7 @@ class OpenAIGateway:
         self._affinity_lock = threading.Lock()
         self._affinity: dict[tuple[str, str], str] = {}
         self._next_upstream: dict[tuple[str, ...], int] = {}
-        self._budget_lock = threading.Lock()
-        self._admitted: dict[str, int] = {}
+        self.budget = GenerationBudget(max_requests_per_task)
         self._pool_lock = threading.Lock()
         self._pools: dict[str, urllib3.HTTPSConnectionPool] = {}
 
@@ -184,29 +185,22 @@ class OpenAIGateway:
         }
 
     def restore(self) -> None:
-        """Rebuild task affinity and admitted-request counts from the log."""
+        """Rebuild affinity and successful-delivery counts from the log."""
         allowed = self.all_upstreams
         affinity = {}
-        admitted: dict[str, int] = {}
         for row in read_log_rows(self.token_log.path):
             task = row.get("task")
             endpoint = row.get("endpoint")
             if task and endpoint in allowed:
                 affinity[(str(task), str(row.get("model") or ""))] = str(endpoint)
-            if (
-                is_budgeted_task(task)
-                and row.get("path") == BUDGETED_PATH
-                and not row.get("budget_rejected")
-            ):
-                admitted[str(task)] = admitted.get(str(task), 0) + 1
         with self._affinity_lock:
             self._affinity.update(affinity)
-        with self._budget_lock:
-            self._admitted.update(admitted)
+        self.budget.restore(
+            row for row in read_log_rows(self.token_log.path)
+            if row.get("path") == BUDGETED_PATH
+        )
         if affinity:
             log(f"restored {len(affinity)} task/model upstream affinities")
-        if admitted:
-            log(f"restored request counts for {len(admitted)} tasks")
 
     def host_for_task(self, task: str | None, model: str | None) -> str:
         """Pin a task to one upstream on first sight; never switch later."""
@@ -229,22 +223,6 @@ class OpenAIGateway:
                     "(pinned for the rest of the task)"
                 )
             return host
-
-    def admit(self, task: str | None, path: str) -> tuple[bool, int | None]:
-        """Count budgeted requests at admission; reject beyond the limit."""
-        if (
-            self.max_requests_per_task <= 0
-            or not is_budgeted_task(task)
-            or path != BUDGETED_PATH
-        ):
-            return True, None
-        with self._budget_lock:
-            admitted = self._admitted.get(task, 0)
-            if admitted >= self.max_requests_per_task:
-                return False, admitted + 1
-            admitted += 1
-            self._admitted[task] = admitted
-            return True, admitted
 
     def pool(self, host: str) -> urllib3.HTTPSConnectionPool:
         with self._pool_lock:
@@ -269,6 +247,9 @@ class OpenAIGateway:
             "tasks": len(self._affinity),
             "out": str(self.token_log.path),
             "max_requests_per_task": self.max_requests_per_task,
+            "max_completed_responses_per_task": self.max_requests_per_task,
+            "step_unit": "successful_task_agent_response",
+            "max_consecutive_generation_failures": MAX_CONSECUTIVE_GENERATION_FAILURES,
             **self.stats,
         }
 
@@ -307,6 +288,19 @@ def parse_sse_for_usage(raw: bytes) -> dict | None:
     return found
 
 
+def generation_succeeded(body: bytes, headers) -> bool:
+    events = response_payloads(body, headers)
+    if "text/event-stream" not in headers.get("content-type", ""):
+        return bool(events) and events[-1].get("status") in {"completed", "incomplete"}
+    terminal = False
+    for event in events:
+        if event.get("type") in {"error", "response.failed", "response.cancelled"}:
+            return False
+        if event.get("type") in {"response.completed", "response.incomplete"}:
+            terminal = True
+    return terminal
+
+
 def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -327,9 +321,10 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
             self.proxy("DELETE")
 
         def fail(self, status: int, message: str, row: dict) -> None:
+            row["http_status"] = status
             row["error"] = message
             gateway.stats["errors"] += 1
-            gateway.token_log.record(row)
+            gateway.budget.finish(row, gateway.token_log)
             log(f"ERROR {message}")
             try:
                 send_json(self, status, {
@@ -338,19 +333,17 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
             except Exception:
                 pass
 
-        def reject_budget(self, row: dict) -> None:
+        def reject_budget(self, row: dict, reason: str) -> None:
             row["http_status"] = 429
-            row["budget_rejected"] = True
-            row["error"] = (
-                "task model-call budget exhausted before upstream admission"
-            )
-            gateway.stats["budget_rejected"] += 1
-            gateway.token_log.record(row)
+            row["error"] = reason
+            if reason == "budget_rejected":
+                gateway.stats["budget_rejected"] += 1
+            gateway.budget.finish(row, gateway.token_log)
             try:
                 send_json(self, 429, {
                     "error": {
-                        "message": "token_proxy: task model-call budget exhausted",
-                        "type": "model_call_budget_exhausted",
+                        "message": f"token_proxy: {reason}",
+                        "type": reason,
                     }
                 })
             except Exception:
@@ -370,6 +363,7 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
                 "task": task,
                 "endpoint": None,
                 "path": parsed.path,
+                "method": method,
                 "input_items": None,
                 "previous_response_id": None,
                 "model": None,
@@ -383,12 +377,11 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
                     row["model"] = request.get("model")
                 except Exception:
                     pass
-            admitted, ordinal = gateway.admit(task, parsed.path)
-            if ordinal is not None:
-                row["request_ordinal"] = ordinal
-                row["request_limit"] = gateway.max_requests_per_task
-            if not admitted:
-                self.reject_budget(row)
+            rejection = gateway.budget.admit(
+                row, method == "POST" and parsed.path == BUDGETED_PATH
+            )
+            if rejection:
+                self.reject_budget(row, rejection)
                 return
             try:
                 host = gateway.host_for_task(task, row["model"])
@@ -436,7 +429,8 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
 
             response_body = response.data
             status = response.status
-            if not relay_response(self, status, response.headers, response_body):
+            delivered = relay_response(self, status, response.headers, response_body)
+            if not delivered:
                 row["client_disconnected"] = True
             row["http_status"] = status
             row["latency_sec"] = round(time.time() - started, 3)
@@ -470,7 +464,15 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
                 row["accounting_error"] = f"{type(exc).__name__}: {exc}"
                 gateway.stats["errors"] += 1
                 log(f"ERROR usage parsing failed task={task}: {exc}")
-            gateway.token_log.record(row)
+            succeeded = False
+            if delivered and 200 <= status < 300 and row["generation_request"]:
+                try:
+                    succeeded = generation_succeeded(response_body, response.headers)
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    pass
+                if not succeeded:
+                    row["generation_error"] = "missing successful generation terminal"
+            gateway.budget.finish(row, gateway.token_log, succeeded)
 
     return Handler
 
@@ -548,8 +550,8 @@ def main() -> int:
         type=int,
         default=0,
         help=(
-            "Hard admission cap for each OSWorld task agent; 0 disables the "
-            "cap. Other traffic is not capped."
+            "Successful delivered generation responses per task agent; 0 "
+            "disables the response cap. Consecutive failures remain bounded."
         ),
     )
     args = parser.parse_args()

@@ -52,7 +52,7 @@ func appLaunchWaitPumpsMainRunLoopUntilCompletion() {
 func appCatalogHidesComputerUseProvider() {
     #expect(
         !AppDiscovery.isDiscoverableBundleIdentifier(
-            "com.microsoft.computer-use.provider.v2"
+            "org.computer-use.provider.v2"
         )
     )
     #expect(AppDiscovery.isDiscoverableBundleIdentifier("com.apple.Notes"))
@@ -63,7 +63,7 @@ func runningAppEnumerationHidesComputerUseProvider() {
     #expect(
         !AppDiscovery.isDiscoverableRunningApplication(
             isTerminated: false,
-            bundleIdentifier: "com.microsoft.computer-use.provider.v2"
+            bundleIdentifier: "org.computer-use.provider.v2"
         )
     )
     #expect(

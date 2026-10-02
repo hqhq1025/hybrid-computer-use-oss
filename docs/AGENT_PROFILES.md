@@ -21,8 +21,9 @@ All agents use:
 - the releases pinned in `configs/agent-artifacts.lock.json` (currently Codex
   0.151.0, Claude Code 2.1.251, Gemini CLI 0.60.0, Grok Build 1.0.40 and the
   Node 20.19.5 runtime Gemini CLI needs);
-- the base instructions in `skills/base/` and one selected benchmark skill, or
-  none for the no-skill ablation;
+- the common safety and outcome policy in `instructions/base.md`, plus one
+  selected interaction guide (normally `instructions/hybrid.md`); selecting
+  no operating profile omits only the guide, not the base policy;
 - one fresh task environment and one MCP process per task;
 - a task-scoped model gateway URL and a placeholder credential;
 - Bash, which the hybrid profile keeps enabled.
@@ -54,8 +55,8 @@ Disabled:
   compaction.
 
 The base instructions are selected with `model_instructions_file`, and the
-benchmark skill is written to `/home/user/AGENTS.md` under the guest user's home.
-Outside OSWorld, the configuration generator embeds the selected skill in
+selected profile is written to `/home/user/AGENTS.md` under the guest user's home.
+Outside OSWorld, the configuration generator embeds the selected profile in
 `developer_instructions` instead, without replacing the user's workspace
 instructions. Its `--codex-home` must match the client's actual `CODEX_HOME`.
 
@@ -87,11 +88,15 @@ acceptable inside the disposable benchmark guest. It uses an isolated
 Environment variables turn off telemetry, error reporting, automatic updates,
 attribution, feedback surveys and nonessential model traffic.
 
-Claude Code 2.1.251 omits tools whose schema is a root-level `oneOf` from its
-initialized tool list. `hcu/osworld/guest_files/claude_mcp_schema_adapter.py`
-sits between Claude Code and the server and flattens only the schemas shown to
-Claude. The server still validates the original discriminated unions before
-any side effect.
+Standalone generation writes the MCP JSON, replacement prompt and a sibling
+`.launch.py` script. Run that script with Python and `claude` on `PATH` to
+apply the selected model, effort and task-scoped gateway. It uses manual tool
+approvals on the host, not the guest's permission bypass. The generated client
+profile does not provide VM isolation; see [MCP](MCP.md) for a launch example.
+
+`hcu/osworld/guest_files/claude_mcp_schema_adapter.py` connects Claude Code to
+the server and presents client-compatible schemas. The server validates the
+original discriminated unions before any side effect.
 
 ## Gemini CLI
 
@@ -117,6 +122,11 @@ process by name. `settings.json` keeps only this MCP server:
   to 600 seconds, because the gateway relays a streamed response only after it
   completes.
 
+The standalone generator requires `--output <home>/.gemini/settings.json`
+and reports `GEMINI_CLI_HOME=<home>`. Settings and global `GEMINI.md` live in
+that `.gemini` directory. Use the printed environment when launching the CLI;
+other output layouts are rejected.
+
 ## Grok Build
 
 `config.toml` in an isolated `GROK_HOME` registers the gateway as the only
@@ -127,25 +137,40 @@ and keeps the `computer_use` MCP server. The launcher passes
 `--no-subagents`, `--disable-web-search`, `--verbatim` and the disallowed
 tools list.
 
-Grok Build 1.0.40 drops `--system-prompt-override` when it resumes a session
-and falls back to its default prompt. A resumed turn would therefore run under
-different instructions, so Grok Build cannot resume: a task that needs a
-second turn (an `ASK_USER` answer or a resume-based retry) fails with that
-reason.
+The Grok Build profile supports a single turn per task. Select a resumable
+client for tasks that require an `ASK_USER` answer or a resume-based retry.
 
 ## Prompt replacement
 
-The same base instructions (`skills/base/CODEX_BASE_INSTRUCTIONS.md`) and skill
-reach every agent, and each harness reads them differently:
+The same base policy (`instructions/base.md`) and selected profile text reach
+every agent. They are always injected plain text, not discoverable or activated
+skills. Each harness reads them differently:
 
-| Agent | Base instructions | Skill |
+| Agent | Base instructions | Selected profile |
 | --- | --- | --- |
 | Codex | `model_instructions_file` in `config.toml` | task-local `AGENTS.md` |
-| Claude Code | `--system-prompt-file` | appended to that prompt under a `# Benchmark computer-use skill` heading |
+| Claude Code | `--system-prompt-file` | profile appended directly to that prompt, retaining its own H1 |
 | Gemini CLI | `GEMINI_SYSTEM_MD` replaces the core prompt | global `GEMINI.md` |
 | Grok Build | `--system-prompt-override` | appended to that override |
 
 This table describes the isolated OSWorld runner. Standalone Codex generation
-uses `developer_instructions` for the skill; standalone Claude configuration
-uses the generator's local Python interpreter for the MCP adapter.
+uses `developer_instructions` for the selected profile; standalone Claude
+configuration uses the generator's local Python interpreter for the MCP adapter.
 Repository development instructions must never reach the evaluated agent.
+Standalone Grok output must be named `config.toml`; its parent becomes
+`GROK_HOME`. Other filenames are rejected because the client would ignore them.
+
+Use `--instructions-file` to select the profile in either the runner or the
+standalone generator. The runner uses `--base-instructions-file` for base
+policy; the standalone generator keeps `--base-instructions`. An empty
+`--instructions-file ""` omits only the profile. Batch and queue configs use
+`instructions_file` and `no_instructions`; old skill-selection names are not
+aliases. Native client skill-disable settings above are unchanged.
+An omitted or JSON `null` `instructions_file` uses the default hybrid profile;
+an empty string or `no_instructions: true` disables it. Experiment preparation
+and result validation preserve these same selection rules.
+
+The runner supplies the `TASK_COMPLETE`, `TASK_INFEASIBLE` and `ASK_USER` protocol
+separately. Product instructions contain no protocol markers. Editing the base
+or profile changes model context and requires a new evaluation attempt; see
+[Instructions](INSTRUCTIONS.md).

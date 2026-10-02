@@ -10,7 +10,7 @@ import (
 func TestNativeIdentityConflictPreservesMutationAndRequiresObservation(t *testing.T) {
 	for _, emitted := range []bool{false, true} {
 		s := newServiceWithBackend(&recordingPlatformBackend{})
-		snapshot := nativeAliasPortFixture("process_instance")
+		snapshot := nativeAliasFixture("process_instance")
 		snapshot.Elements[2].AutomationID = "conflicting-id"
 		prepared, result := s.prepareProviderSnapshot(axServiceRequest{App: "a1"},
 			&ProviderAccessibilityResult{

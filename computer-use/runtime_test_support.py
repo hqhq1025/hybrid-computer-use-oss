@@ -599,7 +599,7 @@ class _ScriptedApp(_TreeNode):
     """Application node whose top-level windows change as the fake clock advances.
 
     timeline is [(start_time, [windows...]), ...] in ascending order; reads use
-    the last entry that has started, so measured timings can be replayed.
+    the last entry that has started, making window transitions deterministic.
     """
 
     def __init__(self, clock, timeline):

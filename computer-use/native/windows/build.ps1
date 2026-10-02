@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 param(
     [ValidateSet("amd64", "arm64")]
     [string]$Architecture = "amd64",

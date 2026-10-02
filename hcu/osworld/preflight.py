@@ -13,39 +13,78 @@ DEDICATED_DOCKER_HOST = os.environ.get(
 DEDICATED_DOCKER_ROOT = os.environ.get("OSWORLD_V2_DOCKER_ROOT", "")
 
 
-def validate_official_asset_runtime() -> dict:
-    raw_asset_root = os.environ.get("OSWORLD_FILE_BASE_URL", "")
-    if not raw_asset_root:
-        raise RuntimeError(
-            "OSWorld V2 requires a local gated asset snapshot. "
-            "OSWORLD_FILE_BASE_URL is unset. "
-            "Load your environment file (see configs/env.example) before "
-            "launching the runner."
-        )
-    if "://" in raw_asset_root:
-        raise RuntimeError(
-            "OSWorld V2 formal runs must not resolve task assets online. "
-            "Set OSWORLD_FILE_BASE_URL to the absolute local gated snapshot, "
-            f"got {raw_asset_root}."
-        )
+def validate_official_asset_runtime(benchmark_version: str, task) -> dict:
+    """Validate only the selected task, before creating a guest.
 
-    asset_root = Path(raw_asset_root).expanduser()
-    if not asset_root.is_absolute():
-        raise RuntimeError(
-            "OSWORLD_FILE_BASE_URL must be an absolute local path, "
-            f"got {raw_asset_root}."
+    This is a setup-asset contract, not a whole-task offline guarantee.
+    Browser navigation, application APIs and evaluator networking are separate.
+    """
+    from desktop_env.file_source import (
+        bind_setup_assets,
+        local_root,
+        manifest_path,
+        read_asset_manifest,
+        require_setup_source,
+        resolve_local_source,
+    )
+    from hcu.osworld.assets import task_asset_sources
+    from hcu.osworld.task import task_value
+
+    # A process can validate several tasks in tests/preparation; never reuse
+    # the preceding task's bindings while resolving the next one.
+    bind_setup_assets(None, benchmark_version=benchmark_version)
+    sources, unresolved = task_asset_sources(task, benchmark_version)
+    variable = (
+        "OSWORLD_V1_ASSET_ROOT" if benchmark_version == "v1"
+        else "OSWORLD_FILE_BASE_URL"
+    )
+    root = local_root(variable)
+    task_id = str(task_value(task, "id", ""))
+    if not task_id:
+        raise ValueError("Asset preflight requires the selected task id")
+    manifest = read_asset_manifest(root) if root is not None else {"tasks": {}}
+    declared = manifest["tasks"].get(f"{benchmark_version}:{task_id}")
+    if declared is not None:
+        sources.extend(
+            str(manifest_path(root, value)) if "://" not in value and not Path(value).is_absolute()
+            else value
+            for value in declared
         )
-    asset_root = asset_root.resolve()
-    if not asset_root.is_dir():
+    if unresolved and declared is None:
         raise RuntimeError(
-            f"Local OSWorld V2 asset snapshot is unavailable: {asset_root}"
+            f"Task {task_id} has dynamic setup assets ({', '.join(unresolved)}). "
+            f"Declare its exact sources in {variable}/setup-assets.json "
+            f'under tasks["{benchmark_version}:{task_id}"].'
         )
-    if not (asset_root / "task_001").is_dir():
-        raise RuntimeError(
-            "Local OSWorld V2 asset snapshot is incomplete or points at the "
-            f"wrong directory: {asset_root}"
-        )
-    return {"asset_root": str(asset_root)}
+    bindings = {}
+    directories = []
+    for source in dict.fromkeys(sources):
+        local = resolve_local_source(source)
+        if local is not None and Path(local).is_dir():
+            directories.append(local)
+            if declared is None:
+                raise RuntimeError(
+                    f"Task {task_id} declares an asset directory, not exact files: {source}. "
+                    f'Provide tasks["{benchmark_version}:{task_id}"] in '
+                    f"{variable}/setup-assets.json; directory existence is not completeness."
+                )
+            continue
+        bindings[source] = require_setup_source(source)
+    bind_setup_assets(bindings)
+    return {
+        "benchmark_version": benchmark_version,
+        "task_id": task_id,
+        "policy": "local-setup-assets-only",
+        "asset_root": str(root) if root is not None else None,
+        "manifest_task_entry": declared is not None,
+        "dynamic_declarations": unresolved,
+        "asset_directories": directories,
+        "assets": [
+            {"source": source, "local_path": path, "size_bytes": Path(path).stat().st_size}
+            for source, path in bindings.items()
+        ],
+        "network_scope": "setup asset retrieval only; task websites and APIs remain available",
+    }
 
 
 def validate_dedicated_docker_runtime() -> dict:

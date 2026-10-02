@@ -132,9 +132,7 @@ const expectTargetHelp = "A target is written either as comma-separated fields �
 	"`\"Bookmark\"`. " +
 	"A BARE WORD with no `=` and no quotes (e.g. `menu`) is matched against the TEXT " +
 	"fields only — name, description, value, placeholder — and NEVER against the role. " +
-	"To match a role you must say so: write `role=menu`, not `menu`. (This used to be " +
-	"loose enough that `menu` matched a `push button \"Back\"` whose description happened " +
-	"to contain the word, which is how a bare word produced a confident wrong verdict.)"
+	"To match a role you must say so: write `role=menu`, not `menu`."
 
 var knownExpectRoles = map[string]bool{
 	"alert": true, "check box": true, "combo box": true, "dialog": true,

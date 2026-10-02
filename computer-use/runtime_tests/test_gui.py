@@ -227,15 +227,7 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertAlmostEqual(clock.now, runtime.SETTLE_MIN_SECONDS, places=6)
 
     def test_waits_until_the_newly_opened_window_takes_focus(self):
-        """Thunderbird opens `Tools > Message Filters` with this timing.
-
-            t=0.070  the new window enters the tree; ACTIVE stays on the main one
-            t=0.123  ACTIVE moves to the new window
-
-        A fixed 0.12 s sleep ends just before the focus transfer, so the
-        snapshot may show the main window, and an index-based click on `New…`
-        would hit the main window's New Message button instead.
-        """
+        """A synthetic window becomes active after it first appears."""
         clock = _FakeClock()
         main_active = _WindowNode("frame", "Inbox", active=True)
         main_idle = _WindowNode("frame", "Inbox")
@@ -257,8 +249,8 @@ class SettleWaitTests(AtspiPatchedTestCase):
         _, chosen = runtime.main_window(app)
         self.assertEqual(runtime.node_name(chosen), "Message Filters")
 
-    def test_the_old_fixed_sleep_would_have_picked_the_wrong_window(self):
-        """With a fixed 0.12 s sleep the old window is observed; the race is real."""
+    def test_appearance_without_focus_transfer_keeps_the_active_window(self):
+        """An inactive synthetic window does not replace the active target."""
         clock = _FakeClock()
         main_active = _WindowNode("frame", "Inbox", active=True)
         filters_idle = _WindowNode("frame", "Message Filters")
@@ -272,10 +264,7 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertEqual(runtime.node_name(chosen), "Inbox")
 
     def test_modal_window_counts_as_settled(self):
-        """A modal window may report MODAL without ACTIVE; either counts as settled.
-
-        The 0.045 s appearance time is taken from LibreOffice.
-        """
+        """A modal window may report MODAL without ACTIVE; either counts as settled."""
         clock = _FakeClock()
         main = _WindowNode("frame", "Writer", active=True)
         alert = _WindowNode("alert", "Question", modal=True)
@@ -306,14 +295,10 @@ class SettleWaitTests(AtspiPatchedTestCase):
         self.assertGreaterEqual(clock.now, 0.30)
 
     def test_window_opening_after_the_minimum_wait_is_out_of_scope(self):
-        """Pin the boundary so it is not mistaken for a covered case.
+        """An unchanged window set ends settling at the minimum wait.
 
-        Observed windows reached the tree within 0.070 s, which leaves
-        SETTLE_MIN_SECONDS=0.12 a 1.7x margin. A slower app is missed, but that
-        failure is visible: the snapshot shows the pre-action state without the
-        new window, unlike the self-consistent wrong-window snapshot above.
-
-        Lowering SETTLE_MIN_SECONDS below 0.070 s fails this test.
+        A window that appears later is not covered by this wait. The caller
+        must observe again to detect that asynchronous transition.
         """
         clock = _FakeClock()
         main = _WindowNode("frame", "Inbox", active=True)
@@ -326,7 +311,9 @@ class SettleWaitTests(AtspiPatchedTestCase):
 
         self.assertIsNone(self._wait(app, before, clock))
         self.assertAlmostEqual(clock.now, runtime.SETTLE_MIN_SECONDS, places=6)
-        self.assertGreaterEqual(runtime.SETTLE_MIN_SECONDS, 0.070)
+        self.assertEqual(runtime.window_identity_set(app), before)
+        clock.sleep(0.05)
+        self.assertNotEqual(runtime.window_identity_set(app), before)
 
     def test_reports_when_the_new_window_never_takes_focus(self):
         """A timeout is reported, since the snapshot may show an unexpected window."""

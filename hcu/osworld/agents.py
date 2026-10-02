@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import shlex
+from typing import Literal
 import urllib.parse
 
 from hcu.osworld.guest import (
@@ -142,8 +143,23 @@ def codex_config(
     mcp_command: str,
     channels: str = "",
     developer_instructions: str | None = None,
+    execution_context: Literal["standalone", "isolated-guest"] = "standalone",
 ) -> str:
-    """Codex ``config.toml`` with ambient features off and the MCP required."""
+    """Codex config with sandboxed shell execution and on-request approvals.
+
+    Only callers that provide an externally isolated, disposable guest should
+    select ``isolated-guest`` to retain unattended, unrestricted evaluation.
+    This setting does not isolate the MCP server or its desktop session.
+    """
+    if execution_context == "standalone":
+        approval_policy, sandbox_mode = "on-request", "workspace-write"
+    elif execution_context == "isolated-guest":
+        approval_policy, sandbox_mode = "never", "danger-full-access"
+    else:
+        raise ValueError(
+            "execution_context must be standalone or isolated-guest, "
+            f"got {execution_context!r}"
+        )
     public_tools(channels)
     mcp_env = (
         f'\n[mcp_servers.computer_use.env]\nCOMPUTER_USE_CHANNELS = {json.dumps(channels)}\n'
@@ -171,8 +187,8 @@ def codex_config(
 model = {json.dumps(model)}
 model_provider = "{CODEX_PROVIDER_ID}"
 model_reasoning_effort = {json.dumps(effort)}
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
+approval_policy = {json.dumps(approval_policy)}
+sandbox_mode = {json.dumps(sandbox_mode)}
 web_search = "disabled"
 model_reasoning_summary = "detailed"
 show_raw_agent_reasoning = true
@@ -272,19 +288,19 @@ def claude_mcp_config(
     return json.dumps({"mcpServers": {"computer_use": server}}, indent=2) + "\n"
 
 
-def claude_system_prompt(base_instructions: str, skill: str) -> str:
-    """Claude Code gets the skill in its replacement system prompt.
+def claude_system_prompt(base_instructions: str, instructions: str) -> str:
+    """Claude Code gets the profile in its replacement system prompt.
 
-    A ``CLAUDE.md`` file would also load ambient configuration, so the skill
+    A ``CLAUDE.md`` file would also load ambient configuration, so the profile
     is appended to the base instructions instead.
     """
-    return base_instructions + "\n\n# Benchmark computer-use skill\n\n" + skill
+    return base_instructions + ("\n\n" + instructions if instructions else "")
 
 
-def grok_system_prompt(base_instructions: str, skill: str) -> str:
+def grok_system_prompt(base_instructions: str, instructions: str) -> str:
     """Grok Build ignores its rules files under a system-prompt override, so
-    the skill follows the base instructions in the override itself."""
-    return base_instructions + "\n\n" + skill
+    the profile follows the base instructions in the override itself."""
+    return base_instructions + ("\n\n" + instructions if instructions else "")
 
 
 # Gemini CLI tools that talk to the user or the web, or add planning and
@@ -323,7 +339,7 @@ def gemini_settings(
 
     ``dynamicModelConfiguration`` is required: without it CLI 0.60.0 rewrites
     the selected model. Only the global ``GEMINI.md`` next to this file is
-    loaded as context, and it carries the skill; directory discovery is off.
+    loaded as context, and it carries the profile; directory discovery is off.
     ``effort`` is a Gemini thinking level, or ``native`` for the model default.
     """
     public_tools(channels)

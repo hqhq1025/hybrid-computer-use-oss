@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func nativeIdentityPortFixture() (*AXSnapshotV1, *AXNode) {
+func nativeIdentityFixture() (*AXSnapshotV1, *AXNode) {
 	window := "w2:" + strings.Repeat("a", 32)
 	node := &AXNode{
 		ID: "save", Role: "button", ProviderRole: "button", Name: "Save",
@@ -28,7 +28,7 @@ func nativeIdentityPortFixture() (*AXSnapshotV1, *AXNode) {
 	}, node
 }
 
-func nativeIdentityPortRecord(node *AXNode) *elementRecord {
+func nativeIdentityRecord(node *AXNode) *elementRecord {
 	return &elementRecord{
 		Index: 1, RuntimeID: append([]int(nil), node.RuntimeID...),
 		ControlType: node.ProviderRole, Name: node.Name, AutomationID: node.AutomationID,
@@ -40,7 +40,7 @@ func nativeIdentityPortRecord(node *AXNode) *elementRecord {
 	}
 }
 
-func nativeIdentityPortAcquire(r *RefRegistry, snapshot *AXSnapshotV1, node *AXNode, mode string) string {
+func nativeIdentityAcquire(r *RefRegistry, snapshot *AXSnapshotV1, node *AXNode, mode string) string {
 	switch mode {
 	case "typed":
 		return r.AcquireTyped(node.LocatorKind, snapshot.AppIdentity, snapshot.WindowHandle,
@@ -57,14 +57,14 @@ func nativeIdentityPortAcquire(r *RefRegistry, snapshot *AXSnapshotV1, node *AXN
 	}
 }
 
-func TestNativeIdentityPortRetainedProjection(t *testing.T) {
+func TestNativeIdentityRetainedProjection(t *testing.T) {
 	for _, mode := range []string{"typed", "node", "snapshot"} {
 		for _, id := range []string{"", "save"} {
 			t.Run(mode+"/"+id, func(t *testing.T) {
 				r := NewRefRegistry(32)
-				snapshot, node := nativeIdentityPortFixture()
+				snapshot, node := nativeIdentityFixture()
 				node.AutomationID = id
-				ref := nativeIdentityPortAcquire(r, snapshot, node, mode)
+				ref := nativeIdentityAcquire(r, snapshot, node, mode)
 				if ref == "" {
 					t.Fatal("no initial ref")
 				}
@@ -73,7 +73,7 @@ func TestNativeIdentityPortRetainedProjection(t *testing.T) {
 					node.RuntimeID, node.RuntimeIDAliases = []int{0, step}, [][]int{{0, step}, {1, step}}
 					node.SemanticTarget = fmt.Sprintf("diagnostic projection %d", step)
 					snapshot.Revision = fmt.Sprintf("c%d", step)
-					if next := nativeIdentityPortAcquire(r, snapshot, node, mode); next != ref {
+					if next := nativeIdentityAcquire(r, snapshot, node, mode); next != ref {
 						t.Fatalf("same retained object changed ref: %s -> %s", ref, next)
 					}
 					r.AssignSnapshotRefs(snapshot)
@@ -82,7 +82,7 @@ func TestNativeIdentityPortRetainedProjection(t *testing.T) {
 						t.Fatalf("find lost retained ref: %v", err)
 					}
 					if !reflect.DeepEqual(entry.RuntimeIDAliases, node.RuntimeIDAliases) || runtimePathMatchesEntry(entry, []int{0, step - 1}) {
-						t.Fatal("historical runtime path survived projection refresh")
+						t.Fatal("stale runtime path survived projection refresh")
 					}
 					target, err := semanticTargetFromRefEntry(entry)
 					if err != nil {
@@ -99,7 +99,7 @@ func TestNativeIdentityPortRetainedProjection(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortProjectionRejectsContradictions(t *testing.T) {
+func TestNativeIdentityProjectionRejectsContradictions(t *testing.T) {
 	changes := map[string]func(*AXSnapshotV1, *AXNode){
 		"scope":         func(_ *AXSnapshotV1, n *AXNode) { n.ProviderIdentityScope = "process" },
 		"token":         func(_ *AXSnapshotV1, n *AXNode) { n.ProviderObjectPath = "replacement" },
@@ -122,12 +122,12 @@ func TestNativeIdentityPortProjectionRejectsContradictions(t *testing.T) {
 		for name, change := range changes {
 			t.Run(mode+"/"+name, func(t *testing.T) {
 				r := NewRefRegistry(32)
-				snapshot, node := nativeIdentityPortFixture()
-				old := nativeIdentityPortAcquire(r, snapshot, node, mode)
+				snapshot, node := nativeIdentityFixture()
+				old := nativeIdentityAcquire(r, snapshot, node, mode)
 				before := *r.entries[old]
 				node.RuntimeID, node.SemanticTarget = []int{0, 12}, "changed diagnostic"
 				change(snapshot, node)
-				if next := nativeIdentityPortAcquire(r, snapshot, node, mode); next == old {
+				if next := nativeIdentityAcquire(r, snapshot, node, mode); next == old {
 					t.Fatal("contradictory identity reused old ref")
 				}
 				entry := r.entries[old]
@@ -140,12 +140,12 @@ func TestNativeIdentityPortProjectionRejectsContradictions(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortIncompleteOwnerCannotMigrate(t *testing.T) {
+func TestNativeIdentityIncompleteOwnerCannotMigrate(t *testing.T) {
 	for _, mode := range []string{"typed", "node", "snapshot"} {
 		for _, field := range []string{"app", "window", "owner", "owner_bus", "owner_epoch"} {
 			t.Run(mode+"/"+field, func(t *testing.T) {
 				r := NewRefRegistry(32)
-				snapshot, node := nativeIdentityPortFixture()
+				snapshot, node := nativeIdentityFixture()
 				switch field {
 				case "app":
 					snapshot.AppRef = ""
@@ -158,9 +158,9 @@ func TestNativeIdentityPortIncompleteOwnerCannotMigrate(t *testing.T) {
 				case "owner_epoch":
 					node.ProviderWindowProcessGeneration = ""
 				}
-				old := nativeIdentityPortAcquire(r, snapshot, node, mode)
+				old := nativeIdentityAcquire(r, snapshot, node, mode)
 				node.RuntimeID, node.SemanticTarget = []int{0, 3}, "different projection"
-				if next := nativeIdentityPortAcquire(r, snapshot, node, mode); old != "" && next == old {
+				if next := nativeIdentityAcquire(r, snapshot, node, mode); old != "" && next == old {
 					t.Fatal("incomplete ownership authorized projection migration")
 				}
 			})
@@ -168,16 +168,16 @@ func TestNativeIdentityPortIncompleteOwnerCannotMigrate(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortRefreshBoundaries(t *testing.T) {
+func TestNativeIdentityRefreshBoundaries(t *testing.T) {
 	for _, scope := range []string{"process", "process_instance"} {
 		for _, change := range []string{"same", "token", "runtime", "owner", "missing_owner", "scope"} {
 			t.Run(scope+"/"+change, func(t *testing.T) {
 				r := NewRefRegistry(32)
-				snapshot, node := nativeIdentityPortFixture()
+				snapshot, node := nativeIdentityFixture()
 				node.LocatorKind, node.ProviderIdentityScope = AXLocatorSemantic, scope
 				ref := r.AcquireNode(snapshot, node, AXLocatorSemantic)
 				before := *r.entries[ref]
-				record := nativeIdentityPortRecord(node)
+				record := nativeIdentityRecord(node)
 				switch change {
 				case "token":
 					record.ProviderObjectPath = "replacement"
@@ -206,13 +206,13 @@ func TestNativeIdentityPortRefreshBoundaries(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortRawLabelsReachWire(t *testing.T) {
+func TestNativeIdentityRawLabelsReachWire(t *testing.T) {
 	for _, whitespace := range []string{"\u202f", "\u00a0", "\t", "\n"} {
 		for _, kind := range []AXLocatorKind{AXLocatorSemantic, AXLocatorProviderBound} {
 			t.Run(fmt.Sprintf("%q/%s", whitespace, kind), func(t *testing.T) {
 				r := NewRefRegistry(32)
-				snapshot, node := nativeIdentityPortFixture()
-				record := nativeIdentityPortRecord(node)
+				snapshot, node := nativeIdentityFixture()
+				record := nativeIdentityRecord(node)
 				record.Name = "Meeting" + whitespace + "PM"
 				node.SourceRecord, node.Name = record, "Meeting PM"
 				node.SemanticTarget = encodeScopedSemanticRef(`button "Meeting PM"`, snapshot.WindowHandle)
@@ -241,12 +241,12 @@ func TestNativeIdentityPortRawLabelsReachWire(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortDescriptionDoesNotBecomeName(t *testing.T) {
+func TestNativeIdentityDescriptionDoesNotBecomeName(t *testing.T) {
 	for _, kind := range []AXLocatorKind{AXLocatorSemantic, AXLocatorProviderBound} {
 		r := NewRefRegistry(16)
-		snapshot, node := nativeIdentityPortFixture()
+		snapshot, node := nativeIdentityFixture()
 		node.Name, node.SemanticTarget = "", `button [desc="Details"]`
-		node.SourceRecord = nativeIdentityPortRecord(node)
+		node.SourceRecord = nativeIdentityRecord(node)
 		ref := r.AcquireNode(snapshot, node, kind)
 		target, err := semanticTargetFromRefEntry(r.entries[ref])
 		if err != nil || target.HasName || target.Name != "" {
@@ -255,9 +255,9 @@ func TestNativeIdentityPortDescriptionDoesNotBecomeName(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortOldLifecycleCannotEraseReplacement(t *testing.T) {
+func TestNativeIdentityOldLifecycleCannotEraseReplacement(t *testing.T) {
 	r := NewRefRegistry(32)
-	snapshot, node := nativeIdentityPortFixture()
+	snapshot, node := nativeIdentityFixture()
 	node.LocatorKind = AXLocatorSemantic
 	old := r.AcquireNode(snapshot, node, node.LocatorKind)
 	node.ProviderObjectPath = "replacement"
@@ -268,9 +268,9 @@ func TestNativeIdentityPortOldLifecycleCannotEraseReplacement(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortRejectsSelectorWindowMismatch(t *testing.T) {
+func TestNativeIdentityRejectsSelectorWindowMismatch(t *testing.T) {
 	r := NewRefRegistry(16)
-	snapshot, node := nativeIdentityPortFixture()
+	snapshot, node := nativeIdentityFixture()
 	node.SemanticTarget = encodeScopedSemanticRef(`button "Save"`, "another-window")
 	ref := r.AcquireNode(snapshot, node, AXLocatorSemantic)
 	if _, err := semanticTargetFromRefEntry(r.entries[ref]); err == nil {
@@ -278,9 +278,9 @@ func TestNativeIdentityPortRejectsSelectorWindowMismatch(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortEvictionPreservesReplacementIndex(t *testing.T) {
+func TestNativeIdentityEvictionPreservesReplacementIndex(t *testing.T) {
 	r := NewRefRegistry(1)
-	snapshot, node := nativeIdentityPortFixture()
+	snapshot, node := nativeIdentityFixture()
 	old := r.AcquireNode(snapshot, node, AXLocatorSemantic)
 	node.ProviderObjectPath = "replacement"
 	fresh := r.AcquireNode(snapshot, node, AXLocatorSemantic)
@@ -292,17 +292,17 @@ func TestNativeIdentityPortEvictionPreservesReplacementIndex(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortFindRefreshAndWindowGuard(t *testing.T) {
+func TestNativeIdentityFindRefreshAndWindowGuard(t *testing.T) {
 	for _, change := range []string{"raw_label", "token", "other_window"} {
 		t.Run(change, func(t *testing.T) {
 			s := newService()
-			snapshot, node := nativeIdentityPortFixture()
+			snapshot, node := nativeIdentityFixture()
 			node.LocatorKind = AXLocatorSemantic
 			node.Name, node.AutomationID = "Meeting PM", ""
 			node.SemanticTarget = encodeScopedSemanticRef(`button "Meeting PM"`, snapshot.WindowHandle)
 			node.Ref = s.refRegistry.AcquireNode(snapshot, node, AXLocatorSemantic)
 			ref := node.Ref
-			record := nativeIdentityPortRecord(node)
+			record := nativeIdentityRecord(node)
 			record.Name = "Meeting\u202fPM"
 			source := &appSnapshot{WindowHandle: snapshot.WindowHandle, Elements: []elementRecord{*record}}
 			switch change {
@@ -327,11 +327,11 @@ func TestNativeIdentityPortFindRefreshAndWindowGuard(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortWrapperRebindNeedsStrongOwner(t *testing.T) {
+func TestNativeIdentityWrapperRebindNeedsStrongOwner(t *testing.T) {
 	for _, change := range []string{"complete", "no_id", "no_runtime", "no_owner", "retained"} {
 		t.Run(change, func(t *testing.T) {
 			s := newService()
-			snapshot, node := nativeIdentityPortFixture()
+			snapshot, node := nativeIdentityFixture()
 			node.ProviderIdentityScope = "process"
 			switch change {
 			case "no_id":
@@ -360,10 +360,10 @@ func TestNativeIdentityPortWrapperRebindNeedsStrongOwner(t *testing.T) {
 	}
 }
 
-func TestNativeIdentityPortCanonicalRawLabelAndAutomationWire(t *testing.T) {
+func TestNativeIdentityCanonicalRawLabelAndAutomationWire(t *testing.T) {
 	for _, kind := range []AXLocatorKind{AXLocatorSemantic, AXLocatorProviderBound} {
 		t.Run(string(kind), func(t *testing.T) {
-			source := nativeAliasPortFixture("process_instance")
+			source := nativeAliasFixture("process_instance")
 			source.Elements = source.Elements[:2]
 			source.Elements[1].Name = "Meeting\u202fPM"
 			tree, err := buildAXSnapshotV1(source)

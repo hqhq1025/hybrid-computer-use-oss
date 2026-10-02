@@ -8,8 +8,10 @@ Unknown keys are rejected instead of silently ignored.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import os
 from pathlib import Path
+import re
 import sys
 
 # Config key -> run_task flag for options that take a value. String values
@@ -22,7 +24,7 @@ RUNNER_VALUE_OPTIONS = (
     ("artifact_dir", "--artifact-dir"),
     ("agent_binary", "--agent-binary"),
     ("mcp_binary", "--mcp-binary"),
-    ("skill_file", "--skill-file"),
+    ("instructions_file", "--instructions-file"),
     ("channels", "--channels"),
     ("base_instructions_file", "--base-instructions-file"),
     ("client_password", "--client-password"),
@@ -37,7 +39,7 @@ RUNNER_KEYS = frozenset(
     {key for key, _flag in RUNNER_VALUE_OPTIONS}
     | {key for key, _flag in RUNNER_SWITCHES}
     | {
-        "no_skill",
+        "no_instructions",
         "benchmark_version",
         "agent",
         "model",
@@ -98,13 +100,38 @@ def normalized_tasks(config: dict) -> list[dict]:
     return tasks
 
 
-def append_option(command: list[str], config: dict, key: str, flag: str) -> None:
+def resolve_config(config: dict, environment: Mapping[str, str]) -> dict:
+    """Expand config variables once, against the environment the child receives."""
+    variable = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+
+    def expand(value):
+        if isinstance(value, str):
+            def replace(match):
+                name = match.group(1) or match.group(2)
+                if name not in environment:
+                    raise ValueError(f"Missing configuration environment variable: {name}")
+                return environment[name]
+            return variable.sub(replace, value)
+        if isinstance(value, list):
+            return [expand(item) for item in value]
+        if isinstance(value, dict):
+            return {key: expand(item) for key, item in value.items()}
+        return value
+
+    return expand(config)
+
+
+def append_option(
+    command: list[str], config: dict, key: str, flag: str, *, resolved: bool = False
+) -> None:
     value = config.get(key)
     if value not in (None, ""):
-        command.extend((flag, os.path.expandvars(str(value))))
+        command.extend((flag, str(value) if resolved else os.path.expandvars(str(value))))
 
 
-def runner_command(config: dict, task: dict, result_dir: Path) -> list[str]:
+def runner_command(
+    config: dict, task: dict, result_dir: Path, *, resolved: bool = False
+) -> list[str]:
     """Build the run_task command line for one task of a configuration."""
     command = [
         sys.executable,
@@ -132,11 +159,15 @@ def runner_command(config: dict, task: dict, result_dir: Path) -> list[str]:
         str(result_dir),
     ]
     for key, flag in RUNNER_VALUE_OPTIONS:
-        if key == "skill_file" and config.get("no_skill"):
-            # The runner reads an empty --skill-file as "no skill".
-            command.extend((flag, ""))
+        if key == "instructions_file":
+            # Preserve explicit empty profiles as well as the boolean switch.
+            if config.get("no_instructions"):
+                command.extend((flag, ""))
+            elif config.get(key) is not None:
+                value = str(config[key])
+                command.extend((flag, value if resolved else os.path.expandvars(value)))
             continue
-        append_option(command, config, key, flag)
+        append_option(command, config, key, flag, resolved=resolved)
     task_domain = task.get("task_domain", config.get("task_domain"))
     if task_domain:
         command.extend(("--task-domain", str(task_domain)))

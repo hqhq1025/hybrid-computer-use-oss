@@ -59,7 +59,7 @@ full-desktop image the tool returned. See [Architecture](docs/ARCHITECTURE.md).
 | `hcu/osworld/` | OSWorld runner: one QEMU guest, agent and MCP process per task, then the official evaluator |
 | `hcu/gateway/` | Task-scoped model gateways that route and meter the agents' model requests |
 | `osworld-overlay/` | Patches installed into a structurally compatible OSWorld-V2 checkout |
-| `skills/` | Agent instructions: hybrid, AX-only and GUI-only skills and shared base instructions |
+| `instructions/` | Plain-text base policy and hybrid, AX-only and GUI-only interaction guides |
 | `docker/`, `scripts/` | Release build, installers and smoke tests |
 | `configs/` | Agent release lock file, environment template and example batch configs |
 
@@ -77,7 +77,7 @@ make smoke    # starts the stdio server and requires exactly AX and GUI
 These two targets build the Linux binary. Native desktop packages use
 `make build-macos` on macOS or the PowerShell build script on Windows.
 See [Platform support](docs/PLATFORMS.md) for prerequisites, permissions,
-packaging, and validation limits. The native integration is experimental;
+and packaging. The native integration is experimental;
 OSWorld runners remain Linux-based.
 
 On Linux, the server must run inside the signed-in desktop session, with Python 3,
@@ -112,28 +112,30 @@ cp configs/env.example .env   # then fill in the paths
 
 OSWorld-V2 task classes and assets are gated on Hugging Face and have to be
 downloaded into the checkout separately; [Running OSWorld](docs/OSWORLD.md)
-lists the commands. Both OSWorld and OSWorld-V2 tasks then run through the
-same runner:
+lists the commands. After loading the edited environment file, preview the
+current V2 example without starting a VM or spending model quota:
 
 ```bash
-external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_task \
-  --benchmark-version v2 --task-id 001 --agent codex ...
+external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_batch \
+  --config configs/osworld-v2-codex-queue.example.json --dry-run
 ```
 
 [Running OSWorld](docs/OSWORLD.md) walks through guest images, model
 gateways, setup canaries, single tasks, batches and result files.
+[Experiment Configuration](docs/REPRODUCIBILITY.md) covers task selection,
+instruction snapshots, queue execution and result summaries.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md): process model, AX and GUI state, evidence.
 - [Computer Use MCP](docs/MCP.md): build, run, client setup, contract, troubleshooting.
-- [Platform support](docs/PLATFORMS.md): native packages, permissions and tests.
+- [Platform support](docs/PLATFORMS.md): native packages and permissions.
 - [Running OSWorld](docs/OSWORLD.md): the evaluation runbook.
+- [Experiment Configuration](docs/REPRODUCIBILITY.md): prepare and execute a task queue.
 - [Agent profiles](docs/AGENT_PROFILES.md): how the four task agents are configured.
 - [AX, GUI and CDP](docs/AX_AND_CDP.md): desktop session and browser channels.
-- [Skills](docs/SKILLS.md): the instructions the evaluated agent receives.
+- [Instructions](docs/INSTRUCTIONS.md): base policy, operating profiles and injection routes.
 - [Isolation](docs/ISOLATION.md): what an evaluated agent may and may not see.
-- [Contributing](CONTRIBUTING.md) and [Changelog](CHANGELOG.md).
 
 ## Versioning
 

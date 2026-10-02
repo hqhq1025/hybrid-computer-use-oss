@@ -4,7 +4,7 @@ import Foundation
 import os
 
 private let windowLivenessLogger = Logger(
-    subsystem: "com.microsoft.computer-use.provider",
+    subsystem: "org.computer-use.provider",
     category: "window-liveness"
 )
 

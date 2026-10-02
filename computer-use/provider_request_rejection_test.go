@@ -80,7 +80,7 @@ func TestProviderRequestRejectionOrderedBatchPreservesPrefix(t *testing.T) {
 	for _, mixed := range []bool{false, true} {
 		for _, rejection := range []bool{false, true} {
 			for _, observe := range []string{observeNone, observeDiff} {
-				s, _, window, ref := candidateABatchService(t)
+				s, _, window, ref := orderedInputTestService(t)
 				backend := &requestRejectionBackend{
 					recordingPlatformBackend: &recordingPlatformBackend{
 						accessibilityResponse: &ProviderAccessibilityResult{
@@ -147,7 +147,7 @@ func TestProviderRequestRejectionOrderedBatchPreservesPrefix(t *testing.T) {
 }
 
 func TestProviderRequestRejectionServicePathsDoNotInvalidate(t *testing.T) {
-	s, app, window, _ := candidateABatchService(t)
+	s, app, window, _ := orderedInputTestService(t)
 	s.rememberFailedObservation(app, nil)
 	result := s.runtimeFailureResult(axServiceRequest{App: app}, nil, testRequestRejection())
 	if !result.IsError || result.StructuredContent["input_events_emitted"] != false ||
@@ -164,7 +164,7 @@ func TestProviderRequestRejectionServicePathsDoNotInvalidate(t *testing.T) {
 
 func TestProviderRequestRejectionGUIKeepsPendingState(t *testing.T) {
 	for _, coordinate := range []bool{false, true} {
-		s, app, window, _ := candidateABatchService(t)
+		s, app, window, _ := orderedInputTestService(t)
 		backend := &recordingPlatformBackend{err: testRequestRejection()}
 		s.backend = backend
 		s.rememberFailedObservation(app, nil)
@@ -196,7 +196,7 @@ func TestProviderRequestRejectionGUIKeepsPendingState(t *testing.T) {
 
 func TestProviderRequestRejectionPublicReadsAreNotLocalPreflight(t *testing.T) {
 	for _, mode := range []string{"observe", "find"} {
-		s, app, _, _ := candidateABatchService(t)
+		s, app, _, _ := orderedInputTestService(t)
 		backend := &recordingPlatformBackend{err: testRequestRejection()}
 		s.backend = backend
 		args := map[string]any{"mode": mode, "app": app}

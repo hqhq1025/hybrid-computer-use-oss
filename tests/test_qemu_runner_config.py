@@ -67,8 +67,7 @@ def test_batch_expands_environment_backed_paths(tmp_path, monkeypatch):
     assert command[command.index("--max-model-calls") + 1] == "200"
 
 
-# The cross-model comparison runs four harnesses on V1; the V2 main
-# experiment runs Codex and Claude Code.
+# Required example-queue coverage by benchmark version and agent.
 EXAMPLE_AGENTS = {
     "v1": ("codex", "claude-code", "gemini-cli", "grok-build"),
     "v2": ("codex", "claude-code"),
@@ -123,9 +122,13 @@ def test_example_queues_point_each_agent_at_its_own_gateway():
             )
 
 
-def test_config_rejects_unknown_keys():
-    with pytest.raises(ValueError, match="hybrid_skill_file"):
-        validate_config({"tasks": ["001"], "hybrid_skill_file": "/s.md"})
+@pytest.mark.parametrize("key", ["hybrid_skill_file", "skill_file", "no_skill"])
+def test_config_rejects_old_instruction_keys(key):
+    with pytest.raises(ValueError, match=key):
+        validate_config({"tasks": ["001"], key: "/s.md"})
+
+
+def test_config_rejects_unknown_task_keys():
     with pytest.raises(ValueError, match="flavor"):
         validate_config({"tasks": [{"id": "001", "flavor": "x"}]})
 
@@ -145,7 +148,7 @@ def test_task_level_resources_override_config_defaults(tmp_path):
 @pytest.mark.parametrize(
     ("module", "expected"),
     [
-        ("hcu.osworld.run_task", ["--benchmark-version {v1,v2}"]),
+        ("hcu.osworld.run_task", ["--benchmark-version {v1,v2}", "--instructions-file"]),
         (
             "hcu.osworld.setup_canary",
             ["--benchmark-version {v1,v2}", "--task-domain TASK_DOMAIN"],
@@ -173,6 +176,7 @@ from pathlib import Path
 from hcu.osworld import run_task
 
 root, out, agent = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+instructions_file = Path(sys.argv[4]) if sys.argv[4] else None
 profile = run_task.AGENT_PROFILES[agent]
 args = argparse.Namespace(
     agent=agent, model=profile["default_model"],
@@ -180,7 +184,7 @@ args = argparse.Namespace(
     gateway_base="http://gateway:8600",
     claude_gateway_base="http://gateway:8537",
     gemini_gateway_base="http://gateway:8571",
-    benchmark_version="v1", channels="",
+    benchmark_version="v1", channels="", task_id="001", task_domain="",
 )
 run = run_task.TaskRun(
     args=args, run_tag="RUN", result_dir=out,
@@ -188,11 +192,11 @@ run = run_task.TaskRun(
     agent_binary=out / profile["artifact"],
     node_binary=out / "node" if agent == "gemini-cli" else None,
     mcp_binary=out / "computer-use",
-    skill_file=root / "skills/hybrid/SKILL.md",
-    base_instructions_file=root / "skills/base/CODEX_BASE_INSTRUCTIONS.md",
+    instructions_file=instructions_file,
+    base_instructions_file=root / "instructions/base.md",
     task={"instruction": "Do the task."}, phases=[],
-    instruction="Do the task.", current_date="2026-01-01",
-    run_timezone="UTC", run_started_at_utc="2026-01-01T00:00:00+00:00",
+    instruction="Do the task.", current_date="2000-01-01",
+    run_timezone="UTC", run_started_at_utc="2000-01-01T00:00:00+00:00",
     explicit_task_date=None, guest_image="",
 )
 out.mkdir(parents=True, exist_ok=True)
@@ -203,15 +207,18 @@ print(json.dumps({
     "uploads": {row["path"]: Path(row["local_path"]).name for row in uploads},
     "executables": executables,
     "system_prompt": run.base_instructions_copy.read_text(),
+    "instructions": run.instructions_copy.read_text() if run.instructions_copy.exists() else None,
+    "metadata": run_task.initial_meta(run, {}, {}),
     "launcher": run.launcher_path.read_text(),
 }))
 """
 
 
-def stage(tmp_path, agent):
+def stage(tmp_path, agent, profile="hybrid"):
     python = require_osworld_checkout()
     result = subprocess.run(
-        [str(python), "-c", STAGING_PROBE, str(ROOT), str(tmp_path), agent],
+        [str(python), "-c", STAGING_PROBE, str(ROOT), str(tmp_path), agent,
+         str(ROOT / "instructions" / f"{profile}.md") if profile else ""],
         cwd=ROOT,
         env={**os.environ, "OSWORLD_V2_ROOT": str(OSWORLD_ROOT)},
         capture_output=True,
@@ -245,27 +252,33 @@ def test_each_agent_is_bound_to_its_gateway_with_the_task_prefix(tmp_path):
     )
 
 
-def test_each_agent_receives_the_skill_through_its_own_channel(tmp_path):
-    skill_head = (ROOT / "skills/hybrid/SKILL.md").read_text().splitlines()[0]
-    base_head = (
-        ROOT / "skills/base/CODEX_BASE_INSTRUCTIONS.md"
-    ).read_text().splitlines()[0]
-    staged = {agent: stage(tmp_path / agent, agent) for agent in (
-        "codex", "claude-code", "gemini-cli", "grok-build"
-    )}
-    # Codex and Gemini CLI read the skill from a context file.
-    assert staged["codex"]["uploads"]["/home/user/AGENTS.md"] == "AGENTS.md"
-    assert staged["gemini-cli"]["uploads"][
-        "/opt/agent-runtime/gemini/.gemini/GEMINI.md"
-    ] == "AGENTS.md"
-    for agent in ("codex", "gemini-cli"):
-        assert skill_head not in staged[agent]["system_prompt"]
-    # Claude Code and Grok Build get it after the base instructions.
-    for agent in ("claude-code", "grok-build"):
-        prompt = staged[agent]["system_prompt"]
-        assert prompt.startswith(base_head)
-        assert skill_head in prompt
-        assert "/home/user/AGENTS.md" not in staged[agent]["uploads"]
+@pytest.mark.parametrize("agent", ["codex", "claude-code", "gemini-cli", "grok-build"])
+@pytest.mark.parametrize("profile", ["hybrid", "ax-only", "gui-only", None])
+def test_each_agent_receives_instructions_through_its_own_channel(tmp_path, agent, profile):
+    from hcu.osworld.guest import GUEST_GEMINI_CONTEXT, GUEST_INSTRUCTIONS
+
+    instructions_file = ROOT / "instructions" / f"{profile}.md" if profile else None
+    instructions = instructions_file.read_text() if instructions_file else None
+    base = (ROOT / "instructions/base.md").read_text()
+    staged = stage(tmp_path, agent, profile)
+    assert staged["instructions"] == instructions
+    assert staged["metadata"]["instructions_file"] == (
+        str(instructions_file) if instructions_file else None
+    )
+    assert staged["metadata"]["base_instructions_file"] == str(ROOT / "instructions/base.md")
+    assert "skill_file" not in staged["metadata"]
+    if agent in ("codex", "gemini-cli"):
+        assert staged["system_prompt"] == base
+        context_path = GUEST_INSTRUCTIONS if agent == "codex" else GUEST_GEMINI_CONTEXT
+        if instructions_file:
+            assert staged["uploads"][context_path] == "operating-instructions.md"
+            assert (tmp_path / staged["uploads"][context_path]).read_bytes() == instructions_file.read_bytes()
+        else:
+            assert context_path not in staged["uploads"]
+    else:
+        assert staged["system_prompt"] == base + ("\n\n" + instructions if instructions else "")
+        assert GUEST_INSTRUCTIONS not in staged["uploads"]
+        assert GUEST_GEMINI_CONTEXT not in staged["uploads"]
 
 
 def test_gemini_ships_its_own_node_and_unpacks_the_cli_in_the_guest(tmp_path):
@@ -313,12 +326,44 @@ def test_channel_ablation_exposes_one_tool_to_each_agent():
     assert "env" not in json.loads(claude_mcp_config())["mcpServers"]["computer_use"]
 
 
-def test_batch_forwards_channels_and_an_empty_skill(tmp_path):
+@pytest.mark.parametrize("agent", ["codex", "claude-code", "gemini-cli", "grok-build"])
+@pytest.mark.parametrize("config, expected", [
+    ({"no_instructions": True}, ""),
+    ({"instructions_file": ""}, ""),
+    ({"instructions_file": "${TEST_INSTRUCTIONS}"}, "/profile/instructions.md"),
+    ({"no_instructions": False, "instructions_file": "custom.md"}, "custom.md"),
+    ({"no_instructions": True, "instructions_file": "ignored.md"}, ""),
+    ({}, None),
+])
+def test_batch_forwards_channels_and_instructions(tmp_path, monkeypatch, agent, config, expected):
+    monkeypatch.setenv("TEST_INSTRUCTIONS", "/profile/instructions.md")
+    config = {"channels": "gui,keyboard", "agent": agent, "tasks": ["001"], **config}
+    validate_config(config)
     command = runner_command(
-        {"channels": "gui,keyboard", "no_skill": True}, {"id": "001"}, tmp_path
+        config, {"id": "001"}, tmp_path
     )
     assert command[command.index("--channels") + 1] == "gui,keyboard"
-    assert command[command.index("--skill-file") + 1] == ""
+    assert command[command.index("--agent") + 1] == agent
+    assert "--skill-file" not in command
+    if expected is None:
+        assert "--instructions-file" not in command
+    else:
+        assert command.count("--instructions-file") == 1
+        assert command[command.index("--instructions-file") + 1] == expected
+
+
+def test_example_queue_instructions_resolve_to_real_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("HYBRID_COMPUTER_USE_ROOT", str(ROOT))
+    for configs in example_configs().values():
+        for config in configs.values():
+            command = runner_command(config, config["tasks"][0], tmp_path)
+            for flag, name in (
+                ("--instructions-file", "hybrid.md"),
+                ("--base-instructions-file", "base.md"),
+            ):
+                path = Path(command[command.index(flag) + 1])
+                assert path == ROOT / "instructions" / name
+                assert path.is_file()
 
 
 def test_gemini_and_grok_expose_only_the_requested_channel():

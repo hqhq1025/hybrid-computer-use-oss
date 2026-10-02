@@ -578,7 +578,7 @@ func expansionAdvertisedInvalidValueThrowsInsteadOfCoercingNumbers() {
 func expansionApplicabilityHasNoRoleCacheOrDiagnosticBudget() throws {
     var namesReads = 0
     var valueReads = 0
-    // All objects have the same group role, including ones beyond the old cap.
+    // Same-role objects must each receive an independent expansion read.
     let elements = (1...40).map { AXUIElementCreateApplication(pid_t(-$0)) }
     for (index, element) in elements.enumerated() {
         let advertised = index % 2 == 0

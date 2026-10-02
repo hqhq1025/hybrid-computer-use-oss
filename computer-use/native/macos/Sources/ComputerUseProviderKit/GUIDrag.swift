@@ -35,7 +35,7 @@ func executeGUIDrag(
         for point in points {
             try post(.leftMouseDragged, point, flags)
             lastPoint = point
-            // Preserve the old two-point pacing budget across every waypoint.
+            // Distribute a fixed total drag duration across all waypoints.
             sleep(24 * 0.042 / Double(points.count))
         }
         sleep(0.1)

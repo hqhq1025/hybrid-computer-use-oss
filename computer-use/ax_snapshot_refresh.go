@@ -1070,9 +1070,8 @@ func continuityNotes(previous, current *appSnapshot) []string {
 			"app that was actually delivered to the model — same "+
 			"window instance, same tree, same focus, same selection.%s "+
 			"Nothing in the tree reports work in progress, but that is not proof your "+
-			"last action failed: effects that never reach the accessibility tree are "+
-			"common (measured right-align and save operations changed application state "+
-			"while the tree stayed byte-identical). Check the screenshot, or "+
+			"last action failed: effects may not reach the accessibility tree. "+
+			"Check the screenshot, or "+
 			"assert the specific element with AX mode=assert_ax before deciding to retry. "+
 			"Note also what this line rules OUT: the content is not missing because a "+
 			"budget trimmed it — this tree is the same one you already have.",

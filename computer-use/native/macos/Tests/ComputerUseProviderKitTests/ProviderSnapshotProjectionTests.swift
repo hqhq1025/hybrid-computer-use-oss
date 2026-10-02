@@ -8,7 +8,7 @@ func providerProjectionIgnoresDuplicateIndexesFromDisplayOnlyRowText() throws {
     let root = AXUIElementCreateSystemWide()
     let app = RunningAppDescriptor(
         name: "Projection Test",
-        bundleIdentifier: "com.microsoft.computer-use.projection-test",
+        bundleIdentifier: "org.computer-use.projection-test",
         pid: getpid(),
         runningApplication: NSRunningApplication.current
     )
@@ -72,7 +72,7 @@ func providerProjectionPublishesExplicitSetValueSupport() throws {
     let root = AXUIElementCreateSystemWide()
     let app = RunningAppDescriptor(
         name: "Projection Test",
-        bundleIdentifier: "com.microsoft.computer-use.projection-test",
+        bundleIdentifier: "org.computer-use.projection-test",
         pid: getpid(),
         runningApplication: NSRunningApplication.current
     )
@@ -116,7 +116,7 @@ func providerProjectionDoesNotPromoteRenderedValueIntoIdentityName() throws {
     let root = AXUIElementCreateSystemWide()
     let app = RunningAppDescriptor(
         name: "Projection Test",
-        bundleIdentifier: "com.microsoft.computer-use.projection-test",
+        bundleIdentifier: "org.computer-use.projection-test",
         pid: getpid(),
         runningApplication: NSRunningApplication.current
     )
@@ -165,7 +165,7 @@ func providerProjectionPreservesMultilineSemanticValue() throws {
     let root = AXUIElementCreateSystemWide()
     let app = RunningAppDescriptor(
         name: "Projection Test",
-        bundleIdentifier: "com.microsoft.computer-use.projection-test",
+        bundleIdentifier: "org.computer-use.projection-test",
         pid: getpid(),
         runningApplication: NSRunningApplication.current
     )

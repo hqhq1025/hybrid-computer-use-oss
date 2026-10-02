@@ -29,7 +29,7 @@ from requests_toolbelt.multipart.encoder import MultipartEncoder
 
 from desktop_env.controllers.python import PythonController
 from desktop_env.evaluators.metrics.utils import compare_urls
-from desktop_env.file_source import resolve_local_source
+from desktop_env.file_source import HISTORY_DB_URL, require_setup_source
 from desktop_env.providers.aws.proxy_pool import get_global_proxy_pool, init_proxy_pool, ProxyInfo
 
 import dotenv
@@ -777,94 +777,13 @@ class SetupController:
                 "path": str, the path on the VM to store the downloaded file
               }
         """
-        for f in files:
-            url: str = f["url"]
-            path: str = f["path"]
-            cache_path: str = os.path.join(self.cache_dir, "{:}_{:}".format(
-                uuid.uuid5(uuid.NAMESPACE_URL, url),
-                os.path.basename(path)))
-            if not url or not path:
-                raise Exception(f"Setup Download - Invalid URL ({url}) or path ({path}).")
-
-            # Support local file sources: either a `file://` URI or a plain
-            # local filesystem path. In that case, just copy to cache instead
-            # of doing an HTTP download.
-            local_src = resolve_local_source(url)
-
-            if local_src is not None:
-                if not os.path.exists(cache_path):
-                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                    logger.info(f"Copying local file {local_src} to cache {cache_path}")
-                    shutil.copyfile(local_src, cache_path)
-            elif not os.path.exists(cache_path):
-                if url.startswith("file://") or "://" not in url:
-                    raise FileNotFoundError(
-                        f"Setup Download - Local source not found: {url}"
-                    )
-                logger.info(f"Cache file not found, downloading from {url} to {cache_path}")
-                max_retries = 10
-                downloaded = False
-                e = None
-                for i in range(max_retries):
-                    try:
-                        logger.info(f"Download attempt {i+1}/{max_retries} for {url}")
-                        dl_headers = {}
-                        if "huggingface.co" in url:
-                            hf_repo = os.environ.get("HF_REPO", "")
-                            if hf_repo:
-                                url = url.replace("xlangai/osworld_v2_file_cache", hf_repo)
-                            hf_token = os.environ.get("HF_TOKEN", "")
-                            if hf_token:
-                                dl_headers["Authorization"] = f"Bearer {hf_token}"
-                        response = requests.get(url, stream=True, timeout=300, headers=dl_headers)
-                        response.raise_for_status()
-
-                        total_size = int(response.headers.get('content-length', 0))
-                        if total_size > 0:
-                            logger.info(f"File size: {total_size / (1024*1024):.2f} MB")
-
-                        downloaded_size = 0
-                        with open(cache_path, 'wb') as f:
-                            for chunk in response.iter_content(chunk_size=8192):
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded_size += len(chunk)
-                                    if total_size > 0 and downloaded_size % (1024*1024) == 0:  # Log every MB
-                                        progress = (downloaded_size / total_size) * 100
-                                        logger.info(f"Download progress: {progress:.1f}%")
-
-                        logger.info(f"File downloaded successfully to {cache_path} ({downloaded_size / (1024*1024):.2f} MB)")
-                        downloaded = True
-                        break
-
-                    except requests.RequestException as e:
-                        logger.error(
-                            f"Failed to download {url} caused by {e}. Retrying... ({max_retries - i - 1} attempts left)")
-                        if os.path.exists(cache_path):
-                            os.remove(cache_path)
-                if not downloaded:
-                    raise requests.RequestException(f"Failed to download {url}. No retries left.")
-
-            form = MultipartEncoder({
-                "file_path": path,
-                "file_data": (os.path.basename(path), open(cache_path, "rb"))
-            })
-            headers = {"Content-Type": form.content_type}
-            logger.debug(form.content_type)
-
-            try:
-                logger.info(f"Uploading {os.path.basename(path)} to VM at {path}")
-                logger.debug("REQUEST ADDRESS: %s", self.http_server + "/setup" + "/upload")
-                response = requests.post(self.http_server + "/setup" + "/upload", headers=headers, data=form, timeout=600)
-                if response.status_code == 200:
-                    logger.info(f"File uploaded successfully: {path}")
-                    logger.debug("Upload response: %s", response.text)
-                else:
-                    logger.error(f"Failed to upload file {path}. Status code: {response.status_code}, Response: {response.text}")
-                    raise requests.RequestException(f"Upload failed with status {response.status_code}")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"An error occurred while trying to upload {path}: {e}")
-                raise
+        local_sources = [require_setup_source(f["url"]) for f in files]
+        if any(not f["path"] for f in files):
+            raise ValueError("Setup download requires a nonempty guest path")
+        self._upload_file_setup([
+            {"local_path": local, "path": item["path"]}
+            for item, local in zip(files, local_sources)
+        ])
 
     def _upload_file_setup(self, files: List[Dict[str, str]]):
         """
@@ -1564,6 +1483,10 @@ class SetupController:
                     path(str): remote url to download file
                     dest(List[str]): the path in the google drive to store the downloaded file
         """
+        # Check all upload sources before any cloud-side deletion or mutation.
+        for operation, parameters in zip(config["operation"], config["args"]):
+            if operation == "upload":
+                require_setup_source(parameters["url"])
         settings_file = config.get('settings_file', 'evaluation_examples/settings/googledrive/settings.yml')
         gauth = GoogleAuth(settings_file=settings_file)
         drive = GoogleDrive(gauth)
@@ -1613,11 +1536,8 @@ class SetupController:
                 params = config['args'][oid]
                 url = params['url']
                 with tempfile.NamedTemporaryFile(mode='wb', delete=False) as tmpf:
-                    response = requests.get(url, stream=True)
-                    response.raise_for_status()
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            tmpf.write(chunk)
+                    with open(require_setup_source(url), "rb") as source:
+                        shutil.copyfileobj(source, tmpf)
                     tmpf.close()
                     paths = [params['path']] if params['path'] != list else params['path']
                     parent_id = mkdir_in_googledrive(paths[:-1])
@@ -1694,35 +1614,10 @@ class SetupController:
             return browser, context
 
     def _update_browse_history_setup(self, **config):
-        cache_path = os.path.join(self.cache_dir, "history_new.sqlite")
-        db_url = "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/chrome/44ee5668-ecd5-4366-a6ce-c1c9b8d4e938/history_empty.sqlite?download=true"
-        if not os.path.exists(cache_path):
-            max_retries = 3
-            downloaded = False
-            e = None
-            for i in range(max_retries):
-                try:
-                    response = requests.get(db_url, stream=True)
-                    response.raise_for_status()
-
-                    with open(cache_path, 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                    logger.info("File downloaded successfully")
-                    downloaded = True
-                    break
-
-                except requests.RequestException as e:
-                    logger.error(
-                        f"Failed to download {db_url} caused by {e}. Retrying... ({max_retries - i - 1} attempts left)")
-            if not downloaded:
-                raise requests.RequestException(f"Failed to download {db_url}. No retries left. Error: {e}")
-        else:
-            logger.info("File already exists in cache directory")
+        local_src = require_setup_source(HISTORY_DB_URL)
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = os.path.join(tmp_dir, "history_empty.sqlite")
-            shutil.copy(cache_path, db_path)
+            shutil.copy(local_src, db_path)
 
             history = config['history']
 

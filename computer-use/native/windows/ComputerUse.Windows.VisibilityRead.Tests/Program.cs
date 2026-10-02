@@ -2,7 +2,6 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using ComputerUse.Windows.Runtime;
 
-if (args.SequenceEqual(new[] { "--legacy-red" })) { return LegacyRed.Run(); }
 if (args.Length != 0) { Console.Error.WriteLine("Unknown arguments"); return 2; }
 
 var window = new Rectangle(100, 100, 800, 600);

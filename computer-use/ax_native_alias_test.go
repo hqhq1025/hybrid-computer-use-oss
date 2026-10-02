@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func nativeAliasPortFixture(scope string) *appSnapshot {
-	snapshot, node := nativeIdentityPortFixture()
-	first := *nativeIdentityPortRecord(node)
+func nativeAliasFixture(scope string) *appSnapshot {
+	snapshot, node := nativeIdentityFixture()
+	first := *nativeIdentityRecord(node)
 	first.ProviderIdentityScope = scope
 	second := first
 	second.Index, second.RuntimeID = 2, []int{0, 2}
@@ -22,11 +22,11 @@ func nativeAliasPortFixture(scope string) *appSnapshot {
 	}
 }
 
-func TestNativeAliasPortConflicts(t *testing.T) {
+func TestNativeAliasConflicts(t *testing.T) {
 	for _, scope := range []string{"", "process", "process_instance"} {
 		for _, conflict := range []string{"role", "id", "owner", "later_owner", "label_hides_role"} {
 			t.Run(scope+"/"+conflict, func(t *testing.T) {
-				snapshot := nativeAliasPortFixture(scope)
+				snapshot := nativeAliasFixture(scope)
 				switch conflict {
 				case "role":
 					snapshot.Elements[2].ControlType = "textbox"
@@ -55,8 +55,8 @@ func TestNativeAliasPortConflicts(t *testing.T) {
 	}
 }
 
-func TestNativeAliasPortCompatibleAndDistinct(t *testing.T) {
-	snapshot := nativeAliasPortFixture("process_instance")
+func TestNativeAliasCompatibleAndDistinct(t *testing.T) {
+	snapshot := nativeAliasFixture("process_instance")
 	snapshot.Elements[1].AutomationID = ""
 	snapshot.Elements[1].States, snapshot.Elements[2].States = "[focused]", "[selected]"
 	tree, err := buildAXSnapshotV1(snapshot)
@@ -73,7 +73,7 @@ func TestNativeAliasPortCompatibleAndDistinct(t *testing.T) {
 	if err != nil || tree.ByIndex[1] == tree.ByIndex[2] {
 		t.Fatalf("distinct objects merged: %v", err)
 	}
-	snapshot = nativeAliasPortFixture("table_owner")
+	snapshot = nativeAliasFixture("table_owner")
 	snapshot.Elements[1].Name, snapshot.Elements[2].Name = "A1", "B1"
 	snapshot.Elements[1].ControlType, snapshot.Elements[2].ControlType = "cell", "cell"
 	tree, err = buildAXSnapshotV1(snapshot)

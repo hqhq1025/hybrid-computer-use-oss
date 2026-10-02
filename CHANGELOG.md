@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- Remove project fork identity from lineage metadata, use neutral native
+  application identifiers, and check submission addresses without embedding
+  operator endpoints. Preserve third-party attribution.
+- Export complete reviewed experiment directories, including instruction
+  snapshots and CSV summaries, and reject broken references or task/run
+  conflicts. Include explicitly unexecuted V1/V2 preparation records.
+- Isolate same-second task attempts, recheck budgets at completion, and retain
+  available turn evidence on budget-validation failures. Accept Gemini JSON-array
+  streams as well as SSE.
+- Include V1 evaluator setup dependencies, preserve checkout-relative asset
+  bindings, fix V1 canary evaluation, and bind asset roots during queue recovery.
+- Require sealed truncation evidence for final summaries, keep instruction
+  defaults and opt-outs consistent, and reject undiscoverable Grok config paths.
+- Unify gateway and runner budgets around complete successful generation
+  delivery, preserving final-response tool execution. Failed generations have
+  an independent bounded retry circuit and no-progress timeout.
+- Separate V1/V2 setup assets, validate selected dependencies, and remove
+  implicit setup downloads. Add explicit local-asset preparation and manifests.
+- Add current-source experiment preparation with explicit task membership,
+  exclusions, protocol IDs, pinned client versions and copied instructions.
+  Preparation never launches a task or claims a measured result.
+- Add fixed-denominator queue summaries in JSON, CSV and Markdown, preserving
+  RAW scores, truncation policy, missing/error states and unknown measurements.
+- Add allowlisted current-worktree submission export and actual extracted-source
+  Linux build/MCP verification, separate from HEAD-only release archives.
+- Replace always-injected skill files with condensed plain-text instructions
+  under `instructions/`, separating common safety and outcome policy from the
+  selected interaction guide. Runner protocol markers stay in the runner.
+- Rename operating-profile selection to `--instructions-file` /
+  `instructions_file` and the batch/queue opt-out to `no_instructions`.
+  Standalone generation also uses `--instructions-file` and keeps
+  `--base-instructions`. Old skill-selection names have no compatibility aliases.
+  An empty instructions file argument omits only the profile, not base policy.
+- These instruction edits change model context and require new evaluation
+  attempts; no performance improvement is established by this migration.
 - Add experimental native macOS (Swift Accessibility/CoreGraphics) and Windows
   (C# UIA3/Win32) backends behind the existing `AX` and `GUI` tools.
 - Include native build scripts, unit/protocol tests, bounded sidecar lifecycle,

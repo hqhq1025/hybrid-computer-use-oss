@@ -360,12 +360,12 @@ func validateMacProviderObjectAliases(
 }
 
 private let providerAliasLogger = Logger(
-    subsystem: "com.microsoft.computer-use.provider",
+    subsystem: "org.computer-use.provider",
     category: "provider-alias"
 )
 
 private let providerFailureLogger = Logger(
-    subsystem: "com.microsoft.computer-use.provider",
+    subsystem: "org.computer-use.provider",
     category: "provider-failure"
 )
 

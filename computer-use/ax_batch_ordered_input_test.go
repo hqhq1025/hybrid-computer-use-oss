@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-func candidateABatchService(t *testing.T) (*service, string, string, string) {
-	return orderedInputTestService(t)
-}
-
 // Inspect the delivered text evidence, including its JSON round trip.
 func publicBatchEvidence(t *testing.T, result toolCallResult) map[string]any {
 	t.Helper()

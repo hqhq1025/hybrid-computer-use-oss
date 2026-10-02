@@ -47,7 +47,6 @@ computer-use/
 make build        # release binary in artifacts/computer-use, built in Docker
 make build-local  # the same with a local Go 1.22+ toolchain
 make smoke        # initialize, list tools, require exactly AX and GUI
-make test         # gofmt, go vet, Go tests, provider tests, Python tests
 ```
 
 `make build` runs gofmt and the Go tests inside the builder, injects the
@@ -55,7 +54,7 @@ version from `VERSION` and checks that `--version` reports it. A plain
 `go build` reports `dev`.
 
 Those release targets build Linux. [Platform support](PLATFORMS.md) covers
-the macOS app bundle, Windows self-contained executable, and native tests.
+the macOS app bundle, Windows self-contained executable, and permissions.
 When redistributing a build, include its `LICENSE`, `THIRD_PARTY_NOTICES.md`
 and `licenses/` directory alongside the executable. The Linux output directory
 can also contain downloaded agent CLIs; those are separate dependencies, not
@@ -117,25 +116,65 @@ startup_timeout_sec = 60
 tool_timeout_sec = 180
 ```
 
-To generate the Codex tool profile and selected skill outside OSWorld:
+To generate the Codex tool profile and selected interaction guide outside OSWorld:
 
 ```bash
 python3 -m hcu.render_agent_config --agent codex \
   --model gpt-5.5 --effort xhigh \
   --gateway http://127.0.0.1:8611 \
   --mcp "$PWD/artifacts/computer-use" \
+  --instructions-file "$PWD/instructions/hybrid.md" \
+  --base-instructions "$PWD/instructions/base.md" \
   --codex-home /tmp/codex-home \
   --output /tmp/codex-home/config.toml
 
 CODEX_HOME=/tmp/codex-home codex
 ```
 
-The standalone configuration embeds the selected `--skill` text in
+The standalone configuration embeds the selected `--instructions-file` text in
 `developer_instructions`; it does not write or overwrite a workspace
 `AGENTS.md`. The OSWorld runner continues to inject its task-local `AGENTS.md`
 inside the disposable guest. Set `--codex-home` to the home the client will
 actually use so bundled-skill paths match. Local generation does not reproduce
 guest isolation or grant permission to automate the desktop.
+
+Standalone Codex configurations use `approval_policy = "on-request"` and
+`sandbox_mode = "workspace-write"`. Shell commands run within the workspace
+sandbox; the agent can request approval for elevated access. This is not an
+approval prompt for every action. Review the working directory before starting
+Codex, since workspace files can be changed without an escalation.
+Use the interactive `codex` command for approval prompts. Non-interactive
+`codex exec` can disable approval prompts even when this config requests them;
+it retains the selected shell sandbox but cannot ask for elevated access.
+
+The launch command above adds no permission overrides. Codex CLI options such
+as `--dangerously-bypass-approvals-and-sandbox`, `--sandbox danger-full-access`
+or `-c approval_policy=never` can override these defaults. Do not add them to
+standalone launch scripts. `--ignore-user-config` skips the generated config;
+`--profile` can layer different permissions over it.
+
+Use interactive `codex` when you need approval prompts. The pinned CLI's
+non-interactive `codex exec` selects `never` approvals while retaining
+`workspace-write` sandboxing; actions requiring elevation cannot prompt for
+approval. This does not grant unrestricted shell access.
+
+The shell sandbox does not isolate the MCP server or the desktop it controls.
+Use a dedicated desktop or disposable VM for untrusted tasks, keep sensitive
+applications and credentials out of that session, and review any client
+permission overrides before use. A separate `CODEX_HOME` isolates configuration,
+not the operating system.
+
+Python callers of `hcu.osworld.agents.codex_config()` get the same standalone
+defaults. Only an externally isolated, disposable evaluation guest should use
+`execution_context="isolated-guest"`; that explicitly selects
+`approval_policy = "never"` and `sandbox_mode = "danger-full-access"` for
+unattended execution. Guest paths, task IDs and channel selections do not
+select this mode. The standalone generator always selects `standalone`.
+
+The guide is always injected plain text, not a discoverable or activated
+skill. `--instructions-file ""` omits the guide but retains base policy;
+`--base-instructions` selects that policy. Product instruction files contain no runner protocol
+markers. See [Instructions](INSTRUCTIONS.md) for the shared policy and profiles.
 
 The profile turns off Codex's built-in `computer_use` feature, so desktop
 input comes only from this server, the shell or the browser runtime. See
@@ -143,8 +182,7 @@ input comes only from this server, the shell or the browser runtime. See
 
 ## Claude Code
 
-Claude Code 2.1.251 drops tools whose input schema is a root-level `oneOf`,
-so it reaches the server through `hcu/osworld/guest_files/claude_mcp_schema_adapter.py`.
+Claude Code connects through `hcu/osworld/guest_files/claude_mcp_schema_adapter.py`.
 The adapter flattens only the schemas it shows Claude; the server still
 validates the original schemas before any side effect.
 
@@ -160,13 +198,33 @@ validates the original schemas before any side effect.
 }
 ```
 
-`python3 -m hcu.render_agent_config --agent claude-code ...` writes this file
-and the replacement system prompt, selecting the Python interpreter running
+`python3 -m hcu.render_agent_config --agent claude-code ...` writes this file,
+the replacement system prompt and a `.launch.py` startup script. It selects the Python interpreter running
 the generator. On Windows, run the generator with the local Python installation;
 the generated executable and adapter paths are native paths. Keep that Python
 installation available when launching Claude. The Linux guest runner retains
 its guest-specific Python path. The runner allows the tools `Bash`,
 `Edit`, `Read`, `mcp__computer_use__AX` and `mcp__computer_use__GUI`.
+
+For a standalone session:
+
+```bash
+python3 -m hcu.render_agent_config --agent claude-code \
+  --model claude-opus-5 --effort xhigh \
+  --gateway http://127.0.0.1:8537 \
+  --task-id manual \
+  --mcp "$PWD/artifacts/computer-use" \
+  --output /tmp/hcu-claude/mcp.json
+
+python3 /tmp/hcu-claude/mcp.launch.py
+```
+
+The script requires `claude` on `PATH` and forwards additional CLI arguments.
+It supplies the selected model and effort, the task-scoped gateway URL,
+placeholder authentication, MCP configuration and replacement prompt. Loading
+the MCP JSON alone does not apply these startup settings. Local sessions use
+manual tool approvals, not the disposable guest's permission bypass; generation
+does not reproduce guest isolation.
 
 `python3 -m hcu.render_agent_config` also renders the Gemini CLI and Grok
 Build profiles (`--agent gemini-cli`, `--agent grok-build`), writing the
@@ -183,6 +241,14 @@ Both register the same server directly, without an adapter. Gemini CLI reads
 its `config.toml` and is served by `hcu.gateway.openai_proxy` on the Responses
 API. [Agent profiles](AGENT_PROFILES.md) describes the rest of each profile,
 including the tool lists each harness disables.
+
+For Gemini, `--output` must be `<home>/.gemini/settings.json`, for example
+`/tmp/hcu-gemini/.gemini/settings.json`. Other layouts are rejected before
+writing configuration. The generator prints the required environment, including
+`GEMINI_CLI_HOME=<home>` and absolute paths for the base prompt and experiments
+file. Apply those environment variables when starting `gemini`; its global
+`GEMINI.md` is written beside `settings.json`. An arbitrary JSON filename is not
+a discoverable Gemini configuration.
 
 ## Public contract
 
@@ -207,19 +273,6 @@ only the returned pixels and reported input delivery. Neither proves file
 contents, persistence or network state; agents should verify those through
 the shell or the application.
 
-### Contract tests
-
-The model sees the tool schemas, descriptions, server instructions and error
-texts, so they are treated as an interface. `contract_golden_test.go`
-records `initialize`, `tools/list`, the argument-validation errors and the CLI
-help in `testdata/contract/public_contract.json`, and `go test` fails when any
-of them changes. After an intentional change, regenerate the file and review
-the diff:
-
-```bash
-cd computer-use && go test -run TestPublicContractMatchesGolden -update-contract
-```
-
 ## Environment variables
 
 | Variable | Effect |
@@ -234,9 +287,6 @@ cd computer-use && go test -run TestPublicContractMatchesGolden -update-contract
 | `COMPUTER_USE_AX_TELEMETRY_LOG` | private AX telemetry log, `/tmp/computer-use-ax-telemetry.jsonl` by default |
 | `COMPUTER_USE_PYTHON_BINARY` | interpreter for the provider, `python3` by default |
 | `COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS` | provider request timeout, 30 seconds by default |
-
-The contract test clears the variables that change model-visible output, so
-it always checks the defaults.
 
 ## Troubleshooting
 

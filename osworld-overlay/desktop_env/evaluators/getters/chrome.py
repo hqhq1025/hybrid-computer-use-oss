@@ -36,11 +36,8 @@ _accessibility_ns_map = {
 
 logger = logging.getLogger("desktopenv.getters.chrome")
 
-"""
-WARNING:
-1. Functions from this script assume that no account is registered on Chrome, otherwise the default file path needs to be changed.
-2. The functions are not tested on Windows and Mac, but they should work.
-"""
+# Profile-file getters assume Chrome's default unsigned-in profile.
+# Set the corresponding file path when using another profile.
 
 
 def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
@@ -962,7 +959,6 @@ def get_pdf_from_url(env, config: Dict[str, str]) -> str:
     return _path
 
 
-# fixme: needs to be changed (maybe through post-processing) since it's not working
 def get_chrome_saved_address(env, config: Dict[str, str]):
     host = env.vm_ip
     port = env.chromium_port
@@ -1170,7 +1166,7 @@ def get_googledrive_file(env, config: Dict[str, Any]) -> Any:
                 filelist: GoogleDriveFileList = drive.ListFile({'q': search}).GetList()
                 if len(filelist) == 0:  # target file not found
                     return None
-                file: GoogleDriveFile = filelist[0]  # HACK: if multiple candidates, just use the first one
+                file: GoogleDriveFile = filelist[0]
                 parent_id = file['id']
 
             file.GetContentFile(_path, mimetype=file['mimeType'])
@@ -2631,7 +2627,7 @@ def get_macys_product_url_parse(env, config: Dict[str, str]):
     return result
 
 
-# Alias for backward compatibility - the old function name was too generic
+# Compatibility alias for configurations using the "url_path_parse" type.
 def get_url_path_parse(env, config: Dict[str, str]):
     """
     Alias for get_macys_product_url_parse to maintain backward compatibility.

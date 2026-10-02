@@ -17,18 +17,9 @@ UNVERIFIED_SYNTHESIS = (
     "global and reports success as soon as the event is queued."
 )
 
-# A semantic action is not evidence of effect either. Observed cases:
-#   Nautilus file icon `menu`:   do_action returns True but no menu opens,
-#                                regardless of prior focus or selection
-#   GIMP layer cell `activate`:  returns True, the active layer is unchanged
-#                                (zero pixel difference)
-#   VLC radio button `Toggle`:   CHECKED flips but the panel does not switch
-# The last case means verification must not read the acted-on node's own
-# state: the state can change while the behaviour does not.
-#
-# do_action's return value only says the toolkit accepted the call, not that
-# anything happened. Reporting it as success would let the caller move on
-# while the UI has not changed.
+# do_action's return value proves only toolkit acceptance, not an effect.
+# The acted-on node's state can change without the intended UI transition;
+# verification must check the requested outcome, not just that node's state.
 UNVERIFIED_SEMANTIC = (
     "The toolkit accepted the call; that is not evidence the action took effect. "
     "AT-SPI actions on Linux routinely report success while doing nothing. "

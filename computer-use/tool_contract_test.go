@@ -38,9 +38,7 @@ func TestCapabilityIsMeasuredNeverDeclaredByAppName(t *testing.T) {
 	) {
 		t.Fatal("instructions must describe accessibility reachability without app exclusions")
 	}
-	// Regression guard: capability statements must not name specific apps or
-	// drivers. App names that only cite the source of a measured number are
-	// evidence, not capability branches, so they are not banned here.
+	// Capability statements must not exclude apps by name or driver.
 	for _, banned := range []string{
 		"Browsers are NOT handled",
 		"Chrome", "Chromium", "Playwright", "browser-use", "CDP",
@@ -77,11 +75,8 @@ func TestMCPInstructionsDocumentGlobalSynthesisFocusContract(t *testing.T) {
 }
 
 // TestInstructionsDoNotClaimScreenshotsAreAlwaysCostlier checks that AX is
-// recommended for actionability, not for being cheaper. Costs vary by app: a
-// gedit tree measured about 350 tokens against about 1,000 for its window
-// screenshot, while a file manager tree measured about 2,100 tokens against
-// about 750. The instructions must not steer the agent with a claim that fails
-// on content-rich applications.
+// recommended for semantic targeting. Relative observation cost depends on
+// the amount and representation of the visible content.
 func TestInstructionsDoNotClaimScreenshotsAreAlwaysCostlier(t *testing.T) {
 	if !strings.Contains(serverInstructions, "Use AX for named controls") {
 		t.Fatal("instructions should give semantic targeting as the reason to prefer AX")

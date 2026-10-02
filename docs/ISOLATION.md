@@ -8,8 +8,13 @@ Before the agent starts, the runner removes inherited agent state for every
 supported harness — `.codex`, `.claude`, `.claude.json`, `.gemini`, `.grok`,
 the context files `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, and the guest
 image's own `.mcp.json`, whose MCP servers are not part of this runner — and
-injects only the selected base instructions, skill, MCP configuration and
+injects only the base policy, selected interaction guide, MCP configuration and
 task-scoped gateway settings.
+
+Base policy and the selected guide are plain text injected at startup.
+Selecting no operating profile leaves the base policy in place. The runner
+supplies its `TASK_COMPLETE`, `TASK_INFEASIBLE` and `ASK_USER` contract separately;
+those markers do not belong in the product instruction files.
 
 Model credentials stay in the host-side gateway. The guest receives a
 placeholder token and a task-scoped endpoint. The gateway has to listen on an

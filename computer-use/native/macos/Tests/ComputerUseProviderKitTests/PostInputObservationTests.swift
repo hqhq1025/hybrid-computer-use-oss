@@ -6,7 +6,7 @@ import Testing
 private func postInputApp() -> RunningAppDescriptor {
     RunningAppDescriptor(
         name: "Post Input Test",
-        bundleIdentifier: "com.microsoft.computer-use.post-input-test",
+        bundleIdentifier: "org.computer-use.post-input-test",
         pid: getpid(),
         runningApplication: NSRunningApplication.current
     )

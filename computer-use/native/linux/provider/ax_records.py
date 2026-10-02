@@ -1,5 +1,11 @@
 """Canonical AX records and stable local indexing."""
 
+# StableIndexer adapts Playwright's role/name-based reference retention rule.
+# Adapted portions: Copyright (c) Microsoft Corporation.
+# Licensed under the Apache License, Version 2.0.
+# See licenses/Apache-2.0.txt and licenses/Playwright-NOTICE.txt.
+# This Python adaptation uses AT-SPI path mappings instead of DOM element state.
+
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
     DEFAULT_TEXT_LIMIT,
@@ -79,22 +85,15 @@ class StableIndexer:
 def labelled_by_name(node):
     """Borrow a name from the AT-SPI LABELLED_BY relation for an unnamed node.
 
-    Toolkits often put a control's label in a relation instead of on the
-    control. In the LibreOffice 7.3 Position and Size dialog, all 13 unnamed
-    spin buttons get names this way (`Position Y:`, `Position X:`, `Width:`,
-    `Height:`, `Angle:`, `Radius:`), so they can be selected by name instead
-    of by position. The standard accessible-name computation includes
-    labelled-by (Playwright's does too), so this does not invent a name. The
-    rendered line still carries a `labelled` mark because a borrowed name may
-    not be unique: the same dialog has two `Position Y:` labels, one per tab.
+    Toolkits may expose a control's label through a relation rather than its
+    own name. The accessible-name computation includes labelled-by, so the
+    returned name comes from provider evidence. The rendered line carries a
+    `labelled` mark because multiple controls may share the same label.
 
-    get_relation_set costs one D-Bus round trip per node (about 1 ms), so it
-    is queried only for nodes without their own name, where all of the
-    benefit lies; querying every node of a large window would add seconds.
-    For the same reason the pruning predicate, which runs on every node, does
-    not consult relations. A node worth keeping only for its borrowed name
-    can therefore be pruned. This has not been observed (such spin buttons
-    are kept for their actions), but it is a known limitation.
+    Reading relations requires a D-Bus call, so this fallback queries them
+    only for nodes without their own name. The pruning predicate does not
+    consult relations; a node whose only useful property is a borrowed name
+    can therefore be omitted from the working projection.
     """
     relations = safe(lambda: node.get_relation_set(), None)
     if not relations:

@@ -15,19 +15,31 @@ import subprocess
 import time
 
 
-from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT, anchor_path_args
+from hcu.paths import OSWORLD_ROOT as ROOT, REPO_ROOT, anchor_path_args, results_root
 from hcu.osworld.batch_config import (
     normalized_tasks,
+    resolve_config,
     runner_command,
     validate_config,
 )
 from hcu.osworld.preflight import DEDICATED_DOCKER_HOST
+from hcu.osworld.summarize import aggregate, read_task
 from desktop_env.providers.volume import (
     normalize_volume_size,
     validate_guest_image_capacity,
 )
 
-RUNNER_MODULE = "hcu.osworld.run_task"
+# Nonsecret runtime selections that can affect a child even when no CLI
+# override was supplied. Never persist the entire inherited environment.
+RUN_ENVIRONMENT_KEYS = (
+    "HYBRID_COMPUTER_USE_ROOT", "OSWORLD_V2_ROOT", "HCU_ARTIFACT_DIR",
+    "HCU_OPENAI_GATEWAY", "HCU_ANTHROPIC_GATEWAY", "HCU_GEMINI_GATEWAY",
+    "OSWORLD_FILE_BASE_URL", "OSWORLD_V1_ASSET_ROOT", "DOCKER_HOST", "OSWORLD_V2_DOCKER_HOST",
+    "OSWORLD_V2_DOCKER_ROOT", "OSWORLD_V2_REQUIRE_DEDICATED_DOCKER",
+    "OSWORLD_DOCKER_CPU_CORES", "OSWORLD_QEMU_CPU_MODEL", "OSWORLD_DISABLE_KVM",
+    "OSWORLD_VM_READY_TIMEOUT_SECONDS", "OSWORLD_VM_START_ATTEMPTS",
+    "OSWORLD_CONTAINER_CREATE_ATTEMPTS",
+)
 
 def default_queue_path() -> Path:
     """Read HCU_QUEUE when ``--queue`` is not given."""
@@ -87,7 +99,7 @@ def validate_queue_guest_image_capacity(config: dict) -> dict | None:
         return None
     tasks = config.get("tasks") or []
     requested = [
-        normalize_volume_size(task.get("volume_size", 40))
+        normalize_volume_size(task.get("volume_size", config.get("volume_size", 40)))
         for task in tasks
     ]
     required = max((size for size in requested if size is not None), default=40)
@@ -102,7 +114,6 @@ def validate_queue_guest_image_capacity(config: dict) -> dict | None:
 class QueueRunner:
     def __init__(self, queue_path: Path, poll_interval: float) -> None:
         self.queue_path = queue_path.resolve()
-        self.base = self.queue_path.parent
         self.config = json.loads(self.queue_path.read_text(encoding="utf-8"))
         validate_config(self.config)
         missing = [key for key in REQUIRED_CONFIG_KEYS if key not in self.config]
@@ -111,6 +122,32 @@ class QueueRunner:
                 "Queue config is missing required keys: " + ", ".join(missing)
             )
         self.config["tasks"] = normalized_tasks(self.config)
+        self.child_env = self.load_child_environment()
+        self.child_env["PYTHONDONTWRITEBYTECODE"] = "1"
+        self.config = resolve_config(self.config, self.child_env)
+        self.run_id = self.config.get("run_id")
+        self.validate_path_id(self.run_id, "run_id")
+        task_ids = [task["id"] for task in self.config["tasks"]]
+        for task_id in task_ids:
+            self.validate_path_id(task_id, "task id")
+        if len(set(task_ids)) != len(task_ids):
+            raise ValueError("Queue task IDs must be unique")
+        # The child starts at REPO_ROOT. Resolve its paths before preflight,
+        # ownership comparison or changing the coordinator's working directory.
+        for key in (
+            "guest_image", "artifact_dir", "agent_binary", "mcp_binary",
+            "instructions_file", "base_instructions_file", "token_log",
+        ):
+            if self.config.get(key):
+                path = Path(self.config[key]).expanduser()
+                self.config[key] = str(
+                    (path if path.is_absolute() else REPO_ROOT / path).resolve()
+                )
+        benchmark_version = self.config.get("benchmark_version") or "v2"
+        output_root = Path(
+            self.child_env.get("HCU_RESULTS_DIR") or results_root()
+        ).expanduser().resolve()
+        self.base = output_root / f"osworld-{benchmark_version}" / self.run_id
         self.execution_root = ROOT
         self.guest_image_capacity = validate_queue_guest_image_capacity(
             self.config
@@ -127,23 +164,23 @@ class QueueRunner:
         self.poll_interval = poll_interval
         self.logs = self.base / "logs"
         self.hybrid = self.base / "hybrid"
-        self.logs.mkdir(parents=True, exist_ok=True)
-        self.hybrid.mkdir(parents=True, exist_ok=True)
-        self.child_env = self.load_child_environment()
-        self.child_env["PYTHONDONTWRITEBYTECODE"] = "1"
         token_log_value = str(self.config.get("token_log") or "").strip()
         if int(self.config.get("max_model_calls") or 0) > 0:
             if not token_log_value:
                 raise RuntimeError(
                     "max_model_calls requires a queue-scoped token_log"
                 )
-            token_log = Path(token_log_value).resolve()
+        self.claim_run()
+        self.logs.mkdir(parents=True, exist_ok=True)
+        self.hybrid.mkdir(parents=True, exist_ok=True)
+        if int(self.config.get("max_model_calls") or 0) > 0:
+            token_log = Path(token_log_value)
             token_log.parent.mkdir(parents=True, exist_ok=True)
             token_log.touch(exist_ok=True)
-        self.children: dict[tuple[str, str], subprocess.Popen] = {}
-        self.adopted_pids: dict[tuple[str, str], int] = {}
-        self.failures: dict[tuple[str, str], str] = {}
-        self.retryable_interruptions: dict[tuple[str, str], dict] = {}
+        self.children: dict[str, subprocess.Popen] = {}
+        self.adopted_pids: dict[str, int] = {}
+        self.failures: dict[str, str] = {}
+        self.retryable_interruptions: dict[str, dict] = {}
         self.rate_limit_events: list[float] = []
         self.rate_limit_pause_until = 0.0
         self.stop_requested = False
@@ -151,8 +188,14 @@ class QueueRunner:
         if state_path.is_file():
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
+                if state.get("run_id") != self.run_id:
+                    raise ValueError("Queue state run_id does not match its owner")
+                for field in ("children", "failures", "retryable_interruptions"):
+                    if set(state.get(field) or {}) - set(task_ids):
+                        raise ValueError(f"Queue state has unknown tasks in {field}")
                 for task_id, pid in (state.get("children") or {}).items():
-                    self.adopted_pids[task_id] = int(pid)
+                    if self.owns_process(task_id, int(pid)):
+                        self.adopted_pids[task_id] = int(pid)
                 for task_id, error in (state.get("failures") or {}).items():
                     self.failures[task_id] = str(error)
                 for task_id, interruption in (
@@ -176,12 +219,12 @@ class QueueRunner:
                 self.rate_limit_pause_until = float(
                     state.get("rate_limit_pause_until") or 0
                 )
-            except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                pass
+            except (OSError, ValueError, TypeError) as exc:
+                raise ValueError(f"Cannot recover queue state: {state_path}: {exc}") from exc
         self.child_env["OSW_RUN_STARTED_AT_UTC"] = self.run_started_at_utc
         self.child_env["OSW_RUN_TIMEZONE"] = self.run_timezone
         for key, pid in list(self.adopted_pids.items()):
-            if self.pid_alive(pid):
+            if self.owns_process(key, pid):
                 self.failures.pop(key, None)
         self.adopt_live_attempts()
         self.recover_retryable_interruptions()
@@ -197,11 +240,55 @@ class QueueRunner:
                     "attempt directory exists without a result or live process"
                 )
 
+    @staticmethod
+    def validate_path_id(value: object, label: str) -> None:
+        if (
+            not isinstance(value, str) or not value or value != value.strip()
+            or value in {".", ".."} or "/" in value or "\\" in value
+        ):
+            raise ValueError(f"Queue {label} must be an explicit single path component")
+
+    def claim_run(self) -> None:
+        """Only resume artifacts with the same explicit, nonhash configuration."""
+        owner_path = self.base / "QUEUE_OWNER.json"
+        config = dict(self.config)
+        config.pop("client_password", None)
+        commands = [self.command(task) for task in self.config["tasks"]]
+        for command in commands:
+            if "--client-password" in command:
+                index = command.index("--client-password")
+                del command[index:index + 2]
+        owner = {
+            "schema_version": 1,
+            "run_id": self.run_id,
+            "config": config,
+            "execution_root": str(self.execution_root),
+            "commands": commands,
+            "environment": {
+                key: self.child_env.get(key) for key in RUN_ENVIRONMENT_KEYS
+            },
+        }
+        try:
+            self.base.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            try:
+                existing = json.loads(owner_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise ValueError(f"Run directory has no valid queue owner: {self.base}") from exc
+            if existing != owner:
+                raise ValueError(
+                    f"Conflicting configuration for run_id {self.run_id}; use a fresh run_id"
+                )
+        else:
+            atomic_write(owner_path, json.dumps(owner, indent=2) + "\n")
+
     def load_child_environment(self) -> dict[str, str]:
         env = os.environ.copy()
         raw_env_file = self.config.get("environment_file")
         if raw_env_file:
-            env_file = Path(raw_env_file).resolve()
+            expanded = resolve_config({"path": raw_env_file}, env)["path"]
+            env_file = Path(expanded).expanduser().resolve()
+            self.config["environment_file"] = str(env_file)
             if not env_file.is_file():
                 raise FileNotFoundError(
                     f"Configured environment file does not exist: {env_file}"
@@ -248,9 +335,8 @@ class QueueRunner:
         return env
 
     def adopt_live_attempts(self) -> None:
-        roots = {
-            str(self.root_path(task["id"])): task["id"]
-            for task in self.config["tasks"]
+        commands = {
+            tuple(self.command(task)): task["id"] for task in self.config["tasks"]
         }
         try:
             proc_paths = sorted(
@@ -262,19 +348,25 @@ class QueueRunner:
         for proc_path in proc_paths:
             if not proc_path.name.isdigit():
                 continue
-            try:
-                argv = (proc_path / "cmdline").read_bytes().split(b"\0")
-                args = [item.decode(errors="replace") for item in argv if item]
-            except OSError:
-                continue
-            if not args or RUNNER_MODULE not in " ".join(args):
-                continue
-            command = " ".join(args)
-            for root, task_id in roots.items():
-                if root in command:
-                    self.adopted_pids[task_id] = int(proc_path.name)
-                    self.failures.pop(task_id, None)
-                    break
+            pid = int(proc_path.name)
+            task_id = commands.get(tuple(self.process_command(pid)))
+            if task_id is not None:
+                self.adopted_pids[task_id] = pid
+                self.failures.pop(task_id, None)
+
+    def owns_process(self, task_id: str, pid: int) -> bool:
+        task = next((task for task in self.config["tasks"] if task["id"] == task_id), None)
+        if task is None or pid <= 0:
+            return False
+        return self.process_command(pid) == self.command(task)
+
+    @staticmethod
+    def process_command(pid: int) -> list[str]:
+        try:
+            argv = (Path("/proc") / str(pid) / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            return []
+        return [item.decode(errors="replace") for item in argv if item]
 
     def result_path(self, task_id: str) -> Path:
         return self.hybrid / task_id / "result.txt"
@@ -334,7 +426,7 @@ class QueueRunner:
                 self.retryable_interruptions.pop(task_id, None)
                 continue
             pid = self.adopted_pids.get(task_id)
-            if pid is not None and self.pid_alive(pid):
+            if pid is not None and self.owns_process(task_id, pid):
                 self.failures.pop(task_id, None)
                 continue
             self.adopted_pids.pop(task_id, None)
@@ -352,7 +444,7 @@ class QueueRunner:
             return "running" if child.poll() is None else "failed"
         pid = self.adopted_pids.get(task_id)
         if pid is not None:
-            return "external-running" if self.pid_alive(pid) else "failed"
+            return "external-running" if self.owns_process(task_id, pid) else "failed"
         return "pending"
 
     @staticmethod
@@ -365,7 +457,7 @@ class QueueRunner:
 
     def command(self, task: dict) -> list[str]:
         task_id = task["id"]
-        return runner_command(self.config, task, self.hybrid / task_id)
+        return runner_command(self.config, task, self.hybrid / task_id, resolved=True)
 
     def launch(self, task: dict) -> None:
         task_id = task["id"]
@@ -406,7 +498,7 @@ class QueueRunner:
         for task_id, pid in list(self.adopted_pids.items()):
             if self.result_path(task_id).is_file():
                 del self.adopted_pids[task_id]
-            elif not self.pid_alive(pid):
+            elif not self.owns_process(task_id, pid):
                 if task_id in self.retryable_interruptions:
                     self.recover_retryable_interruptions()
                 else:
@@ -552,7 +644,8 @@ class QueueRunner:
     def render_status(self) -> None:
         rows = []
         completed = 0
-        official_raw_scores = []
+        summary_rows = []
+        summary_errors = []
         total_tasks = len(self.config["tasks"])
         for task in self.config["tasks"]:
             cells = []
@@ -570,8 +663,19 @@ class QueueRunner:
                 score_text = " ERR=evaluator"
             else:
                 score_text = "" if score is None else f" RAW={score:.4f}"
-                if score is not None:
-                    official_raw_scores.append(score)
+            try:
+                summary_row = read_task(
+                    self.root_path(task["id"]), task, self.config,
+                    self.failures.get(task["id"]),
+                )
+                summary_rows.append(summary_row)
+                if summary_row["status"] in {
+                    "budget", "timeout", "truncated", "execution_error",
+                }:
+                    score_text += f" [{summary_row['status']}]"
+            except ValueError as exc:
+                summary_errors.append(str(exc))
+                score_text += " [conflicting evidence]"
             cells.append(f"{status}{score_text}")
             rows.append(
                 "| "
@@ -586,19 +690,35 @@ class QueueRunner:
             )
         headers = ["Task", "Static stratum", "Hybrid"]
         benchmark_version = str(self.config.get("benchmark_version") or "v2")
+        if summary_errors:
+            score_lines = [
+                "Aggregation unavailable: conflicting evidence; "
+                + " | ".join(summary_errors)
+            ]
+        else:
+            totals = aggregate(summary_rows)
+            observed = totals["raw_observed_mean"]
+            score_lines = [
+                "Observed RAW mean (not final): "
+                + (
+                    f"{observed:.4f} across {totals['raw_observed_count']} scores"
+                    if observed is not None else "no scores"
+                ),
+                f"Effective lower bound: {totals['effective_lower_bound']:.4f} "
+                f"over all {total_tasks} selected tasks (unknowns counted as zero)",
+                "Final effective score: "
+                + (
+                    f"{totals['final_score']:.4f}" if totals["complete"]
+                    else "unavailable (missing, invalid or error evidence)"
+                ),
+            ]
         lines = [
             f"# Rolling OSWorld {benchmark_version.upper()} Queue Status",
             "",
             f"Updated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}",
             "",
             f"Completed tasks: {completed}/{total_tasks}",
-            "Official RAW: "
-            + (
-                f"{sum(official_raw_scores) / len(official_raw_scores):.4f} "
-                f"across {len(official_raw_scores)} completed scores"
-                if official_raw_scores
-                else "no completed scores"
-            ),
+            *score_lines,
             f"Active task runs: {self.active_count()}/"
             f"{self.config['max_active_tasks']}",
             "Total live runs: "
@@ -623,6 +743,7 @@ class QueueRunner:
 
     def write_state(self) -> None:
         state = {
+            "run_id": self.run_id,
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "run_started_at_utc": self.run_started_at_utc,
             "run_timezone": self.run_timezone,
@@ -632,7 +753,7 @@ class QueueRunner:
                 **{
                     task_id: pid
                     for task_id, pid in self.adopted_pids.items()
-                    if self.pid_alive(pid)
+                    if self.owns_process(task_id, pid)
                 },
                 **{
                     task_id: child.pid
@@ -677,7 +798,6 @@ class QueueRunner:
 def main() -> int:
     args = parse_args()
     anchor_path_args(args, "queue")
-    os.chdir(ROOT)
     runner = QueueRunner(args.queue, args.poll_interval)
     return runner.run()
 

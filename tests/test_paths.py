@@ -1,7 +1,12 @@
 import argparse
 from pathlib import Path
 
-from hcu.paths import anchor_path_args
+from hcu.paths import (
+    DEFAULT_BASE_INSTRUCTIONS_FILE,
+    DEFAULT_INSTRUCTIONS_FILE,
+    REPO_ROOT,
+    anchor_path_args,
+)
 
 
 def test_relative_path_arguments_are_anchored_to_the_caller(tmp_path, monkeypatch):
@@ -10,14 +15,21 @@ def test_relative_path_arguments_are_anchored_to_the_caller(tmp_path, monkeypatc
         result_dir="runs/one",
         guest_image=Path("images/guest.qcow2"),
         token_log="",
-        skill_file="/abs/SKILL.md",
+        instructions_file="/abs/instructions.md",
     )
-    anchor_path_args(args, "result_dir", "guest_image", "token_log", "skill_file")
+    anchor_path_args(args, "result_dir", "guest_image", "token_log", "instructions_file")
     assert args.result_dir == str(tmp_path / "runs/one")
     assert args.guest_image == tmp_path / "images/guest.qcow2"
     assert isinstance(args.guest_image, Path)
     assert args.token_log == ""
-    assert args.skill_file == "/abs/SKILL.md"
+    assert args.instructions_file == "/abs/instructions.md"
+
+
+def test_default_instruction_files_exist():
+    assert DEFAULT_INSTRUCTIONS_FILE == REPO_ROOT / "instructions/hybrid.md"
+    assert DEFAULT_BASE_INSTRUCTIONS_FILE == REPO_ROOT / "instructions/base.md"
+    for name in ("base", "hybrid", "ax-only", "gui-only"):
+        assert (REPO_ROOT / "instructions" / f"{name}.md").read_text().strip()
 
 
 def test_home_relative_paths_expand_before_anchoring(monkeypatch, tmp_path):

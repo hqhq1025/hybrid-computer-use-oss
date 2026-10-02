@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import datetime
 import json
+import logging
 from pathlib import Path
 import shlex
 import sys
@@ -48,7 +49,12 @@ from hcu.osworld.prompts import (
     user_response_prompt,
 )
 from hcu.osworld.traces import concise_failure_message, summarize_agent_trace
-from hcu.osworld.usage import count_model_requests, task_model_budget_rejected
+from hcu.osworld.usage import (
+    count_model_requests,
+    task_generation_retry_exhausted,
+    task_model_budget_rejected,
+    validate_task_model_budget,
+)
 
 if TYPE_CHECKING:
     from desktop_env.desktop_env import DesktopEnv
@@ -60,6 +66,8 @@ AGENT_WATCHDOG_ABSENT_THRESHOLD = 2
 STREAM_RETRY_LIMIT = 1
 STREAM_RETRY_BACKOFF_SEC = 30.0
 TOOL_ARGUMENT_RETRY_LIMIT = 1
+# Also bounds final-response tool execution when the operator sets no timeout.
+MODEL_PROGRESS_TIMEOUT_SEC = 1800.0
 
 
 @dataclass(frozen=True)
@@ -279,7 +287,6 @@ def wait_for_agent_turn(
     settings: TurnSettings,
     token_log: Path,
     affinity_task: str,
-    model_request_baseline: int,
     expected_turn_token: str,
     workload_unit: str,
     deadline: float,
@@ -292,35 +299,16 @@ def wait_for_agent_turn(
     )
     done_payload = None
     budget_exhausted = False
-    while time.monotonic() < deadline:
-        done_raw = fetch_guest_file(base_url, GUEST_DONE)
-        if done_raw:
-            candidate = json.loads(done_raw)
-            if candidate.get("turn_token") == expected_turn_token:
-                done_payload = candidate
-                if (
-                    settings.max_model_calls > 0
-                    and candidate.get("returncode") not in {0, None}
-                    and task_model_budget_rejected(
-                        token_log,
-                        affinity_task,
-                    )
-                ):
-                    budget_exhausted = True
-                break
-        watchdog.check(base_url, label)
-        if settings.max_model_calls > 0:
-            model_requests = (
-                count_model_requests(token_log, affinity_task)
-                - model_request_baseline
-            )
-            if model_requests >= settings.max_model_calls:
-                budget_exhausted = True
-                break
-        time.sleep(settings.poll_interval)
+    stop_attempted = False
 
-    truncated = done_payload is None or budget_exhausted
-    if truncated:
+    def validate_budget() -> None:
+        validate_task_model_budget(token_log, affinity_task, settings.max_model_calls)
+        if task_generation_retry_exhausted(token_log, affinity_task):
+            raise RuntimeError("Gateway consecutive generation failure limit exhausted")
+
+    def stop_agent() -> None:
+        nonlocal stop_attempted
+        stop_attempted = True
         request_execute(
             base_url,
             [
@@ -334,29 +322,75 @@ def wait_for_agent_turn(
             timeout=30,
         )
         time.sleep(3)
-        done_raw = fetch_guest_file(base_url, GUEST_DONE)
-        if done_raw:
-            candidate = json.loads(done_raw)
-            if candidate.get("turn_token") == expected_turn_token:
-                done_payload = candidate
 
-    trace_raw = save_guest_artifact(
-        base_url,
-        GUEST_TRACE,
-        result_dir / f"{label}-agent.jsonl",
-    )
-    stderr_raw = save_guest_artifact(
-        base_url,
-        GUEST_STDERR,
-        result_dir / f"{label}-agent.stderr",
-    )
-    final_raw = save_guest_artifact(
-        base_url,
-        GUEST_FINAL,
-        result_dir / f"{label}-final.txt",
-    )
-    append_artifact(result_dir / "agent.jsonl", trace_raw)
-    append_artifact(result_dir / "agent.stderr", stderr_raw)
+    artifacts = {}
+    original_error = None
+    try:
+        last_progress = time.monotonic()
+        completed_responses = count_model_requests(token_log, affinity_task)
+        while time.monotonic() < min(deadline, last_progress + MODEL_PROGRESS_TIMEOUT_SEC):
+            validate_budget()
+            done_raw = fetch_guest_file(base_url, GUEST_DONE)
+            if done_raw:
+                candidate = json.loads(done_raw)
+                if candidate.get("turn_token") == expected_turn_token:
+                    done_payload = candidate
+                    break
+            watchdog.check(base_url, label)
+            observed = count_model_requests(token_log, affinity_task)
+            if observed > completed_responses:
+                completed_responses = observed
+                last_progress = time.monotonic()
+            # Response N may still execute tools; only rejection of N+1 stops it.
+            if task_model_budget_rejected(token_log, affinity_task):
+                budget_exhausted = True
+                break
+            time.sleep(settings.poll_interval)
+
+        validate_budget()
+        budget_exhausted = budget_exhausted or task_model_budget_rejected(token_log, affinity_task)
+        truncated = done_payload is None or budget_exhausted
+        if truncated:
+            stop_agent()
+            done_raw = fetch_guest_file(base_url, GUEST_DONE)
+            if done_raw:
+                candidate = json.loads(done_raw)
+                if candidate.get("turn_token") == expected_turn_token:
+                    done_payload = candidate
+            validate_budget()
+            budget_exhausted = budget_exhausted or task_model_budget_rejected(token_log, affinity_task)
+    except BaseException as exc:
+        original_error = exc
+        raise
+    finally:
+        # Preserve every available artifact before outer cleanup destroys the guest.
+        # Secondary stop/export errors must not replace the original failure.
+        if original_error is not None and not stop_attempted:
+            try:
+                stop_agent()
+            except Exception:
+                logging.exception("Failed to stop agent while preserving turn failure")
+        export_error = None
+        for guest_path, suffix, aggregate in (
+            (GUEST_TRACE, "agent.jsonl", "agent.jsonl"),
+            (GUEST_STDERR, "agent.stderr", "agent.stderr"),
+            (GUEST_FINAL, "final.txt", None),
+        ):
+            try:
+                data = save_guest_artifact(base_url, guest_path, result_dir / f"{label}-{suffix}")
+                artifacts[guest_path] = data
+                if aggregate:
+                    append_artifact(result_dir / aggregate, data)
+            except Exception as exc:
+                logging.exception("Failed to preserve turn artifact %s", guest_path)
+                if export_error is None:
+                    export_error = exc
+        if original_error is None and export_error is not None:
+            raise export_error
+
+    trace_raw = artifacts.get(GUEST_TRACE)
+    stderr_raw = artifacts.get(GUEST_STDERR)
+    final_raw = artifacts.get(GUEST_FINAL)
     final_message = (
         final_raw.decode("utf-8", errors="replace").strip()
         if final_raw else ""
@@ -386,7 +420,6 @@ def run_agent_phase(
     settings: TurnSettings,
     token_log: Path,
     affinity_task: str,
-    model_request_baseline: int,
     deadline: float,
     multi_phase: bool,
 ) -> dict:
@@ -466,7 +499,6 @@ def run_agent_phase(
             settings=settings,
             token_log=token_log,
             affinity_task=affinity_task,
-            model_request_baseline=model_request_baseline,
             expected_turn_token=label,
             workload_unit=workload_unit,
             deadline=deadline,
