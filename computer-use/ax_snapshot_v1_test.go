@@ -427,8 +427,6 @@ func TestTypedActionabilityEvidenceDoesNotClaimDelivery(t *testing.T) {
 		evidence,
 		axServiceRequest{Action: axClickCommand{}},
 		result,
-		settlePlan{},
-		settleOutcome{},
 		true,
 		nil,
 	)
@@ -1127,8 +1125,6 @@ func TestActionabilityUsesRuntimeRouteInsteadOfActionTypeGuess(t *testing.T) {
 		evidence,
 		axServiceRequest{Action: axTypeCommand{}},
 		toolCallResult{},
-		settlePlan{},
-		settleOutcome{},
 		true,
 		actual,
 	)
@@ -1196,8 +1192,6 @@ func TestFailedActionPreservesPartialRuntimeRoute(t *testing.T) {
 			"failure_code":         "post_emit_failure",
 			"input_events_emitted": true,
 		}},
-		settlePlan{},
-		settleOutcome{},
 		false,
 		actual,
 	)

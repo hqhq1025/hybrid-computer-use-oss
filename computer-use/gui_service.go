@@ -17,6 +17,10 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 	if err != nil {
 		return textResult(err.Error(), true).withEvidenceScope("error_only")
 	}
+	if err := checkGUIWaitBudget(providerActions); err != nil {
+		return withArgumentRule(
+			textResult(err.Error(), true).withEvidenceScope("error_only"), err)
+	}
 	if err := s.preflightPlatformGUIKeys(providerActions); err != nil {
 		return textResult(err.Error(), true).withEvidenceScope("error_only")
 	}
@@ -408,4 +412,23 @@ func guiObservationFailure(
 		result.StructuredContent = payload
 	}
 	return result
+}
+
+// checkGUIWaitBudget enforces the cumulative wait limit that the GUI
+// description states and the schema cannot express: each wait is one second
+// and a batch may wait at most guiMaxTotalWait seconds.
+func checkGUIWaitBudget(actions []ProviderDesktopAction) error {
+	waits := 0
+	for _, action := range actions {
+		if action.Type == "wait" {
+			waits++
+		}
+	}
+	if waits > guiMaxTotalWait {
+		return newArgumentRuleError(argumentRuleWaitBudget, fmt.Sprintf(
+			"GUI batch waits %ds; the maximum is %ds per batch. No action was emitted; "+
+				"split the batch and inspect the screenshot between waits",
+			waits, guiMaxTotalWait))
+	}
+	return nil
 }

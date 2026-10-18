@@ -23,11 +23,11 @@ const (
 )
 
 func parseA11yMode(args map[string]any) (string, error) {
-	mode := strings.ToLower(strings.TrimSpace(optionalString(args, "mode")))
-	if mode == "" {
+	if _, present := args["mode"]; !present {
 		return "", errors.New(
 			"mode is required and must be observe, find, act, or assert_ax")
 	}
+	mode := optionalString(args, "mode")
 	switch mode {
 	case a11yModeObserve, a11yModeFind, a11yModeAct, a11yModeAssert:
 		return mode, nil
@@ -41,27 +41,29 @@ func a11yModeFields(mode string, args map[string]any) map[string]bool {
 	fields := map[string]bool{"mode": true}
 	switch mode {
 	case a11yModeObserve:
-		if strings.ToLower(strings.TrimSpace(
-			optionalString(args, "observation_target"),
-		)) == "apps" {
+		if optionalString(args, "observation_target") == "apps" {
 			fields["observation_target"] = true
 			return fields
 		}
 		for _, field := range []string{
 			"observation_target", "app", "app_ref", "window_ref",
-			"actions", "observe",
-			"scope", "root",
+			"observe", "scope", "root",
 		} {
 			fields[field] = true
 		}
 	case a11yModeFind:
+		// A cursor continues a prior find; only then does the top-level
+		// limit apply. A new search takes its limit inside query.
+		if _, continuing := args["cursor"]; continuing {
+			fields["cursor"] = true
+			fields["limit"] = true
+			return fields
+		}
 		fields["app"] = true
 		fields["app_ref"] = true
 		fields["window_ref"] = true
 		fields["query"] = true
 		fields["scope"] = true
-		fields["cursor"] = true
-		fields["limit"] = true
 	case a11yModeAct:
 		fields["window_ref"] = true
 		fields["actions"] = true
@@ -81,9 +83,10 @@ func (s *service) resolveA11yReadIdentity(
 	args map[string]any,
 	target string,
 ) (*a11yReadContext, error) {
-	app := strings.TrimSpace(optionalString(args, "app"))
-	appRef := strings.TrimSpace(optionalString(args, "app_ref"))
-	windowRef := strings.TrimSpace(optionalString(args, "window_ref"))
+	app, appRef, windowRef, err := readIdentityArguments(args)
+	if err != nil {
+		return nil, err
+	}
 	if app != "" && (appRef != "" || windowRef != "") {
 		return nil, errors.New("app cannot be combined with app_ref or window_ref")
 	}
@@ -100,10 +103,10 @@ func (s *service) resolveA11yReadIdentity(
 		context.windowRef = entry.LogicalWindowRef
 		context.windowHandle = entry.WindowHandle
 		if windowRef != "" && entry.LogicalWindowRef != windowRef {
-			return nil, fmt.Errorf(
+			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity, fmt.Sprintf(
 				"target %s belongs to window %s, not %s",
 				target, entry.LogicalWindowRef, windowRef,
-			)
+			))
 		}
 	}
 	if windowRef != "" {
@@ -112,10 +115,10 @@ func (s *service) resolveA11yReadIdentity(
 			return nil, err
 		}
 		if context.appRef != "" && entry.AppRef != context.appRef {
-			return nil, fmt.Errorf(
+			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity, fmt.Sprintf(
 				"target owner %s conflicts with window owner %s",
 				context.appRef, entry.AppRef,
-			)
+			))
 		}
 		context.appRef = entry.AppRef
 		context.windowRef = entry.Ref
@@ -126,16 +129,16 @@ func (s *service) resolveA11yReadIdentity(
 			return nil, err
 		}
 		if context.appRef != "" && context.appRef != appRef {
-			return nil, fmt.Errorf(
+			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity, fmt.Sprintf(
 				"target owner %s conflicts with app_ref %s",
 				context.appRef, appRef,
-			)
+			))
 		}
 		context.appRef = appRef
 	}
 	if context.appRef != "" {
 		if app != "" {
-			return nil, errors.New(
+			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity,
 				"app cannot be combined with a ref-owned target",
 			)
 		}
@@ -147,6 +150,32 @@ func (s *service) resolveA11yReadIdentity(
 		return context, nil
 	}
 	return nil, errors.New("one of app, app_ref, window_ref, or an owned rN target is required")
+}
+
+// readIdentityArguments reads app, app_ref and window_ref. A present field
+// must be a non-blank string; refs must be exact short refs. An absent field
+// is returned as "".
+func readIdentityArguments(args map[string]any) (app, appRef, windowRef string, err error) {
+	read := func(key string, valid func(string) bool, shape string) (string, error) {
+		raw, present := args[key]
+		if !present {
+			return "", nil
+		}
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) == "" || (valid != nil && !valid(value)) {
+			return "", fmt.Errorf("%s must be %s", key, shape)
+		}
+		return value, nil
+	}
+	if app, err = read("app", nil, "a non-blank app name, app id, or PID string"); err != nil {
+		return
+	}
+	app = strings.TrimSpace(app)
+	if appRef, err = read("app_ref", isShortAXAppRef, "an app ref aN copied from observe"); err != nil {
+		return
+	}
+	windowRef, err = read("window_ref", isShortAXWindowRef, "a window ref wN copied from observe/find")
+	return
 }
 
 func validateA11yModeFields(mode string, args map[string]any) error {
@@ -167,9 +196,7 @@ func validateA11yModeFields(mode string, args map[string]any) error {
 	}
 	context := fmt.Sprintf("mode=%q", mode)
 	if mode == a11yModeObserve &&
-		strings.ToLower(strings.TrimSpace(
-			optionalString(args, "observation_target"),
-		)) == "apps" {
+		optionalString(args, "observation_target") == "apps" {
 		context += ` with observation_target="apps"`
 	}
 	message := fmt.Sprintf(
@@ -246,12 +273,10 @@ func (s *service) a11yObserve(
 	args map[string]any,
 	obs observation,
 ) toolCallResult {
-	target := defaultString(
-		strings.ToLower(strings.TrimSpace(
-			optionalString(args, "observation_target"),
-		)),
-		"app",
-	)
+	target := "app"
+	if raw, present := args["observation_target"]; present {
+		target, _ = raw.(string)
+	}
 	switch target {
 	case "apps":
 		result := s.listApps().withEvidenceScope("app_inventory")
@@ -266,21 +291,6 @@ func (s *service) a11yObserve(
 		return textResult(
 			"observation_target must be app or apps", true,
 		).withEvidenceScope("error_only")
-	}
-	if raw, present := args["actions"]; present {
-		actions, ok := raw.([]any)
-		if !ok {
-			return textResult(
-				"mode=\"observe\" actions must be an empty array when supplied",
-				true,
-			).withEvidenceScope("error_only")
-		}
-		if len(actions) != 0 {
-			return textResult(
-				"mode=\"observe\" cannot execute actions; use mode=\"act\"",
-				true,
-			).withEvidenceScope("error_only")
-		}
 	}
 	if obs.resolvedMode() == observeNone {
 		return textResult(
@@ -335,16 +345,12 @@ func (s *service) a11yFind(
 	args map[string]any,
 	obs observation,
 ) toolCallResult {
-	if cursor := strings.TrimSpace(optionalString(args, "cursor")); cursor != "" {
-		for _, field := range []string{
-			"app", "app_ref", "window_ref", "query", "scope",
-		} {
-			if _, present := args[field]; present {
-				return textResult(
-					"AX find cursor continuation accepts only mode, cursor, and limit",
-					true,
-				).withEvidenceScope("error_only")
-			}
+	if rawCursor, continuing := args["cursor"]; continuing {
+		cursor, _ := rawCursor.(string)
+		if !isShortAXFindCursor(cursor) {
+			return textResult(
+				"cursor must be a find cursor fN copied from find", true,
+			).withEvidenceScope("error_only")
 		}
 		limit, err := optionalPositiveInt(args, "limit")
 		if err != nil {
@@ -395,19 +401,28 @@ func (s *service) a11yFind(
 			true,
 		).withEvidenceScope("error_only")
 	}
-	if optionalString(query, "name_contains") != "" &&
-		optionalString(query, "name_equals") != "" {
-		return textResult(
-			"find.query accepts only one of name_contains or name_equals",
-			true,
-		).withEvidenceScope("error_only")
+	for _, field := range []string{
+		"role", "name_contains", "name_equals", "text_contains", "text_equals", "state",
+	} {
+		if raw, present := query[field]; present {
+			if _, ok := raw.(string); !ok {
+				return textResult(
+					"find.query."+field+" must be a string", true,
+				).withEvidenceScope("error_only")
+			}
+		}
 	}
-	if optionalString(query, "text_contains") != "" &&
-		optionalString(query, "text_equals") != "" {
-		return textResult(
-			"find.query accepts only one of text_contains or text_equals",
-			true,
-		).withEvidenceScope("error_only")
+	for _, pair := range [][2]string{
+		{"name_contains", "name_equals"}, {"text_contains", "text_equals"},
+	} {
+		_, first := query[pair[0]]
+		_, second := query[pair[1]]
+		if first && second {
+			return textResult(
+				"find.query accepts only one of "+pair[0]+" or "+pair[1],
+				true,
+			).withEvidenceScope("error_only")
+		}
 	}
 	limit, err := optionalPositiveInt(query, "limit")
 	if err != nil {
@@ -427,16 +442,14 @@ func (s *service) a11yFind(
 		return textResult(err.Error(), true).withEvidenceScope("error_only")
 	}
 	name := optionalString(query, "name_contains")
-	nameExact := false
-	if exact := optionalString(query, "name_equals"); exact != "" {
-		name = exact
-		nameExact = true
+	_, nameExact := query["name_equals"]
+	if nameExact {
+		name = optionalString(query, "name_equals")
 	}
 	text := optionalString(query, "text_contains")
-	textExact := false
-	if exact := optionalString(query, "text_equals"); exact != "" {
-		text = exact
-		textExact = true
+	_, textExact := query["text_equals"]
+	if textExact {
+		text = optionalString(query, "text_equals")
 	}
 	result := s.find(
 		readContext.appToken,
@@ -465,15 +478,19 @@ func (s *service) a11yAssert(
 	if err != nil {
 		return textResult(err.Error(), true).withEvidenceScope("error_only")
 	}
+	scope, err := parseA11yScope(args)
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
 	timeoutMS := spec.timeoutMS
 	stableMS := spec.stableMS
 	assertionType := spec.assertionType
 	targetAddress := spec.targetAddress
 	readContext, identityErr := s.resolveA11yReadIdentity(args, targetAddress)
 	if identityErr != nil {
-		return textResult(
+		return withArgumentRule(textResult(
 			"AX assertion target: "+identityErr.Error(), true,
-		).withEvidenceScope("error_only")
+		).withEvidenceScope("error_only"), identityErr)
 	}
 	if assertionType == "window_title_contains" {
 		windowTitle := strings.TrimSpace(
@@ -503,29 +520,7 @@ func (s *service) a11yAssert(
 		result.StructuredContent["task_completion_verified"] = false
 		return result
 	}
-	scope, err := parseA11yScope(args)
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-	goal := verifyGoal{}
-	switch assertionType {
-	case "exists":
-		goal.exists = optionalBool(assertion, "value")
-	case "state":
-		state := strings.TrimSpace(optionalString(assertion, "state"))
-		expected := optionalBool(assertion, "value")
-		if !*expected {
-			state = "!" + state
-		}
-		goal.state = state
-	case "value_contains":
-		goal.valueContains = optionalString(assertion, "value")
-	case "value_equals":
-		goal.valueEquals, goal.valueEqualsKind, _ =
-			assertionScalarString(assertion, "value")
-	case "text_contains":
-		goal.textContains = optionalString(assertion, "text")
-	}
+	goal := spec.goal
 	target := targetAddress
 	if target == "" {
 		return textResult(
@@ -626,13 +621,16 @@ func (s *service) a11yAct(
 			)
 		}
 	}
+	_, _, windowRef, err := readIdentityArguments(args)
+	if err != nil {
+		return a11yBatchValidationError(err.Error(), 0)
+	}
 	result := s.a11yBatch(
-		"",
 		rawActions,
 		obs,
 		postcondition,
 		"",
-		optionalString(args, "window_ref"),
+		windowRef,
 	).withEvidenceScope("delivery_or_local_ui")
 	return withA11yModeEvidence(result, a11yModeAct)
 }

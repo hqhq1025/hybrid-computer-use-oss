@@ -102,6 +102,7 @@ var contractCalls = []struct {
 	}}},
 	{"GUI", map[string]any{"actions": []any{map[string]any{"type": "screenshot"}}}},
 	{"Nope", map[string]any{}},
+	{" ax ", map[string]any{"mode": "observe", "observation_target": "apps"}},
 }
 
 type contractExchange struct {

@@ -32,7 +32,7 @@ func TestListAppsPreservesProviderDisplayTextAndInjectsRef(t *testing.T) {
 func TestAXObserveRejectsGuessedWholeTreeGeometry(t *testing.T) {
 	service := newService()
 	result := service.dispatch(
-		"a11y",
+		publicToolAX,
 		map[string]any{
 			"mode":  "observe",
 			"app":   "editor",
@@ -87,7 +87,7 @@ func TestChannelCapabilitySwitch(t *testing.T) {
 	// A direct call must be refused as well, and the error must say that the
 	// channel is disabled rather than that the tool does not exist.
 	service := newService()
-	result := service.callTool("gui", map[string]any{"actions": []any{}})
+	result := service.callTool(publicToolGUI, map[string]any{"actions": []any{}})
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "channel, which is disabled") {
 		t.Fatalf("a direct call to a disabled channel's tool must explain the refusal: %#v", result)
 	}
@@ -105,7 +105,7 @@ func TestA11yReadModesKeepTheirEvidenceBoundaries(t *testing.T) {
 		}
 	}
 
-	if got := toolEvidenceScope("a11y", map[string]any{
+	if got := toolEvidenceScope(publicToolAX, map[string]any{
 		"mode": "observe", "observation_target": "apps",
 	}); got != "app_inventory" {
 		t.Fatalf("apps observation evidence scope=%q", got)
@@ -115,11 +115,11 @@ func TestA11yReadModesKeepTheirEvidenceBoundaries(t *testing.T) {
 		{"mode": "find"},
 		{"mode": "assert_ax"},
 	} {
-		if got := toolEvidenceScope("a11y", args); got != "independent_ui_read" {
+		if got := toolEvidenceScope(publicToolAX, args); got != "independent_ui_read" {
 			t.Fatalf("%v evidence scope=%q", args, got)
 		}
 	}
-	if got := toolEvidenceScope("a11y", map[string]any{
+	if got := toolEvidenceScope(publicToolAX, map[string]any{
 		"mode": "act",
 	}); got != "delivery_or_local_ui" {
 		t.Fatalf("act evidence scope=%q", got)
@@ -165,7 +165,7 @@ func TestA11yReadModesKeepTheirEvidenceBoundaries(t *testing.T) {
 
 func TestPreflightOnlyErrorsDoNotCaptureFreshUIContext(t *testing.T) {
 	service := newService()
-	result := service.callTool("a11y", map[string]any{
+	result := service.callTool(publicToolAX, map[string]any{
 		"mode":    "find",
 		"app":     "Editor",
 		"query":   map[string]any{"name": "Save"},
@@ -270,7 +270,7 @@ func TestCallToolAppliesAXImagePolicyAtSharedOutputBoundary(t *testing.T) {
 
 func TestInvalidStructuredAssertionFailsBeforeFreshUIRead(t *testing.T) {
 	service := newService()
-	result := service.callTool("a11y", map[string]any{
+	result := service.callTool(publicToolAX, map[string]any{
 		"mode": "assert_ax",
 		"app":  "Editor",
 		"assertion": map[string]any{
@@ -316,7 +316,7 @@ func TestGUISchemaUsesComputerScrollNamesAndExcludesWindowActions(t *testing.T) 
 		{"actions": []any{}, "settle_ms": 100},
 		{"actions": []any{}, "expect_change": true},
 	} {
-		result := service.dispatch("gui", args)
+		result := service.dispatch(publicToolGUI, args)
 		if !result.IsError {
 			t.Fatalf("GUI accepted removed compatibility input: %#v", args)
 		}
@@ -324,7 +324,7 @@ func TestGUISchemaUsesComputerScrollNamesAndExcludesWindowActions(t *testing.T) 
 }
 
 func TestGUIObservationRejectsSettleBeforeRuntime(t *testing.T) {
-	result := newService().dispatch("gui", map[string]any{
+	result := newService().dispatch(publicToolGUI, map[string]any{
 		"actions": []any{map[string]any{
 			"type": "screenshot",
 		}},

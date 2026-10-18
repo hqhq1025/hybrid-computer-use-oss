@@ -139,10 +139,8 @@ func (s *service) stabilizePostActionTransientCommit(
 	app string,
 	after *appSnapshot,
 	request axServiceRequest,
-	plan settlePlan,
 ) (*appSnapshot, []string, bool, bool) {
 	if s == nil ||
-		plan.expect != nil ||
 		(observation{mode: request.Observe}).resolvedMode() == observeNone ||
 		after == nil ||
 		after.externalDesktopTransition ||
@@ -350,11 +348,9 @@ func shouldStabilizePostActionContent(
 	service *service,
 	after *appSnapshot,
 	request axServiceRequest,
-	plan settlePlan,
 	identityStabilized bool,
 ) bool {
 	if service == nil ||
-		plan.expect != nil ||
 		identityStabilized ||
 		request.WindowAction != nil ||
 		(observation{mode: request.Observe}).resolvedMode() != observeDiff ||
@@ -426,14 +422,12 @@ func (s *service) stabilizePostActionContent(
 	app string,
 	after *appSnapshot,
 	request axServiceRequest,
-	plan settlePlan,
 	identityStabilized bool,
 ) (*appSnapshot, []string, bool, bool) {
 	if !shouldStabilizePostActionContent(
 		s,
 		after,
 		request,
-		plan,
 		identityStabilized,
 	) {
 		return after, nil, false, false
@@ -489,7 +483,7 @@ func (s *service) stabilizePostActionContent(
 	return refreshed, notes, true, true
 }
 
-func (s *service) actionResultSettling(app string, request axServiceRequest, plan settlePlan) toolCallResult {
+func (s *service) actionResult(app string, request axServiceRequest) toolCallResult {
 	// The pre-action state is already cached (actions require a prior
 	// observation, and every action refreshes the cache), so the before/after
 	// comparison needs no extra tree traversal.
@@ -547,8 +541,6 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 					*request.Actionability,
 					request,
 					result,
-					plan,
-					settleOutcome{},
 					false,
 					actual,
 				),
@@ -574,30 +566,9 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 		response.StructuredContent["final_observation_returned"] = false
 		response.StructuredContent["observation_required"] = false
 		response.StructuredContent["delivery_only"] = true
-		return withActionOutcomeForRequest(
-			response,
-			request,
-			plan,
-			settleOutcome{},
-			snapshot,
-			notes,
-		)
+		return withActionOutcomeForRequest(response, request, snapshot)
 	}
 	immediateSnapshot := snapshot
-	immediateNotes := append([]string(nil), notes...)
-	// The settle step of act, settle and verify runs here, before any later
-	// note is derived: the formatting comparison, the unchanged-state check,
-	// the incremental tree and the observation chosen by observe must all
-	// read the settled UI rather than a snapshot that has not stabilized.
-	var outcome settleOutcome
-	if plan.expect != nil {
-		outcome = s.settle(
-			app, plan, before, snapshot, request.IncludeScreenshot, request.ScreenshotScope)
-		if outcome.snapshot != nil {
-			snapshot = outcome.snapshot
-		}
-		notes = settledActionNotes(immediateSnapshot, immediateNotes, outcome)
-	}
 	var transientCommitNotes []string
 	var transientCommitStabilized bool
 	snapshot, transientCommitNotes, _,
@@ -605,7 +576,6 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 		app,
 		snapshot,
 		request,
-		plan,
 	)
 	notes = append(notes, transientCommitNotes...)
 	var stabilizationNotes []string
@@ -632,7 +602,6 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 		app,
 		snapshot,
 		request,
-		plan,
 		identityStabilized,
 	)
 	notes = append(notes, contentStabilizationNotes...)
@@ -652,11 +621,7 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 			strings.Join(shown, " | ") +
 			". The snapshot renders structure, not formatting, so the tree can look unchanged while this does not. Treat this as supporting evidence rather than proof: a page can also restyle itself on its own. Obvious repaint noise (a web font replacing the fallback font, colour shifts too small to see) is already filtered out."}, notes...)
 	}
-	// A verified expect skips the unchanged-state notes: the predicate is
-	// stronger evidence than the tree comparison, and reporting both would
-	// contradict itself ("no observable change" next to "a dialog appeared").
-	semanticUnchanged :=
-		before != nil && !observablyChanged(before, snapshot) && !outcome.verified
+	semanticUnchanged := before != nil && !observablyChanged(before, snapshot)
 	if semanticUnchanged {
 		// A semantic action can report success while nothing happens: some
 		// toolkits accept actions such as `menu`, `activate` or `Toggle` and
@@ -677,13 +642,6 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 		} else {
 			notes = append(notes, unchangedNotes(false, readPixelVerdict(notes), readTextAttributeChange(notes))...)
 		}
-	}
-	// The expect verdict comes last because it is the call's final answer; the
-	// earlier notes are clues. It goes into notes, which every observe mode
-	// returns, including "none": a verdict is not observation, and returning
-	// less observation must never drop it.
-	if plan.expect != nil {
-		notes = append(notes, expectNote(plan, outcome, request, notes))
 	}
 	// Trace last, once notes are complete (pixel verdict, state readback and
 	// resolved target), because those notes matter most on review.
@@ -829,14 +787,7 @@ func (s *service) actionResultSettling(app string, request axServiceRequest, pla
 				"Do not repeat the AX action; take one fresh GUI screenshot.\n",
 		})
 	}
-	response = withActionOutcomeForRequest(
-		response,
-		request,
-		plan,
-		outcome,
-		immediateSnapshot,
-		immediateNotes,
-	)
+	response = withActionOutcomeForRequest(response, request, immediateSnapshot)
 	response = markUnchangedMutationUncertainty(
 		response,
 		semanticUnchanged,
@@ -883,47 +834,13 @@ func (s *service) rememberDeliveredActionObservation(
 func withActionOutcomeForRequest(
 	response toolCallResult,
 	request axServiceRequest,
-	plan settlePlan,
-	outcome settleOutcome,
 	immediateSnapshot *appSnapshot,
-	immediateNotes []string,
 ) toolCallResult {
 	if response.StructuredContent == nil {
 		response.StructuredContent = map[string]any{}
 	}
 	response.StructuredContent["action_attempted"] = true
-	response.StructuredContent["predicate_checked"] = plan.expect != nil
-	if plan.expect != nil {
-		response.StructuredContent["predicate_verified"] = outcome.verified
-		response.StructuredContent["verification_complete"] =
-			!outcome.verificationIncomplete
-		response.StructuredContent["followup_read_failed"] =
-			outcome.followupReadFailed
-		response.StructuredContent["settled_after_ms"] = outcome.elapsedMS
-		response.StructuredContent["followup_snapshot_used"] =
-			outcome.snapshotFromFollowup
-		response.StructuredContent["response_snapshot_phase"] = "immediate"
-		if immediateSnapshot != nil {
-			response.StructuredContent["immediate_snapshot_id"] =
-				immediateSnapshot.SnapshotID
-		}
-		if outcome.snapshot != nil {
-			response.StructuredContent["final_snapshot_id"] =
-				outcome.snapshot.SnapshotID
-		}
-		if outcome.snapshotFromFollowup {
-			response.StructuredContent["response_snapshot_phase"] = "settled"
-			if readPixelVerdict(immediateNotes) != pixelsUnknown {
-				response.StructuredContent["pixel_evidence_phase"] =
-					"immediate"
-				response.StructuredContent["final_pixel_verdict"] =
-					"unavailable"
-			}
-		} else if readPixelVerdict(immediateNotes) != pixelsUnknown {
-			response.StructuredContent["pixel_evidence_phase"] =
-				"immediate_and_final"
-		}
-	}
+	response.StructuredContent["predicate_checked"] = false
 	if request.Actionability != nil {
 		response = attachActionabilityEvidence(
 			response,
@@ -931,8 +848,6 @@ func withActionOutcomeForRequest(
 				*request.Actionability,
 				request,
 				response,
-				plan,
-				outcome,
 				true,
 				immediateSnapshot.actionExecution,
 			),

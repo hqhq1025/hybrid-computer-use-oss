@@ -38,21 +38,8 @@ func (s *service) verifyResolvedAXRefWithProbe(
 
 // withActionOutcome applies an outcome without request facts, so no
 // actionability evidence is attached.
-func withActionOutcome(
-	response toolCallResult,
-	plan settlePlan,
-	outcome settleOutcome,
-	immediateSnapshot *appSnapshot,
-	immediateNotes []string,
-) toolCallResult {
-	return withActionOutcomeForRequest(
-		response,
-		axServiceRequest{},
-		plan,
-		outcome,
-		immediateSnapshot,
-		immediateNotes,
-	)
+func withActionOutcome(response toolCallResult) toolCallResult {
+	return withActionOutcomeForRequest(response, axServiceRequest{}, nil)
 }
 
 func lookupElement(snapshot *appSnapshot, elementIndex string) (*elementRecord, error) {

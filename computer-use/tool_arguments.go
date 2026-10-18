@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -36,7 +37,10 @@ func a11yTargetAddress(args map[string]any) (string, bool, error) {
 		)
 	}
 	if rawIndex, ok := target["index"]; ok {
-		address := strings.TrimSpace(elementIndexString(rawIndex))
+		if _, isString := rawIndex.(string); isString {
+			return "", true, errors.New("target.index must be an integer")
+		}
+		address := elementIndexString(rawIndex)
 		if address == "" || !numericElementAddress(address) {
 			return "", true, errors.New("target.index must be an integer")
 		}
@@ -48,10 +52,9 @@ func a11yTargetAddress(args map[string]any) (string, bool, error) {
 	}
 	if rawRef, ok := target["ref"]; ok {
 		ref, ok := rawRef.(string)
-		if !ok || strings.TrimSpace(ref) == "" {
+		if !ok || ref == "" {
 			return "", true, errors.New("target.ref must be a non-empty rN or wN string")
 		}
-		ref = strings.TrimSpace(ref)
 		if !isShortAXRef(ref) &&
 			!isShortAXWindowRef(ref) {
 			return "", true, errors.New(
@@ -96,12 +99,16 @@ func a11ySelectorAddress(selector map[string]any) (string, error) {
 	}
 	for field := range allowed {
 		if value, present := selector[field]; present {
-			if _, ok := value.(string); !ok {
-				return "", fmt.Errorf("%s must be a string", field)
+			text, ok := value.(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				return "", fmt.Errorf("%s must be a non-blank string", field)
 			}
 		}
 	}
 	role := strings.TrimSpace(optionalString(selector, "role"))
+	if strings.ContainsAny(role, `[]"`) {
+		return "", errors.New(`role must not contain [, ] or "`)
+	}
 	name := strings.TrimSpace(optionalString(selector, "name"))
 	address := selectorHead(role, name)
 	predicates := make([]string, 0, 4)
@@ -117,9 +124,7 @@ func a11ySelectorAddress(selector map[string]any) (string, error) {
 		predicates = append(predicates,
 			"[placeholder="+strconv.Quote(placeholder)+"]")
 	}
-	if state := strings.ToLower(strings.TrimSpace(
-		optionalString(selector, "state"),
-	)); state != "" {
+	if state := optionalString(selector, "state"); state != "" {
 		if !publicSelectorStateWords[state] {
 			return "", fmt.Errorf(
 				"unsupported state %q; use checked, expanded, selected, or focused",
@@ -212,8 +217,8 @@ func optionalNonNegativeInt(
 		}
 		integer = int64(typed)
 	case json.Number:
-		parsed, err := typed.Int64()
-		if err != nil {
+		parsed, ok := jsonInteger(typed)
+		if !ok {
 			return nil, invalid
 		}
 		integer = parsed
@@ -237,14 +242,27 @@ func positiveIntFromValue(value any, key string) (*int, error) {
 		}
 		return positiveIntFromFloat64(typed, key)
 	case json.Number:
-		integer, err := typed.Int64()
-		if err != nil {
+		integer, ok := jsonInteger(typed)
+		if !ok {
 			return nil, fmt.Errorf("%s must be a positive integer", key)
 		}
 		return positiveIntFromInt64(integer, key)
 	default:
 		return nil, fmt.Errorf("%s must be a positive integer", key)
 	}
+}
+
+// jsonInteger reads a JSON number as an integer. JSON Schema treats any
+// number with a zero fractional part as an integer, so 5.0 and 5e3 count.
+func jsonInteger(number json.Number) (int64, bool) {
+	if integer, err := number.Int64(); err == nil {
+		return integer, true
+	}
+	rational, ok := new(big.Rat).SetString(number.String())
+	if !ok || !rational.IsInt() || !rational.Num().IsInt64() {
+		return 0, false
+	}
+	return rational.Num().Int64(), true
 }
 
 func positiveIntFromFloat64(value float64, key string) (*int, error) {
@@ -308,39 +326,32 @@ func (o observation) resolvedScreenshot() *bool {
 	}
 }
 
+// parseObservation reads the optional observe argument. Values are exact:
+// the published enum is the only accepted spelling.
 func parseObservation(args map[string]any) (observation, error) {
-	obs := observation{}
-	raw := strings.TrimSpace(strings.ToLower(optionalString(args, "observe")))
-	if raw == "" {
-		return obs, nil
+	raw, present := args["observe"]
+	if !present {
+		return observation{}, nil
 	}
-	// "notes" is a legacy alias of "none"; it is accepted but not advertised.
-	if raw == "notes" {
-		raw = observeNone
-	}
-	for _, value := range observeValues {
-		if raw == value {
-			obs.mode = raw
-			return obs, nil
+	value, _ := raw.(string)
+	for _, allowed := range observeValues {
+		if value == allowed {
+			return observation{mode: value}, nil
 		}
 	}
 	return observation{}, fmt.Errorf(
-		"invalid observe %q. Valid values are %s. Omit it for the default %q, which "+
+		"invalid observe %s. Valid values are %s. Omit it for the default %q, which "+
 			"returns only what changed since the previous tree state delivered to the model.",
-		optionalString(args, "observe"), strings.Join(observeValues, ", "), observeDiff)
+		compactJSON(raw), strings.Join(observeValues, ", "), observeDiff)
 }
 
+// optionalBool returns the JSON boolean stored under key, or nil when the key
+// is absent or holds any other type. Strings are never coerced: "yes" used to
+// decode as false and silently inverted an assertion.
 func optionalBool(args map[string]any, key string) *bool {
-	value, ok := args[key]
+	flag, ok := args[key].(bool)
 	if !ok {
 		return nil
 	}
-	if flag, ok := value.(bool); ok {
-		return &flag
-	}
-	if text, ok := value.(string); ok {
-		flag := text == "true"
-		return &flag
-	}
-	return nil
+	return &flag
 }

@@ -2270,3 +2270,32 @@ class GUIScreenCoordinateTests(unittest.TestCase):
             [event[0] for event in events],
             ["click", "drag", "scroll", "type", "key"],
         )
+
+
+class GUISchemaContractTests(unittest.TestCase):
+    """The Linux GUI validator accepts exactly what the published GUI schema
+    accepts. The Go test TestGUIActionSamplesMatchSchema writes the samples
+    and their schema verdicts; key-name resolution needs a display and is
+    stubbed, because the schema leaves key names open."""
+
+    def test_validate_gui_action_matches_published_schema(self):
+        path = Path(__file__).resolve().parent.parent / "testdata" / "contract" / "gui_action_samples.json"
+        samples = json.loads(path.read_text())
+        self.assertGreater(len(samples), 100)
+        mismatches = []
+        # Whether a key chord names real keys (a modifier before the main
+        # key, a resolvable keysym) needs the keyboard map; the schema leaves
+        # key names open, so parse_key is stubbed.
+        with mock.patch.object(runtime, "keycode", return_value=1), \
+                mock.patch("native.linux.provider.ax_actions.keycode", return_value=1), \
+                mock.patch("native.linux.provider.ax_actions.parse_key", return_value=([], "a")):
+            for sample in samples:
+                try:
+                    runtime.validate_gui_action(sample["action"])
+                    accepted = True
+                except RuntimeError:
+                    accepted = False
+                if accepted != sample["accepted"]:
+                    mismatches.append((sample["origin"], sample["action"], sample["accepted"]))
+        self.maxDiff = None
+        self.assertEqual(mismatches[:20], [], "{} GUI schema/provider mismatches".format(len(mismatches)))

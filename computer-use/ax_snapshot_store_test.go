@@ -515,7 +515,6 @@ func TestTransientCommitProbeReturnsReplacementWindow(t *testing.T) {
 				Action:  axKeypressCommand{Key: "ENTER"},
 				Observe: string(observeDiff),
 			},
-			settlePlan{},
 		)
 	if !attempted || !stabilized {
 		t.Fatalf("transient transition status=%t/%t", attempted, stabilized)

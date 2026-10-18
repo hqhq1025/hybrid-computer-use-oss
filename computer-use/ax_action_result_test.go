@@ -101,7 +101,6 @@ func TestFocusedFallbackTriggersOneContentStabilizationRead(t *testing.T) {
 		service,
 		&unchanged,
 		request,
-		settlePlan{},
 		false,
 	) {
 		t.Fatal("hidden canonical change suppressed a zero-change diff refresh")
@@ -110,19 +109,9 @@ func TestFocusedFallbackTriggersOneContentStabilizationRead(t *testing.T) {
 		service,
 		current,
 		request,
-		settlePlan{},
 		false,
 	) {
 		t.Fatal("focused fallback did not request one bounded content refresh")
-	}
-	if shouldStabilizePostActionContent(
-		service,
-		current,
-		request,
-		settlePlan{expect: &expectSpec{}},
-		false,
-	) {
-		t.Fatal("explicit postcondition settling must not receive an extra refresh")
 	}
 	windowAction := WindowActivate
 	request.WindowAction = &windowAction
@@ -130,7 +119,6 @@ func TestFocusedFallbackTriggersOneContentStabilizationRead(t *testing.T) {
 		service,
 		current,
 		request,
-		settlePlan{},
 		false,
 	) {
 		t.Fatal("window actions must use window identity or lifecycle handling")
@@ -141,7 +129,6 @@ func TestFocusedFallbackTriggersOneContentStabilizationRead(t *testing.T) {
 		service,
 		current,
 		request,
-		settlePlan{},
 		false,
 	) {
 		t.Fatal("proved content transition should render directly without stabilization")
@@ -302,7 +289,6 @@ func TestTransientCommitClassificationIsGeneralAndObservationBounded(t *testing.
 				Action:  axKeypressCommand{Key: "ENTER"},
 				Observe: string(observeNone),
 			},
-			settlePlan{},
 		)
 	if attempted || stabilized || got != dialog || len(notes) != 0 {
 		t.Fatalf(
@@ -351,7 +337,6 @@ func TestTransientCommitProbeDoesNotAdoptSiblingWindow(t *testing.T) {
 				Action:  axKeypressCommand{Key: "ENTER"},
 				Observe: string(observeDiff),
 			},
-			settlePlan{},
 		)
 	if !attempted || stabilized || got != dialog || len(notes) != 0 {
 		t.Fatalf(
@@ -444,7 +429,6 @@ func TestTransientCommitProbeDoesNotCommitFailedReplacementRead(t *testing.T) {
 				Action:  axKeypressCommand{Key: "ENTER"},
 				Observe: string(observeDiff),
 			},
-			settlePlan{},
 		)
 	if !attempted || stabilized || got != dialog || len(notes) != 0 {
 		t.Fatalf(

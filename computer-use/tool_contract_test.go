@@ -107,16 +107,15 @@ func TestConsolidatedA11ySurfaceExposesOnlyA11yAndGUI(t *testing.T) {
 		t.Fatalf("consolidated surface exposed unexpected tools: %#v", names)
 	}
 
-	for public, internal := range map[string]string{
-		"AX":  "a11y",
-		"GUI": "gui",
-	} {
-		if got := internalToolName(public); got != internal {
-			t.Fatalf("public spelling %s normalized to %s, want %s",
-				public, got, internal)
+	for _, public := range []string{"AX", "GUI"} {
+		if got, ok := publicToolCallName(public); !ok || got != public {
+			t.Fatalf("public tool %s was not accepted exactly: %q %v", public, got, ok)
 		}
 	}
+	// Mismatch #1: MCP tool names are case-sensitive, so case and whitespace
+	// variants of the public names are unknown tools.
 	for _, legacy := range []string{
+		"ax", "Ax", " AX", "AX ", "gui", "Gui", " GUI ",
 		"a11y", "get_app_state", "find", "verify", "list_apps", "click",
 		"invoke_element_action", "press_key", "scroll", "set_value", "type_text",
 	} {

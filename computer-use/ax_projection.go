@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -32,20 +31,25 @@ func normalizedTreeView(value string) string {
 }
 
 func parseTreeView(args map[string]any) (string, error) {
-	raw := strings.ToLower(strings.TrimSpace(optionalString(args, "view")))
-	if raw == "" {
-		return treeViewWorking, nil
+	return exactEnumArgument(args, "view", treeViewValues, treeViewWorking)
+}
+
+// exactEnumArgument reads an optional string argument that must equal one of
+// values; an absent argument yields fallback.
+func exactEnumArgument(args map[string]any, key string, values []string, fallback string) (string, error) {
+	raw, present := args[key]
+	if !present {
+		return fallback, nil
 	}
-	for _, value := range treeViewValues {
-		if raw == value {
+	value, _ := raw.(string)
+	for _, allowed := range values {
+		if value == allowed {
 			return value, nil
 		}
 	}
 	return "", fmt.Errorf(
-		"invalid view %q. Valid values are %s; omit it for %q",
-		optionalString(args, "view"),
-		strings.Join(treeViewValues, ", "),
-		treeViewWorking,
+		"invalid %s %s. Valid values are %s; omit it for %q",
+		key, compactJSON(raw), strings.Join(values, ", "), fallback,
 	)
 }
 
@@ -59,21 +63,7 @@ func normalizedA11yScope(value string) string {
 }
 
 func parseA11yScope(args map[string]any) (string, error) {
-	raw := strings.ToLower(strings.TrimSpace(optionalString(args, "scope")))
-	if raw == "" {
-		return a11yScopeWindow, nil
-	}
-	for _, value := range a11yScopeValues {
-		if raw == value {
-			return value, nil
-		}
-	}
-	return "", fmt.Errorf(
-		"invalid scope %q. Valid values are %s; omit it for %q",
-		optionalString(args, "scope"),
-		strings.Join(a11yScopeValues, ", "),
-		a11yScopeWindow,
-	)
+	return exactEnumArgument(args, "scope", a11yScopeValues, a11yScopeWindow)
 }
 
 func parseObservationRoot(raw any) (map[string]any, error) {
@@ -161,149 +151,7 @@ func applyProjection(request *axServiceRequest, projection snapshotProjection) {
 const (
 	defaultSettleMS = 800
 	maxSettleMS     = 3000
-	settlePollMS    = 200
 )
-
-// expectTarget is a toolkit-independent element description. Both spellings
-// can be copied from snapshot lines:
-//   - field form: `role=dialog`, `name=Save`, `element_index=42`, joined by
-//     commas for AND
-//   - selector form: `push button "Save"`, the same syntax as AX selectors
-type expectTarget struct {
-	raw       string
-	index     int // -1 when the target is not addressed by index
-	role      string
-	name      string
-	exactRole bool
-	exactName bool
-	text      string
-	state     string
-	// loose is the fallback for a bare word: a match in the name,
-	// description, value or placeholder suffices, because toolkits disagree
-	// on which text field holds a phrase. Roles are excluded: matching a bare
-	// word against roles let {"appears": "menu"} match an unrelated push
-	// button, a false certainty for the agent. Roles need an explicit role=,
-	// a closed vocabulary that needs no fuzzy matching.
-	loose string
-}
-
-func (t expectTarget) empty() bool {
-	return t.index < 0 && t.role == "" && t.name == "" &&
-		t.text == "" && t.state == "" && t.loose == ""
-}
-
-func (t expectTarget) matches(record *elementRecord) bool {
-	if record == nil {
-		return false
-	}
-	if t.index >= 0 && record.Index != t.index {
-		return false
-	}
-	role := t.role
-	name := t.name
-	if t.exactRole {
-		if !strings.EqualFold(strings.TrimSpace(record.ControlType), strings.TrimSpace(t.role)) &&
-			!strings.EqualFold(strings.TrimSpace(record.LocalizedControlType), strings.TrimSpace(t.role)) {
-			return false
-		}
-		role = ""
-	}
-	if t.exactName {
-		if !equalFoldedSemanticIdentity(record.Name, t.name) {
-			return false
-		}
-		name = ""
-	}
-	if !recordMatches(record, role, name, t.text, t.state) {
-		return false
-	}
-	if t.loose != "" {
-		// Scan text fields only; ControlType and LocalizedControlType are
-		// excluded on purpose (see the loose field).
-		if !containsFold(record.Name, t.loose) &&
-			!containsFold(record.Description, t.loose) &&
-			!containsFold(record.Value, t.loose) &&
-			!containsFold(record.Placeholder, t.loose) {
-			return false
-		}
-	}
-	return true
-}
-
-func (t expectTarget) find(snapshot *appSnapshot) *elementRecord {
-	if snapshot == nil {
-		return nil
-	}
-	for index := range snapshot.Elements {
-		if t.matches(&snapshot.Elements[index]) {
-			return &snapshot.Elements[index]
-		}
-	}
-	return nil
-}
-
-func (t expectTarget) countMatches(snapshot *appSnapshot) int {
-	if snapshot == nil {
-		return 0
-	}
-	total := 0
-	for index := range snapshot.Elements {
-		if t.matches(&snapshot.Elements[index]) {
-			total++
-		}
-	}
-	return total
-}
-
-func (t expectTarget) matching(snapshot *appSnapshot) []*elementRecord {
-	if snapshot == nil {
-		return nil
-	}
-	matches := []*elementRecord{}
-	for index := range snapshot.Elements {
-		if t.matches(&snapshot.Elements[index]) {
-			matches = append(matches, &snapshot.Elements[index])
-		}
-	}
-	return matches
-}
-
-func (t expectTarget) roleCounts(snapshot *appSnapshot) map[string]int {
-	counts := map[string]int{}
-	for _, record := range t.matching(snapshot) {
-		counts[record.ControlType]++
-	}
-	return counts
-}
-
-func sortedRoleUnion(first, second map[string]int) []string {
-	seen := map[string]bool{}
-	for role := range first {
-		seen[role] = true
-	}
-	for role := range second {
-		seen[role] = true
-	}
-	roles := make([]string, 0, len(seen))
-	for role := range seen {
-		roles = append(roles, role)
-	}
-	sort.Strings(roles)
-	return roles
-}
-
-func (t expectTarget) findFocused(snapshot *appSnapshot) *elementRecord {
-	if snapshot == nil {
-		return nil
-	}
-	for index := range snapshot.Elements {
-		record := &snapshot.Elements[index]
-		if t.matches(record) && containsFold(record.States, "focused") {
-			return record
-		}
-	}
-	return nil
-}
 
 func runtimePathContains(ancestor, descendant []int) bool {
 	// The provider uses [] for the accessibility root path. JSON omits that

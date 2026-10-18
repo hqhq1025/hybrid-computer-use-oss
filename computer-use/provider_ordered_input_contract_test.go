@@ -751,18 +751,16 @@ func TestA11yMixedBatchExecutesEveryPlannedOrderedInputRun(t *testing.T) {
 	}
 	service.backend = backend
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{
-				"type":   "click",
-				"target": map[string]any{"ref": elementRef},
-			},
-			map[string]any{"type": "keypress", "keys": []any{"DOWN"}},
-			map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
-			map[string]any{"type": "type", "text": "not-run"},
-			map[string]any{"type": "keypress", "keys": []any{"TAB"}},
+	result := service.a11yBatch([]any{
+		map[string]any{
+			"type":   "click",
+			"target": map[string]any{"ref": elementRef},
 		},
+		map[string]any{"type": "keypress", "keys": []any{"DOWN"}},
+		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
+		map[string]any{"type": "type", "text": "not-run"},
+		map[string]any{"type": "keypress", "keys": []any{"TAB"}},
+	},
 		observation{mode: observeNone},
 		nil,
 		"",
@@ -843,17 +841,15 @@ func TestA11yMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 	}
 	service.backend = backend
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{
-				"type":   "click",
-				"target": map[string]any{"ref": elementRef},
-			},
-			map[string]any{"type": "keypress", "keys": []any{"A"}},
-			map[string]any{"type": "keypress", "keys": []any{"B"}},
-			map[string]any{"type": "type", "text": "not-run"},
+	result := service.a11yBatch([]any{
+		map[string]any{
+			"type":   "click",
+			"target": map[string]any{"ref": elementRef},
 		},
+		map[string]any{"type": "keypress", "keys": []any{"A"}},
+		map[string]any{"type": "keypress", "keys": []any{"B"}},
+		map[string]any{"type": "type", "text": "not-run"},
+	},
 		observation{mode: observeNone},
 		nil,
 		"",
@@ -893,12 +889,10 @@ func TestA11yWholeOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 		err:                      errors.New("connection closed after request write"),
 	}
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{"type": "keypress", "keys": []any{"A"}},
-			map[string]any{"type": "keypress", "keys": []any{"B"}},
-		},
+	result := service.a11yBatch([]any{
+		map[string]any{"type": "keypress", "keys": []any{"A"}},
+		map[string]any{"type": "keypress", "keys": []any{"B"}},
+	},
 		observation{mode: observeNone},
 		nil,
 		appRef,
@@ -934,17 +928,15 @@ func TestA11yMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 	}
 	service.backend = backend
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{
-				"type":   "click",
-				"target": map[string]any{"ref": elementRef},
-			},
-			map[string]any{"type": "keypress", "keys": []any{"A"}},
-			map[string]any{"type": "keypress", "keys": []any{"B"}},
-			map[string]any{"type": "type", "text": "not-run"},
+	result := service.a11yBatch([]any{
+		map[string]any{
+			"type":   "click",
+			"target": map[string]any{"ref": elementRef},
 		},
+		map[string]any{"type": "keypress", "keys": []any{"A"}},
+		map[string]any{"type": "keypress", "keys": []any{"B"}},
+		map[string]any{"type": "type", "text": "not-run"},
+	},
 		observation{mode: observeNone},
 		nil,
 		"",
@@ -982,12 +974,10 @@ func TestA11yBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) 
 	}
 	service.backend = backend
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{"type": "keypress", "keys": []any{"DOWN"}},
-			map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
-		},
+	result := service.a11yBatch([]any{
+		map[string]any{"type": "keypress", "keys": []any{"DOWN"}},
+		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
+	},
 		observation{mode: observeNone},
 		nil,
 		appRef,
@@ -1044,11 +1034,9 @@ func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testin
 	}
 	service.backend = backend
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{"type": "keypress", "keys": []any{"SUPER", "F"}},
-		},
+	result := service.a11yBatch([]any{
+		map[string]any{"type": "keypress", "keys": []any{"SUPER", "F"}},
+	},
 		observation{mode: observeDiff},
 		nil,
 		appRef,
@@ -1130,11 +1118,9 @@ func TestA11yWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
 	}
 	service.backend = backend
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{"type": "keypress", "keys": []any{"SUPER", "F"}},
-		},
+	result := service.a11yBatch([]any{
+		map[string]any{"type": "keypress", "keys": []any{"SUPER", "F"}},
+	},
 		observation{mode: observeDiff},
 		nil,
 		appRef,
@@ -1209,13 +1195,11 @@ func TestA11yBatchPreservesOrderedPartialEmissionWithoutLegacyRetry(t *testing.T
 	}
 	service.backend = backend
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{"type": "keypress", "keys": []any{"A"}},
-			map[string]any{"type": "keypress", "keys": []any{"B"}},
-			map[string]any{"type": "keypress", "keys": []any{"C"}},
-		},
+	result := service.a11yBatch([]any{
+		map[string]any{"type": "keypress", "keys": []any{"A"}},
+		map[string]any{"type": "keypress", "keys": []any{"B"}},
+		map[string]any{"type": "keypress", "keys": []any{"C"}},
+	},
 		observation{mode: observeNone},
 		nil,
 		appRef,

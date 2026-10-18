@@ -7,6 +7,7 @@ from .foundation import (
     GUI_ACTION_FIELDS,
     GUI_ACTION_TYPES,
     GUI_KEYBOARD_ACTION_TYPES,
+    GUI_MOUSE_MODIFIERS,
     GUI_KEYBOARD_MICRO_WAIT_MAX_SECONDS,
     GUI_MAX_DRAG_POINTS,
     GUI_MAX_KEYS,
@@ -86,8 +87,8 @@ def send_drag_path(points):
 
 
 def send_gui_scroll(scroll_x, scroll_y, x, y):
-    dx = int(round(scroll_x))
-    dy = int(round(scroll_y))
+    dx = float(scroll_x)
+    dy = float(scroll_y)
     emitted = emit_mouse_event(x, y, "abs", False)
     # Computer scroll values are deltas, not raw X11 wheel-click counts.
     vertical_clicks = max(1, abs(round(dy / 100))) if dy else 0
@@ -101,6 +102,9 @@ def send_gui_scroll(scroll_x, scroll_y, x, y):
 
 
 def finite_gui_number(value, label):
+    # JSON numbers only: a string or boolean is not a coordinate.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError("{} must be a finite number".format(label))
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -111,7 +115,7 @@ def finite_gui_number(value, label):
 
 
 def validate_mouse_modifier_keys(keys):
-    from .ax_actions import MODIFIER_KEYS, keycode, normalize_key_expression
+    from .ax_actions import MODIFIER_KEYS, keycode
 
     if keys is None:
         return []
@@ -123,15 +127,13 @@ def validate_mouse_modifier_keys(keys):
                 GUI_MAX_KEYS))
     normalized = []
     for key in keys:
-        if not isinstance(key, str) or not key.strip():
+        # The published enum is exact; CONTROL is the one documented
+        # alternative spelling of CTRL.
+        if not isinstance(key, str) or key not in GUI_MOUSE_MODIFIERS:
             raise RuntimeError(
-                "gui mouse action keys must contain non-empty modifier names")
-        token = normalize_key_expression(key).strip().lower()
-        if "+" in token or token not in MODIFIER_KEYS:
-            raise RuntimeError(
-                "gui mouse action keys accept only CTRL, SHIFT, ALT, or SUPER")
-        keycode(MODIFIER_KEYS[token])
-        normalized.append(token.upper())
+                "gui mouse action keys accept only CTRL, CONTROL, SHIFT, ALT, or SUPER")
+        keycode(MODIFIER_KEYS[key.lower()])
+        normalized.append(key)
     return normalized
 
 
@@ -172,8 +174,8 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
     """Normalize one action without producing input, focus, or wait side effects."""
     if not isinstance(action, dict):
         raise RuntimeError("gui action must be an object")
-    action_type = str(action.get("type") or "").strip().lower()
-    if action_type not in GUI_ACTION_TYPES:
+    action_type = action.get("type")
+    if not isinstance(action_type, str) or action_type not in GUI_ACTION_TYPES:
         raise RuntimeError(
             "unsupported gui action type {!r}; expected {}".format(
                 action_type, ", ".join(sorted(GUI_ACTION_TYPES)))
@@ -192,8 +194,9 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
         normalized["y"] = finite_gui_number(
             action.get("y"), "gui {} y".format(action_type))
     if action_type == "click":
-        button = str(action.get("button") or "left").strip().lower()
-        if button not in {"left", "right", "wheel", "back", "forward"}:
+        button = action.get("button", "left")
+        if not isinstance(button, str) or button not in {
+                "left", "right", "wheel", "back", "forward"}:
             raise RuntimeError(
                 "gui click button must be left, right, wheel, back, or forward")
         normalized["button"] = button
@@ -210,6 +213,10 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
                 "gui drag path accepts at most {} points".format(GUI_MAX_DRAG_POINTS))
         normalized["path"] = []
         for point in path:
+            if isinstance(point, dict) and set(point) - {"x", "y"}:
+                raise RuntimeError(
+                    "gui drag path points accept only x and y; unsupported field(s): {}".format(
+                        ", ".join(sorted(set(point) - {"x", "y"}))))
             x = point.get("x") if isinstance(point, dict) else None
             y = point.get("y") if isinstance(point, dict) else None
             normalized["path"].append((
@@ -225,7 +232,7 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
             raise RuntimeError(
                 "gui scroll scroll_x and scroll_y must be between -{} and {}".format(
                     GUI_MAX_SCROLL_DELTA, GUI_MAX_SCROLL_DELTA))
-        if int(round(dx)) == 0 and int(round(dy)) == 0:
+        if dx == 0 and dy == 0:
             raise RuntimeError("gui scroll requires a non-zero scroll_x or scroll_y")
         normalized["scroll_x"] = dx
         normalized["scroll_y"] = dy

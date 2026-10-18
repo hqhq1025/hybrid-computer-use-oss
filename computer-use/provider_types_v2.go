@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 )
 
 const providerProtocolV2 = 2
@@ -476,21 +477,140 @@ func (result *ProviderAccessibilityResult) prepareForService() {
 	}
 }
 
+// decodeProviderDesktopActions converts the public GUI actions into the
+// provider protocol type directly, without a JSON round trip. It is strict:
+// a field the protocol does not carry would otherwise vanish here, before the
+// provider's own field check could see it, and {"type":"wait","ms":5} would
+// run as a plain one-second wait.
 func decodeProviderDesktopActions(
 	value any,
 ) ([]ProviderDesktopAction, error) {
 	if value == nil {
 		return nil, nil
 	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
+	items, ok := value.([]any)
+	if !ok {
+		return nil, errors.New("GUI actions must be an array of action objects")
 	}
-	var actions []ProviderDesktopAction
-	if err := json.Unmarshal(data, &actions); err != nil {
-		return nil, fmt.Errorf("decode provider desktop actions: %w", err)
+	actions := make([]ProviderDesktopAction, len(items))
+	for index, item := range items {
+		if err := decodeProviderDesktopAction(item, &actions[index]); err != nil {
+			return nil, fmt.Errorf("GUI actions[%d]: %w", index, err)
+		}
 	}
 	return actions, nil
+}
+
+func decodeProviderDesktopAction(item any, action *ProviderDesktopAction) error {
+	fields, ok := item.(map[string]any)
+	if !ok {
+		return errors.New("action must be an object")
+	}
+	for _, key := range sortedKeys(fields) {
+		raw := fields[key]
+		var err error
+		switch key {
+		case "type":
+			action.Type, err = desktopString(key, raw)
+		case "button":
+			action.Button, err = desktopString(key, raw)
+		case "text":
+			action.Text, err = desktopString(key, raw)
+		case "x":
+			action.X, err = desktopNumber(key, raw)
+		case "y":
+			action.Y, err = desktopNumber(key, raw)
+		case "scroll_x":
+			action.ScrollX, err = desktopNumber(key, raw)
+		case "scroll_y":
+			action.ScrollY, err = desktopNumber(key, raw)
+		case "keys":
+			action.Keys, err = desktopStrings(key, raw)
+		case "path":
+			action.Path, err = desktopPath(raw)
+		default:
+			err = fmt.Errorf("unknown field %q", key)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func desktopString(key string, raw any) (string, error) {
+	text, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string", key)
+	}
+	return text, nil
+}
+
+func desktopNumber(key string, raw any) (*float64, error) {
+	var number float64
+	switch typed := raw.(type) {
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return nil, fmt.Errorf("%s must be a number", key)
+		}
+		number = parsed
+	case float64:
+		number = typed
+	case int:
+		number = float64(typed)
+	default:
+		return nil, fmt.Errorf("%s must be a number", key)
+	}
+	if math.IsNaN(number) || math.IsInf(number, 0) {
+		return nil, fmt.Errorf("%s must be a finite number", key)
+	}
+	return &number, nil
+}
+
+func desktopStrings(key string, raw any) ([]string, error) {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be an array of strings", key)
+	}
+	values := make([]string, len(items))
+	for index, item := range items {
+		text, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s[%d] must be a string", key, index)
+		}
+		values[index] = text
+	}
+	return values, nil
+}
+
+func desktopPath(raw any) ([]ProviderPoint, error) {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, errors.New("path must be an array of points")
+	}
+	points := make([]ProviderPoint, len(items))
+	for index, item := range items {
+		point, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("path[%d] must be an object", index)
+		}
+		for _, key := range sortedKeys(point) {
+			number, err := desktopNumber(fmt.Sprintf("path[%d].%s", index, key), point[key])
+			if err != nil {
+				return nil, err
+			}
+			switch key {
+			case "x":
+				points[index].X = *number
+			case "y":
+				points[index].Y = *number
+			default:
+				return nil, fmt.Errorf("path[%d]: unknown field %q", index, key)
+			}
+		}
+	}
+	return points, nil
 }
 
 func providerMutationCanInvalidate(facts *ProviderMutationFacts) bool {

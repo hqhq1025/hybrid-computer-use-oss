@@ -170,6 +170,8 @@ var modelPrivateEvidenceKeys = map[string]bool{
 	"observed_snapshot_id":                    true,
 	"window_identity_stabilization_attempted": true,
 	"window_identity_stabilization_trigger":   true,
+	"argument_error_code":                     true,
+	"argument_error_path":                     true,
 }
 
 func modelVisibleEvidence(source map[string]any) map[string]any {

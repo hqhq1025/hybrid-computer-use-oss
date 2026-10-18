@@ -336,3 +336,53 @@ func TestGUICoordinateBatchWithoutPriorScreenshotObservesWithoutInput(t *testing
 		t.Fatal("the delivered fresh screenshot must become the coordinate frame")
 	}
 }
+
+// Probe #26: the lenient decode dropped fields that ProviderDesktopAction does
+// not carry, so the provider never saw them and {"type":"wait","ms":5} ran as
+// a plain wait. Such calls must be rejected before any provider request.
+func TestGUIRejectsUnknownActionFieldsBeforeProvider(t *testing.T) {
+	for _, action := range []map[string]any{
+		{"type": "wait", "ms": 5},
+		{"type": "click", "x": 1, "y": 1, "delay": 3},
+		{"type": "drag", "path": []any{
+			map[string]any{"x": 1, "y": 1}, map[string]any{"x": 2, "y": 2, "z": 0},
+		}},
+	} {
+		backend := &recordingPlatformBackend{}
+		result := newServiceWithBackend(backend).dispatch(publicToolGUI, map[string]any{
+			"actions": []any{action},
+		})
+		if !result.IsError || !strings.Contains(resultText(result), "does not accept fields") {
+			t.Fatalf("GUI accepted unknown field in %v: %#v", action, result)
+		}
+		if len(backend.desktopRequests) != 0 {
+			t.Fatalf("GUI reached the provider with %v", action)
+		}
+		// The provider decoder stays strict as well, so a caller that
+		// bypasses the schema gate cannot reintroduce silent drops.
+		if _, err := decodeProviderDesktopActions([]any{action}); err == nil ||
+			!strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("provider decode accepted unknown field in %v: %v", action, err)
+		}
+	}
+}
+
+// Probe #30: the 20-second cumulative wait limit was only stated in the
+// description. It is a declared rule checked before any provider request.
+func TestGUIWaitBudgetIsRejectedBeforeProvider(t *testing.T) {
+	waits := make([]any, guiMaxTotalWait+1)
+	for index := range waits {
+		waits[index] = map[string]any{"type": "wait"}
+	}
+	backend := &recordingPlatformBackend{}
+	result := newServiceWithBackend(backend).callTool(publicToolGUI, map[string]any{"actions": waits})
+	if !result.IsError || !strings.Contains(resultText(result), "maximum is 20s") {
+		t.Fatalf("21 waits were not rejected: %#v", result)
+	}
+	if result.StructuredContent["argument_error_code"] != argumentRuleWaitBudget {
+		t.Fatalf("wait budget rejection lacks its rule code: %#v", result.StructuredContent)
+	}
+	if len(backend.desktopRequests) != 0 {
+		t.Fatal("wait budget rejection reached the provider")
+	}
+}

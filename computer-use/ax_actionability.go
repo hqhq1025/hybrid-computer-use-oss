@@ -111,8 +111,6 @@ func finalizeActionabilityEvidence(
 	evidence ActionabilityEvidence,
 	request axServiceRequest,
 	response toolCallResult,
-	plan settlePlan,
-	outcome settleOutcome,
 	success bool,
 	actual *RuntimeActionEvidence,
 ) ActionabilityEvidence {
@@ -302,37 +300,15 @@ func finalizeActionabilityEvidence(
 			&evidence, ActionReadBack, "not_performed", "",
 		)
 	}
-	if plan.expect != nil {
-		postconditionStatus := "failed"
-		if outcome.verificationIncomplete {
-			evidence.PostconditionVerified = TriUnknown
-			postconditionStatus = "unknown"
-		} else {
-			evidence.PostconditionVerified = boolEvidence(outcome.verified)
-			if outcome.verified {
-				postconditionStatus = "passed"
-			}
-		}
-		updateActionabilityStage(
-			&evidence,
-			ActionPostcondition,
-			postconditionStatus,
-			strings.TrimSpace(outcome.evidence),
-		)
-		updateActionabilityStage(
-			&evidence,
-			ActionWaitStable,
-			map[bool]string{true: "passed", false: "unknown"}[outcome.verified && !outcome.verificationIncomplete],
-			"",
-		)
-	} else {
-		updateActionabilityStage(
-			&evidence, ActionWaitStable, ActionStageNotRequired, "",
-		)
-		updateActionabilityStage(
-			&evidence, ActionPostcondition, ActionStageNotRequired, "",
-		)
-	}
+	// Single AX actions carry no settle predicate; batch postconditions are
+	// reported by the batch, not by this per-action evidence.
+	updateActionabilityStage(
+		&evidence, ActionWaitStable, ActionStageNotRequired, "",
+	)
+	updateActionabilityStage(
+		&evidence, ActionPostcondition, ActionStageNotRequired, "",
+	)
+
 	return evidence
 }
 

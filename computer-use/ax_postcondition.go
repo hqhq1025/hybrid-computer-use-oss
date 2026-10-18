@@ -16,6 +16,7 @@ type a11yAssertionSpec struct {
 	targetAddress string
 	timeoutMS     int
 	stableMS      int
+	goal          verifyGoal
 }
 
 func assertionScalarString(
@@ -72,9 +73,7 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 	if stable != nil {
 		stableMS = *stable
 	}
-	assertionType := strings.ToLower(strings.TrimSpace(
-		requiredString(assertion, "type"),
-	))
+	assertionType, _ := assertion["type"].(string)
 	allowed := map[string]bool{
 		"type": true, "stable_ms": true, "timeout_ms": true,
 	}
@@ -102,23 +101,6 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 				`assertion type "state" requires non-empty state and boolean value`,
 			)
 		}
-	case "value_contains":
-		allowed["target"] = true
-		allowed["value"] = true
-		_, kind, valid := assertionScalarString(assertion, "value")
-		if !valid || kind != "string" {
-			return nil, errors.New(
-				`assertion type "value_contains" requires a non-empty string value`,
-			)
-		}
-	case "value_equals":
-		allowed["target"] = true
-		allowed["value"] = true
-		if _, _, valid := assertionScalarString(assertion, "value"); !valid {
-			return nil, errors.New(
-				`assertion type "value_equals" requires a string, number, or boolean value`,
-			)
-		}
 	case "value":
 		allowed["target"] = true
 		allowed["value"] = true
@@ -129,11 +111,12 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 				`assertion type "value" requires a string, number, or boolean value`,
 			)
 		}
-		match := strings.ToLower(strings.TrimSpace(
-			optionalString(assertion, "match"),
-		))
+		match := "equals"
+		if raw, present := assertion["match"]; present {
+			match, _ = raw.(string)
+		}
 		switch match {
-		case "", "equals":
+		case "equals":
 			spec.assertionType = "value_equals"
 		case "contains":
 			if kind != "string" {
@@ -163,10 +146,16 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 				"assertion.text must contain at least one non-whitespace character",
 			)
 		}
+		if _, present := assertion["exists"]; present &&
+			optionalBool(assertion, "exists") == nil {
+			return nil, errors.New(
+				`assertion type "window_title_contains" exists must be true or false`,
+			)
+		}
 	default:
 		return nil, errors.New(
-			"assertion.type must be exists, state, value, value_equals, value_contains, " +
-				"text_contains, or window_title_contains",
+			"assertion.type must be exists, state, value, text_contains, " +
+				"or window_title_contains",
 		)
 	}
 	unexpected := make([]string, 0)
@@ -193,6 +182,7 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 		}
 		spec.targetAddress = targetAddress
 	}
+	spec.goal = assertionSpecGoal(spec.assertionType, assertion)
 	return spec, nil
 }
 
@@ -339,13 +329,24 @@ func (s *service) stopA11yBatchForActionPostcondition(
 	)
 }
 
+// assertionGoal returns the predicate of a published assertion object.
 func assertionGoal(assertion map[string]any) verifyGoal {
+	spec, err := parseA11yAssertionSpec(assertion)
+	if err != nil {
+		return verifyGoal{}
+	}
+	return spec.goal
+}
+
+// assertionSpecGoal builds the predicate from the normalized assertion type;
+// "value" has already been resolved to value_equals or value_contains.
+func assertionSpecGoal(assertionType string, assertion map[string]any) verifyGoal {
 	goal := verifyGoal{}
-	switch strings.ToLower(strings.TrimSpace(requiredString(assertion, "type"))) {
+	switch assertionType {
 	case "exists":
 		goal.exists = optionalBool(assertion, "value")
 	case "state":
-		state := strings.TrimSpace(optionalString(assertion, "state"))
+		state := optionalString(assertion, "state")
 		if expected := optionalBool(assertion, "value"); expected != nil && !*expected {
 			state = "!" + state
 		}
@@ -559,7 +560,7 @@ func (s *service) preflightA11yPostcondition(
 		return nil
 	}
 	if numericElementIndex(spec.targetAddress) {
-		return errors.New(
+		return newArgumentRuleError(argumentRulePostconditionIndex,
 			"numeric indices are not stable across mutations; use rN or an exact read-only selector",
 		)
 	}

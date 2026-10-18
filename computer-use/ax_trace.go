@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,56 +107,4 @@ func (s *service) appendTrace(app string, request axServiceRequest, before, afte
 	}
 	defer file.Close()
 	file.Write(append(line, '\n'))
-}
-
-func phaseBoundNotes(
-	notes []string,
-	phase string,
-	_ *appSnapshot,
-	supersededBy *appSnapshot,
-) []string {
-	if len(notes) == 0 {
-		return nil
-	}
-	prefix := fmt.Sprintf("[observation phase=%s]", phase)
-	if supersededBy != nil {
-		prefix = fmt.Sprintf("[observation phase=%s superseded=true]", phase)
-	}
-	out := make([]string, 0, len(notes))
-	for _, note := range notes {
-		out = append(out, prefix+" "+note)
-	}
-	return out
-}
-
-func settledActionNotes(
-	immediateSnapshot *appSnapshot,
-	immediateNotes []string,
-	outcome settleOutcome,
-) []string {
-	if !outcome.snapshotFromFollowup || outcome.snapshot == nil {
-		return immediateNotes
-	}
-	notes := phaseBoundNotes(
-		immediateNotes,
-		"immediate",
-		immediateSnapshot,
-		outcome.snapshot,
-	)
-	notes = append(
-		notes,
-		phaseBoundNotes(
-			outcome.snapshotNotes,
-			"settled",
-			outcome.snapshot,
-			nil,
-		)...,
-	)
-	if readPixelVerdict(immediateNotes) != pixelsUnknown {
-		notes = append(notes,
-			"[observation phase=settled] final_pixel_verdict=unavailable: pixel evidence was captured "+
-				"for the immediate action snapshot and is not reused as evidence "+
-				"for this later settled snapshot.")
-	}
-	return notes
 }

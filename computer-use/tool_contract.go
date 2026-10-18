@@ -101,25 +101,25 @@ const a11yObserveArgumentHelp = "Returned evidence: diff (default current-state 
 // one. Accessibility app names mix display names ("Google Chrome"), binary
 // names ("gedit") and app ids ("org.gnome.Nautilus"), and no rule derives one
 // from another, so the argument accepts any of these or a PID.
-const appArgumentHelp = "Bootstrap app/process name, app id, or PID; never a window title. " +
-	"Prefer returned aN/wN/rN refs."
+const appArgumentHelp = "Bootstrap app/process name, app id, or PID as a decimal string; " +
+	"never a window title. Prefer returned aN/wN/rN refs."
 
-// toolChannel maps each internal tool to the channel that enables it. Tools
+// toolChannel maps each public tool to the channel that enables it. Tools
 // outside the map belong to no channel and are always enabled.
 var toolChannel = map[string]string{
-	"a11y": "a11y",
-	"gui":  "gui",
+	publicToolAX:  "a11y",
+	publicToolGUI: "gui",
 }
 
 // actionTools are the tools that change the UI and therefore produce an
 // observation as a by-product. The observe parameter applies only to them; for
 // read-only tools the observation is the return value itself.
 var actionTools = map[string]bool{
-	"a11y": true,
-	"gui":  true,
+	publicToolAX:  true,
+	publicToolGUI: true,
 }
 
-func isActionTool(name string) bool { return actionTools[internalToolName(name)] }
+func isActionTool(name string) bool { return actionTools[name] }
 
 func sortedChannels() []string {
 	enabled := enabledChannels()
@@ -132,7 +132,6 @@ func sortedChannels() []string {
 }
 
 func toolIsEnabled(name string) bool {
-	name = internalToolName(name)
 	channel, known := toolChannel[name]
 	if !known {
 		return true
@@ -153,12 +152,13 @@ func toolDefinitions() []toolDefinition {
 	return kept
 }
 
+// publicToolCallName accepts exactly the advertised tool names. MCP tool
+// names are case-sensitive, and a tolerated spelling would be one the
+// schema never describes.
 func publicToolCallName(name string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "ax":
-		return publicToolAX, true
-	case "gui":
-		return publicToolGUI, true
+	switch name {
+	case publicToolAX, publicToolGUI:
+		return name, true
 	default:
 		return "", false
 	}
@@ -169,10 +169,14 @@ func a11yStructuredSelectorProperty() map[string]any {
 		"type":        "object",
 		"description": "Exact AX identity fields, ANDed in one window.",
 		"properties": map[string]any{
-			"role":        stringProperty("Exact AX role."),
-			"name":        stringProperty("Exact accessible name."),
-			"description": stringProperty("Exact accessible description."),
-			"placeholder": stringProperty("Exact accessible placeholder."),
+			"role": map[string]any{
+				"type":        "string",
+				"pattern":     selectorRolePattern,
+				"description": "Exact AX role.",
+			},
+			"name":        nonBlankStringProperty("Exact accessible name."),
+			"description": nonBlankStringProperty("Exact accessible description."),
+			"placeholder": nonBlankStringProperty("Exact accessible placeholder."),
 			"state": enumStringProperty(
 				"Optional distinguishing state.",
 				[]string{"checked", "expanded", "selected", "focused"},
@@ -180,31 +184,6 @@ func a11yStructuredSelectorProperty() map[string]any {
 		},
 		"minProperties":        1,
 		"additionalProperties": false,
-	}
-}
-
-func a11yTargetProperty() map[string]any {
-	index := objectSchema(map[string]any{
-		"index": map[string]any{
-			"type":        "integer",
-			"minimum":     0,
-			"description": "Current-snapshot index; action 1 only.",
-		},
-	}, []string{"index"})
-	ref := objectSchema(map[string]any{
-		"ref": map[string]any{
-			"type":        "string",
-			"pattern":     "^(r[1-9][0-9]*|w[1-9][0-9]*)$",
-			"description": "Current session ref; rN identifies an element and wN identifies one window.",
-		},
-	}, []string{"ref"})
-	selector := objectSchema(map[string]any{
-		"selector": a11yStructuredSelectorProperty(),
-	}, []string{"selector"})
-	return map[string]any{
-		"type":        "object",
-		"description": "One index, ref, or selector.",
-		"oneOf":       []any{index, ref, selector},
 	}
 }
 
@@ -295,7 +274,7 @@ func a11yActionProperty() map[string]any {
 					"maxItems":    guiMaxKeys,
 					"items": map[string]any{
 						"type":      "string",
-						"minLength": 1,
+						"pattern":   nonBlankPattern,
 						"maxLength": guiMaxKeyLength,
 					},
 				},
@@ -318,10 +297,11 @@ func a11yActionProperty() map[string]any {
 				),
 			}, []string{"target", "value"}),
 			a11yActionBranch("type", map[string]any{
-				"text": boundedStringProperty(
-					"Literal text to type.",
-					maxActionText,
-				),
+				"text": func() map[string]any {
+					text := boundedStringProperty("Literal text to type.", maxActionText)
+					text["pattern"] = nonBlankPattern
+					return text
+				}(),
 			}, []string{"text"}),
 		},
 	}
@@ -342,12 +322,12 @@ func a11yFindQueryProperty() map[string]any {
 		},
 		"additionalProperties": false,
 		"anyOf": []any{
-			map[string]any{"required": []string{"role"}},
-			map[string]any{"required": []string{"name_contains"}},
-			map[string]any{"required": []string{"name_equals"}},
-			map[string]any{"required": []string{"text_contains"}},
-			map[string]any{"required": []string{"text_equals"}},
-			map[string]any{"required": []string{"state"}},
+			nonEmptyFilter("role"),
+			nonEmptyFilter("name_contains"),
+			nonEmptyFilter("name_equals"),
+			nonEmptyFilter("text_contains"),
+			nonEmptyFilter("text_equals"),
+			nonEmptyFilter("state"),
 		},
 		"allOf": []any{
 			map[string]any{"not": map[string]any{"required": []string{"name_contains", "name_equals"}}},
@@ -384,10 +364,9 @@ func a11yAssertionProperty() map[string]any {
 		}
 		return objectSchema(properties, append([]string{"type", "target"}, required...))
 	}
-	windowText := stringProperty(
+	windowText := nonBlankStringProperty(
 		"Case-insensitive title substring for a current top-level window owned by the resolved application.",
 	)
-	windowText["minLength"] = 1
 	return map[string]any{
 		"description": "Poll exactly one typed AX-visible predicate.",
 		"oneOf": []any{
@@ -395,14 +374,14 @@ func a11yAssertionProperty() map[string]any {
 				"value": booleanProperty("Whether the target must exist."),
 			}, []string{"value"}),
 			elementBranch("state", map[string]any{
-				"state": stringProperty("Accessibility state name, such as checked, focused, selected, or expanded."),
+				"state": nonBlankStringProperty("Accessibility state name, such as checked, focused, selected, or expanded."),
 				"value": booleanProperty("Whether the state must be present."),
 			}, []string{"state", "value"}),
 			func() map[string]any {
 				branch := elementBranch("value", map[string]any{
 					"value": map[string]any{
 						"type":        []string{"string", "number", "boolean"},
-						"minLength":   1,
+						"pattern":     nonBlankPattern,
 						"description": "Required AX scalar value.",
 					},
 					"match": enumStringProperty(
@@ -428,7 +407,7 @@ func a11yAssertionProperty() map[string]any {
 				return branch
 			}(),
 			elementBranch("text_contains", map[string]any{
-				"text": stringProperty("Required substring across accessible name, description, value, or placeholder."),
+				"text": nonBlankStringProperty("Required substring across accessible name, description, value, or placeholder."),
 			}, []string{"text"}),
 			objectSchema(map[string]any{
 				"type":       constStringProperty("window_title_contains", "Window-title predicate."),
@@ -449,7 +428,9 @@ func a11yObservationRootProperty() map[string]any {
 			"description": "Return a bounded local subtree around the current focused element.",
 		},
 	}, []string{"focused"})
-	target := a11yTargetProperty()
+	// A root is read-only, like an assertion target: rN only, and an index
+	// addresses the snapshot this observe reads.
+	target := a11yAssertionElementTargetProperty()
 	branches := []any{focused}
 	if targetBranches, ok := target["oneOf"].([]any); ok {
 		branches = append(branches, targetBranches...)
@@ -578,9 +559,8 @@ func a11yInputSchema() map[string]any {
 		"type":        "object",
 		"description": "Exactly one AX mode.",
 		"$defs": map[string]any{
-			"target":        a11yTargetProperty(),
 			"assertion":     a11yAssertionProperty(),
-			"app":           stringProperty(appArgumentHelp),
+			"app":           nonBlankStringProperty(appArgumentHelp),
 			"app_ref":       map[string]any{"type": "string", "pattern": "^a[1-9][0-9]*$"},
 			"window_ref":    map[string]any{"type": "string", "pattern": "^w[1-9][0-9]*$"},
 			"by_app":        map[string]any{"required": []string{"app"}},
@@ -689,7 +669,7 @@ func guiActionProperty(includeScreenshot bool) map[string]any {
 		"maxItems":    guiMaxKeys,
 		"items": map[string]any{
 			"type":      "string",
-			"minLength": 1,
+			"pattern":   nonBlankPattern,
 			"maxLength": guiMaxKeyLength,
 		},
 	}
@@ -873,6 +853,31 @@ func objectSchema(properties map[string]any, required []string) map[string]any {
 
 func stringProperty(description string) map[string]any {
 	return map[string]any{"type": "string", "description": description}
+}
+
+// nonBlankPattern requires at least one non-whitespace character. The AX
+// runtime compares these strings after trimming, so a blank value can match
+// nothing.
+const nonBlankPattern = `\S`
+
+// selectorRolePattern is a non-blank role without [, ] or ". The role is the
+// unquoted head of the internal selector grammar, so those characters would
+// be read as predicates or a name.
+const selectorRolePattern = `^[^\["\]]*[^\s\["\]][^\["\]]*$`
+
+func nonBlankStringProperty(description string) map[string]any {
+	property := stringProperty(description)
+	property["pattern"] = nonBlankPattern
+	return property
+}
+
+// nonEmptyFilter is one anyOf alternative of a find query: the filter is
+// present and not empty.
+func nonEmptyFilter(field string) map[string]any {
+	return map[string]any{
+		"required":   []string{field},
+		"properties": map[string]any{field: map[string]any{"minLength": 1}},
+	}
 }
 
 func boundedStringProperty(description string, maxLength int) map[string]any {

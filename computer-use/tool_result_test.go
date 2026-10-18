@@ -74,10 +74,6 @@ func TestTextEvidencePreservesTheOriginalToolContent(t *testing.T) {
 func TestActionOutcomeSeparatesAttemptFromPredicateAndTaskEffect(t *testing.T) {
 	withoutExpect := withActionOutcome(
 		textResult("ok", false),
-		settlePlan{},
-		settleOutcome{},
-		nil,
-		nil,
 	).withEvidenceScope("delivery_or_local_ui")
 	if withoutExpect.StructuredContent["action_attempted"] != true ||
 		withoutExpect.StructuredContent["predicate_checked"] != false {
@@ -87,32 +83,6 @@ func TestActionOutcomeSeparatesAttemptFromPredicateAndTaskEffect(t *testing.T) {
 	if _, exists := withoutExpect.StructuredContent["predicate_verified"]; exists {
 		t.Fatalf("no expect means no predicate verdict, not predicate_verified=false: %#v",
 			withoutExpect.StructuredContent)
-	}
-
-	withFailedExpect := withActionOutcome(
-		textResult("expect did not hold", false),
-		settlePlan{expect: &expectSpec{}},
-		settleOutcome{verified: false, elapsedMS: 800},
-		nil,
-		nil,
-	).withEvidenceScope("delivery_or_local_ui")
-	for key, want := range map[string]any{
-		"action_attempted":     true,
-		"predicate_checked":    true,
-		"predicate_verified":   false,
-		"settled_after_ms":     800,
-		"task_effect_verified": false,
-	} {
-		got := withFailedExpect.StructuredContent[key]
-		if got != want {
-			t.Fatalf("%s = %#v, want %#v in %#v", key, got, want, withFailedExpect.StructuredContent)
-		}
-	}
-	for _, ambiguous := range []string{"operation_completed", "tool_call_completed"} {
-		if _, exists := withFailedExpect.StructuredContent[ambiguous]; exists {
-			t.Fatalf("predicate failure must not coexist with %q: %#v",
-				ambiguous, withFailedExpect.StructuredContent)
-		}
 	}
 }
 
@@ -208,7 +178,7 @@ func TestGUISuccessDoesNotAddStaticEvidencePrefix(t *testing.T) {
 			resultText(visible))
 	}
 	source := mainGoSource(t)
-	if !strings.Contains(source, `if internalName != "gui"`) {
+	if !strings.Contains(source, `if name != publicToolGUI`) {
 		t.Fatal("callTool still applies the generic evidence wrapper to GUI")
 	}
 }
@@ -329,6 +299,8 @@ func TestModelVisibleEvidenceKeepsInternalHashesPrivate(t *testing.T) {
 		"content_revision_before":                 "c1:before",
 		"content_revision_after":                  "c1:after",
 		"failure_code":                            "stale_element_ref",
+		"argument_error_code":                     "invalid_argument",
+		"argument_error_path":                     "/actions/0",
 	}
 	visible := modelVisibleEvidence(internal)
 	if visible["failure_code"] != "stale_element_ref" {

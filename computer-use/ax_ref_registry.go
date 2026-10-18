@@ -370,7 +370,6 @@ func (registry *AppRefRegistry) evict() {
 }
 
 func parseMonotonicAXAppRef(ref string) (uint64, bool) {
-	ref = strings.TrimSpace(ref)
 	if len(ref) < 2 || ref[0] != 'a' {
 		return 0, false
 	}
@@ -688,7 +687,6 @@ func (registry *WindowRefRegistry) evict() {
 }
 
 func parseMonotonicAXWindowRef(ref string) (uint64, bool) {
-	ref = strings.TrimSpace(ref)
 	if len(ref) < 2 || ref[0] != 'w' {
 		return 0, false
 	}

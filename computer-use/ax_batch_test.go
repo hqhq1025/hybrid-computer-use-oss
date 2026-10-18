@@ -157,10 +157,10 @@ func TestA11yBatchModePublishesAndEnforcesSafetyContract(t *testing.T) {
 		}
 	}
 	windowTitleContains := windowTitleProps["text"].(map[string]any)
-	if windowTitleContains["minLength"] != 1 {
+	if windowTitleContains["pattern"] != nonBlankPattern {
 		t.Fatalf(
-			"window title text minLength=%v, want 1",
-			windowTitleContains["minLength"],
+			"window title text pattern=%v, want a non-blank pattern",
+			windowTitleContains["pattern"],
 		)
 	}
 	appsBranch := findA11ySchemaBranch(t, "observe", "apps")
@@ -345,7 +345,7 @@ func TestA11yBatchModePublishesAndEnforcesSafetyContract(t *testing.T) {
 			"type":   "click",
 			"target": map[string]any{"index": float64(7)},
 		},
-	}); err == nil || !strings.Contains(err.Error(), "not part of the public act contract") {
+	}); err == nil || !strings.Contains(err.Error(), `target must be {"ref":"rN"} or {"ref":"wN"}`) {
 		t.Fatalf("numeric index must fail ref-only batch validation: %v", err)
 	}
 	if _, err := normalizeA11yBatchActions([]any{
@@ -382,8 +382,7 @@ func TestA11yBatchModePublishesAndEnforcesSafetyContract(t *testing.T) {
 	}
 
 	service := newService()
-	rejected := service.a11yBatch(
-		"", []any{map[string]any{"type": "keypress", "keys": []any{"TAB"}}},
+	rejected := service.a11yBatch([]any{map[string]any{"type": "keypress", "keys": []any{"TAB"}}},
 		observation{}, nil,
 	)
 	if !rejected.IsError ||
@@ -391,7 +390,7 @@ func TestA11yBatchModePublishesAndEnforcesSafetyContract(t *testing.T) {
 		t.Fatalf("prevalidation failure must prove no action attempt: %#v", rejected)
 	}
 	noObservation := service.a11yBatch(
-		"Editor", []any{}, observation{mode: observeNone}, nil,
+		[]any{}, observation{mode: observeNone}, nil,
 	)
 	if !noObservation.IsError ||
 		!strings.Contains(resultText(noObservation), `mode="act" requires at least one action`) {
@@ -474,7 +473,7 @@ func TestRefOwnedBatchDerivesOneWindowAndKeyboardInheritance(t *testing.T) {
 		{actionType: "click", targetRef: elementRef},
 		{actionType: "keypress", key: "ENTER"},
 	}
-	context, err := service.deriveA11yBatchContext("", "", "", actions)
+	context, err := service.deriveA11yBatchContext("", "", actions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,26 +488,24 @@ func TestActionPostconditionsArePreflightedBeforeFirstInput(t *testing.T) {
 	backend := &recordingPlatformBackend{}
 	service.backend = backend
 
-	result := service.a11yBatch(
-		"",
-		[]any{
-			map[string]any{
-				"type":   "click",
-				"target": map[string]any{"ref": elementRef},
-			},
-			map[string]any{
-				"type": "keypress",
-				"keys": []any{"ENTER"},
-				"postcondition": map[string]any{
-					"type": "state",
-					"target": map[string]any{
-						"ref": "r999999",
-					},
-					"state": "selected",
-					"value": true,
+	result := service.a11yBatch([]any{
+		map[string]any{
+			"type":   "click",
+			"target": map[string]any{"ref": elementRef},
+		},
+		map[string]any{
+			"type": "keypress",
+			"keys": []any{"ENTER"},
+			"postcondition": map[string]any{
+				"type": "state",
+				"target": map[string]any{
+					"ref": "r999999",
 				},
+				"state": "selected",
+				"value": true,
 			},
 		},
+	},
 		observation{},
 		nil,
 	)
@@ -704,7 +701,7 @@ func TestUnknownActionPostconditionRequiresObservationWhenNoneReturned(t *testin
 func TestAllUntargetedBatchRequiresWindowRef(t *testing.T) {
 	service, _, _, _ := sheetBatchService(t)
 	_, err := service.deriveA11yBatchContext(
-		"LibreOffice", "", "", []a11yBatchAction{{
+		"", "", []a11yBatchAction{{
 			actionType: "keypress",
 			key:        "CTRL+S",
 		}},
@@ -724,27 +721,13 @@ func TestCrossWindowBatchFailsBeforeInput(t *testing.T) {
 		":1.84", "/window/2", "pid:10:start:100", "dialog", "Question",
 		appRef,
 	)
-	_, err := service.deriveA11yBatchContext(
-		"", "", "", []a11yBatchAction{
-			{actionType: "click", targetRef: firstRef},
-			{actionType: "click", targetRef: secondRef},
-		},
+	_, err := service.deriveA11yBatchContext("", "", []a11yBatchAction{
+		{actionType: "click", targetRef: firstRef},
+		{actionType: "click", targetRef: secondRef},
+	},
 	)
 	if err == nil || !strings.Contains(err.Error(), "multiple logical windows") {
 		t.Fatalf("expected cross-window rejection, got %v", err)
-	}
-}
-
-func TestRefOwnedBatchRejectsDuplicateLegacyAppAddress(t *testing.T) {
-	service, _, _, elementRef := sheetBatchService(t)
-	_, err := service.deriveA11yBatchContext(
-		"LibreOffice", "", "", []a11yBatchAction{{
-			actionType: "click",
-			targetRef:  elementRef,
-		}},
-	)
-	if err == nil || !strings.Contains(err.Error(), "single application identity") {
-		t.Fatalf("expected duplicate app-address rejection, got %v", err)
 	}
 }
 
@@ -757,11 +740,10 @@ func TestRefOwnedBatchRejectsDuplicateAppOrWindowRef(t *testing.T) {
 		"app_ref":    {appRef: appRef},
 		"window_ref": {windowRef: windowRef},
 	} {
-		_, err := service.deriveA11yBatchContext(
-			"", identity.appRef, identity.windowRef, []a11yBatchAction{{
-				actionType: "click",
-				targetRef:  elementRef,
-			}},
+		_, err := service.deriveA11yBatchContext(identity.appRef, identity.windowRef, []a11yBatchAction{{
+			actionType: "click",
+			targetRef:  elementRef,
+		}},
 		)
 		if err == nil ||
 			!strings.Contains(err.Error(), "must omit app_ref and window_ref") {
@@ -777,7 +759,7 @@ func TestPublicBatchRejectsSelectorTargets(t *testing.T) {
 			"selector": map[string]any{"role": "button", "name": "Save"},
 		},
 	}})
-	if err == nil || !strings.Contains(err.Error(), "not part of the public act contract") {
+	if err == nil || !strings.Contains(err.Error(), `target must be {"ref":"rN"} or {"ref":"wN"}`) {
 		t.Fatalf("expected ref-only rejection, got %v", err)
 	}
 }
@@ -806,10 +788,9 @@ func TestSetValueThenClickRemainsSchemaValid(t *testing.T) {
 
 func TestBatchContextCarriesPrivateWindowExpectation(t *testing.T) {
 	service, _, windowRef, elementRef := sheetBatchService(t)
-	context, err := service.deriveA11yBatchContext(
-		"", "", "", []a11yBatchAction{
-			{actionType: "click", targetRef: elementRef},
-		},
+	context, err := service.deriveA11yBatchContext("", "", []a11yBatchAction{
+		{actionType: "click", targetRef: elementRef},
+	},
 	)
 	if err != nil {
 		t.Fatal(err)

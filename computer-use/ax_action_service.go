@@ -366,7 +366,7 @@ func applyActionElementResolution(
 	}
 }
 
-func (s *service) click(app, elementIndex, declared string, x, y *float64, clickCount int, mouseButton, clickMethod string, obs observation, plan settlePlan) toolCallResult {
+func (s *service) click(app, elementIndex, declared string, x, y *float64, clickCount int, mouseButton, clickMethod string, obs observation) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)
 	}
@@ -410,7 +410,7 @@ func (s *service) click(app, elementIndex, declared string, x, y *float64, click
 		CaptureSnapshot:   obs.captureSnapshot,
 	}
 	applyActionElementResolution(&request, resolution)
-	return s.actionResultSettling(app, request, plan)
+	return s.actionResult(app, request)
 }
 
 func (s *service) windowAction(
@@ -419,7 +419,6 @@ func (s *service) windowAction(
 	declared,
 	action string,
 	obs observation,
-	plan settlePlan,
 ) toolCallResult {
 	if strings.TrimSpace(app) == "" {
 		return textResult("Missing required argument: app", true)
@@ -440,7 +439,7 @@ func (s *service) windowAction(
 		CaptureSnapshot:   obs.captureSnapshot,
 	}
 	applyActionElementResolution(&request, resolution)
-	return s.actionResultSettling(app, request, plan)
+	return s.actionResult(app, request)
 }
 
 func (s *service) scroll(
@@ -448,7 +447,6 @@ func (s *service) scroll(
 	expectedWindow *ProviderWindowExpectation,
 	pages float64,
 	obs observation,
-	plan settlePlan,
 ) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)
@@ -468,7 +466,7 @@ func (s *service) scroll(
 		return textResult("pages must be > 0", true)
 	}
 	if elementIndex == "" {
-		return s.actionResultSettling(app, axServiceRequest{
+		return s.actionResult(app, axServiceRequest{
 			App: app,
 			Action: axScrollCommand{
 				Direction: normalized, Pages: pages, WindowCentre: true,
@@ -477,7 +475,7 @@ func (s *service) scroll(
 			ExpectedWindow:     expectedWindow,
 			IncludeScreenshot:  obs.resolvedScreenshot(), Observe: obs.resolvedMode(),
 			CaptureSnapshot: obs.captureSnapshot,
-		}, plan)
+		})
 	}
 	resolution, result := s.resolveActionElement(
 		app, elementIndex, declared, "scroll")
@@ -492,7 +490,7 @@ func (s *service) scroll(
 		CaptureSnapshot: obs.captureSnapshot,
 	}
 	applyActionElementResolution(&request, resolution)
-	return s.actionResultSettling(app, request, plan)
+	return s.actionResult(app, request)
 }
 
 func (s *service) typeText(
@@ -500,7 +498,6 @@ func (s *service) typeText(
 	expectedWindow *ProviderWindowExpectation,
 	text string,
 	obs observation,
-	plan settlePlan,
 ) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)
@@ -528,7 +525,7 @@ func (s *service) typeText(
 		}
 		applyActionElementResolution(&request, resolution)
 	}
-	return s.actionResultSettling(app, request, plan)
+	return s.actionResult(app, request)
 }
 
 func (s *service) pressKey(
@@ -536,7 +533,6 @@ func (s *service) pressKey(
 	expectedWindow *ProviderWindowExpectation,
 	key string,
 	obs observation,
-	plan settlePlan,
 ) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)
@@ -564,10 +560,10 @@ func (s *service) pressKey(
 		}
 		applyActionElementResolution(&request, resolution)
 	}
-	return s.actionResultSettling(app, request, plan)
+	return s.actionResult(app, request)
 }
 
-func (s *service) setValue(app, elementIndex, declared, value string, obs observation, plan settlePlan) toolCallResult {
+func (s *service) setValue(app, elementIndex, declared, value string, obs observation) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)
 	}
@@ -585,5 +581,5 @@ func (s *service) setValue(app, elementIndex, declared, value string, obs observ
 		CaptureSnapshot: obs.captureSnapshot,
 	}
 	applyActionElementResolution(&request, resolution)
-	return s.actionResultSettling(app, request, plan)
+	return s.actionResult(app, request)
 }

@@ -93,62 +93,6 @@ func TestA11yStructuredTargetNormalizesWithoutAmbiguousFields(t *testing.T) {
 	}
 }
 
-// TestObserveAndExpectAreOrthogonal checks that observe controls how much
-// observation is returned and expect controls which outcome is verified, with
-// neither affecting the other. With observe="none" plus expect, neither tree
-// nor screenshot is returned, but the verification result still is.
-func TestObserveAndExpectAreOrthogonal(t *testing.T) {
-	args := map[string]any{
-		"app":       "gedit",
-		"observe":   "none",
-		"expect":    map[string]any{"appears": "role=dialog"},
-		"settle_ms": 0.0,
-	}
-	obs, err := parseObservation(args)
-	if err != nil {
-		t.Fatalf("expect must not affect observe parsing: %v", err)
-	}
-	if obs.resolvedMode() != observeNone {
-		t.Fatalf("observe should still be none, got %q", obs.resolvedMode())
-	}
-	plan, err := parseSettlePlan(args)
-	if err != nil {
-		t.Fatalf("observe must not affect expect parsing: %v", err)
-	}
-	if plan.expect == nil {
-		t.Fatal("observe=none must not drop the verification intent")
-	}
-
-	// observe="none" returns notesOnlyResult and the verdict travels in the
-	// notes, so it must appear in the result: it is a conclusion, not an
-	// observation.
-	svc := newService()
-	outcome := svc.settle("gedit", plan, expectSnapshot(), expectSnapshot(), nil, "")
-	if outcome.verified {
-		t.Fatal("appears must not hold on empty snapshots")
-	}
-	snapshot := expectSnapshot()
-	result := snapshot.notesOnlyResult([]string{
-		expectNote(plan, outcome, axServiceRequest{Action: axClickCommand{}}, nil),
-	})
-	if len(result.Content) != 1 || result.Content[0].Type != "text" {
-		t.Fatalf("observe=none must not return a tree or image: %#v", result.Content)
-	}
-	text := result.Content[0].Text
-	if !strings.Contains(text, `"predicate_verified":false`) || !strings.Contains(text, "settled_after_ms") {
-		t.Fatalf("observe=none must still return the verification verdict: %q", text)
-	}
-	if result.IsError {
-		t.Fatal("predicate_verified:false must not set isError")
-	}
-	if strings.Contains(text, "element_index values stay valid") {
-		t.Fatal("observe=none must not promise that removed or omitted old indices remain valid")
-	}
-	if !strings.Contains(text, "Existing rN refs remain usable") {
-		t.Fatal("observe=none must describe the refreshed ref-lifecycle boundary")
-	}
-}
-
 func TestPublicTargetRefAcceptsOnlyShortElementOrWindowRefs(t *testing.T) {
 	for _, ref := range []string{"r1", "r42", "w1", "w9"} {
 		if got, _, err := a11yTargetAddress(map[string]any{

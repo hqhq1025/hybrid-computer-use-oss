@@ -36,19 +36,10 @@ const (
 )
 
 func (s *service) deriveA11yBatchContext(
-	legacyApp,
 	explicitAppRef,
 	explicitWindowRef string,
 	actions []a11yBatchAction,
 ) (*a11yBatchContext, error) {
-	if strings.TrimSpace(legacyApp) != "" &&
-		(strings.TrimSpace(explicitAppRef) != "" ||
-			strings.TrimSpace(explicitWindowRef) != "") {
-		return nil, errors.New(
-			"app cannot be combined with app_ref or window_ref; " +
-				"the server-owned ref is the single application identity",
-		)
-	}
 	context := &a11yBatchContext{}
 	bindApp := func(ref, fallback string) error {
 		ref = strings.TrimSpace(ref)
@@ -155,19 +146,6 @@ func (s *service) deriveA11yBatchContext(
 		)
 	}
 
-	if context.windowHandle == "" && strings.TrimSpace(legacyApp) != "" && hasTarget {
-		if snapshot := s.currentSnapshot(legacyApp); snapshot != nil &&
-			snapshot.publicWindowRef != "" {
-			if err := bindWindow(
-				snapshot.publicWindowRef,
-				snapshot.WindowHandle,
-				snapshot.publicAppRef,
-				appIdentityForSnapshot(snapshot),
-			); err != nil {
-				return nil, err
-			}
-		}
-	}
 	if context.windowHandle == "" {
 		if !hasTarget {
 			return nil, errors.New(
@@ -182,15 +160,6 @@ func (s *service) deriveA11yBatchContext(
 		return nil, fmt.Errorf(
 			"app_ref %s conflicts with the batch window owner %s",
 			explicitAppRef, context.appRef,
-		)
-	}
-	if context.appToken == "" {
-		context.appToken = strings.TrimSpace(legacyApp)
-	}
-	if strings.TrimSpace(legacyApp) != "" && hasOwnedShortTarget {
-		return nil, errors.New(
-			"app cannot be combined with a short ref target; " +
-				"the server-owned ref is the single application identity",
 		)
 	}
 	if context.appToken == "" {
@@ -350,6 +319,28 @@ func validateA11yBatchNumber(action map[string]any, field string) error {
 	}
 }
 
+// actionTargetRef reads an action's optional target, which is exactly
+// {"ref": "rN"} or {"ref": "wN"}. Index and selector targets are read-only
+// forms of assertions and observe roots, never action targets.
+func actionTargetRef(action map[string]any) (string, error) {
+	raw, present := action["target"]
+	if !present {
+		return "", nil
+	}
+	target, ok := raw.(map[string]any)
+	ref, isString := target["ref"].(string)
+	if !ok || len(target) != 1 || !isString {
+		return "", errors.New(`target must be {"ref":"rN"} or {"ref":"wN"}`)
+	}
+	if !isShortAXRef(ref) && !isShortAXWindowRef(ref) {
+		return "", errors.New(
+			"target.ref must be an exact rN or wN copied from observe/find; " +
+				"never invent placeholders such as r??",
+		)
+	}
+	return ref, nil
+}
+
 func normalizeA11yBatchActions(raw any) ([]a11yBatchAction, error) {
 	items, ok := raw.([]any)
 	if !ok {
@@ -376,7 +367,6 @@ func normalizeA11yBatchActions(raw any) ([]a11yBatchAction, error) {
 		if err != nil {
 			return nil, fmt.Errorf("actions[%d]: %w", index, err)
 		}
-		tool = strings.ToLower(strings.TrimSpace(tool))
 		normalizedKey := ""
 		switch tool {
 		case "activate", "close", "click", "keypress", "scroll", "set_value", "type":
@@ -396,19 +386,9 @@ func normalizeA11yBatchActions(raw any) ([]a11yBatchAction, error) {
 				)
 			}
 		}
-		elementIndex, _, err := a11yTargetAddress(action)
+		elementIndex, err := actionTargetRef(action)
 		if err != nil {
-			return nil, fmt.Errorf(
-				"actions[%d].target: %w", index, err)
-		}
-		if elementIndex != "" &&
-			!isShortAXRef(elementIndex) &&
-			!isShortAXWindowRef(elementIndex) {
-			return nil, fmt.Errorf(
-				"actions[%d].target must use a short ref returned by AX observe/find; "+
-					"selector and index targets are not part of the public act contract",
-				index,
-			)
+			return nil, fmt.Errorf("actions[%d].target: %w", index, err)
 		}
 
 		switch tool {
@@ -418,8 +398,8 @@ func normalizeA11yBatchActions(raw any) ([]a11yBatchAction, error) {
 					"actions[%d] %s requires target", index, tool)
 			}
 			if tool == "close" && index != len(items)-1 {
-				return nil, fmt.Errorf(
-					"actions[%d] close must be the final action", index)
+				return nil, newArgumentRuleError(argumentRuleCloseNotLast, fmt.Sprintf(
+					"actions[%d] close must be the final action", index))
 			}
 			if !isShortAXWindowRef(elementIndex) {
 				return nil, fmt.Errorf(
@@ -448,7 +428,7 @@ func normalizeA11yBatchActions(raw any) ([]a11yBatchAction, error) {
 			if err != nil {
 				return nil, fmt.Errorf("actions[%d]: %w", index, err)
 			}
-			switch strings.ToLower(direction) {
+			switch direction {
 			case "up", "down", "left", "right":
 			default:
 				return nil, fmt.Errorf(
@@ -506,10 +486,10 @@ func normalizeA11yBatchActions(raw any) ([]a11yBatchAction, error) {
 				"actions[%d] %s target.ref must match rN", index, tool)
 		}
 		if totalText > a11yBatchMaxText {
-			return nil, fmt.Errorf(
+			return nil, newArgumentRuleError(argumentRuleTextBudget, fmt.Sprintf(
 				"the cumulative text/value budget is %d characters",
 				a11yBatchMaxText,
-			)
+			))
 		}
 		var postcondition map[string]any
 		if rawPostcondition, present := action["postcondition"]; present {
@@ -525,7 +505,7 @@ func normalizeA11yBatchActions(raw any) ([]a11yBatchAction, error) {
 		normalized = append(normalized, a11yBatchAction{
 			actionType:    tool,
 			targetRef:     elementIndex,
-			direction:     strings.ToLower(optionalString(action, "direction")),
+			direction:     optionalString(action, "direction"),
 			pages:         floatValue(optionalFloat(action, "pages"), 1),
 			text:          optionalString(action, "text"),
 			key:           normalizedKey,
@@ -542,7 +522,6 @@ func (s *service) executeA11yBatchAction(
 	obs observation,
 ) toolCallResult {
 	const noDeclaredTarget = ""
-	plan := settlePlan{}
 	switch action.actionType {
 	case "activate", "close":
 		return s.windowAction(
@@ -551,7 +530,6 @@ func (s *service) executeA11yBatchAction(
 			noDeclaredTarget,
 			action.actionType,
 			obs,
-			plan,
 		).withEvidenceScope("delivery_or_local_ui")
 	case "click":
 		return s.click(
@@ -564,7 +542,6 @@ func (s *service) executeA11yBatchAction(
 			"left",
 			"auto",
 			obs,
-			plan,
 		).withEvidenceScope("delivery_or_local_ui")
 	case "keypress":
 		return s.pressKey(
@@ -575,7 +552,6 @@ func (s *service) executeA11yBatchAction(
 			context.expectedWindow,
 			action.key,
 			obs,
-			plan,
 		).withEvidenceScope("delivery_or_local_ui")
 	case "scroll":
 		return s.scroll(
@@ -587,7 +563,6 @@ func (s *service) executeA11yBatchAction(
 			context.expectedWindow,
 			action.pages,
 			obs,
-			plan,
 		).withEvidenceScope("delivery_or_local_ui")
 	case "set_value":
 		return s.setValue(
@@ -596,7 +571,6 @@ func (s *service) executeA11yBatchAction(
 			noDeclaredTarget,
 			action.value,
 			obs,
-			plan,
 		).withEvidenceScope("delivery_or_local_ui")
 	case "type":
 		return s.typeText(
@@ -607,7 +581,6 @@ func (s *service) executeA11yBatchAction(
 			context.expectedWindow,
 			action.text,
 			obs,
-			plan,
 		).withEvidenceScope("delivery_or_local_ui")
 	default:
 		return textResult(
@@ -716,7 +689,10 @@ func a11yBatchValidationError(message string, requested int) toolCallResult {
 }
 
 func a11yBatchPreflightError(err error, requested int) toolCallResult {
-	return withAXLifecycleFailure(a11yBatchValidationError(err.Error(), requested), err)
+	return withArgumentRule(
+		withAXLifecycleFailure(a11yBatchValidationError(err.Error(), requested), err),
+		err,
+	)
 }
 
 func withAXLifecycleFailure(result toolCallResult, err error) toolCallResult {
@@ -755,7 +731,6 @@ func withAXLifecycleFailure(result toolCallResult, err error) toolCallResult {
 }
 
 func (s *service) a11yBatch(
-	app string,
 	rawActions any,
 	obs observation,
 	postcondition map[string]any,
@@ -797,9 +772,7 @@ func (s *service) a11yBatch(
 			return a11yBatchPreflightError(err, requested)
 		}
 	}
-	context, err := s.deriveA11yBatchContext(
-		app, appRef, windowRef, actions,
-	)
+	context, err := s.deriveA11yBatchContext(appRef, windowRef, actions)
 	if err != nil {
 		return a11yBatchPreflightError(err, requested)
 	}

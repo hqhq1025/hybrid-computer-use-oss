@@ -10,7 +10,7 @@ func enforceAXImageOutputPolicy(
 	args map[string]any,
 	result toolCallResult,
 ) toolCallResult {
-	if internalToolName(name) != "a11y" {
+	if name != publicToolAX {
 		return result
 	}
 	if axRequestExplicitlyIncludesScreenshot(args) {
@@ -34,13 +34,7 @@ func axRequestExplicitlyIncludesScreenshot(args map[string]any) bool {
 	}
 	switch mode {
 	case a11yModeObserve:
-		target := defaultString(
-			strings.ToLower(strings.TrimSpace(
-				optionalString(args, "observation_target"),
-			)),
-			"app",
-		)
-		if target != "app" {
+		if optionalString(args, "observation_target") == "apps" {
 			return false
 		}
 		obs, err := parseObservation(args)

@@ -71,7 +71,6 @@ func NewFindCursorRegistry(limit int) *FindCursorRegistry {
 }
 
 func parseAXFindCursor(ref string) (uint64, bool) {
-	ref = strings.TrimSpace(ref)
 	if len(ref) < 2 || ref[0] != 'f' {
 		return 0, false
 	}
@@ -392,4 +391,9 @@ func estimateFindResultSet(
 		bytes = len(encoded)
 	}
 	return nodes, bytes
+}
+
+func isShortAXFindCursor(value string) bool {
+	_, ok := parseAXFindCursor(value)
+	return ok
 }

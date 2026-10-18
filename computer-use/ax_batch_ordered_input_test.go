@@ -87,7 +87,7 @@ func TestOrderedBatchPreflightsEntireRequestBeforeNativeDispatch(t *testing.T) {
 		legacy := &recordingPlatformBackend{}
 		backend := &orderedInputRecordingBackend{recordingPlatformBackend: legacy}
 		s.backend = backend
-		result := s.a11yBatch("", []any{
+		result := s.a11yBatch([]any{
 			map[string]any{"type": "keypress", "keys": []any{"A"}}, invalid,
 		}, observation{mode: observeNone}, nil, "", window)
 		if !result.IsError || len(backend.requests) != 0 || len(legacy.calls) != 0 {
@@ -103,7 +103,7 @@ func TestOrderedBatchCrossWindowTailRejectedBeforeInput(t *testing.T) {
 	legacy := &recordingPlatformBackend{}
 	backend := &orderedInputRecordingBackend{recordingPlatformBackend: legacy}
 	s.backend = backend
-	result := s.a11yBatch("", []any{
+	result := s.a11yBatch([]any{
 		map[string]any{"type": "click", "target": map[string]any{"ref": ref}},
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
 		map[string]any{"type": "close", "target": map[string]any{"ref": otherWindow}},
@@ -131,7 +131,7 @@ func TestOrderedBatchGuardKeepsExistingAssertionPath(t *testing.T) {
 			action["postcondition"] = guard
 			batchGuard = nil
 		}
-		result := s.a11yBatch("", []any{action}, observation{mode: observeDiff}, batchGuard, "", window)
+		result := s.a11yBatch([]any{action}, observation{mode: observeDiff}, batchGuard, "", window)
 		if result.IsError || len(backend.requests) != 0 || len(legacy.actionRequests) != 1 || len(legacy.observeRequests) == 0 {
 			t.Fatalf("guarded batch left assertion path: perAction=%t result=%#v calls=%#v", perAction, result, legacy.calls)
 		}
@@ -154,7 +154,7 @@ func TestOrderedBatchOptionalFinalObservationFailure(t *testing.T) {
 		if tail {
 			actions = append(actions, map[string]any{"type": "type", "text": "must not run"})
 		}
-		result := s.a11yBatch("", actions, observation{mode: observeNone}, nil, "", window)
+		result := s.a11yBatch(actions, observation{mode: observeNone}, nil, "", window)
 		facts := result.StructuredContent["a11y_batch_result"].(map[string]any)
 		if result.IsError != tail || len(backend.requests) != 1 || len(legacy.calls) != 0 ||
 			facts["actions_completed_without_call_error"] != 1 || facts["final_observation_returned"] != false ||

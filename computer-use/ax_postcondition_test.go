@@ -647,11 +647,10 @@ func TestNegativeSelectorPostconditionRejectsUnsafeWindowTransitionEvidence(
 
 func TestRefOwnedBatchScopesSelectorPostconditionToSameWindow(t *testing.T) {
 	service, _, windowRef, elementRef := sheetBatchService(t)
-	context, err := service.deriveA11yBatchContext(
-		"", "", "", []a11yBatchAction{{
-			actionType: "click",
-			targetRef:  elementRef,
-		}},
+	context, err := service.deriveA11yBatchContext("", "", []a11yBatchAction{{
+		actionType: "click",
+		targetRef:  elementRef,
+	}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -772,5 +771,51 @@ func TestActionPostconditionFailureStopsLaterActionsWithCurrentEvidence(t *testi
 	actions := batch["actions"].([]map[string]any)
 	if len(actions) != 1 || actions[0]["postcondition"] == nil {
 		t.Fatalf("failed action guard evidence was hidden: %#v", batch)
+	}
+}
+
+// Probe #13: optionalBool used to decode any string other than "true" as
+// false, so {"type":"exists","value":"yes"} silently asserted absence.
+func TestAssertionBooleansRejectStrings(t *testing.T) {
+	for name, assertion := range map[string]map[string]any{
+		"exists value": {
+			"type": "exists", "target": map[string]any{"ref": "r1"}, "value": "yes",
+		},
+		"exists true string": {
+			"type": "exists", "target": map[string]any{"ref": "r1"}, "value": "true",
+		},
+		"state value": {
+			"type": "state", "target": map[string]any{"ref": "r1"},
+			"state": "checked", "value": "false",
+		},
+		"window title exists": {
+			"type": "window_title_contains", "text": "Save", "exists": "no",
+		},
+	} {
+		if _, err := parseA11yAssertionSpec(assertion); err == nil {
+			t.Fatalf("%s: string boolean was accepted", name)
+		}
+	}
+	if got := optionalBool(map[string]any{"value": "yes"}, "value"); got != nil {
+		t.Fatalf("optionalBool coerced a string to %v", *got)
+	}
+}
+
+// The published "value" predicate must keep its comparison when the goal is
+// rebuilt from the raw assertion (canonical reconciliation). It used to
+// switch on the raw type, build an empty goal for "value", and pass for any
+// observed value.
+func TestValueAssertionGoalIsNotEmpty(t *testing.T) {
+	for _, assertion := range []map[string]any{
+		{"type": "value", "target": map[string]any{"ref": "r1"}, "value": "draft"},
+		{"type": "value", "target": map[string]any{"ref": "r1"}, "value": "draft", "match": "contains"},
+	} {
+		goal := assertionGoal(assertion)
+		if goal.empty() {
+			t.Fatalf("assertion %v produced an empty goal", assertion)
+		}
+		if ok, detail := goal.check(&elementRecord{Value: "final"}, nil); ok {
+			t.Fatalf("assertion %v passed for an unrelated value: %s", assertion, detail)
+		}
 	}
 }

@@ -174,16 +174,15 @@ func (s *service) callTool(
 		result = enforceAXImageOutputPolicy(name, args, result)
 	}()
 
-	internalName := internalToolName(name)
-	result = s.dispatch(internalName, args)
-	if internalName != "gui" {
+	result = s.dispatch(name, args)
+	if name != publicToolGUI {
 		result = result.withDefaultEvidenceScope(
-			toolEvidenceScope(internalName, args),
+			toolEvidenceScope(name, args),
 		)
 	}
 	// Capture error context in one place: errors are returned from many call
 	// sites, and adding the capture to each would miss some.
-	if result.IsError && internalName != "gui" {
+	if result.IsError && name != publicToolGUI {
 		// Preparation can remain queued after the failure. Error reporting must
 		// not issue a hidden read or replace the explicit stop with recovery.
 		if result.StructuredContent["focus_preparation"] != nil ||
@@ -270,7 +269,7 @@ func (s *service) callTool(
 		if strings.Contains(message, "runtime_timeout=true") {
 			return result
 		}
-		note, sampled := s.writeErrorContext(app, internalName, message)
+		note, sampled := s.writeErrorContext(app, name, message)
 		if note != "" {
 			result.Content = append(result.Content, contentItem{Type: "text", Text: note})
 		}
@@ -289,23 +288,11 @@ func (s *service) callTool(
 	return result
 }
 
-func internalToolName(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "ax", "a11y":
-		return "a11y"
-	case "gui":
-		return "gui"
-	default:
-		return name
-	}
-}
-
 func toolEvidenceScope(name string, args map[string]any) string {
-	name = internalToolName(name)
 	switch name {
-	case "gui":
+	case publicToolGUI:
 		return "full_desktop_observation"
-	case "a11y":
+	case publicToolAX:
 		mode, _ := parseA11yMode(args)
 		switch mode {
 		case a11yModeObserve:
@@ -333,24 +320,21 @@ func (s *service) dispatch(name string, args map[string]any) toolCallResult {
 			"tool %q belongs to the %s channel, which is disabled by COMPUTER_USE_CHANNELS. Enabled channels: %s.",
 			name, toolChannel[name], strings.Join(sortedChannels(), ", ")), true)
 	}
-	// The observation budget is parsed the same way for every action tool, so
-	// callers need not learn per-tool semantics or defaults. Read-only tools
-	// are exempt because they have their own options.
-	obs, obsErr := parseObservation(args)
-	if obsErr != nil && isActionTool(name) {
-		return textResult(obsErr.Error(), true)
+	// The published input schema is the static contract. Nothing below runs,
+	// and no input is emitted, for arguments it rejects.
+	if argErr := validateToolArguments(name, args); argErr != nil {
+		return argumentErrorResult(name, args, argErr)
 	}
-	// The verification plan is parsed next to the observation budget for the
-	// same reason. The two are orthogonal (obs decides how much to return,
-	// plan decides what to verify), so each is parsed separately. An invalid
-	// expect or settle_ms is a call error (isError), distinct from an unmet
-	// expect, which is a fact about the UI.
-	plan, planErr := parseSettlePlan(args)
-	if planErr != nil && isActionTool(name) {
-		return textResult(planErr.Error(), true)
-	}
+	return s.dispatchValidated(name, args)
+}
+
+// dispatchValidated runs a call whose arguments already passed the published
+// schema. The tool services still check what they read, so this path alone
+// must accept and reject the same arguments as the schema; the consistency
+// test calls it directly to prove that.
+func (s *service) dispatchValidated(name string, args map[string]any) toolCallResult {
 	switch name {
-	case "gui":
+	case publicToolGUI:
 		invalidFields := make([]string, 0)
 		for field := range args {
 			if field != "actions" && field != "settle_ms" {
@@ -400,15 +384,16 @@ func (s *service) dispatch(name string, args map[string]any) toolCallResult {
 				}
 			}
 		}
-		if plan.settleMS > guiMaxSettleMS {
-			return textResult(fmt.Sprintf(
-				"gui settle_ms must be between 0 and %d", guiMaxSettleMS), true)
+		settleMS, err := optionalSettleMS(args)
+		if err != nil {
+			return textResult(err.Error(), true).withEvidenceScope("error_only")
 		}
-		return s.gui(
-			actions,
-			plan.settleMS,
-		)
-	case "a11y":
+		return s.gui(actions, settleMS)
+	case publicToolAX:
+		obs, err := parseObservation(args)
+		if err != nil {
+			return textResult(err.Error(), true).withEvidenceScope("error_only")
+		}
 		return s.a11yRequest(args, obs)
 	default:
 		return textResult(fmt.Sprintf("unsupportedTool(%q)", name), true)

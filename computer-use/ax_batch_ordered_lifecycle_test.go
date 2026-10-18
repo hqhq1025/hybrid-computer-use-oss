@@ -43,7 +43,7 @@ func TestOrderedBatchTypedLifecycleScope(t *testing.T) {
 				},
 			}
 			s.backend = backend
-			result := s.a11yBatch("", []any{
+			result := s.a11yBatch([]any{
 				map[string]any{"type": "keypress", "keys": []any{"ESC"}},
 			}, observation{mode: observeNone}, nil, "", window)
 			if !result.IsError || result.StructuredContent["failure_code"] != tc.code ||
@@ -59,7 +59,7 @@ func TestOrderedBatchTypedLifecycleScope(t *testing.T) {
 					s.windowRefRegistry.entries[sibling].Lifecycle, s.refRegistry.entries[element].Lifecycle)
 			}
 			if tc.window != AXRefActive {
-				result = s.a11yBatch("", []any{
+				result = s.a11yBatch([]any{
 					map[string]any{"type": "keypress", "keys": []any{"ESC"}},
 				}, observation{mode: observeNone}, nil, "", window)
 				code := "stale_window_ref"
@@ -87,7 +87,7 @@ func TestOrderedBatchInvalidResultCannotRetireIdentity(t *testing.T) {
 		},
 	}
 	s.backend = backend
-	result := s.a11yBatch("", []any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
+	result := s.a11yBatch([]any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
 		observation{mode: observeNone}, nil, "", window)
 	if !result.IsError || result.StructuredContent["failure_code"] != "runtime_transport_lost" ||
 		result.StructuredContent["mutation_unknown"] != true || len(backend.requests) != 1 || len(legacy.calls) != 0 {
@@ -108,7 +108,7 @@ func TestOrderedBatchRequestRejectionIsNotTransportUncertainty(t *testing.T) {
 		}},
 	}
 	s.backend = backend
-	result := s.a11yBatch("", []any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
+	result := s.a11yBatch([]any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
 		observation{mode: observeNone}, nil, "", window)
 	facts := result.StructuredContent["a11y_batch_result"].(map[string]any)
 	if !result.IsError || result.StructuredContent["provider_request_rejected"] != true ||

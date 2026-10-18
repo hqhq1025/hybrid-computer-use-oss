@@ -4,83 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-func TestSettledActionNotesAreBoundToTheirSnapshotPhase(t *testing.T) {
-	immediate := &appSnapshot{SnapshotID: "immediate-a"}
-	final := &appSnapshot{SnapshotID: "settled-b"}
-	immediateNotes := []string{
-		"SNAPSHOT UNCHANGED: immediate tree stayed the same.",
-		"[pixels] sampled_pixel_change=material.",
-	}
-	outcome := settleOutcome{
-		snapshot:             final,
-		snapshotNotes:        []string{"ROOT WINDOW CHANGED: final alert."},
-		snapshotFromFollowup: true,
-		verified:             true,
-		elapsedMS:            548,
-		polls:                1,
-	}
-	notes := settledActionNotes(immediate, immediateNotes, outcome)
-	joined := strings.Join(notes, "\n")
-	for _, fragment := range []string{
-		"[observation phase=immediate superseded=true] SNAPSHOT UNCHANGED",
-		"[observation phase=immediate superseded=true] [pixels]",
-		"[observation phase=settled] ROOT WINDOW CHANGED",
-		"final_pixel_verdict=unavailable",
-	} {
-		if !strings.Contains(joined, fragment) {
-			t.Fatalf("phase-bound notes missing %q:\n%s", fragment, joined)
-		}
-	}
-	for _, private := range []string{"immediate-a", "settled-b", "snapshot_id"} {
-		if strings.Contains(joined, private) {
-			t.Fatalf("phase-bound notes leaked private identity %q:\n%s", private, joined)
-		}
-	}
-	for _, note := range notes {
-		if strings.HasPrefix(note, "SNAPSHOT UNCHANGED") ||
-			strings.HasPrefix(note, "[pixels]") {
-			t.Fatalf("immediate evidence leaked without a phase binding: %q", note)
-		}
-	}
-
-	result := withActionOutcome(
-		textResult("settled", false),
-		settlePlan{expect: &expectSpec{}},
-		outcome,
-		immediate,
-		immediateNotes,
-	)
-	for key, want := range map[string]any{
-		"followup_snapshot_used":  true,
-		"response_snapshot_phase": "settled",
-		"immediate_snapshot_id":   "immediate-a",
-		"final_snapshot_id":       "settled-b",
-		"pixel_evidence_phase":    "immediate",
-		"final_pixel_verdict":     "unavailable",
-	} {
-		if got := result.StructuredContent[key]; got != want {
-			t.Fatalf("%s=%#v, want %#v; all=%#v", key, got, want,
-				result.StructuredContent)
-		}
-	}
-}
-
-func TestNoFollowupKeepsSingleSnapshotNotesUnchanged(t *testing.T) {
-	notes := []string{"[pixels] sampled_pixel_change=none."}
-	outcome := settleOutcome{
-		snapshot:             &appSnapshot{SnapshotID: "immediate-a"},
-		snapshotFromFollowup: false,
-	}
-	got := settledActionNotes(outcome.snapshot, notes, outcome)
-	if !reflect.DeepEqual(got, notes) {
-		t.Fatalf("single-snapshot response changed shape: got %v want %v", got, notes)
-	}
-}
 
 func TestTraceIsOffUnlessGivenAPath(t *testing.T) {
 	// Tracing is enabled by giving a path, not a boolean: where to write is the

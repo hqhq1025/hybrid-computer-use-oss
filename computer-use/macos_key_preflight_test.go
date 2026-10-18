@@ -81,8 +81,12 @@ func TestMacOSKeyPreflightRejectsGUIBeforeLayoutRead(t *testing.T) {
 		if !result.IsError || len(backend.calls) != 0 {
 			t.Fatalf("invalid GUI batch performed layout read/input: calls=%v result=%#v", backend.calls, result)
 		}
-		if !strings.Contains(resultText(result), "unsupported macOS") {
-			t.Fatalf("did not reach platform key preflight: %#v", result)
+		// Mouse modifiers are a published enum, so the schema rejects them
+		// first; keypress names are free text and reach the macOS preflight.
+		text := resultText(result)
+		if !strings.Contains(text, "unsupported macOS") &&
+			!strings.Contains(text, "is unsupported; it must be CTRL, CONTROL, SHIFT, ALT, or SUPER") {
+			t.Fatalf("did not reach a key preflight: %#v", result)
 		}
 		if !s.hasPendingFailedObservation("a1") {
 			t.Fatal("GUI preflight consumed pending AX observation gate")

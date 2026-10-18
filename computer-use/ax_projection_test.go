@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -148,30 +149,6 @@ func TestContentScopeAndRootIgnoreLegacyTreeBudget(t *testing.T) {
 	text := typedTreeTextForTest(t, snapshot)
 	if !strings.Contains(text, `heading "Deep target"`) {
 		t.Fatalf("typed root missing despite canonical record:\n%s", text)
-	}
-}
-
-func TestQuotedExpectSelectorUsesExactRoleAndName(t *testing.T) {
-	snapshot := expectSnapshot(
-		elementRecord{Index: 1, ControlType: "push button", Name: "OK"},
-		elementRecord{Index: 2, ControlType: "push button", Name: "Bookmark"},
-		elementRecord{Index: 3, ControlType: "menu item", Name: "OK"},
-	)
-	target, err := parseExpectTarget(`push button "OK"`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	matches := target.matching(snapshot)
-	if len(matches) != 1 || matches[0].Index != 1 {
-		t.Fatalf("quoted selector must not substring-match Bookmark or another role: %#v", matches)
-	}
-
-	substring, err := parseExpectTarget(`name=OK`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := substring.countMatches(snapshot); got != 3 {
-		t.Fatalf("field query name= must retain documented substring semantics, got %d", got)
 	}
 }
 
@@ -332,4 +309,29 @@ func TestObservationRootProviderBoundRefFailsClosed(t *testing.T) {
 			t.Fatalf("ambiguous provider root error=%v", err)
 		}
 	})
+}
+
+// Probe #18/#19: the published observe root reused the act target schema, so
+// it advertised {"ref":"wN"}, which the runtime rejects, and an index
+// described as "action 1 only". The root now uses the read-only element target.
+func TestObserveRootSchemaMatchesRuntimeRefRule(t *testing.T) {
+	branch := findA11ySchemaBranch(t, "observe", "app")
+	root := branch["properties"].(map[string]any)["root"].(map[string]any)
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, "w[1-9]") {
+		t.Fatalf("observe root schema still advertises wN refs: %s", text)
+	}
+	if strings.Contains(text, "action 1 only") {
+		t.Fatalf("observe root index still claims to be act-only: %s", text)
+	}
+	if _, err := parseObservationRoot(map[string]any{"ref": "w1"}); err == nil {
+		t.Fatal("runtime accepted a wN observe root")
+	}
+	if _, err := parseObservationRoot(map[string]any{"ref": "r1"}); err != nil {
+		t.Fatalf("runtime rejected an rN observe root: %v", err)
+	}
 }

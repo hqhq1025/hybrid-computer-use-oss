@@ -270,7 +270,6 @@ func numericElementAddress(address string) bool {
 }
 
 func isShortAXRef(value string) bool {
-	value = strings.TrimSpace(value)
 	if len(value) < 2 || value[0] != 'r' {
 		return false
 	}
@@ -355,7 +354,6 @@ func (s *service) resolveShortAXRef(
 	app,
 	address string,
 ) (*AXRefEntry, error) {
-	address = strings.TrimSpace(address)
 	if !isShortAXRef(address) {
 		return nil, fmt.Errorf("%q is not a short AX ref", address)
 	}
@@ -385,7 +383,6 @@ func (s *service) resolveShortAXRef(
 }
 
 func (s *service) resolveShortAXRefOwned(address string) (*AXRefEntry, error) {
-	address = strings.TrimSpace(address)
 	if !isShortAXRef(address) {
 		return nil, fmt.Errorf("%q is not a short AX ref", address)
 	}
@@ -396,7 +393,6 @@ func (s *service) resolveShortAXWindowRef(
 	app,
 	address string,
 ) (*AXWindowRefEntry, error) {
-	address = strings.TrimSpace(address)
 	if !isShortAXWindowRef(address) {
 		return nil, fmt.Errorf("%q is not a short AX window ref", address)
 	}
@@ -428,7 +424,6 @@ func (s *service) resolveShortAXWindowRef(
 func (s *service) resolveShortAXWindowRefOwned(
 	address string,
 ) (*AXWindowRefEntry, error) {
-	address = strings.TrimSpace(address)
 	if !isShortAXWindowRef(address) {
 		return nil, fmt.Errorf("%q is not a short AX window ref", address)
 	}
@@ -436,7 +431,6 @@ func (s *service) resolveShortAXWindowRefOwned(
 }
 
 func (s *service) resolveShortAXAppRef(address string) (*AXAppRefEntry, error) {
-	address = strings.TrimSpace(address)
 	if !isShortAXAppRef(address) {
 		return nil, fmt.Errorf("%q is not a short AX app ref", address)
 	}
