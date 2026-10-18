@@ -23,31 +23,31 @@ option. Follow the current tool schema for argument shapes and actions.
 
 ## Observe And Act
 
-- Observe the relevant app/window. Use content scope for one identifiable page
-  or document root, and window scope for chrome, menus, dialogs, and settings.
-  Supply one read identity: bootstrap app, app ref, or window ref. Prefer refs;
-  a window ref already owns its app.
+- List windows with `apps`, then observe or find in one window. Use content
+  scope for one identifiable page or document root, and window scope for
+  chrome, menus, dialogs, and settings. `app` accepts a name, PID, or `aN`;
+  after the first read, use the returned `wN` as `window_ref`.
 - Find a known role, name, text, value, or state directly. Find searches canonical
   records even when the compact tree omits containers. Partial coverage does not
   invalidate returned targets, and projection summaries are not action targets.
   Prefer focused or rooted observations to repeated full-window trees.
-- Mutations require current `rN` element or `wN` window refs, never indices or
-  selectors. Do not invent or modify refs. A targeted ref owns app and window;
-  use `window_ref` only for an entirely untargeted keyboard batch.
-- Batch known actions within one logical window while later refs and focus
-  should remain valid. End the batch at an action that can open, close, replace,
-  or navigate a window. Window activation and closure use `wN`; closure is last.
-- Semantic click may activate a selectable item, not merely select it. Gate
-  dependent input with a postcondition on the earlier action when its outcome
-  must be checked. A postcondition cannot undo activation already emitted.
-- Use literal `type` and key-array `keypress`. Semantic input may require
-  foreground focus; it is not a guarantee of background delivery.
-- Keep the default fresh post-action diff and continue from it. Use no
-  observation only when readback is unnecessary. A target-window screenshot,
-  when exposed by the AX schema, is visual evidence, not full-desktop control.
-- Put a known final semantic predicate in the batch postcondition. Use a
-  separate assertion for a later state-dependent decision. Prefer positive
-  next-state conditions to waiting for an old node to disappear.
+- Actions take current `rN` element refs or `wN` window refs, copied exactly.
+  `activate` and `close` also take a window title substring. `keypress` and
+  `type` without `ref` go to the window that has focus.
+- Batch known actions within one window while later refs and focus should
+  remain valid. End the batch at an action that can open, close, replace, or
+  navigate a window; `close` is last.
+- Semantic click may activate a selectable item, not merely select it. Put
+  `until` on the earlier action when a later action depends on its result.
+  `until` cannot undo an action already sent.
+- Keep the default post-action diff and continue from it. Use `observe:"none"`
+  only when readback is unnecessary. A window screenshot is visual evidence,
+  not full-desktop control.
+- Put a known final predicate in the batch `until`. To wait without acting,
+  use `observe` with `until`; a false predicate is a result, not an error.
+  A `selector` or `title` predicate checks every window of the application,
+  including a dialog or menu that opens as its own window.
+  Prefer positive next-state conditions to waiting for an old node to vanish.
 
 ## Recovery And Verification
 
@@ -56,9 +56,10 @@ option. Follow the current tool schema for argument shapes and actions.
   earlier OS focus request cannot still take effect.
 - `not_executed` with `input_events_emitted=false` means the action caused no
   later UI change. Input emission alone does not prove its intended effect.
-- Reuse current evidence and refs returned in a response. On a stale-ref
-  failure, discard targets from the failed call and use fresh returned refs
-  or one new find/observation. Do not replay or reopen an obsolete dialog.
+- Reuse current evidence and refs returned in a response. Errors return a
+  `code` and a `hint` with a corrected call. On `stale_ref`, discard targets
+  from the failed call and use fresh refs or one new find. Do not replay or
+  reopen an obsolete dialog.
 - An unchanged tree can coexist with changed formatting or file state. Inspect
   the appropriate artifact or runtime evidence instead of repeating the action.
   For a transient window absent from AX, try a suitable non-AX channel rather
@@ -69,9 +70,9 @@ option. Follow the current tool schema for argument shapes and actions.
 - Combine related read-only shell checks. Prefer structured parsers or APIs
   over bulk clipboard transfer. If pasting is necessary, keep the clipboard
   owner alive; after one focus-verified paste failure, change mechanism.
-- Assertions prove only requested AX-visible state. Verify durable files and
+- `until` proves only requested AX-visible state. Verify durable files and
   effective settings through their own state; use visual evidence when the
-  outcome requires it and that evidence is available. A postcondition or final
+  outcome requires it and that evidence is available. An `until` or final
   observation can finish verification without another call when it directly
   covers the requirement. Report a hard blocker only after available alternative
   channels cannot meet the original instruction.

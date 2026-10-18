@@ -263,8 +263,8 @@ func TestPrepareAXEvidenceCompactsSuccessWithoutReturningTelemetry(t *testing.T)
 		},
 	}
 	result = prepareAXEvidence(result)
-	if len(result.StructuredContent) != 0 {
-		t.Fatalf("routine success should not return audit counters: %#v",
+	if len(result.StructuredContent) != 2 {
+		t.Fatalf("routine success should return only ok and input_emitted: %#v",
 			result.StructuredContent)
 	}
 	for _, noisy := range []string{
@@ -280,9 +280,9 @@ func TestPrepareAXEvidenceCompactsSuccessWithoutReturningTelemetry(t *testing.T)
 		}
 	}
 	visible := withAXTextEvidence(result)
-	if len(visible.Content) != 1 ||
-		strings.HasPrefix(visible.Content[0].Text, "[ax] ") {
-		t.Fatalf("routine success added an empty evidence prefix: %#v",
+	if len(visible.Content) != 2 ||
+		visible.Content[0].Text != `{"ok":true,"input_emitted":false}` {
+		t.Fatalf("routine success must carry only the short evidence line: %#v",
 			visible.Content)
 	}
 }
@@ -301,6 +301,10 @@ func TestModelVisibleEvidenceKeepsInternalHashesPrivate(t *testing.T) {
 		"failure_code":                            "stale_element_ref",
 		"argument_error_code":                     "invalid_argument",
 		"argument_error_path":                     "/actions/0",
+		axPublicErrorCodeKey:                      "invalid_argument",
+		axPublicErrorPathKey:                      "actions[0]",
+		axPublicErrorHintKey:                      "{}",
+		axPublicErrorDetailKey:                    "message",
 	}
 	visible := modelVisibleEvidence(internal)
 	if visible["failure_code"] != "stale_element_ref" {

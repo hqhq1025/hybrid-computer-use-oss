@@ -30,6 +30,8 @@ type verifyGoal struct {
 	valueContains   string
 	textContains    string
 	exists          *bool
+	// negated inverts a value or text predicate: wait until it is false.
+	negated bool
 }
 
 func (g verifyGoal) empty() bool {
@@ -62,6 +64,9 @@ func (g verifyGoal) describe() string {
 	if g.textContains != "" {
 		parts = append(parts, fmt.Sprintf("text to contain %q", g.textContains))
 	}
+	if g.negated {
+		return "not (" + strings.Join(parts, " and ") + ")"
+	}
 	return strings.Join(parts, " and ")
 }
 
@@ -69,6 +74,15 @@ func (g verifyGoal) describe() string {
 // observation matters most: "assertion failed" carries no information, while
 // "expected checked, observed enabled focused" does.
 func (g verifyGoal) check(record *elementRecord, lookupErr error) (bool, string) {
+	if g.negated {
+		positive := g
+		positive.negated = false
+		if record == nil {
+			return false, "no element matches the selector"
+		}
+		ok, observed := positive.check(record, lookupErr)
+		return !ok, observed
+	}
 	if record == nil {
 		if g.exists != nil && !*g.exists {
 			return true, "no element matches the selector"
@@ -229,25 +243,24 @@ func assertionEvidenceScope(result toolCallResult) string {
 	return "error_only"
 }
 
+// verifyWindowTitle polls the titles of every top-level window of app:
+// documents, dialogs and popups alike. A title predicate asks whether the
+// application shows such a window, so it is never narrowed to the window a
+// batch acted in; that window is often the one the action closed or the one a
+// new dialog covers.
 func (s *service) verifyWindowTitle(
 	app,
 	titleSubstring string,
 	expected bool,
 	timeoutMS,
 	stableMS int,
-	targetWindowHandle ...string,
 ) toolCallResult {
-	windowHandle := ""
-	if len(targetWindowHandle) > 0 {
-		windowHandle = strings.TrimSpace(targetWindowHandle[0])
-	}
 	return s.verifyWindowTitleWithProbe(
 		app,
 		titleSubstring,
 		expected,
 		timeoutMS,
 		stableMS,
-		windowHandle,
 		s.callProviderWindowList,
 	)
 }
@@ -258,7 +271,6 @@ func (s *service) verifyWindowTitleWithProbe(
 	expected bool,
 	timeoutMS,
 	stableMS int,
-	targetWindowHandle string,
 	probe func(ProviderWindowListRequest) (*ProviderWindowResult, error),
 ) toolCallResult {
 	if timeoutMS <= 0 {
@@ -273,13 +285,14 @@ func (s *service) verifyWindowTitleWithProbe(
 	for {
 		attempts++
 		operation := axServiceRequest{
-			Operation:          axServiceWindowList,
-			App:                app,
-			TargetWindowHandle: targetWindowHandle,
+			Operation: axServiceWindowList,
+			App:       app,
 		}
-		if err := s.bindRuntimeAppIdentity(&operation); err != nil {
+		// Closing an application's last window can retire its aN before this
+		// poll; the read then names the same exact process.
+		if err := s.bindPredicateAppIdentity(&operation); err != nil {
 			return a11yAssertionResult(
-				"assert_ax application target: "+err.Error(),
+				"until: application target: "+err.Error(),
 				true,
 				"invalid_target",
 				attempts,
@@ -293,8 +306,9 @@ func (s *service) verifyWindowTitleWithProbe(
 		if err != nil {
 			lastError = err.Error()
 		} else if !response.OK {
-			completeAppAbsence := !expected &&
-				isShortAXAppRef(app) &&
+			// An application that no longer exists, read from a complete
+			// inventory, has no window with any title.
+			completeAppAbsence := isShortAXAppRef(app) &&
 				response.Failure != nil &&
 				response.Failure.FactsComplete &&
 				strings.EqualFold(response.Failure.Subject, "app") &&
@@ -362,9 +376,8 @@ func (s *service) verifyWindowTitleWithProbe(
 				expectation = "disappear"
 			}
 			text := fmt.Sprintf(
-				"assert_ax window_title_timeout: no application-owned window "+
-					"title containing %q satisfied the requested %s predicate "+
-					"within %dms.",
+				"until false: no window title containing %q satisfied the "+
+					"requested %s predicate within %dms.",
 				titleSubstring,
 				expectation,
 				timeoutMS,
@@ -616,7 +629,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 ) toolCallResult {
 	if target == nil {
 		return a11yAssertionResult(
-			"assert_ax invalid_target: the AX ref has no live target identity.",
+			"until: the ref has no live target identity.",
 			true, "invalid_target", 0, stableMS,
 		)
 	}
@@ -640,7 +653,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 		}
 		if err := s.bindRuntimeAppIdentity(&operation); err != nil {
 			return a11yAssertionResult(
-				"assert_ax invalid_target: "+err.Error(),
+				"until: "+err.Error(),
 				true, "invalid_target", attempt, stableMS,
 			)
 		}
@@ -731,7 +744,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 				response.FailureCode == "semantic_target_invalid" {
 				result := a11yAssertionResult(
 					fmt.Sprintf(
-						"assert_ax %s: %s",
+						"until %s: %s",
 						lastStatus,
 						firstLine(lookupErr.Error()),
 					),
@@ -803,7 +816,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 		}
 		if !time.Now().Before(deadline) {
 			text := fmt.Sprintf(
-				"assert_ax %s: %s did not satisfy %s within %dms. Last observation: %s",
+				"until %s: %s did not satisfy %s within %dms. Last observation: %s",
 				lastStatus,
 				displayRef,
 				goal.describe(),
@@ -866,7 +879,7 @@ func (s *service) verify(
 		return textResult("Missing required argument: app", true)
 	}
 	if strings.TrimSpace(selector) == "" {
-		return textResult("assert_ax requires a target.", true)
+		return textResult("until requires ref or selector.", true)
 	}
 	if strings.TrimSpace(displaySelector) == "" {
 		displaySelector = selector
@@ -874,20 +887,17 @@ func (s *service) verify(
 	if numericElementIndex(selector) {
 		if s.hasPendingFailedObservation(app) {
 			return textResult(
-				"assert_ax cannot reuse target.index after a stale-reference failure. "+
-					"The previous snapshot address space was invalidated. Call AX mode=observe "+
-					"or mode=find explicitly, then use a newly returned rN ref or a current "+
-					"read-only target.", true)
+				"until cannot reuse an element index after a stale-reference failure; "+
+					"observe or find again and use a newly returned rN.", true)
 		}
 		if s.currentSnapshot(app) == nil {
 			return textResult(
-				"assert_ax cannot use target.index without a current accessibility "+
-					"snapshot. Call AX mode=observe or mode=find first, then use a current "+
-					"target.index, target.ref, or target.selector.", true)
+				"until cannot use an element index without a current snapshot; "+
+					"observe or find first.", true)
 		}
 	} else if _, err := semanticTargetFromAddress(selector); err != nil {
 		result := textResult(
-			"assert_ax locator_invalid: "+err.Error(), true)
+			"until selector invalid: "+err.Error(), true)
 		result.StructuredContent = map[string]any{
 			"assertion_status":     "locator_invalid",
 			"task_effect_verified": false,
@@ -895,7 +905,7 @@ func (s *service) verify(
 		return result
 	}
 	if goal.empty() {
-		return textResult("assert_ax needs something to assert: pass at least one of state, value_contains, value_equals, text_contains, or exists.", true)
+		return textResult("until needs a predicate.", true)
 	}
 	if timeoutMS <= 0 {
 		timeoutMS = 5000
@@ -923,7 +933,7 @@ func (s *service) verify(
 		if len(targetWindowHandle) > 0 {
 			request.TargetWindowHandle = strings.TrimSpace(targetWindowHandle[0])
 		}
-		snapshot, _, result := s.readProjectedSnapshot(app, request)
+		read, result := s.readUntilApplication(request)
 		if result.IsError {
 			if isAXAppUnavailableResult(result) {
 				elapsed := timeoutMS - int(time.Until(deadline).Milliseconds())
@@ -934,7 +944,7 @@ func (s *service) verify(
 				))
 				if !time.Now().Before(deadline) {
 					text := fmt.Sprintf(
-						"assert_ax app_unavailable: %q did not become visible on the AX bus within %dms.\n",
+						"app_unavailable: %q did not become visible on the AX bus within %dms.\n",
 						app,
 						timeoutMS,
 					)
@@ -961,19 +971,36 @@ func (s *service) verify(
 		// would treat an index such as "62" as a selector and keep reporting
 		// no match while the element is present, a false negative that is
 		// worse than no assertion.
+		snapshot := read.primary
 		if attempt == 1 {
 			firstWindow, firstHandle, firstCount = snapshot.WindowTitle,
 				snapshot.WindowHandle,
 				scopedCanonicalElementCount(snapshot)
 		}
-		lookupSnapshot := snapshotForScopedLookup(snapshot)
 		record, lookupErr := lookupElementFor(
-			lookupSnapshot,
+			read.lookup,
 			selector,
 			"",
-			"assert_ax",
+			"until",
 		)
+		incomplete := false
+		if record == nil && !numericElementIndex(selector) &&
+			!strings.Contains(strings.ToLower(fmt.Sprint(lookupErr)), "ambiguous") {
+			// The bound window has no match: the effect may be a dialog
+			// or popup in another window of the application.
+			others, complete := s.readOtherWindows(read)
+			if otherRecord, otherErr := lookupElementFor(others, selector, "", "until"); otherRecord != nil ||
+				strings.Contains(strings.ToLower(fmt.Sprint(otherErr)), "ambiguous") {
+				record, lookupErr = otherRecord, otherErr
+			}
+			incomplete = !complete && record == nil
+		}
 		ok, observed := goal.check(record, lookupErr)
+		if incomplete {
+			// No match proves nothing while a visible window was unread.
+			ok = false
+			observed += "; a visible window of the application could not be read"
+		}
 		selectorAmbiguous := lookupErr != nil &&
 			strings.Contains(strings.ToLower(lookupErr.Error()), "ambiguous")
 		attempts = append(attempts, fmt.Sprintf("attempt %d at +%dms — %s",
@@ -986,7 +1013,7 @@ func (s *service) verify(
 			}
 			result := a11yAssertionResult(
 				fmt.Sprintf(
-					"assert_ax %s: %s\nThis locator did not identify one "+
+					"until %s: %s\nThis locator did not identify one "+
 						"current element, so polling it would not establish the "+
 						"requested predicate. Obtain a fresh ref or use a more "+
 						"specific structured selector.",
@@ -1032,7 +1059,7 @@ func (s *service) verify(
 		// Sample before checking the deadline so even the smallest budget gets
 		// one complete live-state evaluation.
 		if !time.Now().Before(deadline) {
-			e := &toolError{tool: "assert_ax", summary: fmt.Sprintf(
+			e := &toolError{tool: "until", summary: fmt.Sprintf(
 				"expected %s %s, and it did not become true within %dms.",
 				displaySelector, goal.describe(), timeoutMS)}
 			e.add("Selector", strconv.Quote(displaySelector))
@@ -1080,7 +1107,7 @@ func (s *service) verify(
 			// better test. When the UI did change, the candidate list is more
 			// useful than that advice.
 			if selectorAmbiguous {
-				e.next = "the selector remained ambiguous throughout the wait, so assert_ax " +
+				e.next = "the selector remained ambiguous throughout the wait, so until " +
 					"never identified one element to test. Use a fresh rN ref or a selector " +
 					"copied from the current tree with enough role, name, and predicates to " +
 					"match exactly one element. This failure does not prove " +
@@ -1118,7 +1145,18 @@ func (s *service) verify(
 				)
 			}
 			result := toolCallResult{}
-			if lookupErr == nil &&
+			// For an exists predicate a target that never appeared is the
+			// answer: the predicate is false, not unknown.
+			existsOnly := goal.exists != nil && *goal.exists && goal.state == "" &&
+				goal.valueEquals == "" && goal.valueContains == "" && goal.textContains == ""
+			if status == "locator_missing" && existsOnly {
+				status = "predicate_false"
+				lookupErr = nil
+			}
+			if incomplete {
+				status = "observation_incomplete"
+			}
+			if !incomplete && lookupErr == nil &&
 				(status == "predicate_false" || status == "predicate_unstable") {
 				result = assertionNegativeResult(
 					e.Error(), status, attempt, stableMS,
@@ -1129,6 +1167,9 @@ func (s *service) verify(
 				)
 			}
 			addAssertionSnapshotMetadata(&result, snapshot)
+			if read.windowRef != "" {
+				result.StructuredContent["until_window_ref"] = read.windowRef
+			}
 			return result
 		}
 		time.Sleep(400 * time.Millisecond)

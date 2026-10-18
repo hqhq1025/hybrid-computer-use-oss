@@ -20,9 +20,9 @@ func publicBatchEvidence(t *testing.T, result toolCallResult) map[string]any {
 		t.Fatal(err)
 	}
 	for _, item := range decoded.Content {
-		if item.Type == "text" && strings.HasPrefix(item.Text, "[ax] ") {
+		if item.Type == "text" && strings.HasPrefix(item.Text, `{"ok":`) {
 			var facts map[string]any
-			if err := json.Unmarshal([]byte(strings.TrimPrefix(item.Text, "[ax] ")), &facts); err != nil {
+			if err := json.Unmarshal([]byte(item.Text), &facts); err != nil {
 				t.Fatal(err)
 			}
 			return facts
@@ -34,10 +34,13 @@ func publicBatchEvidence(t *testing.T, result toolCallResult) map[string]any {
 
 func assertPublicBatchCounts(t *testing.T, facts map[string]any, requested, completed int) map[string]any {
 	t.Helper()
-	batch, ok := facts["batch"].(map[string]any)
-	if !ok || batch["actions_requested"] != float64(requested) ||
-		batch["actions_completed_without_call_error"] != float64(completed) {
+	if facts["requested"] != float64(requested) ||
+		facts["completed"] != float64(completed) {
 		t.Fatalf("public whole-request counts lost: %#v", facts)
+	}
+	batch, _ := facts["batch"].(map[string]any)
+	if batch == nil {
+		batch = map[string]any{}
 	}
 	return batch
 }
@@ -78,10 +81,10 @@ func orderedInputTestSnapshot() *appSnapshot {
 func TestOrderedBatchPreflightsEntireRequestBeforeNativeDispatch(t *testing.T) {
 	for _, invalid := range []map[string]any{
 		{"type": "keypress", "keys": []any{}},
-		{"type": "increment", "target": map[string]any{"ref": "r1"}},
-		{"type": "decrement", "target": map[string]any{"ref": "r1"}},
+		{"type": "increment", "ref": "r1"},
+		{"type": "decrement", "ref": "r1"},
 		{"type": "keypress", "keys": []any{"ENTER"}, "unsupported": true},
-		{"type": "keypress", "keys": []any{"ENTER"}, "postcondition": map[string]any{"type": "invalid"}},
+		{"type": "keypress", "keys": []any{"ENTER"}, "until": map[string]any{"type": "invalid"}},
 	} {
 		s, _, window, _ := orderedInputTestService(t)
 		legacy := &recordingPlatformBackend{}
@@ -89,7 +92,8 @@ func TestOrderedBatchPreflightsEntireRequestBeforeNativeDispatch(t *testing.T) {
 		s.backend = backend
 		result := s.a11yBatch([]any{
 			map[string]any{"type": "keypress", "keys": []any{"A"}}, invalid,
-		}, observation{mode: observeNone}, nil, "", window)
+		}, observation{mode: observeNone}, nil, window)
+
 		if !result.IsError || len(backend.requests) != 0 || len(legacy.calls) != 0 {
 			t.Fatalf("invalid tail reached provider: invalid=%#v result=%#v", invalid, result)
 		}
@@ -104,10 +108,10 @@ func TestOrderedBatchCrossWindowTailRejectedBeforeInput(t *testing.T) {
 	backend := &orderedInputRecordingBackend{recordingPlatformBackend: legacy}
 	s.backend = backend
 	result := s.a11yBatch([]any{
-		map[string]any{"type": "click", "target": map[string]any{"ref": ref}},
+		map[string]any{"type": "click", "ref": ref},
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
-		map[string]any{"type": "close", "target": map[string]any{"ref": otherWindow}},
-	}, observation{mode: observeNone}, nil)
+		map[string]any{"type": "close", "ref": otherWindow},
+	}, observation{mode: observeNone}, nil, "")
 	if !result.IsError || len(backend.requests) != 0 || len(legacy.calls) != 0 {
 		t.Fatalf("cross-window batch reached provider: %#v", result)
 	}
@@ -128,10 +132,10 @@ func TestOrderedBatchGuardKeepsExistingAssertionPath(t *testing.T) {
 		action := map[string]any{"type": "keypress", "keys": []any{"ENTER"}}
 		batchGuard := guard
 		if perAction {
-			action["postcondition"] = guard
+			action["until"] = map[string]any{"type": "title", "text": "Document", "timeout_ms": 1.0}
 			batchGuard = nil
 		}
-		result := s.a11yBatch([]any{action}, observation{mode: observeDiff}, batchGuard, "", window)
+		result := s.a11yBatch([]any{action}, observation{mode: observeDiff}, batchGuard, window)
 		if result.IsError || len(backend.requests) != 0 || len(legacy.actionRequests) != 1 || len(legacy.observeRequests) == 0 {
 			t.Fatalf("guarded batch left assertion path: perAction=%t result=%#v calls=%#v", perAction, result, legacy.calls)
 		}
@@ -154,7 +158,7 @@ func TestOrderedBatchOptionalFinalObservationFailure(t *testing.T) {
 		if tail {
 			actions = append(actions, map[string]any{"type": "type", "text": "must not run"})
 		}
-		result := s.a11yBatch(actions, observation{mode: observeNone}, nil, "", window)
+		result := s.a11yBatch(actions, observation{mode: observeNone}, nil, window)
 		facts := result.StructuredContent["a11y_batch_result"].(map[string]any)
 		if result.IsError != tail || len(backend.requests) != 1 || len(legacy.calls) != 0 ||
 			facts["actions_completed_without_call_error"] != 1 || facts["final_observation_returned"] != false ||

@@ -399,7 +399,7 @@ def infrastructure_app_error(app, query):
         'compositor, panel or the desktop backdrop — not of an application window '
         'that can receive user input. Keystrokes and clicks addressed here are '
         'delivered nowhere, and the window would return an empty tree.{} Pass one '
-        'of those names, or use AX mode=observe with observation_target=apps.'.format(
+        'of those names, or list windows with AX {{"mode":"apps"}}.'.format(
             query, name, listing))
 
 
@@ -482,7 +482,7 @@ def resolve_app(query):
                 raise OperationFailure(
                     'appTargetAmbiguous("{}"): {} input-capable accessibility '
                     'applications match this bootstrap query: {}. No action was '
-                    'attempted. Observe applications and use app_ref.'.format(
+                    'attempted. List windows with AX {{"mode":"apps"}} and use the aN or wN.'.format(
                         query, len(matches), ", ".join(labels[:10])),
                     failure_code="ax_app_ambiguous",
                     failure_phase="precondition",

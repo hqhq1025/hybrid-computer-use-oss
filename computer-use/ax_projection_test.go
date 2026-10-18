@@ -315,8 +315,8 @@ func TestObservationRootProviderBoundRefFailsClosed(t *testing.T) {
 // it advertised {"ref":"wN"}, which the runtime rejects, and an index
 // described as "action 1 only". The root now uses the read-only element target.
 func TestObserveRootSchemaMatchesRuntimeRefRule(t *testing.T) {
-	branch := findA11ySchemaBranch(t, "observe", "app")
-	root := branch["properties"].(map[string]any)["root"].(map[string]any)
+	properties := findToolDefinition(t, "AX").InputSchema["properties"].(map[string]any)
+	root := properties["root"].(map[string]any)
 	encoded, err := json.Marshal(root)
 	if err != nil {
 		t.Fatal(err)

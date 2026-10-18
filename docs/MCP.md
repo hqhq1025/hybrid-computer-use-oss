@@ -119,7 +119,7 @@ computer-use help [command]
 which makes it useful for diagnostics:
 
 ```bash
-computer-use call AX --args '{"mode":"observe","observation_target":"apps"}'
+computer-use call AX --args '{"mode":"apps"}'
 computer-use call GUI --args '{"actions":[{"type":"screenshot"}]}'
 ```
 
@@ -272,16 +272,45 @@ a discoverable Gemini configuration.
 
 ## Public contract
 
-`AX` takes a `mode`: `observe`, `find`, `act` or `assert_ax`. The server
-owns an identity graph:
+`AX` takes a `mode`: `apps`, `observe`, `find` or `act`. The server owns an
+identity graph:
 
 ```text
 application aN -> top-level window wN -> element rN
 ```
 
+- `apps` lists every top-level window as `wN` with its title, application and
+  whether it has focus.
+- `observe` returns a window tree or a diff with `rN` refs; `find` returns
+  matching `rN`, and a truncated result prints the call for the next page.
+- `act` runs flat actions in one window:
+  `{type, ref|title, text|keys|value|direction|pages, until}`. `activate` and
+  `close` accept a window title substring, resolved to one `wN` before any
+  input. `keypress` and `type` without `ref` go to the window that had focus
+  when the call started.
+- `until` is one predicate (`exists`, `state`, `value`, `text`, `title`, with
+  `negate`, `timeout_ms`, `stable_ms`) on an action, an `act` call, or an
+  `observe` call. On `observe` and on a whole `act` call a false predicate is
+  a result, not an error. A `selector` predicate and a `title` predicate
+  observe the whole application that owns the call's window: all of its
+  top-level windows, including dialogs and popup menus. A `ref` predicate
+  reads that one element. A negated `title` is true when no window of the
+  application has a matching title, also when the application has no window
+  left or has exited, provided the window inventory was read completely.
+  `until` never sends input and never changes which window receives input.
+  When `until_failed` or `until_unknown` knows the window that appeared or
+  took focus, the hint observes that `wN`.
+
 References describe current state; they are not durable selectors. Every
 mutation resolves its reference against the live accessibility tree again and
 rejects stale or cross-window targets before any input.
+
+Every AX result starts with one JSON line: `ok`, and on failure `code`,
+`path`, `message` and `hint` (a corrected call), then `until`,
+`input_emitted`, `completed` and `requested`. The codes are
+`invalid_argument`, `stale_ref`, `window_changed`, `until_failed`,
+`until_unknown`, `effect_unknown`, `app_unavailable`, `runtime_error`,
+`ambiguous_window`, `window_not_found` and `no_focused_window`.
 
 `GUI` takes an ordered `actions` array: screenshot, pointer, drag, scroll,
 keyboard, text and wait actions. A screenshot establishes a private layout

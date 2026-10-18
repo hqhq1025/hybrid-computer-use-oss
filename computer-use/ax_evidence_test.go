@@ -65,13 +65,9 @@ func TestAXModelOutputDropsProviderImagesUnlessExplicitlyRequested(t *testing.T)
 			wantImage: true,
 		},
 		{
-			name: "observe apps",
+			name: "apps",
 			tool: "AX",
-			args: map[string]any{
-				"mode":               "observe",
-				"observation_target": "apps",
-				"observe":            "screenshot",
-			},
+			args: map[string]any{"mode": "apps"},
 		},
 		{
 			name: "find",
@@ -79,9 +75,9 @@ func TestAXModelOutputDropsProviderImagesUnlessExplicitlyRequested(t *testing.T)
 			args: map[string]any{"mode": "find"},
 		},
 		{
-			name: "assert",
+			name: "observe until without image",
 			tool: "AX",
-			args: map[string]any{"mode": "assert_ax"},
+			args: map[string]any{"mode": "observe", "until": map[string]any{"type": "title", "text": "x"}},
 		},
 		{
 			name:      "gui is unaffected",
@@ -258,9 +254,10 @@ func TestPrepareAXEvidenceKeepsPreflightFailureFacts(t *testing.T) {
 	}
 	result = prepareAXEvidence(result)
 	for key, expected := range map[string]any{
+		"code":                   axCodeStaleRef,
 		"failure_code":           "stale_element_ref",
 		"failure_phase":          "precondition",
-		"input_events_emitted":   false,
+		"input_emitted":          false,
 		"partial_input_possible": false,
 		"mutation_unknown":       false,
 		"failure_facts_complete": true,
@@ -503,7 +500,7 @@ func TestPrepareAXEvidenceKeepsRequestedPostcondition(t *testing.T) {
 	}
 	result = prepareAXEvidence(result)
 	batch := result.StructuredContent["batch"].(map[string]any)
-	postcondition, ok := batch["postcondition"].(map[string]any)
+	postcondition, ok := batch["until"].(map[string]any)
 	if !ok || postcondition["status"] != "pass" {
 		t.Fatalf("requested postcondition evidence was lost: %#v", batch)
 	}
@@ -533,14 +530,14 @@ func TestPrepareAXEvidenceKeepsUnknownFinalObservation(t *testing.T) {
 		},
 	})
 	for key, expected := range map[string]any{
-		"input_events_emitted":           true,
+		"input_emitted":                  true,
 		"effect_unknown":                 true,
 		"mutation_unknown":               true,
 		"final_observation_returned":     false,
 		"observation_required":           true,
 		"observation_failure_code":       "runtime_timeout",
 		"post_action_observation_status": "unknown",
-		"postcondition_verified":         false,
+		"until_verified":                 false,
 	} {
 		if result.StructuredContent[key] != expected {
 			t.Fatalf("%s=%#v want %#v in %#v",
@@ -646,7 +643,9 @@ func TestPrepareAXEvidenceFullViewStillHidesDebugTelemetry(t *testing.T) {
 		t.Fatalf("full view leaked debug telemetry: %#v",
 			result.StructuredContent)
 	}
-	if len(result.StructuredContent) != 0 {
+	if len(result.StructuredContent) != 2 ||
+		result.StructuredContent["ok"] != true ||
+		result.StructuredContent["input_emitted"] != false {
 		t.Fatalf("full view returned internal evidence: %#v",
 			result.StructuredContent)
 	}

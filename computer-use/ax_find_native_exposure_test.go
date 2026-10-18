@@ -78,7 +78,7 @@ func TestFindExposureNoDeliveredRef(t *testing.T) {
 				notes = []string{"[expect] " + strings.Repeat("required ", 4000)}
 			}
 			result := findDeliveryFinal(svc.renderFindPage(snapshot, matches, 0, 1, "target", notes, false))
-			if strings.Contains(resultText(result), `target={"ref":`) {
+			if strings.Contains(resultText(result), ` ref="r`) {
 				t.Fatalf("fixture unexpectedly delivered match ref: %s", resultText(result))
 			}
 			after := *snapshot
@@ -139,7 +139,7 @@ func TestFindExposureRefWithoutContext(t *testing.T) {
 	cached.axSnapshot.Roots, cached.axSnapshot.CanonicalRoots = nil, nil
 	svc.exposedHiddenRefs = map[string]map[int]elementRecord{}
 	page := findDeliveryFinal(svc.continueFind(cursor, 1))
-	if page.IsError || !strings.Contains(resultText(page), `target={"ref":`) {
+	if page.IsError || !strings.Contains(resultText(page), ` ref="r`) {
 		t.Fatalf("missing ref-only delivery: %s", resultText(page))
 	}
 	assertFindExposureDelivered(t, svc, snapshot, page)

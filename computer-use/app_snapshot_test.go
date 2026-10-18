@@ -113,7 +113,7 @@ func TestScreenshotContentPreservesAdaptiveMimeType(t *testing.T) {
 func TestMergePostconditionFinalObservationRemovesDeferredPlaceholder(t *testing.T) {
 	action := (&appSnapshot{}).notesOnlyResult([]string{
 		"action delivered",
-		"postcondition: PASS",
+		"until: PASS",
 	})
 	action.StructuredContent = map[string]any{
 		"postcondition_verified": true,
@@ -132,7 +132,7 @@ func TestMergePostconditionFinalObservationRemovesDeferredPlaceholder(t *testing
 	}
 	for _, expected := range []string{
 		"action delivered",
-		"postcondition: PASS",
+		"until: PASS",
 		"final diff",
 	} {
 		if !strings.Contains(text, expected) {
@@ -185,7 +185,7 @@ func TestWindowWithoutActionRefDoesNotInviteDuplicateIdentity(t *testing.T) {
 	}).renderedText()
 	for _, want := range []string{
 		"window-action-ref=unavailable",
-		"rN actions need no app_ref/window_ref",
+		"rN actions need no window_ref",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing ref-owned guidance %q in %q", want, text)

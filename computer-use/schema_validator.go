@@ -121,18 +121,18 @@ func validateToolArguments(tool string, args map[string]any) *argumentError {
 // errors. An AX act rejection keeps the batch summary, which states that no
 // action ran; a rejected top-level field keeps the plain field error.
 func argumentErrorResult(tool string, args map[string]any, argErr *argumentError) toolCallResult {
-	var result toolCallResult
-	if mode, _ := args["mode"].(string); tool == publicToolAX && mode == a11yModeAct &&
-		!(argErr.Path == "" && strings.Contains(argErr.Message, "does not accept fields")) {
+	if tool == publicToolAX {
 		requested := 0
 		if actions, ok := args["actions"].([]any); ok {
 			requested = len(actions)
 		}
-		result = a11yBatchValidationError(argErr.Message, requested)
-	} else {
-		result = textResult(argErr.Message, true)
+		path := strings.ReplaceAll(strings.TrimPrefix(argErr.Path, "/"), "/", ".")
+		result := axArgErrorResult(axInvalid(path, argErr.Message, ""), requested)
+		result.StructuredContent["argument_error_code"] = argErr.Code
+		result.StructuredContent["argument_error_path"] = argErr.Path
+		return result
 	}
-	result = result.withEvidenceScope("error_only")
+	result := textResult(argErr.Message, true).withEvidenceScope("error_only")
 	result.StructuredContent["argument_error_code"] = argErr.Code
 	result.StructuredContent["argument_error_path"] = argErr.Path
 	return result

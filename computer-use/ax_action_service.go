@@ -374,13 +374,13 @@ func (s *service) click(app, elementIndex, declared string, x, y *float64, click
 		// The channel must be evident from the tool name. A coordinate click
 		// targets no element (whatever lies under the point receives it), so
 		// it belongs to GUI rather than being a variant of the AX click.
-		return textResult("AX click does not accept x/y. Use target.ref with a current rN; use GUI for full-desktop pixel coordinates.", true)
+		return textResult("AX click does not accept x/y. Use ref with a current rN; use GUI for full-desktop pixel coordinates.", true)
 	}
 	if elementIndex == "" {
-		return textResult("click requires target.ref with a current rN. If find cannot issue a stable ref, use GUI with coordinates from its full-desktop screenshot.", true)
+		return textResult("click requires ref with a current rN. If find cannot issue a stable ref, use GUI with coordinates from its full-desktop screenshot.", true)
 	}
 	if clickMethod == "accessibility" && elementIndex == "" {
-		return textResult("click_method 'accessibility' requires target.ref", true)
+		return textResult("click_method 'accessibility' requires ref", true)
 	}
 	if clickMethod == "app_post" {
 		return textResult("click_method 'app_post' is not supported on Linux", true)
@@ -506,7 +506,7 @@ func (s *service) typeText(
 		return textResult("Missing required argument: text", true)
 	}
 	if elementIndex == "" && strings.TrimSpace(declared) != "" {
-		return textResult("targeted type requires target.ref; refusing to silently fall back to untargeted input", true)
+		return textResult("targeted type requires ref; refusing to silently fall back to untargeted input", true)
 	}
 	request := axServiceRequest{
 		App: app, Action: axTypeCommand{Text: text},
@@ -541,7 +541,7 @@ func (s *service) pressKey(
 		return textResult("Missing required argument: key", true)
 	}
 	if elementIndex == "" && strings.TrimSpace(declared) != "" {
-		return textResult("targeted keypress requires target.ref; refusing to silently fall back to untargeted input", true)
+		return textResult("targeted keypress requires ref; refusing to silently fall back to untargeted input", true)
 	}
 	request := axServiceRequest{
 		App: app, Action: axKeypressCommand{Key: key},
@@ -568,7 +568,7 @@ func (s *service) setValue(app, elementIndex, declared, value string, obs observ
 		return textResult("Missing required argument: app", true)
 	}
 	if elementIndex == "" {
-		return textResult("set_value requires target.ref with a current rN", true)
+		return textResult("set_value requires ref with a current rN", true)
 	}
 	resolution, result := s.resolveActionElement(
 		app, elementIndex, declared, "set_value")

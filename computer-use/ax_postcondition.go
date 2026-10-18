@@ -105,6 +105,7 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 		allowed["target"] = true
 		allowed["value"] = true
 		allowed["match"] = true
+		allowed["negate"] = true
 		_, kind, valid := assertionScalarString(assertion, "value")
 		if !valid {
 			return nil, errors.New(
@@ -133,6 +134,7 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 	case "text_contains":
 		allowed["target"] = true
 		allowed["text"] = true
+		allowed["negate"] = true
 		if strings.TrimSpace(optionalString(assertion, "text")) == "" {
 			return nil, errors.New(
 				`assertion type "text_contains" requires non-empty text`,
@@ -213,7 +215,7 @@ func (s *service) stopA11yBatchForActionPostcondition(
 	stopped.Content = append(stopped.Content, contentItem{
 		Type: "text",
 		Text: fmt.Sprintf(
-			"action %d postcondition: %s",
+			"action %d until: %s",
 			index+1,
 			firstLine(resultText(postconditionResult)),
 		),
@@ -251,6 +253,11 @@ func (s *service) stopA11yBatchForActionPostcondition(
 		}
 		stopped = mergeA11yBatchFinalObservation(
 			stopped,
+			finalObservation,
+		)
+		recordUntilWindowRef(
+			stopped.StructuredContent,
+			postconditionResult,
 			finalObservation,
 		)
 		finalObservationReturned, _ :=
@@ -317,9 +324,8 @@ func (s *service) stopA11yBatchForActionPostcondition(
 	return prependA11yBatchSummary(
 		stopped,
 		fmt.Sprintf(
-			"AX BATCH STOPPED AFTER ACTION %d/%d (%s): its declared "+
-				"postcondition did not pass, so %d later action(s) were not emitted. "+
-				"A fresh current-state observation is included when available.",
+			"Stopped after action %d/%d (%s): its until did not hold, so %d later "+
+				"action(s) were not sent. Current state follows when available.",
 			index+1,
 			count,
 			action.actionType,
@@ -342,6 +348,9 @@ func assertionGoal(assertion map[string]any) verifyGoal {
 // "value" has already been resolved to value_equals or value_contains.
 func assertionSpecGoal(assertionType string, assertion map[string]any) verifyGoal {
 	goal := verifyGoal{}
+	if negate := optionalBool(assertion, "negate"); negate != nil {
+		goal.negated = *negate
+	}
 	switch assertionType {
 	case "exists":
 		goal.exists = optionalBool(assertion, "value")
@@ -504,7 +513,7 @@ func (s *service) reconcileA11yPostconditionFromCanonicalSnapshot(
 	} else {
 		reconciled = assertionNegativeResult(
 			fmt.Sprintf(
-				"assert_ax predicate_false: %s did not satisfy %s in the "+
+				"until false: %s did not satisfy %s in the "+
 					"action's fresh observation. Last observation: %s",
 				spec.targetAddress,
 				goal.describe(),
@@ -554,7 +563,7 @@ func (s *service) preflightA11yPostcondition(
 	if spec.assertionType == "window_title_contains" {
 		if strings.TrimSpace(context.windowRef) == "" {
 			return errors.New(
-				"window_title_contains requires a current wN batch window",
+				"a title until needs the window of the act call",
 			)
 		}
 		return nil
@@ -566,7 +575,7 @@ func (s *service) preflightA11yPostcondition(
 	}
 	if isShortAXWindowRef(spec.targetAddress) {
 		return errors.New(
-			"wN identifies a window; use window_title_contains for a window postcondition",
+			`wN identifies a window; for a window use {"type":"title","text":"..."}`,
 		)
 	}
 	if !isShortAXRef(spec.targetAddress) {
@@ -585,80 +594,33 @@ func (s *service) preflightA11yPostcondition(
 	return nil
 }
 
+// runA11yPostcondition checks an act until after its action(s). A ref
+// predicate reads that element. A selector or title predicate reads the
+// application that owns the batch window, starting from that window, so a
+// window the action closed or a dialog it opened does not hide the answer.
+// The window binding is read state only; no input is re-bound.
 func (s *service) runA11yPostcondition(
 	context *a11yBatchContext,
 	assertion map[string]any,
-	targetWindowClosed bool,
 ) toolCallResult {
-	args := map[string]any{
-		"mode":      a11yModeAssert,
-		"assertion": assertion,
-	}
+	readContext := &a11yReadContext{}
 	spec, _ := parseA11yAssertionSpec(assertion)
-	if spec != nil &&
-		(spec.assertionType == "window_title_contains" ||
-			!isShortAXRef(spec.targetAddress)) {
-		windowTitleExpectedAbsent := spec.assertionType == "window_title_contains" &&
-			optionalBool(assertion, "exists") != nil &&
-			!*optionalBool(assertion, "exists")
-		if targetWindowClosed && windowTitleExpectedAbsent &&
-			context.appRef != "" {
-			// The closed wN is intentionally stale after a verified close.
-			// Re-enumerate the owning application instead of trying to read
-			// through the vanished window identity. This still detects a
-			// same-title sibling and therefore does not turn exact-window
-			// disappearance into a broader title-absence claim.
-			args["app_ref"] = context.appRef
-		} else if context.windowRef != "" {
-			args["window_ref"] = context.windowRef
-		} else if context.appRef != "" {
-			args["app_ref"] = context.appRef
+	if spec != nil && isShortAXRef(spec.targetAddress) {
+		if entry, err := s.resolveShortAXRefOwned(spec.targetAddress); err == nil {
+			readContext.appToken = entry.AppRef
+			readContext.windowRef = entry.LogicalWindowRef
+			readContext.windowHandle = entry.WindowHandle
 		}
+	} else if spec != nil {
+		readContext.appRef = context.appRef
+		readContext.appToken = firstNonEmpty(context.appRef, context.appToken)
+		readContext.windowRef = context.windowRef
+		readContext.windowHandle = context.windowHandle
 	}
-	result := s.a11yRequest(args, observation{})
-	if negativeSelectorPostconditionProvenByGoneWindow(
-		spec,
-		assertion,
-		result,
-	) {
-		verified := a11yAssertionResult(
-			"PASS: the exact selector is absent because its bound logical "+
-				"window no longer exists and the live window inventory is complete.",
-			false,
-			"pass",
-			1,
-			0,
-		)
-		verified.StructuredContent["source_window_status"] = "gone"
-		verified.StructuredContent["recovery_inventory_complete"] = true
-		verified.StructuredContent["window_transition_proved_absence"] = true
-		return verified
+	if readContext.appToken == "" {
+		readContext.appToken = context.appToken
 	}
-	return result
-}
-
-func negativeSelectorPostconditionProvenByGoneWindow(
-	spec *a11yAssertionSpec,
-	assertion map[string]any,
-	result toolCallResult,
-) bool {
-	if spec == nil ||
-		spec.assertionType != "exists" ||
-		spec.stableMS != 0 ||
-		isShortAXRef(spec.targetAddress) ||
-		optionalBool(assertion, "value") == nil ||
-		*optionalBool(assertion, "value") ||
-		!result.IsError ||
-		result.StructuredContent == nil {
-		return false
-	}
-	code, _ := result.StructuredContent["failure_code"].(string)
-	sourceStatus, _ := result.StructuredContent["source_window_status"].(string)
-	inventoryComplete, _ :=
-		result.StructuredContent["recovery_inventory_complete"].(bool)
-	return code == "stale_window_ref" &&
-		sourceStatus == "gone" &&
-		inventoryComplete
+	return s.runA11yAssertion(readContext, assertion, a11yScopeWindow)
 }
 
 func mergeA11yPostconditionResult(
@@ -677,7 +639,7 @@ func mergeA11yPostconditionResult(
 	}
 	actionResult.Content = append(actionResult.Content, contentItem{
 		Type: "text",
-		Text: "postcondition: " + postconditionText,
+		Text: "until: " + postconditionText,
 	})
 	if actionResult.StructuredContent == nil {
 		actionResult.StructuredContent = map[string]any{}
@@ -709,6 +671,7 @@ func mergeA11yPostconditionResult(
 		classification, underlying := classifyA11yPostconditionFailure(
 			assertionResult,
 		)
+		actionResult.StructuredContent[axPublicErrorDetailKey] = postconditionText
 		actionResult.IsError = true
 		actionResult.StructuredContent["failure_code"] = classification
 		actionResult.StructuredContent["failure_phase"] = "postcondition"

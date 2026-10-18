@@ -104,7 +104,7 @@ func TestProviderRequestRejectionOrderedBatchPreservesPrefix(t *testing.T) {
 				if mixed {
 					backend.rejectAt = 2
 					args["actions"] = append([]any{
-						map[string]any{"type": "click", "target": map[string]any{"ref": ref}},
+						map[string]any{"type": "click", "ref": ref},
 						map[string]any{"type": "keypress", "keys": []any{"SUPER", "A"}},
 						map[string]any{"type": "type", "text": "prefix"},
 					}, actions...)
@@ -124,7 +124,7 @@ func TestProviderRequestRejectionOrderedBatchPreservesPrefix(t *testing.T) {
 				if rejection {
 					if facts["failure_code"] != "provider_request_rejected" ||
 						facts["partial_input_possible"] == true || facts["preflight_only"] == true ||
-						facts["input_events_emitted"] != mixed {
+						facts["input_emitted"] != mixed {
 						t.Fatalf("rejection mislabeled mixed=%v: %#v", mixed, facts)
 					}
 					internal := result.StructuredContent["a11y_batch_result"].(map[string]any)

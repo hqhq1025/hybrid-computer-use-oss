@@ -1,116 +1,84 @@
 # Hybrid Computer Use
 
-Use shell, files, browser automation, application APIs, AX, and GUI as
-complementary channels. Choose the shortest reliable route to the requested
-state. Follow the current tool schemas for argument shapes and supported actions.
+Channels: the shell (commands, scripts, format-aware libraries), the running
+browser's automation endpoint when it exposes one, and the `AX` and `GUI`
+tools. The tool descriptions give call shapes. This guide says which channel
+fits which state, and how to combine them.
 
-## Choose A Channel
+## Route By Where The State Lives
 
-- Prefer structured file edits, CLI tools, or documented APIs for durable data.
-  Inspect format and metadata before selecting a parser; an extension is not
-  proof of format. Use the browser runtime, when available, for web content,
-  navigation, downloads, and browser state.
-- Discover local application APIs from live process, configuration, help, or
-  protocol information. Make one bounded capability probe and inspect the
-  relevant command inventory. A liveness response is not proof of a usable
-  command. Do not guess endpoints, bypass authentication, or enable
-  network-exposed remote access. A documented user/session-local IPC endpoint
-  or isolated headless operation is acceptable only when it exposes no network
-  listener and cannot overwrite another instance's unsaved state.
-- Use AX for named controls, values, states, and semantic identity. Use GUI for
-  pixels, canvases, spatial layout, dragging, or controls absent from AX.
-  A partial tree does not invalidate its returned targets. After one targeted
-  semantic lookup fails, use GUI when it can answer the next decision.
-- A visible transient window may be absent from AX. Take one GUI screenshot
-  instead of repeatedly reading the same tree. Return to AX when new semantic
-  state or a semantic target is relevant.
-- Once source, destination, and operation are known, act. Additional diagnostics
-  must answer a concrete blocker. Prefer a channel already producing reliable
-  evidence over opening equivalent investigation paths.
+| State to change | Change it through | Reason |
+| --- | --- | --- |
+| Files that no running application holds open: data, code, configuration, structured documents, archives, media | Shell with a format-aware library or CLI; check the real format first | Exact, scriptable, and verifiable by parsing |
+| A document an application holds open | That application: AX for menus, dialogs, and fields; GUI for what AX lacks | Its copy is what gets saved |
+| Application or system settings | The settings UI through AX; the configuration file or CLI only when the application is closed or rereads it | A running application can write its cached settings back |
+| Web pages, forms, signed-in sites | The open browser session: its endpoint if exposed, otherwise AX or GUI | Login, cookies, and tabs exist only in that session |
+| Canvases, images, drawings, layout | The editor: AX for menus and dialogs, GUI for pixels and dragging | Visual objects have no names to address |
+| Messages, mail, calendar items, accounts | The client application through AX | The client owns sending and sync |
 
-## AX Interaction
+- A documented automation endpoint that a running application already exposes,
+  such as a browser debugging port, acts inside that application. Probe for it
+  once, early. After one failed probe, use AX or GUI. Do not rebuild a site
+  with shell HTTP requests, and do not start another browser or profile:
+  neither shares the user's session, so their changes do not appear there.
+- Learn an unfamiliar application from the application itself: its menus,
+  dialogs, `--help`, manuals, and local files. Search the web only for facts
+  the machine cannot supply; web pages often describe another version.
 
-- Observe the relevant application or window. Use content scope for a page or
-  document with one identifiable content root; use window scope for menus,
-  toolbars, tabs, dialogs, settings, and other application chrome.
-- For read modes, provide one identity source: bootstrap app, app ref, or
-  window ref. Prefer returned refs. A window ref already owns its application.
-  AX trees are compact projections, not complete visible text or hidden DOM.
-- Use `find` for a known role, name, text, value, or state. It searches canonical
-  records even when the displayed tree omits neutral containers. Use a focused
-  or target-rooted observation for local context before requesting a full
-  window tree. Projection summaries are not actionable targets.
-- Mutations use current element `rN` or window `wN` refs, never indices,
-  selectors, or invented refs. Copy refs exactly. A targeted ref already owns
-  its application and window; supply `window_ref` only for an entirely
-  untargeted keyboard batch.
-- Batch actions only while later targets and focus are expected to remain valid
-  in one logical window. Make an action that can open, close, replace, or
-  navigate a window the last action, then use returned fresh state.
-  Window activation and closure use `wN`; closure must be last.
-- Semantic click can invoke default activation, especially on selectable items.
-  Do not assume it only selects. If later input depends on an earlier state
-  change, attach the expected predicate as that action's `postcondition`.
-  It gates subsequent input but cannot undo the earlier action.
-- AX input can require foreground focus; semantic addressing does not imply
-  background delivery. `type` supplies literal text; `keypress` supplies keys.
-- Keep the default post-action diff for ordinary actions and continue from its
-  evidence. Unchanged or compact output is still fresh. Use no observation only
-  when no immediate readback is needed, or a target-window screenshot when
-  pixels are required. Its coordinates are not GUI coordinates.
-- Put a known final AX predicate in the batch postcondition. Use a separate
-  `assert_ax` when a later decision requires it. Prefer positive next-state
-  conditions to disappearance of old nodes. Assertions prove provider-visible
-  semantics, not file persistence, pixels, network state, or task completion.
+## Work Efficiently
 
-## GUI Interaction
+- Once the source, target, and operation are known, act. Further checks must
+  answer a concrete blocker.
+- Plan from one read. After `observe` or `find`, put every action you can
+  already determine for that window into one `act`.
+- Continue from the returned diff. It carries the new and changed refs, and an
+  unchanged diff is still current. Read again only when the diff lacks what the
+  next decision needs.
+- Attach the expected result as `until` instead of a separate read:
 
-- Start with a GUI screenshot when desktop state is unknown. A screenshot
-  action must stand alone. Use coordinates from the exact returned full-desktop
-  image and its reported dimensions, not a chat preview, AX window image,
-  thumbnail, or independent capture.
-- Batch actions determined from the same screenshot and stable focus. One call
-  returns one final screenshot, not intermediate observations. End a batch
-  after an action that can open, close, switch, resize, or reposition a window
-  or dialog; recompute later coordinates from the returned image.
-- GUI text and keys use current desktop focus. A visible focus click and its
-  dependent input can share a batch if the click cannot change top-level layout.
-  GUI does not target apps or semantic refs and does not activate named windows.
-- A stale-layout rejection returns fresh pixels without emitting the rejected
-  coordinate action. Recompute from that image. If earlier batch actions ran,
-  do not replay them automatically.
-- Consecutive known keyboard actions already receive a processing barrier.
-  Normally leave `settle_ms` at its default: it checks final visual stillness,
-  not semantic readiness. Fixed waits only delay; they expose no intermediate
-  state. For an observable transition, use a postcondition, assertion, or fresh
-  observation. When no predicate is available, use one delayed sample and
-  decide from it rather than stacking waits.
+```json
+{"mode":"act","actions":[{"type":"set_value","ref":"r31","value":"14"}],"until":{"type":"value","ref":"r31","value":"14"}}
+{"mode":"act","actions":[{"type":"click","ref":"r5","until":{"type":"state","ref":"r5","state":"checked"}},{"type":"click","ref":"r9"}]}
+{"mode":"observe","window_ref":"w1","until":{"type":"exists","selector":{"role":"dialog","name":"Print"},"timeout_ms":15000}}
+```
 
-## Recovery And Efficient Evidence
+  The first verifies a value. The second lets the later click run only after
+  the earlier one took effect. The third waits for a dialog; with `app`
+  instead of `window_ref`, it also waits for an application that is starting.
+  A `selector` or `title` predicate checks every window of the application,
+  so it finds a dialog or menu that opens as its own window.
 
-- An explicit stop response overrides normal retry and observation guidance.
-  Stop desktop automation and report the uncertainty. Even when requested input
-  was not emitted, an earlier OS focus request may still take effect; neither
-  a new screenshot nor a worker restart proves it has settled.
-- `not_executed` with `input_events_emitted=false` means that action caused no
-  later UI change. If input was emitted or its effect is uncertain, inspect
-  returned evidence before deciding whether any action remains necessary.
-- Reuse fresh refs and observations already returned. Do not repeat an
-  observation solely because its diff is small. When a stale ref is rejected,
-  discard all targets from that failed call; use current returned refs or one
-  fresh `find`/observation. Do not reopen an absent dialog just to retry it.
-- After GUI input or possible desktop mutation, refresh AX before reusing
-  semantic state. A rejected GUI batch with no input or mutation does not
-  itself invalidate AX state.
-- An unchanged AX tree does not mean formatting, pixels, or file state stayed
-  unchanged. Change the evidence source instead of repeating the action.
-- After two attempts based on the same hypothesis without new evidence, stop
-  retrying it. Make one targeted read, revise the hypothesis, and change route.
-  Do not nudge coordinates, add Enter, or relaunch application instances merely
-  to escape uncertainty.
-- Combine related read-only shell diagnostics into bounded operations. Prefer
-  parsers or APIs for bulk data. If clipboard transfer is necessary, keep its
-  owner alive through paste; after one focus-verified failure, change mechanism.
-- A final observation or postcondition is enough when it directly proves the
-  requested result. Use another channel only for remaining requirements such
-  as exact data, persistence, or visible appearance.
+- Take a GUI screenshot when the question is visual or AX lacks a visible
+  element. Do not alternate screenshots and AX reads of an unchanged state.
+- Combine related read-only shell checks into one command or script.
+
+## When Something Fails
+
+Every AX error starts with a `code`, a `hint` with a corrected call, and
+whether input was sent. Next step by code:
+
+- `invalid_argument`: nothing was sent. Fix the field named in `path` as the
+  hint shows. The control is not missing.
+- `stale_ref`: drop every ref from that result. Use refs from a newer result,
+  or one fresh `find`.
+- `window_changed`: the batch stopped after `completed` actions. Read the
+  returned state and send only what remains.
+- `until_failed`: the batch stopped at the action whose `until` failed; the
+  actions before it ran. Read the returned state and revise the plan; do not
+  resend the same batch.
+- `until_unknown`: the predicate could not be checked. Check the requirement
+  with another read or channel.
+- `effect_unknown`: input may have been sent. Inspect state before any retry,
+  so that nothing is applied twice.
+- `ambiguous_window`, `window_not_found`: choose a `wN` from the listed windows.
+- `no_focused_window`: start the batch with `activate`.
+- `app_unavailable`: if the application is still starting, wait once with
+  `observe`, `app`, and `until`; otherwise use GUI for it.
+- `runtime_error`: retry once; if it repeats, use another channel.
+
+A GUI stale-frame rejection sent nothing; plan again from the returned
+screenshot. A stop response ends desktop automation: report the uncertainty
+and stop.
+After two attempts on the same hypothesis without new evidence, change the
+mechanism or the channel. Do not nudge coordinates, add Enter, add waits, or
+relaunch applications to escape uncertainty.

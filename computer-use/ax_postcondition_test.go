@@ -519,7 +519,6 @@ func TestClosedWindowNegativeTitlePostconditionUsesOwningApp(t *testing.T) {
 			"exists":     false,
 			"timeout_ms": float64(1),
 		},
-		true,
 	)
 	if result.IsError ||
 		result.StructuredContent["assertion_status"] != "pass" {
@@ -530,127 +529,13 @@ func TestClosedWindowNegativeTitlePostconditionUsesOwningApp(t *testing.T) {
 	}
 }
 
-func TestNegativeSelectorPostconditionPassesWhenBoundWindowIsCompletelyGone(
-	t *testing.T,
-) {
-	assertion := map[string]any{
-		"type": "exists",
-		"target": map[string]any{
-			"selector": map[string]any{
-				"role": "button",
-				"name": "Use Excel 2007-365 Format",
-			},
-		},
-		"value": false,
-	}
-	spec, err := parseA11yAssertionSpec(assertion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := toolCallResult{
-		IsError: true,
-		StructuredContent: map[string]any{
-			"failure_code":                "stale_window_ref",
-			"source_window_status":        "gone",
-			"recovery_inventory_complete": true,
-		},
-	}
-	if !negativeSelectorPostconditionProvenByGoneWindow(
-		spec,
-		assertion,
-		result,
-	) {
-		t.Fatal("complete bound-window disappearance did not prove selector absence")
-	}
-}
-
-func TestNegativeSelectorPostconditionRejectsUnsafeWindowTransitionEvidence(
-	t *testing.T,
-) {
-	baseAssertion := map[string]any{
-		"type": "exists",
-		"target": map[string]any{
-			"selector": map[string]any{
-				"role": "button",
-				"name": "Confirm",
-			},
-		},
-		"value": false,
-	}
-	for name, mutate := range map[string]func(
-		map[string]any,
-		map[string]any,
-	){
-		"incomplete inventory": func(
-			_ map[string]any,
-			fields map[string]any,
-		) {
-			fields["recovery_inventory_complete"] = false
-		},
-		"source still present": func(
-			_ map[string]any,
-			fields map[string]any,
-		) {
-			fields["source_window_status"] = "present"
-		},
-		"wrong failure": func(
-			_ map[string]any,
-			fields map[string]any,
-		) {
-			fields["failure_code"] = "observation_incomplete"
-		},
-		"positive exists": func(
-			assertion map[string]any,
-			_ map[string]any,
-		) {
-			assertion["value"] = true
-		},
-		"stable duration": func(
-			assertion map[string]any,
-			_ map[string]any,
-		) {
-			assertion["stable_ms"] = float64(500)
-		},
-		"ref target": func(
-			assertion map[string]any,
-			_ map[string]any,
-		) {
-			assertion["target"] = map[string]any{"ref": "r7"}
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			assertion := map[string]any{}
-			for key, value := range baseAssertion {
-				assertion[key] = value
-			}
-			fields := map[string]any{
-				"failure_code":                "stale_window_ref",
-				"source_window_status":        "gone",
-				"recovery_inventory_complete": true,
-			}
-			mutate(assertion, fields)
-			spec, err := parseA11yAssertionSpec(assertion)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if negativeSelectorPostconditionProvenByGoneWindow(
-				spec,
-				assertion,
-				toolCallResult{IsError: true, StructuredContent: fields},
-			) {
-				t.Fatalf("unsafe evidence proved selector absence: %#v %#v",
-					assertion, fields)
-			}
-		})
-	}
-}
-
 func TestRefOwnedBatchScopesSelectorPostconditionToSameWindow(t *testing.T) {
 	service, _, windowRef, elementRef := sheetBatchService(t)
-	context, err := service.deriveA11yBatchContext("", "", []a11yBatchAction{{
-		actionType: "click",
-		targetRef:  elementRef,
-	}},
+	context, err := service.deriveA11yBatchContext(
+		"", []a11yBatchAction{{
+			actionType: "click",
+			targetRef:  elementRef,
+		}}, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -769,7 +654,7 @@ func TestActionPostconditionFailureStopsLaterActionsWithCurrentEvidence(t *testi
 		t.Fatalf("guard stop position was hidden: %#v", batch)
 	}
 	actions := batch["actions"].([]map[string]any)
-	if len(actions) != 1 || actions[0]["postcondition"] == nil {
+	if len(actions) != 1 || actions[0]["until"] == nil {
 		t.Fatalf("failed action guard evidence was hidden: %#v", batch)
 	}
 }

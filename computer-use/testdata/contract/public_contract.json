@@ -9,7 +9,7 @@
             "listChanged": false
           }
         },
-        "instructions": "Control the already-running desktop with two complementary tools. AX is app-scoped semantic observation and action; GUI is full-desktop visual observation and absolute-pixel input. Use AX for named controls and GUI for pixels or content absent from the accessibility tree. AX find uses explicit equals/contains fields. Copy returned rN/wN refs exactly; never invent placeholders. A targeted ref owns its app and window, so omit app, app_ref and window_ref. Use window_ref only when every action is untargeted keyboard input. Batch only actions valid in one UI generation; split after likely dialog, window or navigation changes. Window activate/close uses wN and close must be last. AX action acceptance and visual change are evidence, not proof of task success; AX cannot prove files, persistence, network state or pixels. GUI keyboard/text uses current focus. AX keyboard/pointer fallbacks use global desktop focus, not background input. After GUI mutation, refresh AX before reusing semantic state. AX target-window screenshot coordinates are never GUI coordinates; GUI coordinates use the exact delivered full-desktop image.",
+        "instructions": "Two tools for the running desktop. AX reads and operates application windows through accessibility: it lists windows, returns controls as rN refs, acts on them, and waits with until. GUI takes full-desktop screenshots and sends pixel input. Use AX for named controls, values, menus, dialogs, windows, and keys. Use GUI for pixels, canvases, dragging, and controls that AX does not expose; after one targeted AX find misses a visible control, use GUI for it. Send all desktop input (window activation, keys, text, mouse) through these tools, not shell input utilities or scripted accessibility calls: the tools check the target window before input and report what changed, and outside input makes their refs and diffs stale. After GUI input, read AX again before reusing refs.",
         "protocolVersion": "2025-03-26",
         "serverInfo": {
           "name": "computer-use",
@@ -26,7 +26,7 @@
             "listChanged": false
           }
         },
-        "instructions": "Control the already-running desktop with two complementary tools. AX is app-scoped semantic observation and action; GUI is full-desktop visual observation and absolute-pixel input. Use AX for named controls and GUI for pixels or content absent from the accessibility tree. AX find uses explicit equals/contains fields. Copy returned rN/wN refs exactly; never invent placeholders. A targeted ref owns its app and window, so omit app, app_ref and window_ref. Use window_ref only when every action is untargeted keyboard input. Batch only actions valid in one UI generation; split after likely dialog, window or navigation changes. Window activate/close uses wN and close must be last. AX action acceptance and visual change are evidence, not proof of task success; AX cannot prove files, persistence, network state or pixels. GUI keyboard/text uses current focus. AX keyboard/pointer fallbacks use global desktop focus, not background input. After GUI mutation, refresh AX before reusing semantic state. AX target-window screenshot coordinates are never GUI coordinates; GUI coordinates use the exact delivered full-desktop image.",
+        "instructions": "Two tools for the running desktop. AX reads and operates application windows through accessibility: it lists windows, returns controls as rN refs, acts on them, and waits with until. GUI takes full-desktop screenshots and sends pixel input. Use AX for named controls, values, menus, dialogs, windows, and keys. Use GUI for pixels, canvases, dragging, and controls that AX does not expose; after one targeted AX find misses a visible control, use GUI for it. Send all desktop input (window activation, keys, text, mouse) through these tools, not shell input utilities or scripted accessibility calls: the tools check the target window before input and report what changed, and outside input makes their refs and diffs stale. After GUI input, read AX again before reusing refs.",
         "protocolVersion": "2025-06-18",
         "serverInfo": {
           "name": "computer-use",
@@ -41,1394 +41,302 @@
     "result": {
       "tools": [
         {
-          "description": "Semantic observe/find/act/assert_ax. Observe/find issue refs; act consumes refs only. Reads use app, app_ref, or window_ref; continue find with fN. Act returns current diff/tree/lifecycle; reread only if required. Use batch or action postconditions for known results. Element actions require rN, window actions require wN; act never accepts app, selector, or index. Targeted act rejects app_ref/window_ref; refs own both. Never invent refs. One wN per batch; targetless batches require window_ref. Stale refs never rebind. Working output may hide controls; find searches canonical AX records. Refs resolve live per action; continuity failure stops the batch. Batch known same-window steps. Split before window changes or unknown next targets. AX proves only AX-visible facts, not pixels/files/persistence/task completion. Limits: 32 actions, 20000 text chars.",
+          "annotations": {
+            "destructiveHint": true,
+            "openWorldHint": false,
+            "title": "Accessibility"
+          },
+          "description": "Accessibility for application windows; peer of GUI. Modes: apps lists windows (wN, title, app, active). observe returns the window tree with rN refs. find returns matching rN; a truncated result shows the cursor call for the next page. act runs ordered actions in one window, checks them before any input, and returns a diff. Copy rN/wN exactly from the latest result; stale refs fail and never rebind. keypress/type without ref go to the focused window. activate/close take a title substring or wN. Put close, and any action that opens or replaces a window, last. until waits for a predicate; false is a result, not an error. Errors return code and hint. Examples:\n{\"mode\":\"act\",\"actions\":[{\"type\":\"activate\",\"title\":\"Quarterly report\"},{\"type\":\"keypress\",\"keys\":[\"CTRL\",\"S\"]}]}\n{\"mode\":\"find\",\"window_ref\":\"w2\",\"query\":{\"role\":\"button\",\"name_contains\":\"Save\"}}\n{\"mode\":\"act\",\"actions\":[{\"type\":\"click\",\"ref\":\"r12\"}],\"until\":{\"type\":\"title\",\"text\":\"Export\"}}",
           "inputSchema": {
             "$defs": {
+              "predicate": {
+                "additionalProperties": false,
+                "description": "Poll one AX predicate until true or timeout_ms; false is a result. selector and title check every window of the app, dialogs and popups included; ref reads that element.",
+                "properties": {
+                  "match": {
+                    "description": "value: default equals.",
+                    "enum": [
+                      "equals",
+                      "contains"
+                    ],
+                    "type": "string"
+                  },
+                  "negate": {
+                    "description": "Wait for it to be false; title negate is true once the app has no such window, or has exited.",
+                    "type": "boolean"
+                  },
+                  "ref": {
+                    "pattern": "^r[1-9][0-9]*$",
+                    "type": "string"
+                  },
+                  "selector": {
+                    "additionalProperties": false,
+                    "description": "Exact AX identity fields, ANDed.",
+                    "minProperties": 1,
+                    "properties": {
+                      "description": {
+                        "pattern": "\\S",
+                        "type": "string"
+                      },
+                      "name": {
+                        "pattern": "\\S",
+                        "type": "string"
+                      },
+                      "placeholder": {
+                        "pattern": "\\S",
+                        "type": "string"
+                      },
+                      "role": {
+                        "pattern": "\\S",
+                        "type": "string"
+                      },
+                      "state": {
+                        "enum": [
+                          "checked",
+                          "expanded",
+                          "selected",
+                          "focused"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "stable_ms": {
+                    "description": "How long it must stay true; filters flicker.",
+                    "maximum": 5000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "state": {
+                    "description": "state: e.g. checked, selected, expanded.",
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "text": {
+                    "description": "text: element text substring; title: substring of any window title of the app.",
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "timeout_ms": {
+                    "description": "Default 5000.",
+                    "maximum": 60000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "enum": [
+                      "exists",
+                      "state",
+                      "value",
+                      "text",
+                      "title"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "description": "value: expected AX value.",
+                    "pattern": "\\S",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "type": "object"
+              }
+            },
+            "additionalProperties": false,
+            "not": {
+              "required": [
+                "app",
+                "window_ref"
+              ]
+            },
+            "properties": {
+              "actions": {
+                "description": "act: ordered actions in one window.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "direction": {
+                      "enum": [
+                        "up",
+                        "down",
+                        "left",
+                        "right"
+                      ],
+                      "type": "string"
+                    },
+                    "keys": {
+                      "description": "One chord, e.g. [\"CTRL\",\"S\"].",
+                      "items": {
+                        "maxLength": 64,
+                        "pattern": "^\\S(.*\\S)?$",
+                        "type": "string"
+                      },
+                      "maxItems": 8,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "pages": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 100,
+                      "type": "number"
+                    },
+                    "ref": {
+                      "description": "rN element; wN for activate/close. Omit for keys/text to the focused window.",
+                      "pattern": "^[rw][1-9][0-9]*$",
+                      "type": "string"
+                    },
+                    "text": {
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "title": {
+                      "description": "activate/close: unique window-title substring, instead of wN.",
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "click",
+                        "type",
+                        "keypress",
+                        "set_value",
+                        "scroll",
+                        "activate",
+                        "close"
+                      ],
+                      "type": "string"
+                    },
+                    "until": {
+                      "$ref": "#/$defs/predicate"
+                    },
+                    "value": {
+                      "maxLength": 10000,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "type": "array"
+              },
               "app": {
-                "description": "Bootstrap app/process name, app id, or PID as a decimal string; never a window title. Prefer returned aN/wN/rN refs.",
+                "description": "App name, app id, PID, or aN; use once, then window_ref.",
                 "pattern": "\\S",
                 "type": "string"
               },
-              "app_ref": {
-                "pattern": "^a[1-9][0-9]*$",
+              "cursor": {
+                "description": "find: next_cursor from a truncated result; send with mode find only.",
+                "pattern": "^f[1-9][0-9]*$",
                 "type": "string"
               },
-              "assertion": {
-                "description": "Poll exactly one typed AX-visible predicate.",
-                "oneOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "stable_ms": {
-                        "description": "Optional time the predicate must remain continuously true before PASS. Defaults to 0.",
-                        "maximum": 5000,
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "target": {
-                        "description": "One read-only element target. Window refs are not element targets.",
-                        "oneOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "index": {
-                                "description": "Current read snapshot index.",
-                                "minimum": 0,
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "index"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "ref": {
-                                "description": "Current AX element ref.",
-                                "pattern": "^r[1-9][0-9]*$",
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "ref"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "selector": {
-                                "additionalProperties": false,
-                                "description": "Exact AX identity fields, ANDed in one window.",
-                                "minProperties": 1,
-                                "properties": {
-                                  "description": {
-                                    "description": "Exact accessible description.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "description": "Exact accessible name.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "placeholder": {
-                                    "description": "Exact accessible placeholder.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "role": {
-                                    "description": "Exact AX role.",
-                                    "pattern": "^[^\\[\"\\]]*[^\\s\\[\"\\]][^\\[\"\\]]*$",
-                                    "type": "string"
-                                  },
-                                  "state": {
-                                    "description": "Optional distinguishing state.",
-                                    "enum": [
-                                      "checked",
-                                      "expanded",
-                                      "selected",
-                                      "focused"
-                                    ],
-                                    "type": "string"
-                                  }
-                                },
-                                "type": "object"
-                              }
-                            },
-                            "required": [
-                              "selector"
-                            ],
-                            "type": "object"
-                          }
-                        ],
-                        "type": "object"
-                      },
-                      "timeout_ms": {
-                        "description": "Polling budget in milliseconds. Defaults to 5000.",
-                        "maximum": 60000,
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "type": {
-                        "const": "exists",
-                        "description": "AX assertion predicate type.",
-                        "type": "string"
-                      },
-                      "value": {
-                        "description": "Whether the target must exist.",
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "target",
-                      "value"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "stable_ms": {
-                        "description": "Optional time the predicate must remain continuously true before PASS. Defaults to 0.",
-                        "maximum": 5000,
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "state": {
-                        "description": "Accessibility state name, such as checked, focused, selected, or expanded.",
-                        "pattern": "\\S",
-                        "type": "string"
-                      },
-                      "target": {
-                        "description": "One read-only element target. Window refs are not element targets.",
-                        "oneOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "index": {
-                                "description": "Current read snapshot index.",
-                                "minimum": 0,
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "index"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "ref": {
-                                "description": "Current AX element ref.",
-                                "pattern": "^r[1-9][0-9]*$",
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "ref"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "selector": {
-                                "additionalProperties": false,
-                                "description": "Exact AX identity fields, ANDed in one window.",
-                                "minProperties": 1,
-                                "properties": {
-                                  "description": {
-                                    "description": "Exact accessible description.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "description": "Exact accessible name.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "placeholder": {
-                                    "description": "Exact accessible placeholder.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "role": {
-                                    "description": "Exact AX role.",
-                                    "pattern": "^[^\\[\"\\]]*[^\\s\\[\"\\]][^\\[\"\\]]*$",
-                                    "type": "string"
-                                  },
-                                  "state": {
-                                    "description": "Optional distinguishing state.",
-                                    "enum": [
-                                      "checked",
-                                      "expanded",
-                                      "selected",
-                                      "focused"
-                                    ],
-                                    "type": "string"
-                                  }
-                                },
-                                "type": "object"
-                              }
-                            },
-                            "required": [
-                              "selector"
-                            ],
-                            "type": "object"
-                          }
-                        ],
-                        "type": "object"
-                      },
-                      "timeout_ms": {
-                        "description": "Polling budget in milliseconds. Defaults to 5000.",
-                        "maximum": 60000,
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "type": {
-                        "const": "state",
-                        "description": "AX assertion predicate type.",
-                        "type": "string"
-                      },
-                      "value": {
-                        "description": "Whether the state must be present.",
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "target",
-                      "state",
-                      "value"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "allOf": [
-                      {
-                        "if": {
-                          "properties": {
-                            "match": {
-                              "const": "contains"
-                            }
-                          },
-                          "required": [
-                            "match"
-                          ]
-                        },
-                        "then": {
-                          "properties": {
-                            "value": {
-                              "type": "string"
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "properties": {
-                      "match": {
-                        "description": "Comparison mode. Defaults to \"equals\".",
-                        "enum": [
-                          "equals",
-                          "contains"
-                        ],
-                        "type": "string"
-                      },
-                      "stable_ms": {
-                        "description": "Optional time the predicate must remain continuously true before PASS. Defaults to 0.",
-                        "maximum": 5000,
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "target": {
-                        "description": "One read-only element target. Window refs are not element targets.",
-                        "oneOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "index": {
-                                "description": "Current read snapshot index.",
-                                "minimum": 0,
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "index"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "ref": {
-                                "description": "Current AX element ref.",
-                                "pattern": "^r[1-9][0-9]*$",
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "ref"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "selector": {
-                                "additionalProperties": false,
-                                "description": "Exact AX identity fields, ANDed in one window.",
-                                "minProperties": 1,
-                                "properties": {
-                                  "description": {
-                                    "description": "Exact accessible description.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "description": "Exact accessible name.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "placeholder": {
-                                    "description": "Exact accessible placeholder.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "role": {
-                                    "description": "Exact AX role.",
-                                    "pattern": "^[^\\[\"\\]]*[^\\s\\[\"\\]][^\\[\"\\]]*$",
-                                    "type": "string"
-                                  },
-                                  "state": {
-                                    "description": "Optional distinguishing state.",
-                                    "enum": [
-                                      "checked",
-                                      "expanded",
-                                      "selected",
-                                      "focused"
-                                    ],
-                                    "type": "string"
-                                  }
-                                },
-                                "type": "object"
-                              }
-                            },
-                            "required": [
-                              "selector"
-                            ],
-                            "type": "object"
-                          }
-                        ],
-                        "type": "object"
-                      },
-                      "timeout_ms": {
-                        "description": "Polling budget in milliseconds. Defaults to 5000.",
-                        "maximum": 60000,
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "type": {
-                        "const": "value",
-                        "description": "AX assertion predicate type.",
-                        "type": "string"
-                      },
-                      "value": {
-                        "description": "Required AX scalar value.",
-                        "pattern": "\\S",
-                        "type": [
-                          "string",
-                          "number",
-                          "boolean"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "target",
-                      "value"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "stable_ms": {
-                        "description": "Optional time the predicate must remain continuously true before PASS. Defaults to 0.",
-                        "maximum": 5000,
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "target": {
-                        "description": "One read-only element target. Window refs are not element targets.",
-                        "oneOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "index": {
-                                "description": "Current read snapshot index.",
-                                "minimum": 0,
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "index"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "ref": {
-                                "description": "Current AX element ref.",
-                                "pattern": "^r[1-9][0-9]*$",
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "ref"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "selector": {
-                                "additionalProperties": false,
-                                "description": "Exact AX identity fields, ANDed in one window.",
-                                "minProperties": 1,
-                                "properties": {
-                                  "description": {
-                                    "description": "Exact accessible description.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "description": "Exact accessible name.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "placeholder": {
-                                    "description": "Exact accessible placeholder.",
-                                    "pattern": "\\S",
-                                    "type": "string"
-                                  },
-                                  "role": {
-                                    "description": "Exact AX role.",
-                                    "pattern": "^[^\\[\"\\]]*[^\\s\\[\"\\]][^\\[\"\\]]*$",
-                                    "type": "string"
-                                  },
-                                  "state": {
-                                    "description": "Optional distinguishing state.",
-                                    "enum": [
-                                      "checked",
-                                      "expanded",
-                                      "selected",
-                                      "focused"
-                                    ],
-                                    "type": "string"
-                                  }
-                                },
-                                "type": "object"
-                              }
-                            },
-                            "required": [
-                              "selector"
-                            ],
-                            "type": "object"
-                          }
-                        ],
-                        "type": "object"
-                      },
-                      "text": {
-                        "description": "Required substring across accessible name, description, value, or placeholder.",
-                        "pattern": "\\S",
-                        "type": "string"
-                      },
-                      "timeout_ms": {
-                        "description": "Polling budget in milliseconds. Defaults to 5000.",
-                        "maximum": 60000,
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "type": {
-                        "const": "text_contains",
-                        "description": "AX assertion predicate type.",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "target",
-                      "text"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "exists": {
-                        "description": "Defaults to true; false waits until no title contains the text.",
-                        "type": "boolean"
-                      },
-                      "stable_ms": {
-                        "description": "Optional time the predicate must remain continuously true before PASS. Defaults to 0.",
-                        "maximum": 5000,
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "text": {
-                        "description": "Case-insensitive title substring for a current top-level window owned by the resolved application.",
-                        "pattern": "\\S",
-                        "type": "string"
-                      },
-                      "timeout_ms": {
-                        "description": "Polling budget in milliseconds. Defaults to 5000.",
-                        "maximum": 60000,
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "type": {
-                        "const": "window_title_contains",
-                        "description": "Window-title predicate.",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "text"
-                    ],
-                    "type": "object"
-                  }
-                ]
+              "limit": {
+                "description": "find page size; default 20.",
+                "maximum": 50,
+                "minimum": 1,
+                "type": "integer"
               },
-              "by_app": {
-                "required": [
-                  "app"
-                ]
+              "mode": {
+                "description": "apps lists every top-level window (wN, title, app, active); observe returns a tree or diff with rN; find returns matching rN; act runs actions.",
+                "enum": [
+                  "apps",
+                  "observe",
+                  "find",
+                  "act"
+                ],
+                "type": "string"
               },
-              "by_app_ref": {
-                "required": [
-                  "app_ref"
-                ]
+              "observe": {
+                "description": "Returned evidence. act and until: default diff; observe: default tree. none only with act or until.",
+                "enum": [
+                  "diff",
+                  "tree",
+                  "full",
+                  "screenshot",
+                  "none"
+                ],
+                "type": "string"
               },
-              "by_owned_assertion_ref": {
-                "not": {
-                  "anyOf": [
-                    {
-                      "required": [
-                        "app"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "app_ref"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "window_ref"
-                      ]
-                    }
-                  ]
-                },
+              "query": {
+                "additionalProperties": false,
+                "description": "find: at least one filter; ANDed, case-insensitive.",
                 "properties": {
-                  "assertion": {
-                    "properties": {
-                      "target": {
-                        "properties": {
-                          "ref": {
-                            "pattern": "^r[1-9][0-9]*$",
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "ref"
-                        ],
-                        "type": "object"
-                      }
-                    },
-                    "required": [
-                      "target"
-                    ],
-                    "type": "object"
-                  }
-                }
-              },
-              "by_owned_ref": {
-                "not": {
-                  "anyOf": [
-                    {
-                      "required": [
-                        "app"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "app_ref"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "window_ref"
-                      ]
-                    }
-                  ]
-                },
-                "properties": {
-                  "actions": {
-                    "contains": {
-                      "properties": {
-                        "target": {
-                          "properties": {
-                            "ref": {
-                              "pattern": "^(?:r|w)[1-9][0-9]*$",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "ref"
-                          ],
-                          "type": "object"
-                        }
-                      },
-                      "required": [
-                        "target"
-                      ],
-                      "type": "object"
-                    }
-                  }
-                }
-              },
-              "by_window_keyboard": {
-                "properties": {
-                  "actions": {
-                    "not": {
-                      "contains": {
-                        "required": [
-                          "target"
-                        ],
-                        "type": "object"
-                      }
-                    }
+                  "name_contains": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "name_equals": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "role": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "state": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "text_contains": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "text_equals": {
+                    "pattern": "\\S",
+                    "type": "string"
                   }
                 },
-                "required": [
-                  "window_ref"
-                ]
+                "type": "object"
               },
-              "by_window_ref": {
-                "required": [
-                  "window_ref"
-                ]
+              "root": {
+                "description": "observe: subtree at rN or the focused element.",
+                "pattern": "^(focused|r[1-9][0-9]*)$",
+                "type": "string"
+              },
+              "scope": {
+                "description": "observe/find; default window.",
+                "enum": [
+                  "window",
+                  "content"
+                ],
+                "type": "string"
+              },
+              "until": {
+                "$ref": "#/$defs/predicate"
               },
               "window_ref": {
+                "description": "Read identity. act: optional; binds ref-less keys/text to wN instead of the focused window; must match any refs.",
                 "pattern": "^w[1-9][0-9]*$",
                 "type": "string"
               }
             },
-            "description": "Exactly one AX mode.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "oneOf": [
-                  {
-                    "$ref": "#/$defs/by_app"
-                  },
-                  {
-                    "$ref": "#/$defs/by_app_ref"
-                  },
-                  {
-                    "$ref": "#/$defs/by_window_ref"
-                  }
-                ],
-                "properties": {
-                  "app": {
-                    "$ref": "#/$defs/app"
-                  },
-                  "app_ref": {
-                    "$ref": "#/$defs/app_ref"
-                  },
-                  "mode": {
-                    "const": "observe",
-                    "type": "string"
-                  },
-                  "observation_target": {
-                    "const": "app",
-                    "type": "string"
-                  },
-                  "observe": {
-                    "description": "Returned evidence: diff (default current-state changed semantic subtrees, with compact absent-ref lifecycle context), tree (working AX), screenshot (target window), or full (tree and image).",
-                    "enum": [
-                      "diff",
-                      "tree",
-                      "screenshot",
-                      "full"
-                    ],
-                    "type": "string"
-                  },
-                  "root": {
-                    "description": "Optional focused or targeted local subtree.",
-                    "oneOf": [
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "focused": {
-                            "const": true,
-                            "description": "Return a bounded local subtree around the current focused element.",
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "focused"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "index": {
-                            "description": "Current read snapshot index.",
-                            "minimum": 0,
-                            "type": "integer"
-                          }
-                        },
-                        "required": [
-                          "index"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "ref": {
-                            "description": "Current AX element ref.",
-                            "pattern": "^r[1-9][0-9]*$",
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "ref"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "selector": {
-                            "additionalProperties": false,
-                            "description": "Exact AX identity fields, ANDed in one window.",
-                            "minProperties": 1,
-                            "properties": {
-                              "description": {
-                                "description": "Exact accessible description.",
-                                "pattern": "\\S",
-                                "type": "string"
-                              },
-                              "name": {
-                                "description": "Exact accessible name.",
-                                "pattern": "\\S",
-                                "type": "string"
-                              },
-                              "placeholder": {
-                                "description": "Exact accessible placeholder.",
-                                "pattern": "\\S",
-                                "type": "string"
-                              },
-                              "role": {
-                                "description": "Exact AX role.",
-                                "pattern": "^[^\\[\"\\]]*[^\\s\\[\"\\]][^\\[\"\\]]*$",
-                                "type": "string"
-                              },
-                              "state": {
-                                "description": "Optional distinguishing state.",
-                                "enum": [
-                                  "checked",
-                                  "expanded",
-                                  "selected",
-                                  "focused"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "type": "object"
-                          }
-                        },
-                        "required": [
-                          "selector"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "scope": {
-                    "enum": [
-                      "window",
-                      "content"
-                    ],
-                    "type": "string"
-                  },
-                  "window_ref": {
-                    "$ref": "#/$defs/window_ref"
-                  }
-                },
-                "required": [
-                  "mode"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "mode": {
-                    "const": "observe",
-                    "type": "string"
-                  },
-                  "observation_target": {
-                    "const": "apps",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "mode",
-                  "observation_target"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "oneOf": [
-                  {
-                    "$ref": "#/$defs/by_app"
-                  },
-                  {
-                    "$ref": "#/$defs/by_app_ref"
-                  },
-                  {
-                    "$ref": "#/$defs/by_window_ref"
-                  }
-                ],
-                "properties": {
-                  "app": {
-                    "$ref": "#/$defs/app"
-                  },
-                  "app_ref": {
-                    "$ref": "#/$defs/app_ref"
-                  },
-                  "mode": {
-                    "const": "find",
-                    "type": "string"
-                  },
-                  "query": {
-                    "additionalProperties": false,
-                    "allOf": [
-                      {
-                        "not": {
-                          "required": [
-                            "name_contains",
-                            "name_equals"
-                          ]
-                        }
-                      },
-                      {
-                        "not": {
-                          "required": [
-                            "text_contains",
-                            "text_equals"
-                          ]
-                        }
-                      }
-                    ],
-                    "anyOf": [
-                      {
-                        "properties": {
-                          "role": {
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "role"
-                        ]
-                      },
-                      {
-                        "properties": {
-                          "name_contains": {
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "name_contains"
-                        ]
-                      },
-                      {
-                        "properties": {
-                          "name_equals": {
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "name_equals"
-                        ]
-                      },
-                      {
-                        "properties": {
-                          "text_contains": {
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "text_contains"
-                        ]
-                      },
-                      {
-                        "properties": {
-                          "text_equals": {
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "text_equals"
-                        ]
-                      },
-                      {
-                        "properties": {
-                          "state": {
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "state"
-                        ]
-                      }
-                    ],
-                    "description": "Bounded AX lookup. Supply at least one explicit filter; filters are ANDed and case-insensitive.",
-                    "properties": {
-                      "limit": {
-                        "description": "Maximum matches to return. Defaults to 20.",
-                        "maximum": 50,
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "name_contains": {
-                        "description": "Accessible-name substring.",
-                        "type": "string"
-                      },
-                      "name_equals": {
-                        "description": "Exact accessible name.",
-                        "type": "string"
-                      },
-                      "role": {
-                        "description": "Role substring.",
-                        "type": "string"
-                      },
-                      "state": {
-                        "description": "State substring.",
-                        "type": "string"
-                      },
-                      "text_contains": {
-                        "description": "Substring across name, description, value, or placeholder.",
-                        "type": "string"
-                      },
-                      "text_equals": {
-                        "description": "Exact match against one text-bearing field.",
-                        "type": "string"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "scope": {
-                    "enum": [
-                      "window",
-                      "content"
-                    ],
-                    "type": "string"
-                  },
-                  "window_ref": {
-                    "$ref": "#/$defs/window_ref"
-                  }
-                },
-                "required": [
-                  "mode",
-                  "query"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "cursor": {
-                    "description": "Continue the exact prior find observation.",
-                    "pattern": "^f[1-9][0-9]*$",
-                    "type": "string"
-                  },
-                  "limit": {
-                    "description": "Maximum matches in this page. Defaults to 20.",
-                    "maximum": 50,
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "mode": {
-                    "const": "find",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "mode",
-                  "cursor"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "oneOf": [
-                  {
-                    "$ref": "#/$defs/by_owned_ref"
-                  },
-                  {
-                    "$ref": "#/$defs/by_window_keyboard"
-                  }
-                ],
-                "properties": {
-                  "actions": {
-                    "description": "Ordered same-window actions; maximum 32. Batch known steps; split on unknown results. Guard a dependent next action with the earlier action's postcondition.",
-                    "items": {
-                      "description": "One AX action.",
-                      "oneOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "postcondition": {
-                              "$ref": "#/$defs/assertion"
-                            },
-                            "target": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "ref": {
-                                  "description": "Current AX window ref.",
-                                  "pattern": "^w[1-9][0-9]*$",
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "ref"
-                              ],
-                              "type": "object"
-                            },
-                            "type": {
-                              "const": "activate",
-                              "description": "Activate one uniquely bound top-level window.",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "target"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "postcondition": {
-                              "$ref": "#/$defs/assertion"
-                            },
-                            "target": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "ref": {
-                                  "description": "Current AX window ref.",
-                                  "pattern": "^w[1-9][0-9]*$",
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "ref"
-                              ],
-                              "type": "object"
-                            },
-                            "type": {
-                              "const": "close",
-                              "description": "Close one uniquely bound top-level window; this must be the final action.",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "target"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "postcondition": {
-                              "$ref": "#/$defs/assertion"
-                            },
-                            "target": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "ref": {
-                                  "description": "Current AX element ref.",
-                                  "pattern": "^r[1-9][0-9]*$",
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "ref"
-                              ],
-                              "type": "object"
-                            },
-                            "type": {
-                              "const": "click",
-                              "description": "AX action type.",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "target"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "keys": {
-                              "description": "Keys emitted together, e.g. [\"CTRL\",\"S\"].",
-                              "items": {
-                                "maxLength": 64,
-                                "pattern": "\\S",
-                                "type": "string"
-                              },
-                              "maxItems": 8,
-                              "minItems": 1,
-                              "type": "array"
-                            },
-                            "postcondition": {
-                              "$ref": "#/$defs/assertion"
-                            },
-                            "target": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "ref": {
-                                  "description": "Current AX element ref.",
-                                  "pattern": "^r[1-9][0-9]*$",
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "ref"
-                              ],
-                              "type": "object"
-                            },
-                            "type": {
-                              "const": "keypress",
-                              "description": "AX action type.",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "keys"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "direction": {
-                              "description": "Scroll direction.",
-                              "enum": [
-                                "up",
-                                "down",
-                                "left",
-                                "right"
-                              ],
-                              "type": "string"
-                            },
-                            "pages": {
-                              "description": "Number of pages. Defaults to 1.",
-                              "exclusiveMinimum": 0,
-                              "maximum": 100,
-                              "type": "number"
-                            },
-                            "postcondition": {
-                              "$ref": "#/$defs/assertion"
-                            },
-                            "target": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "ref": {
-                                  "description": "Current AX element ref.",
-                                  "pattern": "^r[1-9][0-9]*$",
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "ref"
-                              ],
-                              "type": "object"
-                            },
-                            "type": {
-                              "const": "scroll",
-                              "description": "AX action type.",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "direction"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "postcondition": {
-                              "$ref": "#/$defs/assertion"
-                            },
-                            "target": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "ref": {
-                                  "description": "Current AX element ref.",
-                                  "pattern": "^r[1-9][0-9]*$",
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "ref"
-                              ],
-                              "type": "object"
-                            },
-                            "type": {
-                              "const": "set_value",
-                              "description": "AX action type.",
-                              "type": "string"
-                            },
-                            "value": {
-                              "description": "Value to set.",
-                              "maxLength": 10000,
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "target",
-                            "value"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "postcondition": {
-                              "$ref": "#/$defs/assertion"
-                            },
-                            "target": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "ref": {
-                                  "description": "Current AX element ref.",
-                                  "pattern": "^r[1-9][0-9]*$",
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "ref"
-                              ],
-                              "type": "object"
-                            },
-                            "text": {
-                              "description": "Literal text to type.",
-                              "maxLength": 10000,
-                              "pattern": "\\S",
-                              "type": "string"
-                            },
-                            "type": {
-                              "const": "type",
-                              "description": "AX action type.",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "text"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    "maxItems": 32,
-                    "minItems": 1,
-                    "type": "array"
-                  },
-                  "mode": {
-                    "const": "act",
-                    "type": "string"
-                  },
-                  "observe": {
-                    "description": "ACT ONLY: none|diff|screenshot; tree/full are invalid. Omit for a fresh post-action diff. A bounded refresh may return a working tree or lifecycle proof; reread only if required.",
-                    "enum": [
-                      "none",
-                      "diff",
-                      "screenshot"
-                    ],
-                    "type": "string"
-                  },
-                  "postcondition": {
-                    "$ref": "#/$defs/assertion",
-                    "description": "Poll one final AX predicate until pass or timeout, then sample the selected observation. Prefer this to a separate assert_ax."
-                  },
-                  "window_ref": {
-                    "$ref": "#/$defs/window_ref"
-                  }
-                },
-                "required": [
-                  "mode",
-                  "actions"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "oneOf": [
-                  {
-                    "$ref": "#/$defs/by_app"
-                  },
-                  {
-                    "$ref": "#/$defs/by_app_ref"
-                  },
-                  {
-                    "$ref": "#/$defs/by_window_ref"
-                  },
-                  {
-                    "$ref": "#/$defs/by_owned_assertion_ref"
-                  }
-                ],
-                "properties": {
-                  "app": {
-                    "$ref": "#/$defs/app"
-                  },
-                  "app_ref": {
-                    "$ref": "#/$defs/app_ref"
-                  },
-                  "assertion": {
-                    "$ref": "#/$defs/assertion"
-                  },
-                  "mode": {
-                    "const": "assert_ax",
-                    "type": "string"
-                  },
-                  "scope": {
-                    "enum": [
-                      "window",
-                      "content"
-                    ],
-                    "type": "string"
-                  },
-                  "window_ref": {
-                    "$ref": "#/$defs/window_ref"
-                  }
-                },
-                "required": [
-                  "mode",
-                  "assertion"
-                ],
-                "type": "object"
-              }
+            "required": [
+              "mode"
             ],
             "type": "object"
           },
-          "name": "AX"
+          "name": "AX",
+          "title": "Accessibility"
         },
         {
-          "description": "Full-desktop action batch; screenshot alone observes. Batch validates before input and returns one final screenshot. Coordinates are delivered-image pixels. AX activates/closes windows. type/keypress use current focus. wait is one second, no observation, max 20s/batch. scroll_x/scroll_y are Computer deltas. settle_ms checks visual stillness, not semantic success; omitted default 800ms, max 3000ms.",
+          "annotations": {
+            "destructiveHint": true,
+            "openWorldHint": false,
+            "title": "Desktop screenshot and input"
+          },
+          "description": "Full-desktop screenshot and pixel input. {\"actions\":[{\"type\":\"screenshot\"}]} alone observes. Any other batch is checked before input and returns one final screenshot. x/y are pixels of the latest full-desktop GUI image, never of an AX window image. type/keypress go to the current focus, so click the field first in the same batch. Batch the actions planned from one screenshot; end the batch after an action that may open, close, or move a window, and plan the rest from the returned image. GUI cannot address windows; AX activates and closes them by title. wait is one second with no observation, at most 20 s per batch. Example: {\"actions\":[{\"type\":\"click\",\"x\":640,\"y\":412},{\"type\":\"type\",\"text\":\"hello\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}",
           "inputSchema": {
             "description": "One screenshot action observes; otherwise run an input batch.",
             "oneOf": [
@@ -1790,7 +698,7 @@
                     "type": "array"
                   },
                   "settle_ms": {
-                    "description": "Visual stillness: default 800ms, max 3000ms. Final screenshot stillness, not extra sleep. After wait, usually omit it. At the cap inspect the screenshot or use AX assert_ax.",
+                    "description": "Visual stillness: default 800ms, max 3000ms. Final screenshot stillness, not semantic success and not extra sleep. After wait, usually omit it. At the cap inspect the screenshot or use AX until.",
                     "maximum": 3000,
                     "minimum": 0,
                     "type": "integer"
@@ -1804,7 +712,8 @@
             ],
             "type": "object"
           },
-          "name": "GUI"
+          "name": "GUI",
+          "title": "Desktop screenshot and input"
         }
       ]
     }
@@ -1842,11 +751,7 @@
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "mode is required and must be observe, find, act, or assert_ax\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"mode\",\"message\":\"mode is required: apps, observe, find, or act\",\"hint\":\"{\\\"mode\\\":\\\"apps\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1867,11 +772,28 @@
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"mode\",\"message\":\"mode must be apps, observe, find, or act; got \\\"bogus\\\"\",\"hint\":\"{\\\"mode\\\":\\\"apps\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
-            },
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "mode": "assert_ax"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 12,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
             {
-              "text": "mode \"bogus\" is unsupported; it must be observe, find, act, or assert_ax\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"mode\",\"message\":\"mode \\\"assert_ax\\\" was removed; use observe with until\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"w1\\\",\\\"until\\\":{\\\"type\\\":\\\"exists\\\",\\\"ref\\\":\\\"r1\\\"}}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1888,16 +810,77 @@
         "tool": "AX"
       },
       "response": {
-        "id": 12,
+        "id": 13,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"bogus\",\"message\":\"mode \\\"observe\\\" does not accept \\\"bogus\\\"; accepted: mode, app, window_ref, scope, observe, root, until\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
-            },
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "mode": "observe",
+          "observation_target": "apps"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 14,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
             {
-              "text": "mode=\"observe\" does not accept fields: \"bogus\"; accepted fields: app, app_ref, mode, observation_target, observe, root, scope, window_ref\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"observation_target\",\"message\":\"observation_target was removed; list windows with mode \\\"apps\\\"\",\"hint\":\"{\\\"mode\\\":\\\"apps\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "app_ref": "a1",
+          "mode": "observe"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 15,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app_ref\",\"message\":\"\\\"app_ref\\\" is not a field here; use \\\"app\\\"\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "mode": "observe"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 16,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"observe needs app or window_ref\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"app\\\":\\\"a1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1910,21 +893,17 @@
         "arguments": {
           "app": "gedit",
           "mode": "observe",
-          "target": "r1"
+          "window_ref": "w1"
         },
         "tool": "AX"
       },
       "response": {
-        "id": 13,
+        "id": 17,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "mode=\"observe\" does not accept fields: \"target\"; accepted fields: app, app_ref, mode, observation_target, observe, root, scope, window_ref\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"window_ref\",\"message\":\"use app or window_ref, not both; window_ref already identifies its app\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"w1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1940,16 +919,12 @@
         "tool": "AX"
       },
       "response": {
-        "id": 14,
+        "id": 18,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":0,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: mode=\"act\" requires actions\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions\",\"message\":\"act requires actions\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1966,140 +941,12 @@
         "tool": "AX"
       },
       "response": {
-        "id": 15,
-        "jsonrpc": "2.0",
-        "result": {
-          "content": [
-            {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":0,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: mode=\"act\" requires at least one action; use mode=\"observe\" for a read-only observation\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
-              "type": "text"
-            }
-          ],
-          "isError": true
-        }
-      }
-    },
-    {
-      "request": {
-        "arguments": {
-          "actions": [
-            {
-              "type": "click"
-            }
-          ],
-          "mode": "act"
-        },
-        "tool": "AX"
-      },
-      "response": {
-        "id": 16,
-        "jsonrpc": "2.0",
-        "result": {
-          "content": [
-            {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":1,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0] click requires target\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
-              "type": "text"
-            }
-          ],
-          "isError": true
-        }
-      }
-    },
-    {
-      "request": {
-        "arguments": {
-          "actions": [
-            {
-              "target": "r1",
-              "type": "click"
-            }
-          ],
-          "app": "x",
-          "mode": "act"
-        },
-        "tool": "AX"
-      },
-      "response": {
-        "id": 17,
-        "jsonrpc": "2.0",
-        "result": {
-          "content": [
-            {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "mode=\"act\" does not accept fields: \"app\"; each rN/wN target already owns its application and logical window. Copy refs exactly from observe/find. Use top-level window_ref only for an all-untargeted keyboard batch\n",
-              "type": "text"
-            }
-          ],
-          "isError": true
-        }
-      }
-    },
-    {
-      "request": {
-        "arguments": {
-          "actions": [
-            {
-              "text": "hi",
-              "type": "type"
-            }
-          ],
-          "mode": "act"
-        },
-        "tool": "AX"
-      },
-      "response": {
-        "id": 18,
-        "jsonrpc": "2.0",
-        "result": {
-          "content": [
-            {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":1,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: an all-untargeted batch requires window_ref; app names do not prove keyboard focus\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
-              "type": "text"
-            }
-          ],
-          "isError": true
-        }
-      }
-    },
-    {
-      "request": {
-        "arguments": {
-          "actions": [
-            {
-              "target": "r1",
-              "type": "bogus"
-            }
-          ],
-          "mode": "act"
-        },
-        "tool": "AX"
-      },
-      "response": {
         "id": 19,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":1,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0].type \"bogus\" is unsupported; it must be activate, close, click, keypress, scroll, set_value, or type\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions\",\"message\":\"act needs at least one action; use mode \\\"observe\\\" to read\",\"hint\":\"[{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}]\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2112,11 +959,6 @@
         "arguments": {
           "actions": [
             {
-              "target": "w1",
-              "type": "close"
-            },
-            {
-              "target": "r1",
               "type": "click"
             }
           ],
@@ -2130,11 +972,7 @@
         "result": {
           "content": [
             {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":2,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0].target must be an object like {\"ref\":\"wN\"}, not a string; use {\"type\":\"close\",\"target\":{\"ref\":\"w1\"}}\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].ref\",\"message\":\"click needs ref: an rN copied from observe or find\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2147,10 +985,11 @@
         "arguments": {
           "actions": [
             {
-              "target": "7",
+              "ref": "r1",
               "type": "click"
             }
           ],
+          "app": "x",
           "mode": "act"
         },
         "tool": "AX"
@@ -2161,11 +1000,176 @@
         "result": {
           "content": [
             {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":1,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"mode \\\"act\\\" does not accept \\\"app\\\"; accepted: mode, window_ref, actions, observe, until\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "actions": [
+            {
+              "ref": "r1",
+              "type": "bogus"
+            }
+          ],
+          "mode": "act"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 22,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].type\",\"message\":\"type must be one of click, type, keypress, set_value, scroll, activate, close; got \\\"bogus\\\"\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "actions": [
+            {
+              "action": "close",
+              "ref": "w1"
+            }
+          ],
+          "mode": "act"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 23,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].action\",\"message\":\"actions use \\\"type\\\", not \\\"action\\\"\",\"hint\":\"{\\\"type\\\":\\\"close\\\",\\\"ref\\\":\\\"w1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "actions": [
+            {
+              "action": "press",
+              "ref": "r1"
+            }
+          ],
+          "mode": "act"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 24,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].action\",\"message\":\"actions use \\\"type\\\", not \\\"action\\\"\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "actions": [
+            {
+              "target": {
+                "ref": "r1"
+              },
+              "type": "click"
+            }
+          ],
+          "mode": "act"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 25,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].target\",\"message\":\"\\\"target\\\" is not a field here; use \\\"ref\\\"\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "actions": [
+            {
+              "ref": "w1",
+              "type": "close"
             },
             {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0].target must be an object like {\"ref\":\"rN\"}, not a string\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "ref": "r1",
+              "type": "click"
+            }
+          ],
+          "mode": "act"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 26,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"close must be the last action; a closed window cannot take later input\",\"input_emitted\":false,\"completed\":0,\"requested\":2,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "actions": [
+            {
+              "ref": "w1",
+              "title": "Report",
+              "type": "activate"
+            }
+          ],
+          "mode": "act"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 27,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"activate needs exactly one of ref (wN) or title\",\"hint\":\"{\\\"type\\\":\\\"activate\\\",\\\"title\\\":\\\"window title\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2188,16 +1192,12 @@
         "tool": "AX"
       },
       "response": {
-        "id": 22,
+        "id": 28,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":1,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: actions[0].keys must contain 1 to 8 items\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].keys\",\"message\":\"keys must name 1 to 8 keys\",\"hint\":\"{\\\"type\\\":\\\"keypress\\\",\\\"keys\\\":[\\\"CTRL\\\",\\\"S\\\"]}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2210,26 +1210,82 @@
         "arguments": {
           "actions": [
             {
-              "target": "r1",
+              "ref": "r1",
               "type": "click"
             }
           ],
-          "mode": "act",
-          "observe": "tree"
+          "mode": "act"
         },
         "tool": "AX"
       },
       "response": {
-        "id": 23,
+        "id": 29,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"batch\":{\"actions_completed_without_call_error\":0,\"actions_requested\":1,\"rejected_before_first_action\":true},\"input_events_emitted\":false,\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"stale_ref\",\"message\":\"actions[0].ref: short AX ref \\\"r1\\\" was never issued in this session\",\"hint\":\"{\\\"mode\\\":\\\"find\\\",\\\"window_ref\\\":\\\"wN\\\",\\\"query\\\":{\\\"name_contains\\\":\\\"...\\\"}}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"failure_code\":\"unknown_ref\",\"preflight_only\":true}",
               "type": "text"
             },
             {
-              "text": "AX BATCH REJECTED BEFORE ACTION 1: mode=\"act\" observe must be none, diff, or screenshot. No action was executed. Retry this same act with observe omitted or set to diff; do not add a separate observe first.\naction_outcome=not_executed\nactions_completed_without_call_error=0\nNo accessibility action was attempted.\n",
+              "text": "actions[0].ref: short AX ref \"r1\" was never issued in this session\nNo action was sent.\n",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "actions": [
+            {
+              "keys": [
+                "CTRL",
+                "S"
+              ],
+              "type": "keypress"
+            }
+          ],
+          "mode": "act"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 30,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"runtime_error\",\"message\":\"the window list could not be read: desktop unavailable in contract test\",\"hint\":\"{\\\"mode\\\":\\\"apps\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "actions": [
+            {
+              "title": "Report",
+              "type": "activate"
+            }
+          ],
+          "mode": "act"
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 31,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"runtime_error\",\"path\":\"actions[0].title\",\"message\":\"the window list could not be read: desktop unavailable in contract test\",\"hint\":\"{\\\"mode\\\":\\\"apps\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2245,16 +1301,12 @@
         "tool": "AX"
       },
       "response": {
-        "id": 24,
+        "id": 32,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "mode=\"find\" requires query and one of app, app_ref, or window_ref\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"find needs app or window_ref, or a cursor from a truncated result\",\"hint\":\"{\\\"mode\\\":\\\"find\\\",\\\"window_ref\\\":\\\"w1\\\",\\\"query\\\":{\\\"role\\\":\\\"button\\\"}}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2265,22 +1317,19 @@
     {
       "request": {
         "arguments": {
+          "app": "gedit",
           "mode": "find",
           "query": {}
         },
         "tool": "AX"
       },
       "response": {
-        "id": 25,
+        "id": 33,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "mode=\"find\" requires one of app, app_ref, or window_ref\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"query\",\"message\":\"query needs at least one filter: role, name_equals, name_contains, text_equals, text_contains, state\",\"hint\":\"{\\\"name_contains\\\":\\\"Save\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2294,25 +1343,18 @@
           "app": "gedit",
           "mode": "find",
           "query": {
-            "name": {
-              "contains": "y",
-              "equals": "x"
-            }
+            "name": "Save"
           }
         },
         "tool": "AX"
       },
       "response": {
-        "id": 26,
+        "id": 34,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "query does not accept fields: \"name\"; use name_equals/name_contains or text_equals/text_contains\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"query.name\",\"message\":\"query does not accept \\\"name\\\"; accepted: role, name_equals, name_contains, text_equals, text_contains, state\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2333,16 +1375,12 @@
         "tool": "AX"
       },
       "response": {
-        "id": 27,
+        "id": 35,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "mode=\"find\" does not accept fields: \"limit\"; accepted fields: app, app_ref, mode, query, scope, window_ref\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"limit\",\"message\":\"limit must be an integer from 1 to 50\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2353,21 +1391,18 @@
     {
       "request": {
         "arguments": {
-          "mode": "assert_ax"
+          "cursor": "f1",
+          "mode": "find"
         },
         "tool": "AX"
       },
       "response": {
-        "id": 28,
+        "id": 36,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "mode=\"assert_ax\" requires assertion\n",
+              "text": "{\"ok\":false,\"code\":\"runtime_error\",\"message\":\"AX find cursor: unknown AX find cursor \\\"f1\\\"\",\"hint\":\"{\\\"mode\\\":\\\"apps\\\"}\",\"input_emitted\":false,\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2378,24 +1413,53 @@
     {
       "request": {
         "arguments": {
-          "expect": {
-            "bogus": true
-          },
-          "mode": "assert_ax"
+          "app": "gedit",
+          "mode": "observe",
+          "until": {
+            "ref": "r1",
+            "type": "value_equals"
+          }
         },
         "tool": "AX"
       },
       "response": {
-        "id": 29,
+        "id": 37,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"until.type\",\"message\":\"until.type must be one of exists, state, value, text, title\",\"hint\":\"{\\\"type\\\":\\\"exists\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "request": {
+        "arguments": {
+          "app": "gedit",
+          "mode": "observe",
+          "until": {
+            "text": "Saved",
+            "timeout_ms": 1,
+            "type": "title"
+          }
+        },
+        "tool": "AX"
+      },
+      "response": {
+        "id": 38,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"ok\":false,\"code\":\"until_unknown\",\"message\":\"until false: no window title containing \\\"Saved\\\" satisfied the requested appear predicate within 1ms.\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"wN\\\"}\",\"until\":\"unknown\",\"input_emitted\":false,\"assertion_sampled_live_ui\":false,\"evidence_scope\":\"runtime_poll\",\"preflight_only\":false}",
               "type": "text"
             },
             {
-              "text": "mode=\"assert_ax\" does not accept fields: \"expect\"; it requires assertion\n",
+              "text": "until false: no window title containing \"Saved\" satisfied the requested appear predicate within 1ms.\nLast AX application lookup: desktop unavailable in contract test\n",
               "type": "text"
             }
           ],
@@ -2412,16 +1476,12 @@
         "tool": "AX"
       },
       "response": {
-        "id": 30,
+        "id": 39,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "desktop unavailable in contract test\n",
+              "text": "{\"ok\":false,\"code\":\"runtime_error\",\"message\":\"desktop unavailable in contract test\",\"hint\":\"{\\\"mode\\\":\\\"apps\\\"}\",\"input_emitted\":false,\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2432,22 +1492,17 @@
     {
       "request": {
         "arguments": {
-          "mode": "observe",
-          "target": "apps"
+          "mode": "apps"
         },
         "tool": "AX"
       },
       "response": {
-        "id": 31,
+        "id": 40,
         "jsonrpc": "2.0",
         "result": {
           "content": [
             {
-              "text": "[ax] {\"preflight_only\":true}",
-              "type": "text"
-            },
-            {
-              "text": "mode=\"observe\" does not accept fields: \"target\"; use {\"mode\":\"observe\",\"observation_target\":\"apps\"}\n",
+              "text": "{\"ok\":false,\"code\":\"runtime_error\",\"message\":\"desktop unavailable in contract test\",\"hint\":\"{\\\"mode\\\":\\\"apps\\\"}\",\"input_emitted\":false,\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -2461,7 +1516,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 32,
+        "id": 41,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2486,7 +1541,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 33,
+        "id": 42,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2520,7 +1575,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 34,
+        "id": 43,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2549,7 +1604,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 35,
+        "id": 44,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2581,7 +1636,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 36,
+        "id": 45,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2611,7 +1666,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 37,
+        "id": 46,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2642,7 +1697,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 38,
+        "id": 47,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2672,7 +1727,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 39,
+        "id": 48,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2701,7 +1756,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 40,
+        "id": 49,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2730,7 +1785,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 41,
+        "id": 50,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2765,7 +1820,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 42,
+        "id": 51,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2794,7 +1849,7 @@
         "tool": "GUI"
       },
       "response": {
-        "id": 43,
+        "id": 52,
         "jsonrpc": "2.0",
         "result": {
           "content": [
@@ -2817,7 +1872,7 @@
           "code": -32602,
           "message": "Unknown tool \"Nope\"; use AX or GUI"
         },
-        "id": 44,
+        "id": 53,
         "jsonrpc": "2.0"
       }
     },
@@ -2834,7 +1889,7 @@
           "code": -32602,
           "message": "Unknown tool \" ax \"; use AX or GUI"
         },
-        "id": 45,
+        "id": 54,
         "jsonrpc": "2.0"
       }
     }

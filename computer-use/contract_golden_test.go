@@ -38,46 +38,63 @@ var contractCalls = []struct {
 }{
 	{"AX", map[string]any{}},
 	{"AX", map[string]any{"mode": "bogus"}},
+	{"AX", map[string]any{"mode": "assert_ax"}},
 	{"AX", map[string]any{"mode": "observe", "bogus": 1}},
-	{"AX", map[string]any{"mode": "observe", "target": "r1", "app": "gedit"}},
+	{"AX", map[string]any{"mode": "observe", "observation_target": "apps"}},
+	{"AX", map[string]any{"mode": "observe", "app_ref": "a1"}},
+	{"AX", map[string]any{"mode": "observe"}},
+	{"AX", map[string]any{"mode": "observe", "app": "gedit", "window_ref": "w1"}},
 	{"AX", map[string]any{"mode": "act"}},
 	{"AX", map[string]any{"mode": "act", "actions": []any{}}},
 	{"AX", map[string]any{"mode": "act", "actions": []any{
 		map[string]any{"type": "click"},
 	}}},
 	{"AX", map[string]any{"mode": "act", "app": "x", "actions": []any{
-		map[string]any{"type": "click", "target": "r1"},
+		map[string]any{"type": "click", "ref": "r1"},
 	}}},
 	{"AX", map[string]any{"mode": "act", "actions": []any{
-		map[string]any{"type": "type", "text": "hi"},
+		map[string]any{"type": "bogus", "ref": "r1"},
 	}}},
 	{"AX", map[string]any{"mode": "act", "actions": []any{
-		map[string]any{"type": "bogus", "target": "r1"},
+		map[string]any{"ref": "w1", "action": "close"},
 	}}},
 	{"AX", map[string]any{"mode": "act", "actions": []any{
-		map[string]any{"type": "close", "target": "w1"},
-		map[string]any{"type": "click", "target": "r1"},
+		map[string]any{"ref": "r1", "action": "press"},
 	}}},
 	{"AX", map[string]any{"mode": "act", "actions": []any{
-		map[string]any{"type": "click", "target": "7"},
+		map[string]any{"type": "click", "target": map[string]any{"ref": "r1"}},
+	}}},
+	{"AX", map[string]any{"mode": "act", "actions": []any{
+		map[string]any{"type": "close", "ref": "w1"},
+		map[string]any{"type": "click", "ref": "r1"},
+	}}},
+	{"AX", map[string]any{"mode": "act", "actions": []any{
+		map[string]any{"type": "activate", "ref": "w1", "title": "Report"},
 	}}},
 	{"AX", map[string]any{"mode": "act", "window_ref": "w1", "actions": []any{
 		map[string]any{"type": "keypress", "keys": []any{}},
 	}}},
-	{"AX", map[string]any{"mode": "act", "observe": "tree", "actions": []any{
-		map[string]any{"type": "click", "target": "r1"},
+	{"AX", map[string]any{"mode": "act", "actions": []any{
+		map[string]any{"type": "click", "ref": "r1"},
+	}}},
+	{"AX", map[string]any{"mode": "act", "actions": []any{
+		map[string]any{"type": "keypress", "keys": []any{"CTRL", "S"}},
+	}}},
+	{"AX", map[string]any{"mode": "act", "actions": []any{
+		map[string]any{"type": "activate", "title": "Report"},
 	}}},
 	{"AX", map[string]any{"mode": "find"}},
-	{"AX", map[string]any{"mode": "find", "query": map[string]any{}}},
-	{"AX", map[string]any{"mode": "find", "app": "gedit", "query": map[string]any{
-		"name": map[string]any{"equals": "x", "contains": "y"},
-	}}},
+	{"AX", map[string]any{"mode": "find", "app": "gedit", "query": map[string]any{}}},
+	{"AX", map[string]any{"mode": "find", "app": "gedit", "query": map[string]any{"name": "Save"}}},
 	{"AX", map[string]any{"mode": "find", "app": "gedit", "limit": -1,
 		"query": map[string]any{"role": "button"}}},
-	{"AX", map[string]any{"mode": "assert_ax"}},
-	{"AX", map[string]any{"mode": "assert_ax", "expect": map[string]any{"bogus": true}}},
+	{"AX", map[string]any{"mode": "find", "cursor": "f1"}},
+	{"AX", map[string]any{"mode": "observe", "app": "gedit",
+		"until": map[string]any{"type": "value_equals", "ref": "r1"}}},
+	{"AX", map[string]any{"mode": "observe", "app": "gedit",
+		"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1}}},
 	{"AX", map[string]any{"mode": "observe", "app": "gedit"}},
-	{"AX", map[string]any{"mode": "observe", "target": "apps"}},
+	{"AX", map[string]any{"mode": "apps"}},
 	{"GUI", map[string]any{}},
 	{"GUI", map[string]any{"actions": []any{}}},
 	{"GUI", map[string]any{"actions": []any{

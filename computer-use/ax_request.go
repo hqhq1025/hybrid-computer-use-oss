@@ -3,8 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -19,80 +17,29 @@ const (
 	a11yModeObserve = "observe"
 	a11yModeFind    = "find"
 	a11yModeAct     = "act"
-	a11yModeAssert  = "assert_ax"
+	// a11yModeAssert names the internal predicate check that observe+until
+	// and act until run. It is not a public mode.
+	a11yModeAssert = "assert_ax"
 )
 
+// parseA11yMode returns the public mode of a call, or an error when it is
+// missing or unknown. Only exact values are accepted.
 func parseA11yMode(args map[string]any) (string, error) {
-	if _, present := args["mode"]; !present {
-		return "", errors.New(
-			"mode is required and must be observe, find, act, or assert_ax")
-	}
-	mode := optionalString(args, "mode")
+	mode, _ := args["mode"].(string)
 	switch mode {
-	case a11yModeObserve, a11yModeFind, a11yModeAct, a11yModeAssert:
+	case a11yModeApps, a11yModeObserve, a11yModeFind, a11yModeAct:
 		return mode, nil
-	default:
-		return "", fmt.Errorf(
-			"mode must be observe, find, act, or assert_ax")
 	}
+	return "", errors.New("mode must be apps, observe, find, or act")
 }
 
-func a11yModeFields(mode string, args map[string]any) map[string]bool {
-	fields := map[string]bool{"mode": true}
-	switch mode {
-	case a11yModeObserve:
-		if optionalString(args, "observation_target") == "apps" {
-			fields["observation_target"] = true
-			return fields
-		}
-		for _, field := range []string{
-			"observation_target", "app", "app_ref", "window_ref",
-			"observe", "scope", "root",
-		} {
-			fields[field] = true
-		}
-	case a11yModeFind:
-		// A cursor continues a prior find; only then does the top-level
-		// limit apply. A new search takes its limit inside query.
-		if _, continuing := args["cursor"]; continuing {
-			fields["cursor"] = true
-			fields["limit"] = true
-			return fields
-		}
-		fields["app"] = true
-		fields["app_ref"] = true
-		fields["window_ref"] = true
-		fields["query"] = true
-		fields["scope"] = true
-	case a11yModeAct:
-		fields["window_ref"] = true
-		fields["actions"] = true
-		fields["observe"] = true
-		fields["postcondition"] = true
-	case a11yModeAssert:
-		fields["app"] = true
-		fields["app_ref"] = true
-		fields["window_ref"] = true
-		fields["assertion"] = true
-		fields["scope"] = true
-	}
-	return fields
-}
-
+// resolveA11yReadIdentity binds a read to one app or window. app accepts an
+// application name, app id, PID, or an aN ref from apps; window_ref names
+// one window. A ref-owned until target supplies the identity when neither is
+// given.
 func (s *service) resolveA11yReadIdentity(
-	args map[string]any,
-	target string,
+	app, windowRef, target string,
 ) (*a11yReadContext, error) {
-	app, appRef, windowRef, err := readIdentityArguments(args)
-	if err != nil {
-		return nil, err
-	}
-	if app != "" && (appRef != "" || windowRef != "") {
-		return nil, errors.New("app cannot be combined with app_ref or window_ref")
-	}
-	if appRef != "" && windowRef != "" {
-		return nil, errors.New("use exactly one of app_ref or window_ref")
-	}
 	context := &a11yReadContext{}
 	if isShortAXRef(target) {
 		entry, err := s.resolveShortAXRefOwned(target)
@@ -104,8 +51,8 @@ func (s *service) resolveA11yReadIdentity(
 		context.windowHandle = entry.WindowHandle
 		if windowRef != "" && entry.LogicalWindowRef != windowRef {
 			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity, fmt.Sprintf(
-				"target %s belongs to window %s, not %s",
-				target, entry.LogicalWindowRef, windowRef,
+				"%s belongs to window %s, not %s; omit window_ref or use %s",
+				target, entry.LogicalWindowRef, windowRef, entry.LogicalWindowRef,
 			))
 		}
 	}
@@ -114,122 +61,40 @@ func (s *service) resolveA11yReadIdentity(
 		if err != nil {
 			return nil, err
 		}
-		if context.appRef != "" && entry.AppRef != context.appRef {
-			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity, fmt.Sprintf(
-				"target owner %s conflicts with window owner %s",
-				context.appRef, entry.AppRef,
-			))
-		}
 		context.appRef = entry.AppRef
 		context.windowRef = entry.Ref
 		context.windowHandle = entry.WindowHandle
+		context.appToken = entry.AppRef
+		if context.appToken == "" {
+			context.appToken = entry.AppIdentity
+		}
+		return context, nil
 	}
-	if appRef != "" {
-		if _, err := s.resolveShortAXAppRef(appRef); err != nil {
+	if isShortAXAppRef(app) {
+		if _, err := s.resolveShortAXAppRef(app); err != nil {
 			return nil, err
 		}
-		if context.appRef != "" && context.appRef != appRef {
-			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity, fmt.Sprintf(
-				"target owner %s conflicts with app_ref %s",
-				context.appRef, appRef,
-			))
+		if context.appRef != "" && context.appRef != app {
+			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity,
+				fmt.Sprintf("%s belongs to app %s, not %s", target, context.appRef, app))
 		}
-		context.appRef = appRef
+		context.appRef = app
+		context.appToken = app
+		return context, nil
 	}
 	if context.appRef != "" {
 		if app != "" {
 			return nil, newArgumentRuleError(argumentRuleRefOwnsIdentity,
-				"app cannot be combined with a ref-owned target",
-			)
+				target+" already identifies its app; omit app")
 		}
 		context.appToken = context.appRef
 		return context, nil
 	}
-	if app != "" {
-		context.appToken = app
-		return context, nil
+	if app == "" {
+		return nil, errors.New("app or window_ref is required")
 	}
-	return nil, errors.New("one of app, app_ref, window_ref, or an owned rN target is required")
-}
-
-// readIdentityArguments reads app, app_ref and window_ref. A present field
-// must be a non-blank string; refs must be exact short refs. An absent field
-// is returned as "".
-func readIdentityArguments(args map[string]any) (app, appRef, windowRef string, err error) {
-	read := func(key string, valid func(string) bool, shape string) (string, error) {
-		raw, present := args[key]
-		if !present {
-			return "", nil
-		}
-		value, ok := raw.(string)
-		if !ok || strings.TrimSpace(value) == "" || (valid != nil && !valid(value)) {
-			return "", fmt.Errorf("%s must be %s", key, shape)
-		}
-		return value, nil
-	}
-	if app, err = read("app", nil, "a non-blank app name, app id, or PID string"); err != nil {
-		return
-	}
-	app = strings.TrimSpace(app)
-	if appRef, err = read("app_ref", isShortAXAppRef, "an app ref aN copied from observe"); err != nil {
-		return
-	}
-	windowRef, err = read("window_ref", isShortAXWindowRef, "a window ref wN copied from observe/find")
-	return
-}
-
-func validateA11yModeFields(mode string, args map[string]any) error {
-	allowed := a11yModeFields(mode, args)
-	illegal := make([]string, 0)
-	for field := range args {
-		if !allowed[field] {
-			illegal = append(illegal, field)
-		}
-	}
-	if len(illegal) == 0 {
-		return nil
-	}
-	sort.Strings(illegal)
-	quoted := make([]string, 0, len(illegal))
-	for _, field := range illegal {
-		quoted = append(quoted, strconv.Quote(field))
-	}
-	context := fmt.Sprintf("mode=%q", mode)
-	if mode == a11yModeObserve &&
-		optionalString(args, "observation_target") == "apps" {
-		context += ` with observation_target="apps"`
-	}
-	message := fmt.Sprintf(
-		"%s does not accept fields: %s",
-		context,
-		strings.Join(quoted, ", "),
-	)
-	if mode == a11yModeAct {
-		for _, field := range illegal {
-			if field == "app" || field == "app_ref" {
-				message += "; each rN/wN target already owns its application and " +
-					"logical window. Copy refs exactly from observe/find. Use " +
-					"top-level window_ref only for an all-untargeted keyboard batch"
-				break
-			}
-		}
-	}
-	return errors.New(message)
-}
-
-func requiredObjectArgument(
-	args map[string]any,
-	key string,
-) (map[string]any, error) {
-	value, present := args[key]
-	if !present {
-		return nil, fmt.Errorf("missing required argument: %s", key)
-	}
-	object, ok := value.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("%s must be an object", key)
-	}
-	return object, nil
+	context.appToken = app
+	return context, nil
 }
 
 func withA11yModeEvidence(
@@ -245,72 +110,45 @@ func withA11yModeEvidence(
 
 func (s *service) a11yRequest(
 	args map[string]any,
-	obs observation,
+	_ observation,
 ) toolCallResult {
-	mode, err := parseA11yMode(args)
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	request, argErr := decodeAXRequest(args)
+	if argErr != nil {
+		requested := 0
+		if actions, ok := args["actions"].([]any); ok {
+			requested = len(actions)
+		}
+		return axArgErrorResult(argErr, requested)
 	}
-	if err := validateA11yModeFields(mode, args); err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-
-	switch mode {
+	obs := observation{mode: request.observe}
+	switch request.mode {
+	case a11yModeApps:
+		return withA11yModeEvidence(
+			s.listApps().withEvidenceScope("app_inventory"),
+			a11yModeApps,
+		)
 	case a11yModeObserve:
-		return s.a11yObserve(args, obs)
+		return s.a11yObserve(request, obs)
 	case a11yModeFind:
-		return s.a11yFind(args, obs)
-	case a11yModeAssert:
-		return s.a11yAssert(args, obs)
-	case a11yModeAct:
-		return s.a11yAct(args, obs)
+		return s.a11yFind(request)
+	default:
+		return s.a11yAct(request, obs)
 	}
-	return textResult("unreachable AX mode", true).
-		withEvidenceScope("error_only")
 }
 
 func (s *service) a11yObserve(
-	args map[string]any,
+	request *axRequest,
 	obs observation,
 ) toolCallResult {
-	target := "app"
-	if raw, present := args["observation_target"]; present {
-		target, _ = raw.(string)
+	if request.until != nil {
+		return s.a11yObserveUntil(request, obs)
 	}
-	switch target {
-	case "apps":
-		result := s.listApps().withEvidenceScope("app_inventory")
-		result = withA11yModeEvidence(result, a11yModeObserve)
-		if result.StructuredContent == nil {
-			result.StructuredContent = map[string]any{}
-		}
-		result.StructuredContent["observation_target"] = "apps"
-		return result
-	case "app":
-	default:
-		return textResult(
-			"observation_target must be app or apps", true,
-		).withEvidenceScope("error_only")
-	}
-	if obs.resolvedMode() == observeNone {
-		return textResult(
-			"mode=\"observe\" cannot use observe=\"none\"",
-			true,
-		).withEvidenceScope("error_only")
-	}
-	view, err := parseTreeView(args)
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-	scope, err := parseA11yScope(args)
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-	root, err := parseObservationRoot(args["root"])
-	if err != nil {
-		return textResult(
-			"root: "+err.Error(), true,
-		).withEvidenceScope("error_only")
+	var root map[string]any
+	switch {
+	case request.root == "focused":
+		root = map[string]any{"focused": true}
+	case request.root != "":
+		root = map[string]any{"ref": request.root}
 	}
 	var includeScreenshot *bool
 	if obs.resolvedMode() == observeScreenshot ||
@@ -318,129 +156,214 @@ func (s *service) a11yObserve(
 		enabled := true
 		includeScreenshot = &enabled
 	}
-	readContext, identityErr := s.resolveA11yReadIdentity(args, "")
+	readContext, identityErr := s.resolveA11yReadIdentity(request.app, request.windowRef, "")
 	if identityErr != nil {
-		return textResult(
-			"AX observation target: "+identityErr.Error(), true,
-		).withEvidenceScope("error_only")
+		return axIdentityErrorResult(identityErr)
+	}
+	if obs.mode == observeDiff && root == nil {
+		return withA11yModeEvidence(
+			s.a11yDiffObservation(readContext, request.scope).
+				withEvidenceScope("independent_ui_read"),
+			a11yModeObserve,
+		)
 	}
 	result := s.getAppState(
 		readContext.appToken,
-		nil,
-		nil,
-		nil,
-		nil,
+		nil, nil, nil, nil,
 		includeScreenshot,
 		nil,
-		view,
-		scope,
+		treeViewWorking,
+		request.scope,
 		root,
 		readContext.windowHandle,
 	).withEvidenceScope("independent_ui_read")
-	result = withA11yModeEvidence(result, a11yModeObserve)
-	return result
+	return withA11yModeEvidence(result, a11yModeObserve)
 }
 
-func (s *service) a11yFind(
-	args map[string]any,
+// a11yObserveUntil waits for a predicate and then returns the requested
+// observation. A predicate that stays false is a result, not an error.
+func (s *service) a11yObserveUntil(
+	request *axRequest,
 	obs observation,
 ) toolCallResult {
-	if rawCursor, continuing := args["cursor"]; continuing {
-		cursor, _ := rawCursor.(string)
-		if !isShortAXFindCursor(cursor) {
-			return textResult(
-				"cursor must be a find cursor fN copied from find", true,
-			).withEvidenceScope("error_only")
+	target := optionalString(axUntilTarget(request.until), "ref")
+	readContext, identityErr := s.resolveA11yReadIdentity(request.app, request.windowRef, target)
+	if identityErr != nil {
+		return axIdentityErrorResult(identityErr)
+	}
+	check := s.runA11yAssertion(readContext, request.until, request.scope)
+	check = withA11yModeEvidence(check, a11yModeObserve)
+	status, _ := check.StructuredContent["assertion_status"].(string)
+	passed := !check.IsError && status == "pass"
+	predicateFalse := !check.IsError && status != "pass"
+	if check.StructuredContent == nil {
+		check.StructuredContent = map[string]any{}
+	}
+	check.StructuredContent["until_result"] = map[bool]string{true: "true", false: "false"}[passed]
+	if check.IsError {
+		check.StructuredContent["until_result"] = "unknown"
+		return check
+	}
+	_ = predicateFalse
+	if obs.resolvedMode() == observeNone || readContext.appToken == "" {
+		return check
+	}
+	var includeScreenshot *bool
+	if obs.resolvedMode() == observeScreenshot || obs.resolvedMode() == observeFull {
+		enabled := true
+		includeScreenshot = &enabled
+	}
+	var current toolCallResult
+	if obs.resolvedMode() == observeDiff || obs.resolvedMode() == "" {
+		current = s.a11yDiffObservation(readContext, request.scope)
+	} else {
+		current = s.getAppState(
+			readContext.appToken,
+			nil, nil, nil, nil,
+			includeScreenshot,
+			nil,
+			treeViewWorking,
+			request.scope,
+			nil,
+			readContext.windowHandle,
+		)
+	}
+	if current.IsError {
+		// The predicate result stands; the follow-up read is extra evidence.
+		check.Content = append(check.Content, contentItem{
+			Type: "text",
+			Text: "current state unavailable: " + firstLine(resultText(current)),
+		})
+		return check
+	}
+	check.Content = append(check.Content, current.Content...)
+	for _, key := range []string{"tree_complete_for_model", "coverage_incomplete_nodes",
+		"structural_budget_omitted_nodes", "final_observation_kind"} {
+		if value, present := current.StructuredContent[key]; present {
+			check.StructuredContent[key] = value
 		}
-		limit, err := optionalPositiveInt(args, "limit")
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	return check
+}
+
+// a11yDiffObservation reads the window and renders it as a diff against the
+// last tree delivered for it, falling back to the working tree.
+func (s *service) a11yDiffObservation(
+	readContext *a11yReadContext,
+	scope string,
+) toolCallResult {
+	noScreenshot := false
+	request := axServiceRequest{
+		Operation:          axServiceObserve,
+		App:                readContext.appToken,
+		IncludeScreenshot:  &noScreenshot,
+		TargetWindowHandle: readContext.windowHandle,
+		SourceRef:          readContext.windowRef,
+		Scope:              normalizedA11yScope(scope),
+		TreeView:           treeViewWorking,
+	}
+	snapshot, notes, result := s.refreshSnapshot(readContext.appToken, request)
+	if result.IsError {
+		return result
+	}
+	if s.deliveredSnapshotFor(snapshot) == nil {
+		// Nothing was delivered for this window yet, so there is no diff
+		// baseline: return the tree.
+		return s.getAppStateResult(snapshot, notes, false)
+	}
+	return s.renderA11yBatchFinalObservation(snapshot, notes, observation{mode: observeDiff})
+}
+
+// runA11yAssertion evaluates one internal assertion against a read context.
+func (s *service) runA11yAssertion(
+	readContext *a11yReadContext,
+	assertion map[string]any,
+	scope string,
+) toolCallResult {
+	spec, err := parseA11yAssertionSpec(assertion)
+	if err != nil {
+		return textResult(err.Error(), true).withEvidenceScope("error_only")
+	}
+	if spec.assertionType == "window_title_contains" {
+		windowTitle := strings.TrimSpace(optionalString(assertion, "text"))
+		expected := true
+		if exists := optionalBool(assertion, "exists"); exists != nil {
+			expected = *exists
 		}
-		resolvedLimit := 20
-		if limit != nil {
-			resolvedLimit = *limit
-		}
-		if resolvedLimit > maxAXFindPageSize {
-			return textResult(fmt.Sprintf(
-				"limit must be at most %d", maxAXFindPageSize,
-			), true).withEvidenceScope("error_only")
-		}
+		result := s.verifyWindowTitle(
+			firstNonEmpty(readContext.appRef, readContext.appToken),
+			windowTitle,
+			expected,
+			spec.timeoutMS,
+			spec.stableMS,
+		)
 		return withA11yModeEvidence(
-			s.continueFind(cursor, resolvedLimit).
+			result.withEvidenceScope(assertionEvidenceScope(result)),
+			a11yModeAssert,
+		)
+	}
+	goal := assertionGoal(assertion)
+	target := spec.targetAddress
+	if isShortAXRef(target) {
+		entry, resolveErr := s.resolveShortAXRef(readContext.appToken, target)
+		if resolveErr != nil {
+			return axStaleRefResult(target, resolveErr)
+		}
+		liveTarget, targetErr := semanticTargetFromRefEntry(entry)
+		if targetErr != nil {
+			return axStaleRefResult(target, targetErr)
+		}
+		result := s.verifyResolvedAXRef(
+			readContext.appToken,
+			target,
+			liveTarget,
+			goal,
+			spec.timeoutMS,
+			spec.stableMS,
+		)
+		// The live resolver can fail to read some provider-bound elements
+		// completely. One fresh canonical read of the window then decides
+		// the predicate, as it does for an action's until.
+		if a11yPostconditionNeedsCanonicalReconciliation(assertion, result) {
+			result = s.reconcileA11yActionPostcondition(&a11yBatchContext{
+				appToken:     firstNonEmpty(entry.AppRef, readContext.appToken),
+				windowRef:    entry.LogicalWindowRef,
+				windowHandle: entry.WindowHandle,
+			}, assertion, result)
+		}
+		result = result.withEvidenceScope("independent_ui_read")
+		return withA11yModeEvidence(result, a11yModeAssert)
+	}
+	result := s.verify(
+		readContext.appToken,
+		target,
+		target,
+		goal,
+		spec.timeoutMS,
+		spec.stableMS,
+		scope,
+		readContext.windowHandle,
+	).withEvidenceScope("independent_ui_read")
+	if result.StructuredContent != nil &&
+		result.StructuredContent["assertion_sampled_live_ui"] == true {
+		result.StructuredContent["evidence_scope"] = "independent_ui_read"
+	}
+	return withA11yModeEvidence(result, a11yModeAssert)
+}
+
+func (s *service) a11yFind(request *axRequest) toolCallResult {
+	if request.cursor != "" {
+		return withA11yModeEvidence(
+			s.continueFind(request.cursor, request.limit).
 				withEvidenceScope("cached_observation_page"),
 			a11yModeFind,
 		)
 	}
-	readContext, identityErr := s.resolveA11yReadIdentity(args, "")
+	readContext, identityErr := s.resolveA11yReadIdentity(request.app, request.windowRef, "")
 	if identityErr != nil {
-		return textResult(
-			"AX find target: "+identityErr.Error(), true,
-		).withEvidenceScope("error_only")
+		return axIdentityErrorResult(identityErr)
 	}
-	query, err := requiredObjectArgument(args, "query")
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-	allowedQueryFields := map[string]bool{
-		"role": true, "name_contains": true, "name_equals": true,
-		"text_contains": true, "text_equals": true, "state": true,
-		"limit": true,
-	}
-	unexpectedQueryFields := []string{}
-	for field := range query {
-		if !allowedQueryFields[field] {
-			unexpectedQueryFields = append(unexpectedQueryFields, field)
-		}
-	}
-	sort.Strings(unexpectedQueryFields)
-	if len(unexpectedQueryFields) > 0 {
-		return textResult(
-			"find.query has unsupported field(s): "+
-				strings.Join(unexpectedQueryFields, ", ")+
-				"; use name_equals/name_contains or text_equals/text_contains",
-			true,
-		).withEvidenceScope("error_only")
-	}
-	for _, field := range []string{
-		"role", "name_contains", "name_equals", "text_contains", "text_equals", "state",
-	} {
-		if raw, present := query[field]; present {
-			if _, ok := raw.(string); !ok {
-				return textResult(
-					"find.query."+field+" must be a string", true,
-				).withEvidenceScope("error_only")
-			}
-		}
-	}
-	for _, pair := range [][2]string{
-		{"name_contains", "name_equals"}, {"text_contains", "text_equals"},
-	} {
-		_, first := query[pair[0]]
-		_, second := query[pair[1]]
-		if first && second {
-			return textResult(
-				"find.query accepts only one of "+pair[0]+" or "+pair[1],
-				true,
-			).withEvidenceScope("error_only")
-		}
-	}
-	limit, err := optionalPositiveInt(query, "limit")
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-	resolvedLimit := 20
-	if limit != nil {
-		resolvedLimit = *limit
-	}
-	if resolvedLimit > maxAXFindPageSize {
-		return textResult(fmt.Sprintf(
-			"find.query.limit must be at most %d", maxAXFindPageSize,
-		), true).withEvidenceScope("error_only")
-	}
-	scope, err := parseA11yScope(args)
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
+	query := request.query
 	name := optionalString(query, "name_contains")
 	_, nameExact := query["name_equals"]
 	if nameExact {
@@ -457,180 +380,64 @@ func (s *service) a11yFind(
 		name,
 		text,
 		optionalString(query, "state"),
-		resolvedLimit,
+		request.limit,
 		nameExact,
 		textExact,
-		scope,
+		request.scope,
 		readContext.windowHandle,
 	).withEvidenceScope("independent_ui_read")
 	return withA11yModeEvidence(result, a11yModeFind)
 }
 
-func (s *service) a11yAssert(
-	args map[string]any,
-	obs observation,
-) toolCallResult {
-	assertion, err := requiredObjectArgument(args, "assertion")
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-	spec, err := parseA11yAssertionSpec(assertion)
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-	scope, err := parseA11yScope(args)
-	if err != nil {
-		return textResult(err.Error(), true).withEvidenceScope("error_only")
-	}
-	timeoutMS := spec.timeoutMS
-	stableMS := spec.stableMS
-	assertionType := spec.assertionType
-	targetAddress := spec.targetAddress
-	readContext, identityErr := s.resolveA11yReadIdentity(args, targetAddress)
-	if identityErr != nil {
-		return withArgumentRule(textResult(
-			"AX assertion target: "+identityErr.Error(), true,
-		).withEvidenceScope("error_only"), identityErr)
-	}
-	if assertionType == "window_title_contains" {
-		windowTitle := strings.TrimSpace(
-			optionalString(assertion, "text"),
-		)
-		expected := true
-		if exists := optionalBool(assertion, "exists"); exists != nil {
-			expected = *exists
-		}
-		result := s.verifyWindowTitle(
-			readContext.appToken,
-			windowTitle,
-			expected,
-			timeoutMS,
-			stableMS,
-			readContext.windowHandle,
-		)
-		result = result.withEvidenceScope(
-			assertionEvidenceScope(result),
-		)
-		result = withA11yModeEvidence(result, a11yModeAssert)
-		if result.StructuredContent == nil {
-			result.StructuredContent = map[string]any{}
-		}
-		result.StructuredContent["assertion_scope"] =
-			"accessibility_visible_window_title_only"
-		result.StructuredContent["task_completion_verified"] = false
-		return result
-	}
-	goal := spec.goal
-	target := targetAddress
-	if target == "" {
-		return textResult(
-			"mode=\"assert_ax\" requires assertion.target", true,
-		).withEvidenceScope("error_only")
-	}
-	displayTarget := target
-	if isShortAXWindowRef(target) {
-		return textResult(
-			"assertion.target: wN identifies a window action target; "+
-				"use top-level window_ref with "+
-				"assertion.type=\"window_title_contains\" for window state",
-			true,
-		).withEvidenceScope("error_only")
-	}
-	if isShortAXRef(target) {
-		entry, resolveErr := s.resolveShortAXRef(readContext.appToken, target)
-		if resolveErr != nil {
-			return textResult(
-				"assertion.target: "+resolveErr.Error(), true,
-			).withEvidenceScope("error_only")
-		}
-		liveTarget, targetErr := semanticTargetFromRefEntry(entry)
-		if targetErr != nil {
-			return textResult(
-				"assertion.target: "+targetErr.Error(), true,
-			).withEvidenceScope("error_only")
-		}
-		result := s.verifyResolvedAXRef(
-			readContext.appToken,
-			target,
-			liveTarget,
-			goal,
-			timeoutMS,
-			stableMS,
-		).withEvidenceScope("independent_ui_read")
-		result = withA11yModeEvidence(result, a11yModeAssert)
-		if result.StructuredContent == nil {
-			result.StructuredContent = map[string]any{}
-		}
-		result.StructuredContent["assertion_scope"] =
-			"accessibility_visible_state_only"
-		result.StructuredContent["task_completion_verified"] = false
-		return result
-	}
-	result := s.verify(
-		readContext.appToken,
-		target,
-		displayTarget,
-		goal,
-		timeoutMS,
-		stableMS,
-		scope,
-		readContext.windowHandle,
-	).withEvidenceScope("independent_ui_read")
-	if displayTarget != target {
-		result = replaceToolResultText(result, target, displayTarget)
-	}
-	result = withA11yModeEvidence(result, a11yModeAssert)
-	if result.StructuredContent != nil &&
-		result.StructuredContent["assertion_sampled_live_ui"] == true {
-		result.StructuredContent["evidence_scope"] =
-			"independent_ui_read"
-	}
-	if result.StructuredContent == nil {
-		result.StructuredContent = map[string]any{}
-	}
-	result.StructuredContent["assertion_scope"] =
-		"accessibility_visible_state_only"
-	result.StructuredContent["task_completion_verified"] = false
-	return result
-}
-
 func (s *service) a11yAct(
-	args map[string]any,
+	request *axRequest,
 	obs observation,
 ) toolCallResult {
-	switch obs.resolvedMode() {
-	case observeNone, observeDiff, observeScreenshot:
-	default:
-		return a11yBatchValidationError(
-			"mode=\"act\" observe must be none, diff, or screenshot. "+
-				"No action was executed. Retry this same act with observe omitted "+
-				"or set to diff; do not add a separate observe first.", 0)
-	}
-	rawActions, present := args["actions"]
-	if !present {
-		return a11yBatchValidationError(
-			"mode=\"act\" requires actions", 0)
-	}
-	var postcondition map[string]any
-	if raw, present := args["postcondition"]; present {
-		var ok bool
-		postcondition, ok = raw.(map[string]any)
-		if !ok {
-			return a11yBatchValidationError(
-				"postcondition must be an AX assertion object", 0,
-			)
-		}
-	}
-	_, _, windowRef, err := readIdentityArguments(args)
-	if err != nil {
-		return a11yBatchValidationError(err.Error(), 0)
-	}
-	result := s.a11yBatch(
-		rawActions,
+	result := s.a11yBatchDecoded(
+		request.actions,
 		obs,
-		postcondition,
-		"",
-		windowRef,
+		request.until,
+		request.windowRef,
 	).withEvidenceScope("delivery_or_local_ui")
 	return withA11yModeEvidence(result, a11yModeAct)
+}
+
+// axIdentityErrorResult reports a read identity that could not be bound.
+func axIdentityErrorResult(err error) toolCallResult {
+	var lifecycle *axRefLifecycleError
+	if errors.As(err, &lifecycle) {
+		return axStaleRefResult("", err)
+	}
+	if strings.Contains(err.Error(), "never issued") ||
+		strings.Contains(err.Error(), "invalid short AX") ||
+		strings.Contains(err.Error(), "expired") {
+		return axStaleRefResult("", err)
+	}
+	argErr := axInvalid("app", err.Error(), `{"mode":"apps"}`)
+	var rule *argumentRuleError
+	if errors.As(err, &rule) {
+		argErr.rule = rule.code
+	}
+	return axArgErrorResult(argErr, 0)
+}
+
+// axStaleRefResult reports a ref that no longer resolves. Nothing was sent.
+func axStaleRefResult(ref string, err error) toolCallResult {
+	message := err.Error()
+	if ref != "" && !strings.Contains(message, ref) {
+		message = ref + ": " + message
+	}
+	result := textResult(message, true)
+	result.StructuredContent = map[string]any{
+		axPublicErrorCodeKey:   axCodeStaleRef,
+		axPublicErrorDetailKey: message,
+		axPublicErrorHintKey:   `{"mode":"observe","window_ref":"wN"}`,
+		"failure_code":         "stale_target",
+		"input_events_emitted": false,
+		"action_attempted":     false,
+		"preflight_only":       true,
+		"evidence_scope":       "error_only",
+		"observation_required": true,
+	}
+	return result
 }

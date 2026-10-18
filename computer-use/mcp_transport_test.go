@@ -204,8 +204,8 @@ func TestMCPAnswersEveryRequestAndNoNotification(t *testing.T) {
 func TestMCPRequestDecodePreservesExactJSONNumbers(t *testing.T) {
 	request, err := decodeMCPRequest([]byte(
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":` +
-			`{"name":"AX","arguments":{"mode":"assert_ax","assertion":` +
-			`{"type":"value","target":{"ref":"r1"},` +
+			`{"name":"AX","arguments":{"mode":"observe","until":` +
+			`{"type":"value","ref":"r1",` +
 			`"value":9007199254740993}}}}`,
 	))
 	if err != nil {
@@ -213,7 +213,7 @@ func TestMCPRequestDecodePreservesExactJSONNumbers(t *testing.T) {
 	}
 	params := request["params"].(map[string]any)
 	arguments := params["arguments"].(map[string]any)
-	assertion := arguments["assertion"].(map[string]any)
+	assertion := arguments["until"].(map[string]any)
 	value, ok := assertion["value"].(json.Number)
 	if !ok || value.String() != "9007199254740993" {
 		t.Fatalf("MCP transport changed exact JSON number: %#v",

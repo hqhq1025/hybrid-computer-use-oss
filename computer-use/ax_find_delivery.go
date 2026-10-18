@@ -75,7 +75,8 @@ func findMatchUnit(snapshot *AXSnapshotV1, record elementRecord, ordinal int) st
 		out.WriteByte('\n')
 	}
 	if node != nil && node.Ref != "" {
-		fmt.Fprintf(&out, " - match=%d target={\"ref\":%q}\n", ordinal, node.Ref)
+		// The flat action field: {"type":"click","ref":"rN"}.
+		fmt.Fprintf(&out, " - match=%d ref=%q\n", ordinal, node.Ref)
 	} else {
 		reason := "canonical_node_unavailable"
 		if node != nil {
@@ -185,7 +186,9 @@ func (s *service) deliverFindPage(
 		result.StructuredContent["find_page_start"] = offset + 1
 		result.StructuredContent["find_page_count"] = count
 		if strings.HasPrefix(continuation, " next_cursor=") {
-			result.StructuredContent["next_cursor"] = strings.TrimPrefix(continuation, " next_cursor=")
+			cursor := strings.TrimPrefix(continuation, " next_cursor=")
+			cursor, _, _ = strings.Cut(cursor, "\n")
+			result.StructuredContent["next_cursor"] = cursor
 		}
 		return result
 	}
@@ -196,7 +199,7 @@ func (s *service) deliverFindPage(
 			return findDeliveryFits(makeResult(units, context, "", count, omitted))
 		}
 		return findDeliveryFits(makeResult(units, context, reserve, count, omitted)) &&
-			findDeliveryFits(makeResult(units, context, " next_cursor=f18446744073709551615", count, omitted))
+			findDeliveryFits(makeResult(units, context, findNextPageLine("f18446744073709551615"), count, omitted))
 	}
 	units, count := "", 0
 	for index := offset; index < len(matched) && count < limit; index++ {
@@ -258,7 +261,7 @@ func (s *service) deliverFindPage(
 		}
 		continuation = reserve
 		if nextCursor != "" {
-			continuation = " next_cursor=" + nextCursor
+			continuation = findNextPageLine(nextCursor)
 		}
 	}
 	result := makeResult(units, contextPrefix(included), continuation, count, included < len(lines))
@@ -299,4 +302,12 @@ func (s *service) deliverFindPage(
 	}
 	rememberContext(contextSnapshot.Roots, 1)
 	return result
+}
+
+// findNextPageLine is the continuation printed on a truncated find page: the
+// cursor, then the exact call that returns the next page.
+func findNextPageLine(cursor string) string {
+	return " next_cursor=" + cursor + "\nnext page: " +
+		`{"mode":"find","cursor":"` + cursor + `"}` +
+		"; or narrow the query, e.g. name_contains"
 }

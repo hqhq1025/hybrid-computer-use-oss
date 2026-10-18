@@ -499,7 +499,7 @@ func (s *service) renderA11yBatchFinalObservation(
 ) toolCallResult {
 	if snapshot == nil {
 		result := textResult(
-			"final_observation_unavailable: AX returned no snapshot after the postcondition",
+			"final_observation_unavailable: AX returned no snapshot after the until check",
 			true,
 		)
 		result.StructuredContent = map[string]any{

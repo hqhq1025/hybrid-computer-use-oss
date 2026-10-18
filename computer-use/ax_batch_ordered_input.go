@@ -426,7 +426,7 @@ func (s *service) executePlannedOrderedInputRun(
 		}
 		result := textResult(
 			fmt.Sprintf(
-				"A11Y BATCH STOPPED IN NATIVE ORDERED INPUT: %s during %s.",
+				"Stopped during ordered keyboard input: %s during %s.",
 				failureCode,
 				failurePhase,
 			),

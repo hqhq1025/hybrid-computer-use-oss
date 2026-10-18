@@ -32,6 +32,43 @@ var crossFieldRuleCodes = map[string]bool{
 	argumentRulePostconditionIndex: true,
 	argumentRuleRefOwnsIdentity:    true,
 	argumentRuleWaitBudget:         true,
+	// The flat AX schema has no oneOf or if/then, so rules that depend on
+	// the value of mode or of an action or until type are declared rules of
+	// the AX decoder: which fields a mode or type accepts or requires,
+	// whether a ref must be rN or wN, and exactly-one-of pairs whose
+	// presence depends on the type. Rules the flat schema can express
+	// (blank strings, app with window_ref) are in the schema instead.
+	axRuleFieldForMode:    true,
+	axRuleFieldForType:    true,
+	axRuleRequiredForMode: true,
+	axRuleRequiredForType: true,
+	axRuleOneOf:           true,
+	axRuleRefKind:         true,
+	axRuleObserveNone:     true,
+	axRuleFindFilterPair:  true,
+	axRuleValueMatch:      true,
+}
+
+// axConsistencySeeds are valid calls for each AX mode and action type. The
+// flat AX schema has no branches, so seeds generated from it alone would
+// cover only the fields every call shares.
+var axConsistencySeeds = []string{
+	`{"mode":"apps"}`,
+	`{"mode":"observe","app":"a1"}`,
+	`{"mode":"observe","window_ref":"w1","root":"r1","scope":"content","observe":"full"}`,
+	`{"mode":"observe","window_ref":"w1","observe":"none","until":{"type":"title","text":"Sheet","negate":true,"timeout_ms":1,"stable_ms":0}}`,
+	`{"mode":"observe","until":{"type":"value","ref":"r1","value":"5","match":"contains","timeout_ms":1}}`,
+	`{"mode":"observe","app":"a1","until":{"type":"exists","selector":{"role":"button","name":"Save","state":"focused"},"timeout_ms":1}}`,
+	`{"mode":"observe","app":"a1","until":{"type":"state","ref":"r1","state":"checked","timeout_ms":1}}`,
+	`{"mode":"observe","app":"a1","until":{"type":"text","ref":"r1","text":"Save","timeout_ms":1}}`,
+	`{"mode":"find","window_ref":"w1","limit":5,"scope":"window","query":{"role":"button","name_contains":"Save","text_equals":"Save","state":"focused"}}`,
+	`{"mode":"find","cursor":"f1","limit":5}`,
+	`{"mode":"act","observe":"none","actions":[{"type":"click","ref":"r1","until":{"type":"exists","ref":"r1","timeout_ms":1}}]}`,
+	`{"mode":"act","window_ref":"w1","actions":[{"type":"keypress","keys":["CTRL","S"]},{"type":"type","text":"x"},{"type":"scroll","direction":"down","pages":2}]}`,
+	`{"mode":"act","actions":[{"type":"set_value","ref":"r1","value":"x"},{"type":"type","ref":"r1","text":"y"},{"type":"keypress","ref":"r1","keys":["TAB"]},{"type":"scroll","ref":"r1","direction":"up"}],"until":{"type":"title","text":"Sheet","timeout_ms":1}}`,
+	`{"mode":"act","actions":[{"type":"activate","ref":"w1"}]}`,
+	`{"mode":"act","actions":[{"type":"close","ref":"w1"}]}`,
+	`{"mode":"act","actions":[{"type":"activate","title":"Sheet"}]}`,
 }
 
 // liveStateRejections are runtime refusals that depend on desktop or cache
@@ -230,6 +267,11 @@ func consistencySamples(t testing.TB) []consistencySample {
 			t.Fatal(err)
 		}
 		seeds := generateInstances(schema, 0)
+		if tool == publicToolAX {
+			for _, raw := range axConsistencySeeds {
+				seeds = append(seeds, decodeTestArguments(&testing.T{}, raw))
+			}
+		}
 		valid := 0
 		for index, seed := range seeds {
 			object, ok := seed.(map[string]any)
@@ -903,4 +945,15 @@ func FuzzAXArgumentsMatchSchema(f *testing.F) {
 				mismatch.runtime.accepted, mismatch.runtime.text, raw)
 		}
 	})
+}
+
+// The consistency probe calls dispatchValidated. The AX decoder must run on
+// that path too, or the probe would not compare the schema with it.
+func TestConsistencyProbeReachesTheAXDecoder(t *testing.T) {
+	verdict := newConsistencyProbe(t).run(publicToolAX, map[string]any{
+		"mode": "act", "actions": []any{map[string]any{"type": "click"}},
+	})
+	if verdict.accepted || verdict.code != axRuleRequiredForType {
+		t.Fatalf("dispatchValidated did not run the AX decoder: %#v", verdict)
+	}
 }

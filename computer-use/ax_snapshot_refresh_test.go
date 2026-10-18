@@ -83,7 +83,7 @@ func TestIdenticalSnapshotSeparatesStillBusyFromTrimmedAway(t *testing.T) {
 	if len(notes) != 1 || !strings.Contains(notes[0], "not proof your last action failed") {
 		t.Fatalf("an unchanged tree is weak evidence, never proof, got %v", notes)
 	}
-	if !strings.Contains(notes[0], "AX mode=assert_ax") ||
+	if !strings.Contains(notes[0], "AX observe and until") ||
 		strings.Contains(notes[0], "`verify`") {
 		t.Fatalf("continuity guidance leaked the hidden legacy assertion tool: %v", notes)
 	}
@@ -362,7 +362,7 @@ func TestVerifyPreservesProjectionWithoutReplacingActionCache(t *testing.T) {
 
 	source := mainGoSource(t)
 	for _, marker := range []string{
-		"snapshot, _, result := s.readProjectedSnapshot(app, request)",
+		"primary, _, result := s.readProjectedSnapshot(app, request)",
 	} {
 		if !strings.Contains(source, marker) {
 			t.Fatalf("verify projection contract missing %q", marker)

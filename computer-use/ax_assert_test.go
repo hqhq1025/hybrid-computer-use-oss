@@ -128,14 +128,14 @@ func TestPendingStaleGateBlocksNumericVerify(t *testing.T) {
 	blocked := service.verify(
 		"edit", "17", "17", goal, 10, 0, a11yScopeWindow)
 	if !blocked.IsError ||
-		!strings.Contains(resultText(blocked), "cannot reuse target.index") {
+		!strings.Contains(resultText(blocked), "cannot reuse an element index") {
 		t.Fatalf("the stale app's loose alias must block its old numeric index: %#v", blocked)
 	}
 
 	noCache := newService().verify(
 		"editor", "17", "17", goal, 10, 0, a11yScopeWindow)
 	if !noCache.IsError ||
-		!strings.Contains(resultText(noCache), "without a current accessibility snapshot") {
+		!strings.Contains(resultText(noCache), "without a current snapshot") {
 		t.Fatalf("numeric verify must always be bound to a current app snapshot: %#v", noCache)
 	}
 }
@@ -180,7 +180,6 @@ func TestFailedWindowTitlePollIsNotLiveUIEvidence(t *testing.T) {
 		true,
 		1,
 		0,
-		"",
 		func(ProviderWindowListRequest) (*ProviderWindowResult, error) {
 			return nil, errors.New("AX bridge unavailable")
 		},
@@ -844,7 +843,6 @@ func TestNegativeWindowTitleAcceptsCompleteAppDisappearance(t *testing.T) {
 		false,
 		1,
 		0,
-		"",
 		func(ProviderWindowListRequest) (*ProviderWindowResult, error) {
 			return &ProviderWindowResult{
 				OK:    false,

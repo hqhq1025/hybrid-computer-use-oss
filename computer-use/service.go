@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -295,12 +294,9 @@ func toolEvidenceScope(name string, args map[string]any) string {
 	case publicToolAX:
 		mode, _ := parseA11yMode(args)
 		switch mode {
-		case a11yModeObserve:
-			if defaultString(optionalString(args, "observation_target"), "app") == "apps" {
-				return "app_inventory"
-			}
-			return "independent_ui_read"
-		case a11yModeFind, a11yModeAssert:
+		case a11yModeApps:
+			return "app_inventory"
+		case a11yModeObserve, a11yModeFind:
 			return "independent_ui_read"
 		default:
 			return "delivery_or_local_ui"
@@ -319,6 +315,18 @@ func (s *service) dispatch(name string, args map[string]any) toolCallResult {
 		return textResult(fmt.Sprintf(
 			"tool %q belongs to the %s channel, which is disabled by COMPUTER_USE_CHANNELS. Enabled channels: %s.",
 			name, toolChannel[name], strings.Join(sortedChannels(), ", ")), true)
+	}
+	// AX decodes its arguments first: the flat AX schema cannot say which
+	// fields belong to which mode or action type, and the decoder's errors
+	// name the field and show a corrected call.
+	if name == publicToolAX {
+		if _, argErr := decodeAXRequest(args); argErr != nil {
+			requested := 0
+			if actions, ok := args["actions"].([]any); ok {
+				requested = len(actions)
+			}
+			return axArgErrorResult(argErr, requested)
+		}
 	}
 	// The published input schema is the static contract. Nothing below runs,
 	// and no input is emitted, for arguments it rejects.
@@ -398,57 +406,4 @@ func (s *service) dispatchValidated(name string, args map[string]any) toolCallRe
 	default:
 		return textResult(fmt.Sprintf("unsupportedTool(%q)", name), true)
 	}
-}
-
-func (s *service) listApps() toolCallResult {
-	response, err := s.callProviderObserveApps(ProviderObserveAppsRequest{
-		ProtocolVersion: providerProtocolV2,
-	})
-	if err != nil {
-		var timeout *runtimeTimeoutError
-		if errors.As(err, &timeout) {
-			return textResult(
-				err.Error()+"\nruntime_timeout=true mutation_unknown=false "+
-					"a11y_responsive=false cached_pid_present=unknown "+
-					"window_for_cached_pid=unknown. Accessibility application enumeration "+
-					"did not answer.", true)
-		}
-		return textResult(err.Error(), true)
-	}
-	if !response.OK {
-		return textResult(response.Error, true)
-	}
-	if len(response.Apps) > 0 {
-		lines := make([]string, 0, len(response.Apps))
-		for _, app := range response.Apps {
-			line := strings.TrimSpace(app.DisplayText)
-			if line == "" {
-				line = strings.TrimSpace(app.Name)
-			}
-			if app.InputCapable {
-				ref := s.appRefRegistry.Acquire(
-					app.Name,
-					app.ProviderBusName,
-					app.ProcessGeneration,
-					"",
-				)
-				if ref != "" {
-					if app.Name != "" && strings.HasPrefix(line, app.Name) {
-						line = app.Name + " [ref=" + ref + "]" +
-							strings.TrimPrefix(line, app.Name)
-					} else {
-						line = fmt.Sprintf("%s [ref=%s] %s", app.Name, ref, line)
-					}
-				}
-			}
-			lines = append(lines, line)
-		}
-		if len(lines) > 0 {
-			response.Text = strings.Join(lines, "\n")
-		}
-	}
-	if strings.TrimSpace(response.Text) == "" {
-		response.Text = "No running top-level apps are visible to this accessibility provider."
-	}
-	return textResult(response.Text, false)
 }

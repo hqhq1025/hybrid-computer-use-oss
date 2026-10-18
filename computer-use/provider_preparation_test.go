@@ -142,21 +142,21 @@ func TestPreparationFailureStopsBatchWithoutRecovery(t *testing.T) {
 				}
 				backend := &recordingPlatformBackend{accessibilityResponse: response.Accessibility}
 				s.backend = backend
-				action := map[string]any{"type": "click", "target": map[string]any{"ref": ref}}
+				action := map[string]any{"type": "click", "ref": ref}
 				args := map[string]any{"mode": "act", "observe": "diff"}
 				if untargeted {
 					action = map[string]any{"type": "keypress", "keys": []any{"ENTER"}}
 					args["window_ref"] = window
 				}
 				args["actions"] = []any{action, map[string]any{"type": "keypress", "keys": []any{"TAB"}}}
-				args["postcondition"] = map[string]any{"type": "window_title_contains", "text": "Sheet", "exists": true, "timeout_ms": 1}
+				args["until"] = map[string]any{"type": "title", "text": "Sheet", "timeout_ms": 1}
 				result := s.callTool("AX", args)
 				if !result.IsError || len(backend.actionRequests) != 1 || len(backend.observeRequests) != 0 {
 					t.Fatalf("preparation failure continued input or auto-observed: result=%#v calls=%v", result, backend.calls)
 				}
 				facts := publicBatchEvidence(t, result)
 				batch := assertPublicBatchCounts(t, facts, 2, 0)
-				if facts[kind+"_preparation"] == nil || facts["mutation_unknown"] != true || facts["input_events_emitted"] != false || facts["partial_input_possible"] != false || facts["observation_required"] != false || facts["final_observation_returned"] != false {
+				if facts[kind+"_preparation"] == nil || facts["mutation_unknown"] != true || facts["input_emitted"] != false || facts["partial_input_possible"] != false || facts["observation_required"] != false || facts["final_observation_returned"] != false {
 					t.Fatalf("lost honest preparation facts: %#v", facts)
 				}
 				if batch["actions"].([]any)[0].(map[string]any)[kind+"_preparation"] == nil {

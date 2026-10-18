@@ -449,7 +449,7 @@ func elementIntentMismatch(record *elementRecord, declared string) string {
 	return fmt.Sprintf(
 		"target.index %d resolves to %s, which does not match the declared target (%q). "+
 			"This usually means the index came from an earlier snapshot. "+
-			"Call AX mode=observe or mode=find again and use a current target.ref, target.index, or target.selector.",
+			"Call AX mode=observe or mode=find again and use a current rN ref.",
 		record.Index, describeRecord(record), declared)
 }
 

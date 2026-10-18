@@ -1066,7 +1066,7 @@ func continuityNotes(previous, current *appSnapshot) []string {
 			"Nothing in the tree reports work in progress, but that is not proof your "+
 			"last action failed: effects may not reach the accessibility tree. "+
 			"Check the screenshot, or "+
-			"assert the specific element with AX mode=assert_ax before deciding to retry. "+
+			"check the specific element with AX observe and until before deciding to retry. "+
 			"Note also what this line rules OUT: the content is not missing because a "+
 			"budget trimmed it — this tree is the same one you already have.",
 		gap))

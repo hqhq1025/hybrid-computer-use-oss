@@ -34,7 +34,7 @@ func TestToolDefinitionCount(t *testing.T) {
 func TestCapabilityIsMeasuredNeverDeclaredByAppName(t *testing.T) {
 	if !strings.Contains(
 		serverInstructions,
-		"content absent from the accessibility tree",
+		"controls that AX does not expose",
 	) {
 		t.Fatal("instructions must describe accessibility reachability without app exclusions")
 	}
@@ -55,22 +55,30 @@ func TestCapabilityIsMeasuredNeverDeclaredByAppName(t *testing.T) {
 // the tools. Without that fact an agent may answer a request such as "show me
 // X" from its own knowledge and never call a tool.
 func TestInstructionsOpenWithTheLiveSessionFact(t *testing.T) {
-	if !strings.HasPrefix(serverInstructions, "Control the already-running desktop") {
+	if !strings.HasPrefix(serverInstructions, "Two tools for the running desktop") {
 		t.Fatalf("instructions must open with the live desktop fact: %q", serverInstructions)
 	}
-	for _, fragment := range []string{"AX is", "GUI is"} {
+	for _, fragment := range []string{"AX reads and operates", "GUI takes full-desktop"} {
 		if !strings.Contains(serverInstructions, fragment) {
 			t.Fatalf("instructions must name both control channels: missing %q", fragment)
 		}
 	}
 }
 
-func TestMCPInstructionsDocumentGlobalSynthesisFocusContract(t *testing.T) {
-	if !strings.Contains(serverInstructions, "fallbacks use global desktop focus") {
-		t.Fatal("MCP instructions must tell the agent that synthesis ignores the app argument")
+func TestMCPInstructionsRouteDesktopInputThroughTheTools(t *testing.T) {
+	for _, fragment := range []string{
+		"Send all desktop input",
+		"not shell input utilities",
+		"check the target window before input",
+		"After GUI input, read AX again",
+	} {
+		if !strings.Contains(serverInstructions, fragment) {
+			t.Fatalf("MCP instructions are missing %q", fragment)
+		}
 	}
-	if !strings.Contains(serverInstructions, "not background input") {
-		t.Fatal("MCP instructions must not imply background delivery")
+	ax := findToolDefinition(t, "AX")
+	if !strings.Contains(ax.Description, "keypress/type without ref go to the focused window") {
+		t.Fatal("AX description must say where ref-less keys go")
 	}
 }
 
@@ -143,10 +151,8 @@ func TestModelFacingContractsAreBenchmarkNeutral(t *testing.T) {
 
 func TestGUISurfaceUsesFullDesktopImageCoordinates(t *testing.T) {
 	for _, fragment := range []string{
-		"two complementary tools",
-		"GUI is full-desktop visual observation",
-		"absolute-pixel input",
-		"AX target-window screenshot coordinates are never GUI coordinates",
+		"GUI takes full-desktop screenshots",
+		"pixel input",
 	} {
 		if !strings.Contains(serverInstructions, fragment) {
 			t.Fatalf("client instructions are missing the GUI/a11y split: %q", fragment)
@@ -163,7 +169,8 @@ func TestGUISurfaceUsesFullDesktopImageCoordinates(t *testing.T) {
 
 	gui := findToolDefinition(t, "GUI")
 	if !strings.Contains(gui.Description, "Full-desktop") ||
-		!strings.Contains(gui.Description, "returns one final screenshot") {
+		!strings.Contains(gui.Description, "returns one final screenshot") ||
+		!strings.Contains(gui.Description, "never of an AX window image") {
 		t.Fatal("GUI must declare full-desktop image coordinates and a screenshot on every call")
 	}
 	for _, removed := range []string{"get_screenshot", "click_xy", "drag_xy"} {
@@ -282,13 +289,10 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 	if len(byType["wait"]) != 1 {
 		t.Fatalf("wait must expose only type, got %#v", byType["wait"])
 	}
-	for _, text := range []string{gui.Description, serverInstructions} {
-		if !strings.Contains(text, "current focus") &&
-			!strings.Contains(text, "current input focus") {
-			t.Fatal("gui type/keypress must state that they target only current input focus")
-		}
+	if !strings.Contains(gui.Description, "type/keypress go to the current focus") {
+		t.Fatal("gui type/keypress must state that they target only current input focus")
 	}
-	if !strings.Contains(gui.Description, "validates before input") {
+	if !strings.Contains(gui.Description, "checked before input") {
 		t.Fatal("gui must publish whole-batch pre-validation")
 	}
 	if !strings.Contains(gui.Description, "one final screenshot") {
@@ -299,7 +303,7 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 	}
 	if !strings.Contains(
 		gui.Description,
-		fmt.Sprintf("max %ds/batch", guiMaxTotalWait),
+		fmt.Sprintf("at most %d s per batch", guiMaxTotalWait),
 	) {
 		t.Fatal("gui must publish the cumulative wait budget")
 	}
@@ -308,11 +312,10 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 		t.Fatalf("gui settle_ms range = [%v,%v], want [0,%d]",
 			settle["minimum"], settle["maximum"], guiMaxSettleMS)
 	}
-	if !strings.Contains(gui.Description, "visual stillness, not semantic success") {
-		t.Fatal("gui description must keep the settling evidence boundary")
-	}
-	if !strings.Contains(gui.Description, "omitted default") {
-		t.Fatal("gui description must publish omitted settle_ms behavior")
+	settleHelp, _ := settle["description"].(string)
+	if !strings.Contains(settleHelp, "not semantic success") ||
+		!strings.Contains(settleHelp, "default") {
+		t.Fatal("settle_ms must keep the settling evidence boundary and default")
 	}
 	for _, overclaim := range []string{"pixel-stable", "executed"} {
 		if strings.Contains(gui.Description, overclaim) {
@@ -414,42 +417,20 @@ func TestActionBoundsRejectUnboundedInput(t *testing.T) {
 }
 
 func TestAppArgumentHelpDefinesStrictBootstrapIdentity(t *testing.T) {
-	// Agents hesitate to guess app names because accessibility app names come
-	// in three styles that no rule can predict:
-	//     display name  "Google Chrome"        process is chrome
-	//     binary name   "vlc" "gedit" "code"   same as the process
-	//     app id        "org.gnome.Nautilus"   process is nautilus
-	// Since no rule derives them, the help text states the accepted forms.
-	for _, fragment := range []string{
-		"app/process name", "app id", "PID",
-	} {
+	// Accessibility app names come in three styles that no rule can
+	// predict (display name, binary name, app id), so the help text states
+	// the accepted forms, including the aN ref that apps returns.
+	for _, fragment := range []string{"App name", "app id", "PID", "aN"} {
 		if !strings.Contains(appArgumentHelp, fragment) {
 			t.Fatalf("app argument help is missing %q", fragment)
 		}
 	}
-	if strings.Contains(appArgumentHelp, "window-title") {
-		t.Fatal("app bootstrap must not accept document or dialog window titles")
+	properties := findToolDefinition(t, "AX").InputSchema["properties"].(map[string]any)
+	if properties["app"].(map[string]any)["description"] != appArgumentHelp {
+		t.Fatal("the app field must use the shared help text")
 	}
-	// Every mode that accepts app must use this help text, not just one.
-	tool := findToolDefinition(t, "AX")
-	branches := tool.InputSchema["oneOf"].([]any)
-	defs := tool.InputSchema["$defs"].(map[string]any)
-	used := 0
-	withApp := 0
-	for _, raw := range branches {
-		properties := raw.(map[string]any)["properties"].(map[string]any)
-		if property, ok := properties["app"].(map[string]any); ok {
-			withApp++
-			if property["$ref"] == "#/$defs/app" {
-				property = defs["app"].(map[string]any)
-			}
-			if property["description"] == appArgumentHelp {
-				used++
-			}
-		}
-	}
-	if used != withApp || withApp != 3 {
-		t.Fatalf("%d/%d AX mode branches with app use the shared help text, want 3/3", used, withApp)
+	if _, present := properties["app_ref"]; present {
+		t.Fatal("app_ref was merged into app")
 	}
 }
 
@@ -495,9 +476,9 @@ func TestPublicModelContractDoesNotRecommendLegacyMutationTargets(t *testing.T) 
 		}
 	}
 	for _, required := range []string{
-		"act consumes refs only",
-		"Element actions require rN",
-		"window actions require wN",
+		"Copy rN/wN exactly",
+		"stale refs fail and never rebind",
+		"activate/close take a title substring or wN",
 	} {
 		if !strings.Contains(publicContract, required) {
 			t.Fatalf("public model contract is missing %q", required)

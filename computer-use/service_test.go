@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestListAppsPreservesProviderDisplayTextAndInjectsRef(t *testing.T) {
+func TestListAppsWithoutWindowListKeepsProviderDisplayText(t *testing.T) {
 	backend := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
 			OK: true,
@@ -19,12 +19,8 @@ func TestListAppsPreservesProviderDisplayTextAndInjectsRef(t *testing.T) {
 		},
 	}
 	service := newServiceWithBackend(backend)
-	result := service.listApps()
-	text := resultText(result)
-	if !strings.Contains(
-		text,
-		`vlc [ref=a1] [window="master.m3u8 - VLC media player", pid=202]`,
-	) {
+	text := resultText(service.listApps())
+	if !strings.Contains(text, `vlc [window="master.m3u8 - VLC media player", pid=202] app=vlc a1`) {
 		t.Fatalf("provider display text was not preserved: %q", text)
 	}
 }
@@ -43,7 +39,7 @@ func TestAXObserveRejectsGuessedWholeTreeGeometry(t *testing.T) {
 		t.Fatalf("guessed boxes argument must fail closed: %#v", result)
 	}
 	text := resultText(result)
-	if !strings.Contains(text, `mode="observe" does not accept fields: "boxes"`) {
+	if !strings.Contains(text, `mode "observe" does not accept "boxes"`) {
 		t.Fatalf("AX observe field rejection is not actionable: %q", text)
 	}
 	legacy := service.dispatch("get_app_state", map[string]any{"app": "editor"})
@@ -94,26 +90,12 @@ func TestChannelCapabilitySwitch(t *testing.T) {
 }
 
 func TestA11yReadModesKeepTheirEvidenceBoundaries(t *testing.T) {
-	tool := findToolDefinition(t, "AX")
-	for _, fragment := range []string{
-		"AX proves only AX-visible facts",
-		"not pixels/files/persistence/task completion",
-	} {
-		if !strings.Contains(tool.Description, fragment) {
-			t.Fatalf("a11y description must bound assertion evidence: missing %q",
-				fragment)
-		}
-	}
-
-	if got := toolEvidenceScope(publicToolAX, map[string]any{
-		"mode": "observe", "observation_target": "apps",
-	}); got != "app_inventory" {
-		t.Fatalf("apps observation evidence scope=%q", got)
+	if got := toolEvidenceScope(publicToolAX, map[string]any{"mode": "apps"}); got != "app_inventory" {
+		t.Fatalf("apps evidence scope=%q", got)
 	}
 	for _, args := range []map[string]any{
 		{"mode": "observe"},
 		{"mode": "find"},
-		{"mode": "assert_ax"},
 	} {
 		if got := toolEvidenceScope(publicToolAX, args); got != "independent_ui_read" {
 			t.Fatalf("%v evidence scope=%q", args, got)
@@ -124,41 +106,15 @@ func TestA11yReadModesKeepTheirEvidenceBoundaries(t *testing.T) {
 	}); got != "delivery_or_local_ui" {
 		t.Fatalf("act evidence scope=%q", got)
 	}
-
-	err := validateA11yModeFields(a11yModeObserve, map[string]any{
-		"mode":               "observe",
-		"observation_target": "apps",
-		"text_limit":         float64(100),
-		"timeout_ms":         float64(5000),
-	})
-	if err == nil ||
-		!strings.Contains(err.Error(), `"text_limit"`) ||
-		!strings.Contains(err.Error(), `"timeout_ms"`) {
-		t.Fatalf("apps inventory must report every invalid field together: %v",
-			err)
-	}
-	err = validateA11yModeFields(a11yModeAct, map[string]any{
-		"mode":       "act",
-		"app":        "Editor",
-		"actions":    []any{map[string]any{"type": "press_key", "key": "Tab"}},
-		"text_limit": float64(100),
-		"timeout_ms": float64(5000),
-	})
-	if err == nil ||
-		!strings.Contains(err.Error(), `"text_limit"`) ||
-		!strings.Contains(err.Error(), `"timeout_ms"`) {
-		t.Fatalf("act must report every invalid field together: %v", err)
-	}
-
 	service := newService()
 	rejected := service.a11yRequest(map[string]any{
 		"mode":    "find",
 		"app":     "Editor",
-		"query":   map[string]any{"name": "Save"},
+		"query":   map[string]any{"name_equals": "Save"},
 		"actions": []any{},
 	}, observation{})
 	if !rejected.IsError ||
-		!strings.Contains(resultText(rejected), `mode="find" does not accept fields: "actions"`) {
+		!strings.Contains(resultText(rejected), `does not accept "actions"`) {
 		t.Fatalf("find must reject action fields before reading: %#v", rejected)
 	}
 }
@@ -197,7 +153,7 @@ func TestCallToolAlwaysAddsEvidenceContract(t *testing.T) {
 		"mode": "act",
 		"actions": []any{map[string]any{
 			"type":         "click",
-			"target":       map[string]any{"ref": "r1"},
+			"ref":          "r1",
 			"click_method": "not-a-method",
 		}},
 	})
@@ -205,7 +161,7 @@ func TestCallToolAlwaysAddsEvidenceContract(t *testing.T) {
 		t.Fatalf("parameter errors must still carry the evidence contract: %#v", result)
 	}
 	if result.StructuredContent["evidence_scope"] != "error_only" ||
-		result.StructuredContent["task_effect_verified"] != false {
+		result.StructuredContent[axPublicErrorCodeKey] != axCodeInvalidArgument {
 		t.Fatalf("parameter error evidence contract is incomplete: %#v", result.StructuredContent)
 	}
 }
@@ -271,18 +227,16 @@ func TestCallToolAppliesAXImagePolicyAtSharedOutputBoundary(t *testing.T) {
 func TestInvalidStructuredAssertionFailsBeforeFreshUIRead(t *testing.T) {
 	service := newService()
 	result := service.callTool(publicToolAX, map[string]any{
-		"mode": "assert_ax",
+		"mode": "observe",
 		"app":  "Editor",
-		"assertion": map[string]any{
-			"type": "exists",
-			"target": map[string]any{
-				"selector": map[string]any{"role:document": "document"},
-			},
-			"value": true,
+		"until": map[string]any{
+			"type":     "exists",
+			"selector": map[string]any{"role:document": "document"},
 		},
 	})
 	if !result.IsError ||
-		!strings.Contains(resultText(result), "assertion.target") {
+		!strings.Contains(resultText(result), "selector does not accept") ||
+		result.StructuredContent[axPublicErrorPathKey] != "until.selector.role:document" {
 		t.Fatalf("invalid structured assertion must fail clearly: %#v", result)
 	}
 	for key, want := range map[string]any{

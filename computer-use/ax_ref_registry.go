@@ -410,6 +410,23 @@ func (registry *AppRefRegistry) Resolve(ref string) (*AXAppRefEntry, error) {
 	return &copy, nil
 }
 
+// ProviderIdentity returns the exact process identity an issued aN named,
+// whatever its lifecycle. It is for read-only absence checks of that same
+// process; it never revives the ref or binds input.
+func (registry *AppRefRegistry) ProviderIdentity(ref string) *ProviderAppIdentity {
+	if registry == nil {
+		return nil
+	}
+	entry := registry.entries[strings.TrimSpace(ref)]
+	if entry == nil || entry.ProviderBusName == "" || entry.ProcessGeneration == "" {
+		return nil
+	}
+	return &ProviderAppIdentity{
+		ProviderBusName:   entry.ProviderBusName,
+		ProcessGeneration: entry.ProcessGeneration,
+	}
+}
+
 func (registry *AppRefRegistry) MarkLifecycle(
 	ref string,
 	lifecycle AXRefLifecycle,

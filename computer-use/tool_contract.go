@@ -31,30 +31,27 @@ const (
 	maxDeliveredTrees   = 512
 )
 
+// serverInstructions is the MCP server description. It says how the two
+// tools divide the work; call shapes live in the tool descriptions.
 const serverInstructions = "" +
-	"Control the already-running desktop with two complementary tools. AX is " +
-	"app-scoped semantic observation and action; GUI is full-desktop visual observation " +
-	"and absolute-pixel input. Use AX for named controls and GUI for pixels or content " +
-	"absent from the accessibility tree. AX find uses explicit equals/contains fields. " +
-	"Copy returned rN/wN refs exactly; never invent placeholders. A targeted ref owns " +
-	"its app and window, so omit app, app_ref and window_ref. Use window_ref only when " +
-	"every action is untargeted keyboard input. Batch only actions valid in one UI " +
-	"generation; split after likely dialog, window or navigation changes. Window " +
-	"activate/close uses wN and close must be last. AX action acceptance and visual " +
-	"change are evidence, not proof of task success; AX cannot prove files, persistence, " +
-	"network state or pixels. GUI keyboard/text uses current focus. AX keyboard/pointer " +
-	"fallbacks use global desktop focus, not background input. After GUI mutation, " +
-	"refresh AX before reusing semantic state. AX target-window screenshot coordinates " +
-	"are never GUI coordinates; GUI coordinates use the exact delivered full-desktop image."
+	"Two tools for the running desktop. AX reads and operates application windows " +
+	"through accessibility: it lists windows, returns controls as rN refs, acts on " +
+	"them, and waits with until. GUI takes full-desktop screenshots and sends pixel " +
+	"input. Use AX for named controls, values, menus, dialogs, windows, and keys. Use " +
+	"GUI for pixels, canvases, dragging, and controls that AX does not expose; after " +
+	"one targeted AX find misses a visible control, use GUI for it. Send all desktop " +
+	"input (window activation, keys, text, mouse) through these tools, not shell input " +
+	"utilities or scripted accessibility calls: the tools check the target window " +
+	"before input and report what changed, and outside input makes their refs and " +
+	"diffs stale. After GUI input, read AX again before reusing refs."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
+	Title       string         `json:"title,omitempty"`
 	Description string         `json:"description"`
 	Annotations map[string]any `json:"annotations,omitempty"`
 	InputSchema map[string]any `json:"inputSchema"`
 }
-
-const axToolProjectionContract = ""
 
 // enabledChannels reads the channel capability switch. COMPUTER_USE_CHANNELS is a comma-separated list; by default
 // all three channels (a11y, gui, keyboard) are enabled.
@@ -89,20 +86,12 @@ const (
 	observeFull       = "full"
 )
 
-var observeValues = []string{observeNone, observeDiff, observeTree, observeScreenshot, observeFull}
-var a11yObserveValues = []string{observeDiff, observeTree, observeScreenshot, observeFull}
-var a11yActObserveValues = []string{observeNone, observeDiff, observeScreenshot}
+var observeValues = []string{observeDiff, observeTree, observeFull, observeScreenshot, observeNone}
 
-const a11yObserveArgumentHelp = "Returned evidence: diff (default current-state " +
-	"changed semantic subtrees, with compact absent-ref lifecycle context), tree " +
-	"(working AX), screenshot (target window), or full (tree and image)."
-
-// appArgumentHelp describes the app argument shared by every tool that accepts
-// one. Accessibility app names mix display names ("Google Chrome"), binary
-// names ("gedit") and app ids ("org.gnome.Nautilus"), and no rule derives one
-// from another, so the argument accepts any of these or a PID.
-const appArgumentHelp = "Bootstrap app/process name, app id, or PID as a decimal string; " +
-	"never a window title. Prefer returned aN/wN/rN refs."
+// appArgumentHelp describes the app argument. Accessibility app names mix
+// display names, binary names and app ids, and no rule derives one from
+// another, so the argument accepts any of these, a PID, or an aN from apps.
+const appArgumentHelp = "App name, app id, PID, or aN; use once, then window_ref."
 
 // toolChannel maps each public tool to the channel that enables it. Tools
 // outside the map belong to no channel and are always enabled.
@@ -164,481 +153,131 @@ func publicToolCallName(name string) (string, bool) {
 	}
 }
 
-func a11yStructuredSelectorProperty() map[string]any {
+// nonBlank matches a string with at least one non-space character; the
+// runtime rejects blank strings in these fields.
+const nonBlank = "\\S"
+
+func nonBlankString(description string) map[string]any {
+	property := map[string]any{"type": "string", "pattern": nonBlank}
+	if description != "" {
+		property["description"] = description
+	}
+	return property
+}
+
+// a11yPredicateSchema is the until predicate shared by observe, act and each
+// action.
+func a11yPredicateSchema() map[string]any {
 	return map[string]any{
-		"type":        "object",
-		"description": "Exact AX identity fields, ANDed in one window.",
-		"properties": map[string]any{
-			"role": map[string]any{
-				"type":        "string",
-				"pattern":     selectorRolePattern,
-				"description": "Exact AX role.",
-			},
-			"name":        nonBlankStringProperty("Exact accessible name."),
-			"description": nonBlankStringProperty("Exact accessible description."),
-			"placeholder": nonBlankStringProperty("Exact accessible placeholder."),
-			"state": enumStringProperty(
-				"Optional distinguishing state.",
-				[]string{"checked", "expanded", "selected", "focused"},
-			),
-		},
-		"minProperties":        1,
+		"type":                 "object",
 		"additionalProperties": false,
-	}
-}
-
-func a11yElementRefTargetProperty() map[string]any {
-	return objectSchema(map[string]any{
-		"ref": map[string]any{
-			"type":        "string",
-			"pattern":     "^r[1-9][0-9]*$",
-			"description": "Current AX element ref.",
-		},
-	}, []string{"ref"})
-}
-
-func a11yAssertionElementTargetProperty() map[string]any {
-	index := objectSchema(map[string]any{
-		"index": map[string]any{
-			"type":        "integer",
-			"minimum":     0,
-			"description": "Current read snapshot index.",
-		},
-	}, []string{"index"})
-	ref := a11yElementRefTargetProperty()
-	selector := objectSchema(map[string]any{
-		"selector": a11yStructuredSelectorProperty(),
-	}, []string{"selector"})
-	return map[string]any{
-		"type":        "object",
-		"description": "One read-only element target. Window refs are not element targets.",
-		"oneOf":       []any{index, ref, selector},
-	}
-}
-
-func a11yWindowRefTargetProperty() map[string]any {
-	return objectSchema(map[string]any{
-		"ref": map[string]any{
-			"type":        "string",
-			"pattern":     "^w[1-9][0-9]*$",
-			"description": "Current AX window ref.",
-		},
-	}, []string{"ref"})
-}
-
-func a11yActionBranch(
-	actionType string,
-	extra map[string]any,
-	required []string,
-) map[string]any {
-	properties := map[string]any{
-		"type": constStringProperty(
-			actionType,
-			"AX action type.",
-		),
-		"target":        a11yElementRefTargetProperty(),
-		"postcondition": map[string]any{"$ref": "#/$defs/assertion"},
-	}
-	for field, property := range extra {
-		properties[field] = property
-	}
-	return objectSchema(properties, append([]string{"type"}, required...))
-}
-
-func a11yActionProperty() map[string]any {
-	return map[string]any{
-		"description": "One AX action.",
-		"oneOf": []any{
-			objectSchema(map[string]any{
-				"type": constStringProperty(
-					"activate",
-					"Activate one uniquely bound top-level window.",
-				),
-				"target":        a11yWindowRefTargetProperty(),
-				"postcondition": map[string]any{"$ref": "#/$defs/assertion"},
-			}, []string{"type", "target"}),
-			objectSchema(map[string]any{
-				"type": constStringProperty(
-					"close",
-					"Close one uniquely bound top-level window; this must be the final action.",
-				),
-				"target":        a11yWindowRefTargetProperty(),
-				"postcondition": map[string]any{"$ref": "#/$defs/assertion"},
-			}, []string{"type", "target"}),
-			a11yActionBranch("click", nil, []string{"target"}),
-			a11yActionBranch("keypress", map[string]any{
-				"keys": map[string]any{
-					"type":        "array",
-					"description": "Keys emitted together, e.g. [\"CTRL\",\"S\"].",
-					"minItems":    1,
-					"maxItems":    guiMaxKeys,
-					"items": map[string]any{
-						"type":      "string",
-						"pattern":   nonBlankPattern,
-						"maxLength": guiMaxKeyLength,
-					},
+		"required":             []string{"type"},
+		"description":          "Poll one AX predicate until true or timeout_ms; false is a result. selector and title check every window of the app, dialogs and popups included; ref reads that element.",
+		"properties": map[string]any{
+			"type": map[string]any{"type": "string", "enum": []string{"exists", "state", "value", "text", "title"}},
+			"ref":  map[string]any{"type": "string", "pattern": "^r[1-9][0-9]*$"},
+			"selector": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"minProperties":        1,
+				"description":          "Exact AX identity fields, ANDed.",
+				"properties": map[string]any{
+					"role":        nonBlankString(""),
+					"name":        nonBlankString(""),
+					"description": nonBlankString(""),
+					"placeholder": nonBlankString(""),
+					"state":       map[string]any{"type": "string", "enum": []string{"checked", "expanded", "selected", "focused"}},
 				},
-			}, []string{"keys"}),
-			a11yActionBranch("scroll", map[string]any{
-				"direction": enumStringProperty(
-					"Scroll direction.",
-					[]string{"up", "down", "left", "right"},
-				),
-				"pages": numberRangeProperty(
-					"Number of pages. Defaults to 1.",
-					0,
-					maxScrollPages,
-				),
-			}, []string{"direction"}),
-			a11yActionBranch("set_value", map[string]any{
-				"value": boundedStringProperty(
-					"Value to set.",
-					maxActionText,
-				),
-			}, []string{"target", "value"}),
-			a11yActionBranch("type", map[string]any{
-				"text": func() map[string]any {
-					text := boundedStringProperty("Literal text to type.", maxActionText)
-					text["pattern"] = nonBlankPattern
-					return text
-				}(),
-			}, []string{"text"}),
+			},
+			"state": nonBlankString("state: e.g. checked, selected, expanded."),
+			"value": map[string]any{
+				"type":        []string{"string", "number", "boolean"},
+				"pattern":     nonBlank,
+				"description": "value: expected AX value.",
+			},
+			"match":      map[string]any{"type": "string", "enum": []string{"equals", "contains"}, "description": "value: default equals."},
+			"text":       nonBlankString("text: element text substring; title: substring of any window title of the app."),
+			"negate":     map[string]any{"type": "boolean", "description": "Wait for it to be false; title negate is true once the app has no such window, or has exited."},
+			"timeout_ms": map[string]any{"type": "integer", "minimum": 1, "maximum": maxVerifyTimeout, "description": "Default 5000."},
+			"stable_ms": map[string]any{
+				"type": "integer", "minimum": 0, "maximum": axMaxUntilStableMS,
+				"description": "How long it must stay true; filters flicker.",
+			},
 		},
 	}
 }
 
-func a11yFindQueryProperty() map[string]any {
-	query := map[string]any{
-		"type":        "object",
-		"description": "Bounded AX lookup. Supply at least one explicit filter; filters are ANDed and case-insensitive.",
-		"properties": map[string]any{
-			"role":          stringProperty("Role substring."),
-			"name_contains": stringProperty("Accessible-name substring."),
-			"name_equals":   stringProperty("Exact accessible name."),
-			"text_contains": stringProperty("Substring across name, description, value, or placeholder."),
-			"text_equals":   stringProperty("Exact match against one text-bearing field."),
-			"state":         stringProperty("State substring."),
-			"limit":         integerRangeProperty("Maximum matches to return. Defaults to 20.", 1, maxAXFindPageSize),
-		},
-		"additionalProperties": false,
-		"anyOf": []any{
-			nonEmptyFilter("role"),
-			nonEmptyFilter("name_contains"),
-			nonEmptyFilter("name_equals"),
-			nonEmptyFilter("text_contains"),
-			nonEmptyFilter("text_equals"),
-			nonEmptyFilter("state"),
-		},
-		"allOf": []any{
-			map[string]any{"not": map[string]any{"required": []string{"name_contains", "name_equals"}}},
-			map[string]any{"not": map[string]any{"required": []string{"text_contains", "text_equals"}}},
-		},
-	}
-	return query
-}
-
-func a11yAssertionProperty() map[string]any {
-	stable := integerRangeProperty(
-		"Optional time the predicate must remain continuously true before PASS. Defaults to 0.",
-		0,
-		5000,
-	)
-	timeout := integerRangeProperty(
-		"Polling budget in milliseconds. Defaults to 5000.",
-		1,
-		maxVerifyTimeout,
-	)
-	elementBranch := func(
-		assertionType string,
-		extra map[string]any,
-		required []string,
-	) map[string]any {
-		properties := map[string]any{
-			"type":       constStringProperty(assertionType, "AX assertion predicate type."),
-			"target":     a11yAssertionElementTargetProperty(),
-			"stable_ms":  stable,
-			"timeout_ms": timeout,
-		}
-		for key, value := range extra {
-			properties[key] = value
-		}
-		return objectSchema(properties, append([]string{"type", "target"}, required...))
-	}
-	windowText := nonBlankStringProperty(
-		"Case-insensitive title substring for a current top-level window owned by the resolved application.",
-	)
-	return map[string]any{
-		"description": "Poll exactly one typed AX-visible predicate.",
-		"oneOf": []any{
-			elementBranch("exists", map[string]any{
-				"value": booleanProperty("Whether the target must exist."),
-			}, []string{"value"}),
-			elementBranch("state", map[string]any{
-				"state": nonBlankStringProperty("Accessibility state name, such as checked, focused, selected, or expanded."),
-				"value": booleanProperty("Whether the state must be present."),
-			}, []string{"state", "value"}),
-			func() map[string]any {
-				branch := elementBranch("value", map[string]any{
-					"value": map[string]any{
-						"type":        []string{"string", "number", "boolean"},
-						"pattern":     nonBlankPattern,
-						"description": "Required AX scalar value.",
-					},
-					"match": enumStringProperty(
-						`Comparison mode. Defaults to "equals".`,
-						[]string{"equals", "contains"},
-					),
-				}, []string{"value"})
-				branch["allOf"] = []any{
-					map[string]any{
-						"if": map[string]any{
-							"properties": map[string]any{
-								"match": map[string]any{"const": "contains"},
-							},
-							"required": []string{"match"},
-						},
-						"then": map[string]any{
-							"properties": map[string]any{
-								"value": map[string]any{"type": "string"},
-							},
-						},
-					},
-				}
-				return branch
-			}(),
-			elementBranch("text_contains", map[string]any{
-				"text": nonBlankStringProperty("Required substring across accessible name, description, value, or placeholder."),
-			}, []string{"text"}),
-			objectSchema(map[string]any{
-				"type":       constStringProperty("window_title_contains", "Window-title predicate."),
-				"text":       windowText,
-				"exists":     booleanProperty("Defaults to true; false waits until no title contains the text."),
-				"stable_ms":  stable,
-				"timeout_ms": timeout,
-			}, []string{"type", "text"}),
-		},
-	}
-}
-
-func a11yObservationRootProperty() map[string]any {
-	focused := objectSchema(map[string]any{
-		"focused": map[string]any{
-			"type":        "boolean",
-			"const":       true,
-			"description": "Return a bounded local subtree around the current focused element.",
-		},
-	}, []string{"focused"})
-	// A root is read-only, like an assertion target: rN only, and an index
-	// addresses the snapshot this observe reads.
-	target := a11yAssertionElementTargetProperty()
-	branches := []any{focused}
-	if targetBranches, ok := target["oneOf"].([]any); ok {
-		branches = append(branches, targetBranches...)
-	}
-	return map[string]any{
-		"description": "Optional focused or targeted local subtree.",
-		"oneOf":       branches,
-	}
-}
-
-func constStringProperty(value, description string) map[string]any {
-	return map[string]any{
-		"type":        "string",
-		"const":       value,
-		"description": description,
-	}
-}
-
+// a11yInputSchema is the single flat AX schema. It has no oneOf: which
+// fields belong to which mode or action type is checked by decodeAXRequest,
+// which names the field and shows a corrected call. Keep it under the
+// client compaction budget (TestAXSchemaSurvivesClientCompaction).
 func a11yInputSchema() map[string]any {
-	constOnly := func(value string) map[string]any {
-		return map[string]any{"type": "string", "const": value}
+	predicate := map[string]any{"$ref": "#/$defs/predicate"}
+	query := map[string]any{}
+	for _, field := range []string{"role", "name_equals", "name_contains", "text_equals", "text_contains", "state"} {
+		query[field] = nonBlankString("")
 	}
-	enumOnly := func(values []string) map[string]any {
-		return map[string]any{"type": "string", "enum": values}
-	}
-	appProperty := map[string]any{"$ref": "#/$defs/app"}
-	appRefProperty := map[string]any{"$ref": "#/$defs/app_ref"}
-	windowRefProperty := map[string]any{"$ref": "#/$defs/window_ref"}
-	readIdentity := []any{
-		map[string]any{"$ref": "#/$defs/by_app"},
-		map[string]any{"$ref": "#/$defs/by_app_ref"},
-		map[string]any{"$ref": "#/$defs/by_window_ref"},
-	}
-	observeApp := objectSchema(map[string]any{
-		"mode":               constOnly(a11yModeObserve),
-		"observation_target": constOnly("app"),
-		"app":                appProperty,
-		"app_ref":            appRefProperty,
-		"window_ref":         windowRefProperty,
-		"observe": enumStringProperty(
-			a11yObserveArgumentHelp,
-			a11yObserveValues,
-		),
-		"scope": enumOnly(a11yScopeValues),
-		"root":  a11yObservationRootProperty(),
-	}, []string{"mode"})
-	observeApp["oneOf"] = readIdentity
-
-	observeApps := objectSchema(map[string]any{
-		"mode":               constOnly(a11yModeObserve),
-		"observation_target": constOnly("apps"),
-	}, []string{"mode", "observation_target"})
-
-	act := objectSchema(map[string]any{
-		"mode": constOnly(a11yModeAct),
-		"window_ref": map[string]any{
-			"$ref": "#/$defs/window_ref",
-		},
-		"actions": map[string]any{
-			"type": "array",
-			"description": fmt.Sprintf(
-				"Ordered same-window actions; maximum %d. Batch known steps; "+
-					"split on unknown results. Guard a dependent next action with "+
-					"the earlier action's postcondition.",
-				a11yBatchMaxActions,
-			),
-			"minItems": 1,
-			"maxItems": a11yBatchMaxActions,
-			"items":    a11yActionProperty(),
-		},
-		"observe": enumStringProperty(
-			"ACT ONLY: none|diff|screenshot; tree/full are invalid. Omit for a fresh "+
-				"post-action diff. A bounded refresh may return a working tree or "+
-				"lifecycle proof; reread only if required.",
-			a11yActObserveValues,
-		),
-		"postcondition": map[string]any{
-			"$ref":        "#/$defs/assertion",
-			"description": "Poll one final AX predicate until pass or timeout, then sample the selected observation. Prefer this to a separate assert_ax.",
-		},
-	}, []string{"mode", "actions"})
-	act["oneOf"] = []any{
-		map[string]any{"$ref": "#/$defs/by_owned_ref"},
-		map[string]any{"$ref": "#/$defs/by_window_keyboard"},
-	}
-
-	findSearch := objectSchema(map[string]any{
-		"mode":       constOnly(a11yModeFind),
-		"app":        appProperty,
-		"app_ref":    appRefProperty,
-		"window_ref": windowRefProperty,
-		"query":      a11yFindQueryProperty(),
-		"scope":      enumOnly(a11yScopeValues),
-	}, []string{"mode", "query"})
-	findSearch["oneOf"] = readIdentity
-	findContinue := objectSchema(map[string]any{
-		"mode": constOnly(a11yModeFind),
-		"cursor": map[string]any{
-			"type":        "string",
-			"pattern":     "^f[1-9][0-9]*$",
-			"description": "Continue the exact prior find observation.",
-		},
-		"limit": integerRangeProperty(
-			"Maximum matches in this page. Defaults to 20.",
-			1,
-			maxAXFindPageSize,
-		),
-	}, []string{"mode", "cursor"})
-
-	assertA11y := objectSchema(map[string]any{
-		"mode":       constOnly(a11yModeAssert),
-		"app":        appProperty,
-		"app_ref":    appRefProperty,
-		"window_ref": windowRefProperty,
-		"assertion":  map[string]any{"$ref": "#/$defs/assertion"},
-		"scope":      enumOnly(a11yScopeValues),
-	}, []string{"mode", "assertion"})
-	assertA11y["oneOf"] = []any{
-		map[string]any{"$ref": "#/$defs/by_app"},
-		map[string]any{"$ref": "#/$defs/by_app_ref"},
-		map[string]any{"$ref": "#/$defs/by_window_ref"},
-		map[string]any{"$ref": "#/$defs/by_owned_assertion_ref"},
-	}
-
 	return map[string]any{
-		"type":        "object",
-		"description": "Exactly one AX mode.",
-		"$defs": map[string]any{
-			"assertion":     a11yAssertionProperty(),
-			"app":           nonBlankStringProperty(appArgumentHelp),
-			"app_ref":       map[string]any{"type": "string", "pattern": "^a[1-9][0-9]*$"},
-			"window_ref":    map[string]any{"type": "string", "pattern": "^w[1-9][0-9]*$"},
-			"by_app":        map[string]any{"required": []string{"app"}},
-			"by_app_ref":    map[string]any{"required": []string{"app_ref"}},
-			"by_window_ref": map[string]any{"required": []string{"window_ref"}},
-			"by_window_keyboard": map[string]any{
-				"required": []string{"window_ref"},
-				"properties": map[string]any{
-					"actions": map[string]any{
-						"not": map[string]any{
-							"contains": map[string]any{
-								"type":     "object",
-								"required": []string{"target"},
-							},
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"mode"},
+		// window_ref already names its app.
+		"not":   map[string]any{"required": []string{"app", "window_ref"}},
+		"$defs": map[string]any{"predicate": a11yPredicateSchema()},
+		"properties": map[string]any{
+			"mode": map[string]any{
+				"type": "string", "enum": []string{a11yModeApps, a11yModeObserve, a11yModeFind, a11yModeAct},
+				"description": "apps lists every top-level window (wN, title, app, active); observe returns a tree or diff with rN; find returns matching rN; act runs actions.",
+			},
+			"app": nonBlankString(appArgumentHelp),
+			"window_ref": map[string]any{
+				"type": "string", "pattern": "^w[1-9][0-9]*$",
+				"description": "Read identity. act: optional; binds ref-less keys/text to wN instead of the focused window; must match any refs.",
+			},
+			"scope": map[string]any{"type": "string", "enum": a11yScopeValues, "description": "observe/find; default window."},
+			"observe": map[string]any{
+				"type": "string", "enum": observeValues,
+				"description": "Returned evidence. act and until: default diff; observe: default tree. none only with act or until.",
+			},
+			"root": map[string]any{
+				"type": "string", "pattern": "^(focused|r[1-9][0-9]*)$",
+				"description": "observe: subtree at rN or the focused element.",
+			},
+			"query": map[string]any{
+				"type": "object", "additionalProperties": false, "properties": query,
+				"description": "find: at least one filter; ANDed, case-insensitive.",
+			},
+			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxAXFindPageSize, "description": "find page size; default 20."},
+			"cursor": map[string]any{
+				"type": "string", "pattern": "^f[1-9][0-9]*$",
+				"description": "find: next_cursor from a truncated result; send with mode find only.",
+			},
+			"actions": map[string]any{
+				"type": "array", "minItems": 1, "maxItems": a11yBatchMaxActions,
+				"description": "act: ordered actions in one window.",
+				"items": map[string]any{
+					"type": "object", "additionalProperties": false, "required": []string{"type"},
+					"properties": map[string]any{
+						"type": map[string]any{"type": "string", "enum": axActionTypes},
+						"ref": map[string]any{
+							"type": "string", "pattern": "^[rw][1-9][0-9]*$",
+							"description": "rN element; wN for activate/close. Omit for keys/text to the focused window.",
 						},
+						"title": nonBlankString("activate/close: unique window-title substring, instead of wN."),
+						"text":  map[string]any{"type": "string", "minLength": 1, "maxLength": maxActionText},
+						"keys": map[string]any{
+							"type": "array", "minItems": 1, "maxItems": guiMaxKeys,
+							"items":       map[string]any{"type": "string", "pattern": "^\\S(.*\\S)?$", "maxLength": guiMaxKeyLength},
+							"description": "One chord, e.g. [\"CTRL\",\"S\"].",
+						},
+						"value":     map[string]any{"type": "string", "maxLength": maxActionText},
+						"direction": map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}},
+						"pages":     map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": maxScrollPages},
+						"until":     predicate,
 					},
 				},
 			},
-			"by_owned_ref": map[string]any{
-				"not": map[string]any{"anyOf": []any{
-					map[string]any{"required": []string{"app"}},
-					map[string]any{"required": []string{"app_ref"}},
-					map[string]any{"required": []string{"window_ref"}},
-				}},
-				"properties": map[string]any{
-					"actions": map[string]any{
-						"contains": map[string]any{
-							"type":     "object",
-							"required": []string{"target"},
-							"properties": map[string]any{
-								"target": map[string]any{
-									"type":     "object",
-									"required": []string{"ref"},
-									"properties": map[string]any{
-										"ref": map[string]any{
-											"type":    "string",
-											"pattern": "^(?:r|w)[1-9][0-9]*$",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			"by_owned_assertion_ref": map[string]any{
-				"not": map[string]any{"anyOf": []any{
-					map[string]any{"required": []string{"app"}},
-					map[string]any{"required": []string{"app_ref"}},
-					map[string]any{"required": []string{"window_ref"}},
-				}},
-				"properties": map[string]any{
-					"assertion": map[string]any{
-						"type":     "object",
-						"required": []string{"target"},
-						"properties": map[string]any{
-							"target": map[string]any{
-								"type":     "object",
-								"required": []string{"ref"},
-								"properties": map[string]any{
-									"ref": map[string]any{
-										"type":    "string",
-										"pattern": "^r[1-9][0-9]*$",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		"oneOf": []any{
-			observeApp,
-			observeApps,
-			findSearch,
-			findContinue,
-			act,
-			assertA11y,
+			"until": predicate,
 		},
 	}
 }
@@ -780,8 +419,8 @@ func guiInputSchema() map[string]any {
 		"settle_ms": integerRangeProperty(
 			fmt.Sprintf(
 				"Visual stillness: default %dms, max %dms. "+
-					"Final screenshot stillness, not extra sleep. After wait, usually omit it. "+
-					"At the cap inspect the screenshot or use AX assert_ax.",
+					"Final screenshot stillness, not semantic success and not extra sleep. "+
+					"After wait, usually omit it. At the cap inspect the screenshot or use AX until.",
 				defaultSettleMS,
 				guiMaxSettleMS,
 			),
@@ -796,44 +435,49 @@ func guiInputSchema() map[string]any {
 	}
 }
 
+// axToolDescription is model-visible on every client, including ones that
+// compact the input schema. Clients may truncate descriptions at 1,000 bytes.
+const axToolDescription = "Accessibility for application windows; peer of GUI. Modes: " +
+	"apps lists windows (wN, title, app, active). observe returns the window tree with " +
+	"rN refs. find returns matching rN; a truncated result shows the cursor call for the " +
+	"next page. act runs ordered actions in one window, checks them before any input, and " +
+	"returns a diff. Copy rN/wN exactly from the latest result; stale refs fail and never " +
+	"rebind. keypress/type without ref go to the focused window. activate/close take a " +
+	"title substring or wN. Put close, and any action that opens or replaces a window, " +
+	"last. until waits for a predicate; false is a result, not an error. Errors return " +
+	"code and hint. Examples:\n" +
+	`{"mode":"act","actions":[{"type":"activate","title":"Quarterly report"},{"type":"keypress","keys":["CTRL","S"]}]}` + "\n" +
+	`{"mode":"find","window_ref":"w2","query":{"role":"button","name_contains":"Save"}}` + "\n" +
+	`{"mode":"act","actions":[{"type":"click","ref":"r12"}],"until":{"type":"title","text":"Export"}}`
+
+var guiToolDescription = fmt.Sprintf("Full-desktop screenshot and pixel input. "+
+	`{"actions":[{"type":"screenshot"}]} alone observes. Any other batch is checked before `+
+	"input and returns one final screenshot. x/y are pixels of the latest full-desktop GUI "+
+	"image, never of an AX window image. type/keypress go to the current focus, so click "+
+	"the field first in the same batch. Batch the actions planned from one screenshot; end "+
+	"the batch after an action that may open, close, or move a window, and plan the rest "+
+	"from the returned image. GUI cannot address windows; AX activates and closes them by "+
+	"title. wait is one second with no observation, at most %d s per batch. Example: "+
+	`{"actions":[{"type":"click","x":640,"y":412},{"type":"type","text":"hello"},{"type":"keypress","keys":["ENTER"]}]}`,
+	guiMaxTotalWait)
+
 func allToolDefinitions() []toolDefinition {
+	annotations := func(title string) map[string]any {
+		return map[string]any{"title": title, "destructiveHint": true, "openWorldHint": false}
+	}
 	return []toolDefinition{
 		{
-			Name: publicToolAX,
-			Description: fmt.Sprintf(
-				axToolProjectionContract+"Semantic observe/find/act/assert_ax. "+
-					"Observe/find issue refs; act consumes refs only. "+
-					"Reads use app, app_ref, or window_ref; continue find with fN. "+
-					"Act returns current diff/tree/lifecycle; reread only if required. "+
-					"Use batch or action postconditions for known results. "+
-					"Element actions require rN, window actions require wN; act never accepts app, selector, or index. "+
-					"Targeted act rejects app_ref/window_ref; refs own both. Never invent refs. "+
-					"One wN per batch; targetless batches require window_ref. Stale refs never rebind. "+
-					"Working output may hide controls; find searches canonical AX records. "+
-					"Refs resolve live per action; continuity failure stops the batch. "+
-					"Batch known same-window steps. Split before window changes or unknown next targets. "+
-					"AX proves only AX-visible facts, not pixels/files/persistence/task completion. "+
-					"Limits: %d actions, %d text chars.",
-				a11yBatchMaxActions,
-				a11yBatchMaxText,
-			),
-			Annotations: nil,
+			Name:        publicToolAX,
+			Title:       "Accessibility",
+			Description: axToolDescription,
+			Annotations: annotations("Accessibility"),
 			InputSchema: a11yInputSchema(),
 		},
 		{
-			Name: publicToolGUI,
-			Description: fmt.Sprintf(
-				"Full-desktop action batch; screenshot alone observes. "+
-					"Batch validates before input and returns one final screenshot. "+
-					"Coordinates are delivered-image pixels. AX activates/closes windows. "+
-					"type/keypress use current focus. wait is one second, no observation, max %ds/batch. "+
-					"scroll_x/scroll_y are Computer deltas. settle_ms checks visual stillness, not semantic success; "+
-					"omitted default %dms, max %dms.",
-				guiMaxTotalWait,
-				defaultSettleMS,
-				guiMaxSettleMS,
-			),
-			Annotations: nil,
+			Name:        publicToolGUI,
+			Title:       "Desktop screenshot and input",
+			Description: guiToolDescription,
+			Annotations: annotations("Desktop screenshot and input"),
 			InputSchema: guiInputSchema(),
 		},
 	}
@@ -916,4 +560,12 @@ func integerRangeProperty(description string, minimum, maximum int) map[string]a
 
 func booleanProperty(description string) map[string]any {
 	return map[string]any{"type": "boolean", "description": description}
+}
+
+func constStringProperty(value, description string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"const":       value,
+		"description": description,
+	}
 }

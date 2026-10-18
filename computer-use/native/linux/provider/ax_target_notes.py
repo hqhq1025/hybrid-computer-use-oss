@@ -30,7 +30,7 @@ UNVERIFIED_SEMANTIC = (
 # targeting was possible, so callers decide whether to append it.
 PREFER_ELEMENT_INDEX = (
     " This did not use element-targeted invocation. If the target appears in the "
-    "accessibility tree, prefer AX click with target.ref — it is verified, cheaper, "
+    "accessibility tree, prefer an AX click with its rN ref; it is verified, cheaper, "
     "and does not steal focus."
 )
 

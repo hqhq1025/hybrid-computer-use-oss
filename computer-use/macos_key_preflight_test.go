@@ -31,11 +31,11 @@ func TestMacOSKeyPreflightRejectsWholeAXBatch(t *testing.T) {
 			s.rememberFailedObservation(app, nil)
 			invalid := map[string]any{"type": "keypress", "keys": keys}
 			if targeted {
-				invalid["target"] = map[string]any{"ref": ref}
+				invalid["ref"] = ref
 			}
 			result := s.callTool("AX", map[string]any{
 				"mode": "act", "actions": []any{
-					map[string]any{"type": "click", "target": map[string]any{"ref": ref}},
+					map[string]any{"type": "click", "ref": ref},
 					map[string]any{"type": "keypress", "keys": []any{"SUPER", "A"}},
 					map[string]any{"type": "type", "text": "preflight must prevent this"},
 					invalid,

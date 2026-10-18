@@ -1,21 +1,64 @@
 """Linux AT-SPI application discovery and inventory."""
 
 from .foundation import (
+    Atspi,
     OperationFailure,
     node_name,
     node_pid,
+    node_role,
     process_generation,
     provider_bus_name,
+    provider_object_path,
+    state_contains,
 )
 from .atspi_inventory import resolve_app, resolve_app_identity
 from .snapshot import snapshot_digest, utc_timestamp
-from .x11_windows import app_windows, iter_apps, window_instance_handle
-from .window_diagnostics import accepts_user_input
+from .x11_windows import (
+    app_windows,
+    iter_apps,
+    opaque_window_instance_handle_for_id,
+    strong_window_instance_handles,
+    window_instance_handle,
+    x11_root_window_state,
+)
+from .window_diagnostics import accepts_user_input, is_infrastructure_window
+
+
+def app_top_level_windows(app, windows, active_handle):
+    """List an application's top-level windows for window addressing.
+
+    Only windows with a strong native handle are addressable: the handle is
+    what later activate/close/keyboard calls verify, so a window without one
+    is listed with an empty handle and never receives a ref. The active flag
+    comes from the window manager's _NET_ACTIVE_WINDOW when it is readable,
+    because AT-SPI ACTIVE can lag or stay set on a window that lost focus.
+    """
+    strong = strong_window_instance_handles(app, windows)
+    listed = []
+    for index, window in windows:
+        handle = strong.get(index) or ""
+        if active_handle is None:
+            active = state_contains(window, Atspi.StateType.ACTIVE)
+        else:
+            active = bool(handle) and handle == active_handle
+        listed.append({
+            "title": str(node_name(window) or "").strip(),
+            "role": str(node_role(window) or "window").strip().lower(),
+            "handle": handle,
+            "providerBusName": provider_bus_name(window),
+            "providerObjectPath": provider_object_path(window),
+            "processGeneration": process_generation(node_pid(window)),
+            "active": active,
+            "inputTarget": not is_infrastructure_window(window),
+        })
+    return listed
 
 
 def list_apps_inventory():
     entries = []
     seen_identities = set()
+    root_state = x11_root_window_state()
+    active_window_id = root_state.get("activeWindow") if root_state else None
     for app in sorted(
         iter_apps(),
         key=lambda item: (node_name(item).lower(), node_pid(item)),
@@ -43,6 +86,13 @@ def list_apps_inventory():
             ", NOT an input target: every window is untitled and has no "
             "interactive content — desktop infrastructure, action tools will "
             "refuse it")
+        # None means the window manager did not report an active window, so
+        # app_top_level_windows falls back to AT-SPI state.
+        active_handle = (
+            opaque_window_instance_handle_for_id(app, active_window_id) or ""
+            if root_state is not None
+            else None
+        )
         entries.append({
             "name": name,
             "pid": pid,
@@ -52,6 +102,7 @@ def list_apps_inventory():
             "input_capable": input_capable,
             "provider_bus_name": bus,
             "process_generation": generation,
+            "windows": app_top_level_windows(app, windows, active_handle),
         })
     name_counts = {}
     for entry in entries:
@@ -90,6 +141,7 @@ def list_apps_inventory():
                 "processGeneration": entry["process_generation"],
                 "displayText": entry["display_text"],
                 "inputCapable": entry["input_capable"],
+                "windows": entry["windows"],
             }
             for entry in entries
         ],

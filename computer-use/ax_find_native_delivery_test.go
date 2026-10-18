@@ -83,7 +83,7 @@ func findDeliveryWire(t *testing.T, svc *service, args map[string]any) toolCallR
 	return decoded.Result
 }
 
-var findDeliveredTargets = regexp.MustCompile(`(?m)^ - match=(\d+) target=(\{"ref":"r\d+"\})$`)
+var findDeliveredTargets = regexp.MustCompile(`(?m)^ - match=(\d+) ref=("r\d+")$`)
 
 func findDeliveryModelEvidence(t *testing.T, result toolCallResult) map[string]any {
 	t.Helper()
@@ -91,9 +91,9 @@ func findDeliveryModelEvidence(t *testing.T, result toolCallResult) map[string]a
 		return result.StructuredContent
 	}
 	for _, item := range result.Content {
-		if item.Type == "text" && strings.HasPrefix(item.Text, "[ax] ") {
+		if item.Type == "text" && strings.HasPrefix(item.Text, `{"ok":`) {
 			var evidence map[string]any
-			if err := json.Unmarshal([]byte(strings.TrimPrefix(item.Text, "[ax] ")), &evidence); err != nil {
+			if err := json.Unmarshal([]byte(item.Text), &evidence); err != nil {
 				t.Fatal(err)
 			}
 			return evidence
@@ -140,7 +140,7 @@ func TestFindDeliveryLiteralTruncationMarkerThroughTransport(t *testing.T) {
 				}
 				first := findDeliveryWire(t, svc, map[string]any{
 					"mode": "find", "app": "Independent",
-					"query": map[string]any{"role": "listitem", "limit": 1},
+					"query": map[string]any{"role": "listitem"}, "limit": 1,
 				})
 				cursor, _ := findDeliveryModelEvidence(t, first)["next_cursor"].(string)
 				if cursor == "" {
@@ -212,7 +212,7 @@ func TestFindDeliveryLongAncestorThroughFinalEvidence(t *testing.T) {
 	final := findDeliveryFinal(result)
 	text := resultText(final)
 	if final.IsError || !strings.Contains(text, `listitem "Target"`) ||
-		!strings.Contains(text, `target={"ref":"r`) {
+		!strings.Contains(text, ` ref="r`) {
 		t.Fatalf("find lost the matched target at the model boundary:\n%s", text)
 	}
 	if strings.Contains(text, "[TRUNCATED:") || len([]rune(text)) > maxInlineChars() {
@@ -238,7 +238,7 @@ func TestFindDeliveryActualTransportProtocols(t *testing.T) {
 				svc.backend, svc.protocolVersion = backend, protocol
 				result := findDeliveryWire(t, svc, map[string]any{
 					"mode": "find", "app": "Independent",
-					"query": map[string]any{"name_equals": "Target", "role": "listitem", "limit": 2},
+					"query": map[string]any{"name_equals": "Target", "role": "listitem"}, "limit": 2,
 				})
 				text := resultText(result)
 				if result.IsError || len(findDeliveredTargets.FindAllStringSubmatch(text, -1)) != 1 {
@@ -360,7 +360,7 @@ func TestFindDeliveryLongEscapedIdentityAndMatchedTail(t *testing.T) {
 	for _, want := range []string{
 		"TAIL-IDENTITY", "TAIL-MATCH", "header_excerpt=true", "display_excerpt=name",
 		"provider_children_unavailable", "matched_field=description", "matched_text_truncated=true",
-		`"current_state_cause":"independent"`, `target={"ref":"r`,
+		`"current_state_cause":"independent"`, ` ref="r`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("lost %q in final response: %s", want, output)
@@ -374,13 +374,11 @@ func TestFindDeliveryLongEscapedIdentityAndMatchedTail(t *testing.T) {
 		t.Fatal("excerpt mutated canonical identity or omission evidence")
 	}
 	target := findDeliveredTargets.FindStringSubmatch(output)
-	var address struct {
-		Ref string `json:"ref"`
+	var ref string
+	if len(target) != 3 || json.Unmarshal([]byte(target[2]), &ref) != nil {
+		t.Fatal("invalid target ref")
 	}
-	if len(target) != 3 || json.Unmarshal([]byte(target[2]), &address) != nil {
-		t.Fatal("invalid target JSON")
-	}
-	entry := svc.refRegistry.entries[address.Ref]
+	entry := svc.refRegistry.entries[ref]
 	if entry == nil || entry.Name != record.Name || entry.WindowHandle != snapshot.WindowHandle {
 		t.Fatalf("display excerpt changed ref identity: %#v", entry)
 	}
@@ -394,7 +392,7 @@ func TestFindDeliveryLongEscapedIdentityAndMatchedTail(t *testing.T) {
 			}
 			longTarget := findDeliveryWire(t, svc, map[string]any{
 				"mode": "find", "app": "Independent",
-				"query": map[string]any{"text_contains": "TAIL-MATCH", "role": "listitem", "limit": 2},
+				"query": map[string]any{"text_contains": "TAIL-MATCH", "role": "listitem"}, "limit": 2,
 			})
 			if longTarget.IsError || !strings.Contains(resultText(longTarget), "TAIL-MATCH") ||
 				len(findDeliveredTargets.FindAllStringSubmatch(resultText(longTarget), -1)) != 1 {
@@ -426,7 +424,7 @@ func TestFindDeliveryUnaddressableAndTinyBudgets(t *testing.T) {
 	result := svc.renderFindPage(snapshot, snapshot.Elements[2:], 0, 2, "target", nil, false)
 	text := resultText(findDeliveryFinal(result))
 	if result.IsError || !strings.Contains(text, "addressable=false reason=stable_identity_unavailable") ||
-		strings.Contains(text, `target={"ref":`) {
+		strings.Contains(text, ` ref="r`) {
 		t.Fatalf("unaddressability not delivered honestly: %s", text)
 	}
 	for _, budget := range []string{"1", "32", "128", "256"} {
@@ -436,7 +434,7 @@ func TestFindDeliveryUnaddressableAndTinyBudgets(t *testing.T) {
 			result := svc.renderFindPage(snapshot, snapshot.Elements[2:], 0, 2, "target", nil, false)
 			final := findDeliveryFinal(result)
 			if !final.IsError || len(resultText(final)) > 512 ||
-				strings.Contains(resultText(final), `target={`) ||
+				strings.Contains(resultText(final), ` ref="r`) ||
 				len(svc.findCursorRegistry.entries) != 0 || len(svc.findCursorRegistry.resultSets) != 0 {
 				t.Fatalf("tiny budget exposed partial unit or cursor: %#v text=%s", final, resultText(final))
 			}
@@ -489,7 +487,7 @@ func TestFindDeliveryDiagnosticsCannotBeSilentlyDropped(t *testing.T) {
 	result := svc.renderFindPage(snapshot, snapshot.Elements[2:], 0, 2, "target",
 		[]string{"[expect] " + strings.Repeat("important ", 1000)}, true)
 	if !result.IsError || result.StructuredContent["next_cursor"] != nil ||
-		strings.Contains(resultText(findDeliveryFinal(result)), "target={") {
+		strings.Contains(resultText(findDeliveryFinal(result)), " ref=\"r") {
 		t.Fatalf("oversized required diagnostics silently dropped: %s", resultText(result))
 	}
 }
@@ -505,7 +503,7 @@ func TestFindDeliveryMissingCanonicalNodeAndRefFailure(t *testing.T) {
 	}
 	delete(snapshot.axSnapshot.ByIndex, 2)
 	unit = findMatchUnit(snapshot.axSnapshot, snapshot.Elements[2], 1)
-	if !strings.Contains(unit, "canonical_node_unavailable") || strings.Contains(unit, "target={") {
+	if !strings.Contains(unit, "canonical_node_unavailable") || strings.Contains(unit, " ref=\"r") {
 		t.Fatalf("missing canonical node received fabricated target: %s", unit)
 	}
 }
@@ -526,7 +524,7 @@ func TestFindDeliveryWireEscapingIsSeparateFromTextBudget(t *testing.T) {
 		accessibilityResponse: &ProviderAccessibilityResult{OK: true, Snapshot: snapshot},
 	}
 	result := findDeliveryWire(t, svc, map[string]any{
-		"mode": "find", "app": "Independent", "query": map[string]any{"role": "listitem", "limit": 20},
+		"mode": "find", "app": "Independent", "query": map[string]any{"role": "listitem"}, "limit": 20,
 	})
 	wire, _ := json.Marshal(jsonRPCResult(1, result))
 	t.Logf("decoded_text_bytes=%d decoded_runes=%d encoded_wire_bytes=%d cap=%d",

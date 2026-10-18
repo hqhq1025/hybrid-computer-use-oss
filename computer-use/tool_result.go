@@ -189,8 +189,29 @@ func withTextEvidence(result toolCallResult) toolCallResult {
 	return withTextEvidencePrefix(result, "[tool-evidence] ")
 }
 
+func init() {
+	// Public AX error fields are rendered by withAXTextEvidence under their
+	// public names; their internal spellings never reach the model.
+	for _, key := range []string{
+		axPublicErrorCodeKey, axPublicErrorPathKey,
+		axPublicErrorHintKey, axPublicErrorDetailKey,
+	} {
+		modelPrivateEvidenceKeys[key] = true
+	}
+}
+
+// withAXTextEvidence puts the AX evidence line first: one JSON object that
+// starts with ok, then code, path, message, hint, until and counts.
 func withAXTextEvidence(result toolCallResult) toolCallResult {
-	return withTextEvidencePrefix(result, "[ax] ")
+	if len(result.StructuredContent) == 0 {
+		return result
+	}
+	visible := modelVisibleEvidence(result.StructuredContent)
+	result.Content = append(
+		[]contentItem{{Type: "text", Text: orderedJSON(visible, axPublicFields)}},
+		result.Content...,
+	)
+	return result
 }
 
 func intEvidence(value any) (int, bool) {

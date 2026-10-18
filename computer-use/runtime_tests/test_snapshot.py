@@ -963,6 +963,9 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
 
         self.assertEqual(caught.exception.failure_code, "ax_app_ambiguous")
         self.assertFalse(caught.exception.input_events_emitted)
+        # The recovery names the current call, not the removed app_ref.
+        self.assertIn('{"mode":"apps"}', str(caught.exception))
+        self.assertNotIn("app_ref", str(caught.exception))
 
     def test_exact_app_identity_does_not_fall_back_to_name(self):
         current = _TreeNode(role="application", name="LibreOffice")
@@ -1226,6 +1229,82 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
         self.assertEqual(len(result["apps"]), 1)
         self.assertEqual(result["apps"][0]["displayText"], result["text"])
         self.assertTrue(result["apps"][0]["inputCapable"])
+
+
+class ListAppsTopLevelWindowTests(AtspiPatchedTestCase):
+    def _patch_inventory(self, apps, handles, root_state, infrastructure=()):
+        original_apps = runtime.iter_apps
+        original_accepts = runtime.accepts_user_input
+        runtime.iter_apps = lambda: apps
+        runtime.accepts_user_input = lambda _app: True
+        self.addCleanup(setattr, runtime, "iter_apps", original_apps)
+        self.addCleanup(setattr, runtime, "accepts_user_input", original_accepts)
+        for patcher in (
+            mock.patch.object(runtime, "strong_window_instance_handles",
+                              side_effect=lambda app, windows: handles.get(id(app), {})),
+            mock.patch.object(runtime, "x11_root_window_state", return_value=root_state),
+            mock.patch.object(runtime, "opaque_window_instance_handle_for_id",
+                              side_effect=lambda app, window_id: "w2:" + str(window_id)),
+            mock.patch.object(runtime, "is_infrastructure_window",
+                              side_effect=lambda window: window in infrastructure),
+            mock.patch.object(runtime, "provider_bus_name", return_value=":1.9"),
+            mock.patch.object(runtime, "process_generation", return_value="gen"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_every_window_is_listed_with_handle_and_active_flag(self):
+        doc = _TreeNode(role="frame", name="Report.txt - Editor")
+        prefs = _TreeNode(role="dialog", name="Preferences")
+        app = _TreeNode(role="application", name="editor", kids=(doc, prefs))
+        app.get_process_id = lambda: 101
+        self._patch_inventory(
+            [app], {id(app): {0: "w2:0xa", 1: "w2:0xb"}},
+            {"windowIds": {"0xa", "0xb"}, "activeWindow": "0xb"},
+        )
+
+        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
+
+        self.assertEqual([w["title"] for w in windows],
+                         ["Report.txt - Editor", "Preferences"])
+        self.assertEqual([w["handle"] for w in windows], ["w2:0xa", "w2:0xb"])
+        self.assertEqual([w["active"] for w in windows], [False, True])
+        self.assertTrue(all(w["inputTarget"] for w in windows))
+
+    def test_window_without_strong_handle_is_listed_unaddressable(self):
+        window = _TreeNode(role="frame", name="Untracked")
+        app = _TreeNode(role="application", name="editor", kids=(window,))
+        app.get_process_id = lambda: 101
+        self._patch_inventory([app], {id(app): {}},
+                              {"windowIds": set(), "activeWindow": None})
+
+        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
+
+        self.assertEqual(windows[0]["handle"], "")
+        self.assertFalse(windows[0]["active"])
+
+    def test_infrastructure_window_is_marked(self):
+        panel = _TreeNode(role="frame", name="")
+        app = _TreeNode(role="application", name="panel", kids=(panel,))
+        app.get_process_id = lambda: 7
+        self._patch_inventory([app], {id(app): {0: "w2:0xc"}},
+                              {"windowIds": {"0xc"}, "activeWindow": "0xc"},
+                              infrastructure=(panel,))
+
+        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
+
+        self.assertFalse(windows[0]["inputTarget"])
+
+    def test_unreadable_window_manager_falls_back_to_atspi_active(self):
+        window = _TreeNode(role="frame", name="Doc")
+        window.states.add(STATE.ACTIVE)
+        app = _TreeNode(role="application", name="editor", kids=(window,))
+        app.get_process_id = lambda: 101
+        self._patch_inventory([app], {id(app): {0: "w2:0xa"}}, None)
+
+        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
+
+        self.assertTrue(windows[0]["active"])
 
 
 class ProviderInventoryCompletenessTests(AtspiPatchedTestCase):

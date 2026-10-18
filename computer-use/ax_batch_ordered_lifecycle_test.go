@@ -45,7 +45,8 @@ func TestOrderedBatchTypedLifecycleScope(t *testing.T) {
 			s.backend = backend
 			result := s.a11yBatch([]any{
 				map[string]any{"type": "keypress", "keys": []any{"ESC"}},
-			}, observation{mode: observeNone}, nil, "", window)
+			}, observation{mode: observeNone}, nil, window)
+
 			if !result.IsError || result.StructuredContent["failure_code"] != tc.code ||
 				result.StructuredContent["failure_facts_complete"] != tc.complete || len(legacy.calls) != 0 {
 				t.Fatalf("typed failure lost or replayed: %#v", result)
@@ -61,7 +62,8 @@ func TestOrderedBatchTypedLifecycleScope(t *testing.T) {
 			if tc.window != AXRefActive {
 				result = s.a11yBatch([]any{
 					map[string]any{"type": "keypress", "keys": []any{"ESC"}},
-				}, observation{mode: observeNone}, nil, "", window)
+				}, observation{mode: observeNone}, nil, window)
+
 				code := "stale_window_ref"
 				if tc.window == AXRefNeedsRevalidation {
 					code = "observation_incomplete"
@@ -88,7 +90,8 @@ func TestOrderedBatchInvalidResultCannotRetireIdentity(t *testing.T) {
 	}
 	s.backend = backend
 	result := s.a11yBatch([]any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
-		observation{mode: observeNone}, nil, "", window)
+		observation{mode: observeNone}, nil, window)
+
 	if !result.IsError || result.StructuredContent["failure_code"] != "runtime_transport_lost" ||
 		result.StructuredContent["mutation_unknown"] != true || len(backend.requests) != 1 || len(legacy.calls) != 0 {
 		t.Fatalf("invalid result trusted or replayed: %#v", result)
@@ -109,7 +112,8 @@ func TestOrderedBatchRequestRejectionIsNotTransportUncertainty(t *testing.T) {
 	}
 	s.backend = backend
 	result := s.a11yBatch([]any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
-		observation{mode: observeNone}, nil, "", window)
+		observation{mode: observeNone}, nil, window)
+
 	facts := result.StructuredContent["a11y_batch_result"].(map[string]any)
 	if !result.IsError || result.StructuredContent["provider_request_rejected"] != true ||
 		facts["rejected_before_first_action"] != true || facts["first_unattempted_action_index"] != 0 ||

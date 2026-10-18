@@ -459,3 +459,51 @@ func itoa(value int) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
 }
+
+// TestAXSchemaSurvivesClientCompaction keeps the AX schema under the Codex
+// compaction budget. Above it, Codex strips descriptions and then replaces
+// nested objects with {}, so the model no longer sees the action fields and
+// writes shapes the runtime rejects.
+func TestAXSchemaSurvivesClientCompaction(t *testing.T) {
+	ax := findToolDefinition(t, "AX")
+	stages := codexCompact(ax.InputSchema)
+	if len(stages) != 1 || stages[0].bytes > codexSchemaBudget {
+		t.Fatalf("AX schema triggers client compaction: %+v", stages)
+	}
+	normalized := codexNormalize(codexSanitize(cloneJSON(jsonRoundTrip(ax.InputSchema)))).(orderedObject)
+	encoded, err := marshalNoEscape(normalized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var visible map[string]any
+	if err := json.Unmarshal(encoded, &visible); err != nil {
+		t.Fatal(err)
+	}
+	properties := visible["properties"].(map[string]any)
+	actionFields := properties["actions"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	for _, field := range []string{"type", "ref", "title", "text", "keys", "value", "direction", "pages", "until"} {
+		if _, ok := actionFields[field]; !ok {
+			t.Fatalf("action field %q is not visible after normalization: %v", field, sortedKeys(actionFields))
+		}
+	}
+	types := actionFields["type"].(map[string]any)["enum"].([]any)
+	if len(types) != len(axActionTypes) {
+		t.Fatalf("action type enum lost values: %v", types)
+	}
+	predicate := visible["$defs"].(map[string]any)["predicate"].(map[string]any)["properties"].(map[string]any)
+	for _, field := range []string{"type", "ref", "selector", "negate", "timeout_ms", "stable_ms"} {
+		if _, ok := predicate[field]; !ok {
+			t.Fatalf("until field %q is not visible: %v", field, sortedKeys(predicate))
+		}
+	}
+	t.Logf("AX schema: raw=%d normalized=%d budget=%d", len(mustJSON(t, ax.InputSchema)), stages[0].bytes, codexSchemaBudget)
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}

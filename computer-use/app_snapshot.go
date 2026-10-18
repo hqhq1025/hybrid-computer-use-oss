@@ -14,6 +14,23 @@ type appDescriptor struct {
 	ProcessGeneration string `json:"processGeneration,omitempty"`
 	DisplayText       string `json:"displayText,omitempty"`
 	InputCapable      bool   `json:"inputCapable"`
+	// Windows lists the app's top-level windows in an apps listing. A
+	// provider that does not report them leaves it empty.
+	Windows []providerAppWindow `json:"windows,omitempty"`
+}
+
+// providerAppWindow is one top-level window in an apps listing. Handle is
+// the strong native window identity; a window without one is listed but
+// cannot be addressed.
+type providerAppWindow struct {
+	Title              string `json:"title"`
+	Role               string `json:"role"`
+	Handle             string `json:"handle"`
+	ProviderBusName    string `json:"providerBusName"`
+	ProviderObjectPath string `json:"providerObjectPath"`
+	ProcessGeneration  string `json:"processGeneration"`
+	Active             bool   `json:"active"`
+	InputTarget        bool   `json:"inputTarget"`
 }
 
 type frame struct {
@@ -223,7 +240,7 @@ func (s *appSnapshot) renderedText() string {
 		)
 	} else if s.WindowHandle != "" {
 		windowLine = fmt.Sprintf(
-			"window: %q [window-action-ref=unavailable; rN actions need no app_ref/window_ref]", title,
+			"window: %q [window-action-ref=unavailable; rN actions need no window_ref]", title,
 		)
 	}
 	lines := []string{}

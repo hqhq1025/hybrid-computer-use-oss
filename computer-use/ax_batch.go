@@ -1,10 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +15,7 @@ type a11yBatchAction struct {
 	text          string
 	key           string
 	value         string
+	title         string
 	postcondition map[string]any
 }
 
@@ -25,6 +25,9 @@ type a11yBatchContext struct {
 	appToken       string
 	windowHandle   string
 	expectedWindow *ProviderWindowExpectation
+	// boundByFocus marks a batch bound to the window that held keyboard
+	// focus before input; its keys and text must still reach that window.
+	boundByFocus bool
 }
 
 type a11yWindowContinuity string
@@ -35,37 +38,24 @@ const (
 	a11yWindowUnknown a11yWindowContinuity = "unknown"
 )
 
+// deriveA11yBatchContext binds a batch to one logical window. The window
+// comes from the actions' rN/wN refs, from window_ref, or, for a batch whose
+// actions carry no ref, from the window that holds keyboard focus. A
+// window_ref that names the same window as the refs is accepted; a
+// different one is rejected. focus is the focused window read before any
+// input; it is used only when nothing else names a window.
 func (s *service) deriveA11yBatchContext(
-	explicitAppRef,
 	explicitWindowRef string,
 	actions []a11yBatchAction,
+	focus *axDesktopWindow,
 ) (*a11yBatchContext, error) {
 	context := &a11yBatchContext{}
-	bindApp := func(ref, fallback string) error {
-		ref = strings.TrimSpace(ref)
-		fallback = strings.TrimSpace(fallback)
-		if ref != "" {
-			if context.appRef != "" && context.appRef != ref {
-				return fmt.Errorf(
-					"batch spans multiple application refs (%s and %s)",
-					context.appRef, ref,
-				)
-			}
-			context.appRef = ref
-			context.appToken = ref
-			return nil
-		}
-		if context.appToken == "" {
-			context.appToken = fallback
-		}
-		return nil
-	}
-	bindWindow := func(ref, handle, appRef, fallbackApp string) error {
+	bindWindow := func(ref, handle, appRef, appIdentity string) error {
 		ref = strings.TrimSpace(ref)
 		handle = strings.TrimSpace(handle)
 		if context.windowHandle != "" && context.windowHandle != handle {
 			return fmt.Errorf(
-				"batch spans multiple logical windows (%s and %s); split it before input",
+				"batch spans two windows (%s and %s); one act call works in one window, so split it",
 				context.windowRef, ref,
 			)
 		}
@@ -73,17 +63,13 @@ func (s *service) deriveA11yBatchContext(
 			context.windowRef = ref
 			context.windowHandle = handle
 		}
-		return bindApp(appRef, fallbackApp)
-	}
-
-	if explicitAppRef != "" {
-		entry, err := s.resolveShortAXAppRef(explicitAppRef)
-		if err != nil {
-			return nil, err
+		if appRef != "" {
+			context.appRef = appRef
+			context.appToken = appRef
+		} else if context.appToken == "" {
+			context.appToken = appIdentity
 		}
-		if err := bindApp(entry.Ref, entry.DisplayName); err != nil {
-			return nil, err
-		}
+		return nil
 	}
 	if explicitWindowRef != "" {
 		entry, err := s.resolveShortAXWindowRefOwned(explicitWindowRef)
@@ -96,76 +82,51 @@ func (s *service) deriveA11yBatchContext(
 			return nil, err
 		}
 	}
-
 	hasTarget := false
-	hasOwnedShortTarget := false
 	for index, action := range actions {
 		address := strings.TrimSpace(action.targetRef)
 		if address == "" {
 			continue
 		}
 		hasTarget = true
-		switch {
-		case isShortAXRef(address):
-			hasOwnedShortTarget = true
-			entry, err := s.resolveShortAXRefOwned(address)
-			if err != nil {
-				return nil, fmt.Errorf("actions[%d].target: %w", index, err)
+		var err error
+		if isShortAXRef(address) {
+			var entry *AXRefEntry
+			entry, err = s.resolveShortAXRefOwned(address)
+			if err == nil {
+				err = bindWindow(entry.LogicalWindowRef, entry.WindowHandle,
+					entry.AppRef, entry.AppIdentity)
+				if err != nil && explicitWindowRef != "" && index == 0 {
+					err = fmt.Errorf("%s belongs to window %s, not window_ref %s; omit window_ref",
+						address, entry.LogicalWindowRef, explicitWindowRef)
+				}
 			}
-			if err := bindWindow(
-				entry.LogicalWindowRef,
-				entry.WindowHandle,
-				entry.AppRef,
-				entry.AppIdentity,
-			); err != nil {
-				return nil, fmt.Errorf("actions[%d].target: %w", index, err)
+		} else {
+			var entry *AXWindowRefEntry
+			entry, err = s.resolveShortAXWindowRefOwned(address)
+			if err == nil {
+				err = bindWindow(entry.Ref, entry.WindowHandle, entry.AppRef, entry.AppIdentity)
 			}
-		case isShortAXWindowRef(address):
-			hasOwnedShortTarget = true
-			entry, err := s.resolveShortAXWindowRefOwned(address)
-			if err != nil {
-				return nil, fmt.Errorf("actions[%d].target: %w", index, err)
-			}
-			if err := bindWindow(
-				entry.Ref, entry.WindowHandle, entry.AppRef, entry.AppIdentity,
-			); err != nil {
-				return nil, fmt.Errorf("actions[%d].target: %w", index, err)
-			}
-		default:
-			return nil, fmt.Errorf(
-				"actions[%d].target must use rN or wN", index,
-			)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("actions[%d].ref: %w", index, err)
 		}
 	}
-	if hasOwnedShortTarget &&
-		(strings.TrimSpace(explicitAppRef) != "" ||
-			strings.TrimSpace(explicitWindowRef) != "") {
-		return nil, errors.New(
-			"targeted AX actions must omit app_ref and window_ref; " +
-				"each rN/wN target already owns its application and logical window",
-		)
+	if context.windowHandle == "" && !hasTarget && focus != nil {
+		entry, err := s.resolveShortAXWindowRefOwned(focus.ref)
+		if err != nil {
+			return nil, err
+		}
+		if err := bindWindow(entry.Ref, entry.WindowHandle, entry.AppRef, entry.AppIdentity); err != nil {
+			return nil, err
+		}
+		context.boundByFocus = true
 	}
-
 	if context.windowHandle == "" {
-		if !hasTarget {
-			return nil, errors.New(
-				"an all-untargeted batch requires window_ref; app names do not prove keyboard focus",
-			)
-		}
-		return nil, errors.New(
-			"targeted AX actions require an rN or wN ref returned by observe/find",
-		)
-	}
-	if explicitAppRef != "" && context.appRef != explicitAppRef {
-		return nil, fmt.Errorf(
-			"app_ref %s conflicts with the batch window owner %s",
-			explicitAppRef, context.appRef,
-		)
+		return nil, errors.New("the batch has no window: give an rN or wN ref, a title, or window_ref")
 	}
 	if context.appToken == "" {
-		return nil, errors.New(
-			"the batch window has no current application owner; observe it again",
-		)
+		return nil, errors.New("the batch window has no current application owner; observe it again")
 	}
 	if entry, err := s.windowRefRegistry.Resolve(context.windowRef, ""); err == nil {
 		context.expectedWindow = &ProviderWindowExpectation{
@@ -217,303 +178,6 @@ func (s *service) a11yBatchWindowContinuity(
 		return a11yWindowChanged
 	}
 	return a11yWindowSame
-}
-
-func a11yBatchActionFields(tool string) map[string]bool {
-	common := map[string]bool{
-		"type": true, "target": true, "postcondition": true,
-	}
-	for _, field := range map[string][]string{
-		"activate":  {},
-		"close":     {},
-		"click":     {},
-		"keypress":  {"keys"},
-		"scroll":    {"direction", "pages"},
-		"set_value": {"value"},
-		"type":      {"text"},
-	}[tool] {
-		common[field] = true
-	}
-	return common
-}
-
-func requiredA11yBatchString(
-	action map[string]any,
-	field string,
-	allowEmpty bool,
-) (string, error) {
-	value, present := action[field]
-	if !present {
-		return "", fmt.Errorf("missing required field %q", field)
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("%s must be a string", field)
-	}
-	if !allowEmpty && strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("%s must not be empty", field)
-	}
-	return text, nil
-}
-
-func normalizedA11yBatchKey(action map[string]any) (string, error) {
-	rawKeys, hasKeys := action["keys"]
-	if !hasKeys {
-		return "", errors.New(`missing required field "keys"`)
-	}
-
-	items, ok := rawKeys.([]any)
-	if !ok {
-		typed, typedOK := rawKeys.([]string)
-		if !typedOK {
-			return "", errors.New("keys must be an array of key names")
-		}
-		items = make([]any, len(typed))
-		for index, item := range typed {
-			items[index] = item
-		}
-	}
-	if len(items) == 0 || len(items) > guiMaxKeys {
-		return "", fmt.Errorf(
-			"keys must contain between 1 and %d key names", guiMaxKeys)
-	}
-	keys := make([]string, 0, len(items))
-	for index, item := range items {
-		key, ok := item.(string)
-		if !ok || strings.TrimSpace(key) == "" {
-			return "", fmt.Errorf(
-				"keys[%d] must be a non-empty string", index)
-		}
-		key = strings.TrimSpace(key)
-		if len([]rune(key)) > guiMaxKeyLength {
-			return "", fmt.Errorf(
-				"keys[%d] accepts at most %d characters",
-				index, guiMaxKeyLength,
-			)
-		}
-		keys = append(keys, key)
-	}
-	return strings.Join(keys, "+"), nil
-}
-
-func validateA11yBatchNumber(action map[string]any, field string) error {
-	value, present := action[field]
-	if !present {
-		return nil
-	}
-	switch typed := value.(type) {
-	case int:
-		return nil
-	case float64:
-		if math.IsNaN(typed) || math.IsInf(typed, 0) {
-			return fmt.Errorf("%s must be a finite number", field)
-		}
-		return nil
-	case json.Number:
-		if _, err := typed.Float64(); err != nil {
-			return fmt.Errorf("%s must be a number", field)
-		}
-		return nil
-	default:
-		return fmt.Errorf("%s must be a number", field)
-	}
-}
-
-// actionTargetRef reads an action's optional target, which is exactly
-// {"ref": "rN"} or {"ref": "wN"}. Index and selector targets are read-only
-// forms of assertions and observe roots, never action targets.
-func actionTargetRef(action map[string]any) (string, error) {
-	raw, present := action["target"]
-	if !present {
-		return "", nil
-	}
-	target, ok := raw.(map[string]any)
-	ref, isString := target["ref"].(string)
-	if !ok || len(target) != 1 || !isString {
-		return "", errors.New(`target must be {"ref":"rN"} or {"ref":"wN"}`)
-	}
-	if !isShortAXRef(ref) && !isShortAXWindowRef(ref) {
-		return "", errors.New(
-			"target.ref must be an exact rN or wN copied from observe/find; " +
-				"never invent placeholders such as r??",
-		)
-	}
-	return ref, nil
-}
-
-func normalizeA11yBatchActions(raw any) ([]a11yBatchAction, error) {
-	items, ok := raw.([]any)
-	if !ok {
-		return nil, errors.New("actions must be an array")
-	}
-	if len(items) == 0 {
-		return nil, errors.New(
-			"actions must contain at least one action; use AX mode=\"observe\" for a read-only observation",
-		)
-	}
-	if len(items) > a11yBatchMaxActions {
-		return nil, fmt.Errorf(
-			"actions accepts at most %d actions", a11yBatchMaxActions)
-	}
-
-	normalized := make([]a11yBatchAction, 0, len(items))
-	totalText := 0
-	for index, item := range items {
-		action, ok := item.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("actions[%d] must be an object", index)
-		}
-		tool, err := requiredA11yBatchString(action, "type", false)
-		if err != nil {
-			return nil, fmt.Errorf("actions[%d]: %w", index, err)
-		}
-		normalizedKey := ""
-		switch tool {
-		case "activate", "close", "click", "keypress", "scroll", "set_value", "type":
-		default:
-			return nil, fmt.Errorf(
-				"actions[%d].type %q is unsupported; use activate, close, click, "+
-					"keypress, scroll, set_value, or type",
-				index, tool,
-			)
-		}
-		allowed := a11yBatchActionFields(tool)
-		for field := range action {
-			if !allowed[field] {
-				return nil, fmt.Errorf(
-					"actions[%d] type %q does not accept field %q",
-					index, tool, field,
-				)
-			}
-		}
-		elementIndex, err := actionTargetRef(action)
-		if err != nil {
-			return nil, fmt.Errorf("actions[%d].target: %w", index, err)
-		}
-
-		switch tool {
-		case "activate", "close":
-			if elementIndex == "" {
-				return nil, fmt.Errorf(
-					"actions[%d] %s requires target", index, tool)
-			}
-			if tool == "close" && index != len(items)-1 {
-				return nil, newArgumentRuleError(argumentRuleCloseNotLast, fmt.Sprintf(
-					"actions[%d] close must be the final action", index))
-			}
-			if !isShortAXWindowRef(elementIndex) {
-				return nil, fmt.Errorf(
-					"actions[%d] %s requires target.ref matching wN",
-					index, tool,
-				)
-			}
-		case "click":
-			if elementIndex == "" {
-				return nil, fmt.Errorf(
-					"actions[%d] click requires target", index)
-			}
-			if !isShortAXRef(elementIndex) {
-				return nil, fmt.Errorf(
-					"actions[%d] click requires target.ref matching rN", index)
-			}
-		case "keypress":
-			normalizedKey, err = normalizedA11yBatchKey(action)
-			if err != nil {
-				return nil, fmt.Errorf("actions[%d]: %w", index, err)
-			}
-		case "scroll":
-			direction, err := requiredA11yBatchString(
-				action, "direction", false,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("actions[%d]: %w", index, err)
-			}
-			switch direction {
-			case "up", "down", "left", "right":
-			default:
-				return nil, fmt.Errorf(
-					"actions[%d].direction must be up, down, left, or right",
-					index,
-				)
-			}
-			if err := validateA11yBatchNumber(action, "pages"); err != nil {
-				return nil, fmt.Errorf("actions[%d]: %w", index, err)
-			}
-			pages := floatValue(optionalFloat(action, "pages"), 1)
-			if pages <= 0 || pages > maxScrollPages {
-				return nil, fmt.Errorf(
-					"actions[%d].pages must be greater than 0 and at most %d",
-					index, maxScrollPages,
-				)
-			}
-		case "set_value":
-			if elementIndex == "" {
-				return nil, fmt.Errorf(
-					"actions[%d] set_value requires target", index)
-			}
-			if !isShortAXRef(elementIndex) {
-				return nil, fmt.Errorf(
-					"actions[%d] set_value requires target.ref matching rN", index)
-			}
-			value, err := requiredA11yBatchString(action, "value", true)
-			if err != nil {
-				return nil, fmt.Errorf("actions[%d]: %w", index, err)
-			}
-			if len([]rune(value)) > maxActionText {
-				return nil, fmt.Errorf(
-					"actions[%d].value accepts at most %d characters",
-					index, maxActionText,
-				)
-			}
-			totalText += len([]rune(value))
-		case "type":
-			text, err := requiredA11yBatchString(action, "text", false)
-			if err != nil {
-				return nil, fmt.Errorf("actions[%d]: %w", index, err)
-			}
-			if len([]rune(text)) > maxActionText {
-				return nil, fmt.Errorf(
-					"actions[%d].text accepts at most %d characters",
-					index, maxActionText,
-				)
-			}
-			totalText += len([]rune(text))
-		}
-		if elementIndex != "" &&
-			(tool == "keypress" || tool == "scroll" || tool == "type") &&
-			!isShortAXRef(elementIndex) {
-			return nil, fmt.Errorf(
-				"actions[%d] %s target.ref must match rN", index, tool)
-		}
-		if totalText > a11yBatchMaxText {
-			return nil, newArgumentRuleError(argumentRuleTextBudget, fmt.Sprintf(
-				"the cumulative text/value budget is %d characters",
-				a11yBatchMaxText,
-			))
-		}
-		var postcondition map[string]any
-		if rawPostcondition, present := action["postcondition"]; present {
-			postcondition, ok = rawPostcondition.(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf(
-					"actions[%d].postcondition must be an AX assertion object",
-					index,
-				)
-			}
-		}
-
-		normalized = append(normalized, a11yBatchAction{
-			actionType:    tool,
-			targetRef:     elementIndex,
-			direction:     optionalString(action, "direction"),
-			pages:         floatValue(optionalFloat(action, "pages"), 1),
-			text:          optionalString(action, "text"),
-			key:           normalizedKey,
-			value:         optionalString(action, "value"),
-			postcondition: postcondition,
-		})
-	}
-	return normalized, nil
 }
 
 func (s *service) executeA11yBatchAction(
@@ -668,10 +332,7 @@ func compactAXActionContent(result toolCallResult) toolCallResult {
 
 func a11yBatchValidationError(message string, requested int) toolCallResult {
 	result := textResult(
-		"AX BATCH REJECTED BEFORE ACTION 1: "+message+
-			"\naction_outcome=not_executed\n"+
-			"actions_completed_without_call_error=0\n"+
-			"No accessibility action was attempted.",
+		message+"\nNo action was sent.",
 		true,
 	)
 	result.StructuredContent = map[string]any{
@@ -698,6 +359,14 @@ func a11yBatchPreflightError(err error, requested int) toolCallResult {
 func withAXLifecycleFailure(result toolCallResult, err error) toolCallResult {
 	var lifecycle *axRefLifecycleError
 	if !errors.As(err, &lifecycle) {
+		if strings.Contains(err.Error(), "was never issued in this session") {
+			// A ref this session never returned: copy refs from results.
+			if result.StructuredContent == nil {
+				result.StructuredContent = map[string]any{}
+			}
+			result.StructuredContent["failure_code"] = "unknown_ref"
+			result.StructuredContent[axPublicErrorHintKey] = `{"mode":"find","window_ref":"wN","query":{"name_contains":"..."}}`
+		}
 		return result
 	}
 	code := ""
@@ -730,40 +399,88 @@ func withAXLifecycleFailure(result toolCallResult, err error) toolCallResult {
 	return result
 }
 
+// a11yBatch decodes public action objects and runs them. Tests and the
+// public act path share it.
 func (s *service) a11yBatch(
 	rawActions any,
 	obs observation,
 	postcondition map[string]any,
-	ownership ...string,
+	windowRef string,
 ) toolCallResult {
-	appRef := ""
-	windowRef := ""
-	if len(ownership) > 0 {
-		appRef = ownership[0]
+	actions, argErr := decodeAXActions(rawActions)
+	if argErr != nil {
+		requested := 0
+		if items, ok := rawActions.([]any); ok {
+			requested = len(items)
+		}
+		return axArgErrorResult(argErr, requested)
 	}
-	if len(ownership) > 1 {
-		windowRef = ownership[1]
+	return s.a11yBatchDecoded(actions, obs, postcondition, windowRef)
+}
+
+// a11yBatchDecoded runs decoded actions in one window. Window titles and
+// the focused window are resolved here, once, before any input; after that
+// the batch uses only the resolved wN.
+func (s *service) a11yBatchDecoded(
+	actions []a11yBatchAction,
+	obs observation,
+	postcondition map[string]any,
+	windowRef string,
+) toolCallResult {
+	requested := len(actions)
+	bindingNotes := []string{}
+	for index := range actions {
+		if actions[index].title == "" {
+			continue
+		}
+		window, argErr := s.resolveWindowTitle(actions[index].title)
+		if argErr != nil {
+			argErr.path = fmt.Sprintf("actions[%d].title", index)
+			return axArgErrorResult(argErr, requested)
+		}
+		actions[index].targetRef = window.ref
+		bindingNotes = append(bindingNotes, fmt.Sprintf(
+			"title %s -> %s %s (%s)", strconv.Quote(actions[index].title),
+			window.ref, strconv.Quote(window.title), window.appName))
 	}
-	requested := 0
-	if items, ok := rawActions.([]any); ok {
-		requested = len(items)
+	var focus *axDesktopWindow
+	if windowRef == "" && !a11yBatchHasRef(actions) {
+		var argErr *axArgError
+		focus, argErr = s.resolveFocusedWindow()
+		if argErr != nil {
+			return axArgErrorResult(argErr, requested)
+		}
+		bindingNotes = append(bindingNotes, fmt.Sprintf(
+			"bound_window: %s %s (%s, focused at preflight)",
+			focus.ref, strconv.Quote(focus.title), focus.appName))
 	}
-	items, ok := rawActions.([]any)
-	if !ok {
-		return a11yBatchValidationError(
-			"actions must be an array", requested)
-	}
-	if len(items) == 0 {
-		return a11yBatchValidationError(
-			"mode=\"act\" requires at least one action; use mode=\"observe\" "+
-				"for a read-only observation",
-			0,
+	result := s.a11yBatchBound(actions, obs, postcondition, windowRef, focus, requested)
+	if len(bindingNotes) > 0 {
+		result.Content = append(
+			[]contentItem{{Type: "text", Text: strings.Join(bindingNotes, "\n")}},
+			result.Content...,
 		)
 	}
-	actions, err := normalizeA11yBatchActions(rawActions)
-	if err != nil {
-		return a11yBatchPreflightError(err, requested)
+	return result
+}
+
+func a11yBatchHasRef(actions []a11yBatchAction) bool {
+	for _, action := range actions {
+		if action.targetRef != "" {
+			return true
+		}
 	}
+	return false
+}
+
+func (s *service) a11yBatchBound(
+	actions []a11yBatchAction,
+	obs observation,
+	postcondition map[string]any,
+	windowRef string,
+	focus *axDesktopWindow,
+	requested int,
+) toolCallResult {
 	if err := s.preflightPlatformAXKeys(actions); err != nil {
 		return a11yBatchPreflightError(err, requested)
 	}
@@ -772,14 +489,14 @@ func (s *service) a11yBatch(
 			return a11yBatchPreflightError(err, requested)
 		}
 	}
-	context, err := s.deriveA11yBatchContext(appRef, windowRef, actions)
+	context, err := s.deriveA11yBatchContext(windowRef, actions, focus)
 	if err != nil {
 		return a11yBatchPreflightError(err, requested)
 	}
 	if postcondition != nil {
 		if err := s.preflightA11yPostcondition(context, postcondition); err != nil {
 			return a11yBatchPreflightError(
-				fmt.Errorf("postcondition: %w", err), requested,
+				fmt.Errorf("until: %w", err), requested,
 			)
 		}
 	}
@@ -793,7 +510,7 @@ func (s *service) a11yBatch(
 		); err != nil {
 			return a11yBatchPreflightError(
 				fmt.Errorf(
-					"actions[%d].postcondition: %w",
+					"actions[%d].until: %w",
 					index,
 					err,
 				),
@@ -810,7 +527,7 @@ func (s *service) a11yBatch(
 	// The existing assertion path owns predicate identity and reconciliation.
 	// Keep guarded batches there until it supports pre-input identity capture
 	// across internal ordered-run snapshot commits.
-	guarded := postcondition != nil
+	guarded := postcondition != nil || context.boundByFocus
 	for _, action := range actions {
 		guarded = guarded || action.postcondition != nil
 	}
@@ -837,6 +554,13 @@ func (s *service) a11yBatch(
 		)
 		windowAction := action.actionType == "activate" ||
 			action.actionType == "close"
+		if context.boundByFocus {
+			// Keys and text without a ref go to the focused window. If focus
+			// left the bound window, stop instead of sending input elsewhere.
+			if stopped, changed := s.a11yBatchFocusChanged(context, index, len(actions), actionEvidence); changed {
+				return s.recoverA11yBatchObservation(context, stopped, obs)
+			}
+		}
 		result := toolCallResult{}
 		actionEntry := map[string]any{}
 		request, orderedRun := orderedRuns[index]
@@ -924,7 +648,7 @@ func (s *service) a11yBatch(
 				"observe fresh state before recovery."
 			if preparationFailed {
 				observationSummary = "Preparation may have changed state or may complete later. " +
-					"Stop; no recovery observation, postcondition or later action was attempted."
+					"Stop; no recovery observation, until or later action was attempted."
 			}
 			if finalObservationReturned {
 				observationSummary = "A fresh current-state observation follows. " +
@@ -938,10 +662,9 @@ func (s *service) a11yBatch(
 			return prependA11yBatchSummary(
 				result,
 				fmt.Sprintf(
-					"AX BATCH STOPPED AT ACTION %d/%d (%s). "+
-						"%d earlier action call(s) returned without a call error. "+
-						"This does not verify their delivery or task effect. "+
-						"%s",
+					"Stopped at action %d/%d (%s). "+
+						"%d earlier action(s) returned without error; "+
+						"that does not verify their effect. %s",
 					index+1, len(actions), action.actionType, index,
 					observationSummary,
 				),
@@ -952,7 +675,6 @@ func (s *service) a11yBatch(
 			actionPostconditionResult = s.runA11yPostcondition(
 				context,
 				action.postcondition,
-				action.actionType == "close",
 			)
 			if a11yPostconditionNeedsCanonicalReconciliation(
 				action.postcondition,
@@ -1046,7 +768,6 @@ func (s *service) a11yBatch(
 				postconditionResult = s.runA11yPostcondition(
 					context,
 					postcondition,
-					action.actionType == "close",
 				)
 			}
 			finalObservation := toolCallResult{}
@@ -1095,6 +816,11 @@ func (s *service) a11yBatch(
 				result = mergeA11yPostconditionResult(
 					result,
 					postconditionResult,
+				)
+				recordUntilWindowRef(
+					result.StructuredContent,
+					postconditionResult,
+					finalObservation,
 				)
 				if a11yPostconditionPassed(postconditionResult) &&
 					len(actionEvidence) > 0 {
@@ -1268,4 +994,50 @@ func compactBatchActionability(value any) any {
 		"readback_sampled":       evidence.ReadbackSampled,
 		"postcondition_verified": evidence.PostconditionVerified,
 	}
+}
+
+// a11yBatchFocusChanged reports whether keyboard focus left the window a
+// focus-bound batch was bound to, and if so returns the stop result.
+func (s *service) a11yBatchFocusChanged(
+	context *a11yBatchContext,
+	index, count int,
+	actionEvidence []map[string]any,
+) (toolCallResult, bool) {
+	focus, argErr := s.resolveFocusedWindow()
+	if argErr == nil && focus.handle == context.windowHandle {
+		return toolCallResult{}, false
+	}
+	now := "no window has focus"
+	if argErr == nil {
+		now = fmt.Sprintf("focus is now on %s %s (%s)", focus.ref, strconv.Quote(focus.title), focus.appName)
+	} else if argErr.code == axCodeRuntimeError {
+		now = "the focused window could not be read"
+	}
+	anyInputEmitted, anyPartialPossible, anyMutationUnknown := batchMutationSummary(actionEvidence)
+	message := fmt.Sprintf(
+		"keyboard focus left the bound window %s before action %d/%d; %s. "+
+			"%d action(s) ran; the rest were not sent.",
+		context.windowRef, index+1, count, now, index,
+	)
+	stopped := textResult(message, true)
+	stopped.StructuredContent = map[string]any{
+		axPublicErrorCodeKey:     axCodeWindowChanged,
+		axPublicErrorDetailKey:   message,
+		axPublicErrorHintKey:     `{"mode":"act","actions":[{"type":"activate","ref":"` + context.windowRef + `"}]}`,
+		"failure_code":           "stale_target",
+		"failure_phase":          "between_actions",
+		"input_events_emitted":   anyInputEmitted,
+		"partial_input_possible": anyPartialPossible,
+		"mutation_unknown":       anyMutationUnknown || anyInputEmitted,
+		"observation_required":   true,
+		"a11y_batch_result": map[string]any{
+			"actions_requested":                    count,
+			"actions_completed_without_call_error": index,
+			"stopped_before_action_index":          index,
+			"rejected_before_first_action":         index == 0,
+			"partial_sequence":                     index > 0,
+			"actions":                              actionEvidence,
+		},
+	}
+	return stopped, true
 }

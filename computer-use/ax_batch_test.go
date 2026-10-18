@@ -1,8 +1,7 @@
 package main
 
 import (
-	"reflect"
-	"slices"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -28,376 +27,7 @@ func TestCompactAXActionContentDropsRoutineRouteNotes(t *testing.T) {
 	}
 }
 
-func TestA11yBatchModePublishesAndEnforcesSafetyContract(t *testing.T) {
-	tool := findToolDefinition(t, "AX")
-	for _, fragment := range []string{
-		"Semantic observe/find/act/assert_ax",
-		"act consumes refs only",
-		"act never accepts app, selector, or index",
-		"Split before window changes",
-	} {
-		if !strings.Contains(tool.Description, fragment) {
-			t.Fatalf("a11y batch description missing %q", fragment)
-		}
-	}
-	branches := tool.InputSchema["oneOf"].([]any)
-	if len(branches) != 6 {
-		t.Fatalf("a11y oneOf branch count=%d want 6", len(branches))
-	}
-	for _, raw := range branches {
-		branch := raw.(map[string]any)
-		properties := branch["properties"].(map[string]any)
-		mode := properties["mode"].(map[string]any)
-		if _, ok := mode["const"].(string); !ok {
-			t.Fatalf("every a11y oneOf branch must use mode const: %#v", mode)
-		}
-	}
-	observeBranch := findA11ySchemaBranch(t, "observe", "app")
-	observeProps := observeBranch["properties"].(map[string]any)
-	observePayload := observeProps["observe"].(map[string]any)
-	if values, ok := observePayload["enum"].([]string); !ok ||
-		!reflect.DeepEqual(values, a11yObserveValues) {
-		t.Fatalf("a11y standalone observe enum=%#v", observePayload["enum"])
-	}
-	if slices.Contains(a11yObserveValues, observeNone) {
-		t.Fatal("standalone AX observation must not advertise observe=none")
-	}
-	findBranch := findA11ySchemaBranch(t, "find", "")
-	findProps := findBranch["properties"].(map[string]any)
-	assertBranch := findA11ySchemaBranch(t, "assert_ax", "")
-	assertProps := assertBranch["properties"].(map[string]any)
-	for mode, properties := range map[string]map[string]any{
-		"observe":   observeProps,
-		"find":      findProps,
-		"assert_ax": assertProps,
-	} {
-		scope, ok := properties["scope"].(map[string]any)
-		if !ok {
-			t.Fatalf("a11y %s schema must expose scope", mode)
-		}
-		if values, ok := scope["enum"].([]string); !ok ||
-			!reflect.DeepEqual(values, a11yScopeValues) {
-			t.Fatalf("a11y %s scope enum=%#v", mode, scope["enum"])
-		}
-	}
-	query := findProps["query"].(map[string]any)
-	queryProps := query["properties"].(map[string]any)
-	for _, field := range []string{
-		"name_contains", "name_equals", "text_contains", "text_equals",
-	} {
-		if _, ok := queryProps[field]; !ok {
-			t.Fatalf("a11y find query must expose %s", field)
-		}
-	}
-	limitProperty := queryProps["limit"].(map[string]any)
-	if limitProperty["maximum"] != maxAXFindPageSize {
-		t.Fatalf("find limit is not bounded: %#v", limitProperty)
-	}
-	cursorBranchFound := false
-	for _, raw := range branches {
-		properties := raw.(map[string]any)["properties"].(map[string]any)
-		if _, ok := properties["cursor"]; !ok {
-			continue
-		}
-		cursorBranchFound = true
-		if _, hasQuery := properties["query"]; hasQuery {
-			t.Fatal("cursor continuation must not also expose query")
-		}
-		if pattern := properties["cursor"].(map[string]any)["pattern"]; pattern != "^f[1-9][0-9]*$" {
-			t.Fatalf("find cursor pattern=%v", pattern)
-		}
-	}
-	if !cursorBranchFound {
-		t.Fatal("AX find schema has no cursor continuation branch")
-	}
-	if _, present := assertProps["timeout_ms"]; present {
-		t.Fatal("assert_ax timeout_ms must live inside assertion")
-	}
-	defs := tool.InputSchema["$defs"].(map[string]any)
-	assertion := defs["assertion"].(map[string]any)
-	if ref := assertProps["assertion"].(map[string]any)["$ref"]; ref != "#/$defs/assertion" {
-		t.Fatalf("assert_ax does not reuse the shared assertion schema: %v", ref)
-	}
-	assertionBranches, ok := assertion["oneOf"].([]any)
-	if !ok || len(assertionBranches) != 5 {
-		t.Fatalf(
-			"assertion schema must distinguish element and window title: %#v",
-			assertion,
-		)
-	}
-	valueBranch := assertionBranches[2].(map[string]any)
-	valueConstraints, ok := valueBranch["allOf"].([]any)
-	if !ok || len(valueConstraints) != 1 {
-		t.Fatalf("value assertion schema does not constrain contains: %#v",
-			valueBranch)
-	}
-	windowTitleBranch := assertionBranches[4].(map[string]any)
-	windowTitleProps := windowTitleBranch["properties"].(map[string]any)
-	for _, field := range []string{
-		"type",
-		"text",
-		"exists",
-		"stable_ms",
-		"timeout_ms",
-	} {
-		if _, ok := windowTitleProps[field]; !ok {
-			t.Fatalf("window title assertion must expose %s", field)
-		}
-	}
-	elementTarget := assertionBranches[0].(map[string]any)["properties"].(map[string]any)["target"].(map[string]any)
-	targetBranches := elementTarget["oneOf"].([]any)
-	for _, raw := range targetBranches {
-		properties := raw.(map[string]any)["properties"].(map[string]any)
-		refProperty, ok := properties["ref"].(map[string]any)
-		if !ok {
-			continue
-		}
-		if pattern := refProperty["pattern"]; pattern != "^r[1-9][0-9]*$" {
-			t.Fatalf("assert_ax element ref accepts window refs: %#v", refProperty)
-		}
-	}
-	windowTitleContains := windowTitleProps["text"].(map[string]any)
-	if windowTitleContains["pattern"] != nonBlankPattern {
-		t.Fatalf(
-			"window title text pattern=%v, want a non-blank pattern",
-			windowTitleContains["pattern"],
-		)
-	}
-	appsBranch := findA11ySchemaBranch(t, "observe", "apps")
-	appsProps := appsBranch["properties"].(map[string]any)
-	for _, forbidden := range []string{
-		"app", "actions", "observe", "text_limit", "timeout_ms",
-		"max_tree_nodes", "max_tree_depth", "query", "assertion", "scope",
-	} {
-		if _, ok := appsProps[forbidden]; ok {
-			t.Fatalf("observe/apps schema must not expose %s", forbidden)
-		}
-	}
-	actBranch := findA11ySchemaBranch(t, "act", "")
-	props := actBranch["properties"].(map[string]any)
-	if ref := props["postcondition"].(map[string]any)["$ref"]; ref != "#/$defs/assertion" {
-		t.Fatalf("act.postcondition does not reuse the shared assertion schema: %v", ref)
-	}
-	actions := props["actions"].(map[string]any)
-	if actions["maxItems"] != a11yBatchMaxActions {
-		t.Fatalf("a11y actions maxItems=%v want %d",
-			actions["maxItems"], a11yBatchMaxActions)
-	}
-	if actions["minItems"] != 1 {
-		t.Fatal("a11y act schema must require at least one action")
-	}
-	if _, ok := props["observe"]; !ok {
-		t.Fatal("a11y batch must expose one final observe control")
-	}
-	actObserve := props["observe"].(map[string]any)
-	description, _ := actObserve["description"].(string)
-	for _, phrase := range []string{
-		"ACT ONLY: none|diff|screenshot",
-		"tree/full are invalid",
-		"fresh post-action diff",
-		"reread only if required",
-	} {
-		if !strings.Contains(description, phrase) {
-			t.Fatalf("a11y act observe guidance missing %q: %q",
-				phrase, description)
-		}
-	}
-	if values, ok := actObserve["enum"].([]string); !ok ||
-		!reflect.DeepEqual(values, a11yActObserveValues) {
-		t.Fatalf("a11y act observe enum=%#v", actObserve["enum"])
-	}
-	for _, forbidden := range []string{observeTree, observeFull} {
-		if slices.Contains(a11yActObserveValues, forbidden) {
-			t.Fatalf("a11y act must not expose complete readback %q", forbidden)
-		}
-	}
-	for _, forbidden := range []string{"expect", "settle_ms"} {
-		if _, ok := props[forbidden]; ok {
-			t.Fatalf("a11y batch beta must not expose action-local %s", forbidden)
-		}
-	}
-	if _, ok := props["app"]; ok {
-		t.Fatal("ref-only AX act must not expose app")
-	}
-	item := actions["items"].(map[string]any)
-	actionBranches := item["oneOf"].([]any)
-	gotTypes := make([]string, 0, len(actionBranches))
-	for _, raw := range actionBranches {
-		branch := raw.(map[string]any)
-		fields := branch["properties"].(map[string]any)
-		actionType := fields["type"].(map[string]any)
-		branchTypes := []string{}
-		if value, ok := actionType["const"].(string); ok {
-			branchTypes = append(branchTypes, value)
-		}
-		if values, ok := actionType["enum"].([]string); ok {
-			branchTypes = append(branchTypes, values...)
-		}
-		if len(branchTypes) == 0 {
-			t.Fatalf("action branch has no const or enum type: %#v", actionType)
-		}
-		gotTypes = append(gotTypes, branchTypes...)
-		if _, ok := fields["element"]; ok {
-			t.Fatal("public action schema must not expose ambiguous element")
-		}
-		if _, ok := fields["element_index"]; ok {
-			t.Fatal("public action schema must not expose ambiguous element_index")
-		}
-		if _, ok := fields["intent"]; ok {
-			t.Fatal("public action schema must not expose misleading intent")
-		}
-		if _, ok := fields["target"]; !ok {
-			t.Fatal("each public action schema must expose structured target")
-		}
-		if ref := fields["postcondition"].(map[string]any)["$ref"]; ref != "#/$defs/assertion" {
-			t.Fatalf("action %v postcondition does not reuse assertion schema: %v",
-				branchTypes, ref)
-		}
-		target := fields["target"].(map[string]any)
-		targetFields := target["properties"].(map[string]any)
-		if len(targetFields) != 1 || targetFields["ref"] == nil {
-			t.Fatalf("public %v target is not ref-only: %#v", branchTypes, target)
-		}
-		pattern := targetFields["ref"].(map[string]any)["pattern"]
-		for _, branchType := range branchTypes {
-			want := "^r[1-9][0-9]*$"
-			if branchType == "activate" || branchType == "close" {
-				want = "^w[1-9][0-9]*$"
-			}
-			if pattern != want {
-				t.Fatalf("%s target pattern=%v want %s", branchType, pattern, want)
-			}
-		}
-		if slices.Contains(branchTypes, "keypress") {
-			if _, ok := fields["keys"]; !ok {
-				t.Fatal("public keypress schema must use GUI-compatible keys")
-			}
-			if _, ok := fields["key"]; ok {
-				t.Fatal("public keypress schema must hide legacy key")
-			}
-		}
-	}
-	for _, windowAction := range []string{"activate", "close"} {
-		count := 0
-		for _, raw := range actionBranches {
-			fields := raw.(map[string]any)["properties"].(map[string]any)
-			if fields["type"].(map[string]any)["const"] == windowAction {
-				count++
-			}
-		}
-		if count != 1 {
-			t.Fatalf("%s must have one independent const branch, got %d",
-				windowAction, count)
-		}
-	}
-	for _, want := range []string{
-		"activate", "close", "click", "keypress", "scroll", "set_value", "type",
-	} {
-		if !slices.Contains(gotTypes, want) {
-			t.Fatalf("a11y action types missing %q: %#v", want, gotTypes)
-		}
-	}
-
-	valid := []any{
-		map[string]any{
-			"type":   "click",
-			"target": map[string]any{"ref": "r7"},
-			"postcondition": map[string]any{
-				"type": "state",
-				"target": map[string]any{
-					"ref": "r7",
-				},
-				"state": "selected",
-				"value": true,
-			},
-		},
-		map[string]any{
-			"type": "keypress", "keys": []any{"CTRL", "L"},
-		},
-		map[string]any{
-			"type": "type",
-			"target": map[string]any{
-				"ref": "r8",
-			},
-			"text": "Lovelace",
-		},
-	}
-	normalized, err := normalizeA11yBatchActions(valid)
-	if err != nil || len(normalized) != len(valid) {
-		t.Fatalf("valid a11y batch rejected: actions=%#v err=%v",
-			normalized, err)
-	}
-	if normalized[0].postcondition == nil {
-		t.Fatal("action postcondition was not preserved by normalization")
-	}
-	if _, err := normalizeA11yBatchActions([]any{
-		map[string]any{
-			"type":          "click",
-			"target":        map[string]any{"ref": "r7"},
-			"postcondition": "selected",
-		},
-	}); err == nil || !strings.Contains(err.Error(), "postcondition must be an AX assertion object") {
-		t.Fatalf("non-object action postcondition must be rejected: %v", err)
-	}
-	if _, err := normalizeA11yBatchActions([]any{
-		map[string]any{"type": "keypress", "keys": []any{"TAB"}},
-		map[string]any{
-			"type":   "click",
-			"target": map[string]any{"index": float64(7)},
-		},
-	}); err == nil || !strings.Contains(err.Error(), `target must be {"ref":"rN"} or {"ref":"wN"}`) {
-		t.Fatalf("numeric index must fail ref-only batch validation: %v", err)
-	}
-	if _, err := normalizeA11yBatchActions([]any{
-		map[string]any{
-			"type": "keypress", "keys": []any{"TAB"}, "observe": "none",
-		},
-	}); err == nil || !strings.Contains(err.Error(), "does not accept field") {
-		t.Fatalf("per-action observe must be rejected: %v", err)
-	}
-	if _, err := normalizeA11yBatchActions([]any{}); err == nil {
-		t.Fatal("the normal mutating-batch validator must reject an empty sequence")
-	}
-	tooMany := make([]any, a11yBatchMaxActions+1)
-	for index := range tooMany {
-		tooMany[index] = map[string]any{
-			"type": "keypress", "keys": []any{"TAB"},
-		}
-	}
-	if _, err := normalizeA11yBatchActions(tooMany); err == nil {
-		t.Fatal("a11y batch action count must be bounded")
-	}
-	if _, err := normalizeA11yBatchActions([]any{
-		map[string]any{
-			"type": "type", "text": strings.Repeat("a", maxActionText),
-		},
-		map[string]any{
-			"type": "type", "text": strings.Repeat("b", maxActionText),
-		},
-		map[string]any{
-			"type": "type", "text": "c",
-		},
-	}); err == nil || !strings.Contains(err.Error(), "cumulative") {
-		t.Fatalf("a11y batch cumulative text budget must be bounded: %v", err)
-	}
-
-	service := newService()
-	rejected := service.a11yBatch([]any{map[string]any{"type": "keypress", "keys": []any{"TAB"}}},
-		observation{}, nil,
-	)
-	if !rejected.IsError ||
-		rejected.StructuredContent["action_attempted"] != false {
-		t.Fatalf("prevalidation failure must prove no action attempt: %#v", rejected)
-	}
-	noObservation := service.a11yBatch(
-		[]any{}, observation{mode: observeNone}, nil,
-	)
-	if !noObservation.IsError ||
-		!strings.Contains(resultText(noObservation), `mode="act" requires at least one action`) {
-		t.Fatalf("empty a11y act must reject and point to observe mode: %#v",
-			noObservation)
-	}
-
+func TestA11yBatchSourceKeepsExecutionContract(t *testing.T) {
 	source := mainGoSource(t)
 	for _, fragment := range []string{
 		`a11yBatchActionObservation(`,
@@ -413,43 +43,129 @@ func TestA11yBatchModePublishesAndEnforcesSafetyContract(t *testing.T) {
 	}
 }
 
-func TestA11yBatchRejectsRemovedIntentField(t *testing.T) {
-	_, err := normalizeA11yBatchActions([]any{
+func TestDecodeAXActionsAcceptsFlatShapes(t *testing.T) {
+	actions, err := decodeAXActions([]any{
 		map[string]any{
-			"type":   "click",
-			"intent": "the Save button",
-			"target": map[string]any{
-				"selector": map[string]any{
-					"role": "push button",
-					"name": "Save",
-				},
-			},
+			"type": "click", "ref": "r7",
+			"until": map[string]any{"type": "state", "ref": "r7", "state": "selected"},
 		},
+		map[string]any{"type": "keypress", "keys": []any{"CTRL", "L"}},
+		map[string]any{"type": "type", "ref": "r8", "text": "Lovelace"},
+		map[string]any{"type": "set_value", "ref": "r9", "value": ""},
+		map[string]any{"type": "scroll", "direction": "down", "pages": 2.5},
+		map[string]any{"type": "activate", "title": "Report"},
+		map[string]any{"type": "close", "ref": "w3"},
 	})
-	if err == nil || !strings.Contains(err.Error(), `does not accept field "intent"`) {
-		t.Fatalf("removed intent field was accepted: %v", err)
+	if err != nil || len(actions) != 7 {
+		t.Fatalf("valid batch rejected: %#v %v", actions, err)
+	}
+	if actions[0].postcondition == nil || actions[0].postcondition["type"] != "state" ||
+		actions[0].postcondition["value"] != true {
+		t.Fatalf("action until not decoded: %#v", actions[0].postcondition)
+	}
+	if actions[1].key != "CTRL+L" || actions[2].targetRef != "r8" ||
+		actions[4].pages != 2.5 || actions[5].title != "Report" ||
+		actions[6].targetRef != "w3" {
+		t.Fatalf("decoded actions: %#v", actions)
 	}
 }
 
-func TestA11yKeypressUsesOnlyPublicKeys(t *testing.T) {
-	normalized, err := normalizeA11yBatchActions([]any{
-		map[string]any{
-			"type": "keypress", "keys": []any{"CTRL", "L"},
-		},
-	})
-	if err != nil || len(normalized) != 1 {
-		t.Fatalf("keypress rejected: %#v err=%v", normalized, err)
+func TestDecodeAXActionsRejectsWithPathAndHint(t *testing.T) {
+	tooMany := make([]any, a11yBatchMaxActions+1)
+	for index := range tooMany {
+		tooMany[index] = map[string]any{"type": "keypress", "keys": []any{"TAB"}}
 	}
-	if got := normalized[0].key; got != "CTRL+L" {
-		t.Fatalf("normalized key=%#v want CTRL+L", got)
+	for name, test := range map[string]struct {
+		raw     any
+		path    string
+		message string
+	}{
+		"empty":        {[]any{}, "actions", "at least one action"},
+		"too many":     {tooMany, "actions", "at most"},
+		"not an array": {"click r1", "actions", "array"},
+		"click needs ref": {[]any{map[string]any{"type": "click"}},
+			"actions[0].ref", "click needs ref"},
+		"wN on click": {[]any{map[string]any{"type": "click", "ref": "w1"}},
+			"actions[0].ref", "wN is only for activate and close"},
+		"rN on close": {[]any{map[string]any{"type": "close", "ref": "r1"}},
+			"actions[0].ref", "rN is an element"},
+		"close not last": {[]any{
+			map[string]any{"type": "close", "ref": "w1"},
+			map[string]any{"type": "click", "ref": "r1"},
+		}, "actions[0]", "close must be the last action"},
+		"activate both": {[]any{map[string]any{"type": "activate", "ref": "w1", "title": "x"}},
+			"actions[0]", "exactly one of ref (wN) or title"},
+		"activate neither": {[]any{map[string]any{"type": "activate"}},
+			"actions[0]", "exactly one of ref (wN) or title"},
+		"blank title": {[]any{map[string]any{"type": "activate", "title": " "}},
+			"actions[0].title", "non-blank"},
+		"field of another type": {[]any{map[string]any{"type": "click", "ref": "r1", "text": "x"}},
+			"actions[0].text", "click does not accept"},
+		"legacy key": {[]any{map[string]any{"type": "keypress", "key": "Tab"}},
+			"actions[0].key", `use "keys"`},
+		"blank key": {[]any{map[string]any{"type": "keypress", "keys": []any{" "}}},
+			"actions[0].keys[0]", "key name"},
+		"intent": {[]any{map[string]any{"type": "click", "ref": "r1", "intent": "Save"}},
+			"actions[0].intent", "click does not accept"},
+		"index target": {[]any{map[string]any{"type": "click", "index": 7.0}},
+			"actions[0].index", "click does not accept"},
+		"until not object": {[]any{map[string]any{"type": "click", "ref": "r1", "until": "selected"}},
+			"actions[0].until", "until must be an object"},
+		"per-action observe": {[]any{map[string]any{"type": "keypress", "keys": []any{"TAB"}, "observe": "none"}},
+			"actions[0].observe", "keypress does not accept"},
+		"type case": {[]any{map[string]any{"type": "Click", "ref": "r1"}},
+			"actions[0].type", "type must be one of"},
+		"direction case": {[]any{map[string]any{"type": "scroll", "direction": "UP"}},
+			"actions[0].direction", "scroll needs direction"},
+		"text budget": {[]any{
+			map[string]any{"type": "type", "text": strings.Repeat("a", maxActionText)},
+			map[string]any{"type": "type", "text": strings.Repeat("b", maxActionText)},
+			map[string]any{"type": "type", "text": "c"},
+		}, "actions[2]", "limited to"},
+	} {
+		_, err := decodeAXActions(test.raw)
+		if err == nil || err.code != axCodeInvalidArgument ||
+			err.path != test.path || !strings.Contains(err.message, test.message) {
+			t.Fatalf("%s: got %#v", name, err)
+		}
 	}
-	if _, err := normalizeA11yBatchActions([]any{
-		map[string]any{
-			"type": "keypress", "key": "Tab",
-		},
-	}); err == nil || !strings.Contains(err.Error(), `does not accept field "key"`) {
-		t.Fatalf("legacy key must fail preflight: %v", err)
+}
+
+// TestModelWrittenActionShapesGetUsableAnswers covers shapes models wrote in
+// a real panel. The first is valid now; the others name the field and show
+// the accepted shape.
+func TestModelWrittenActionShapesGetUsableAnswers(t *testing.T) {
+	if _, err := decodeAXActions([]any{map[string]any{"ref": "r103", "type": "click"}}); err != nil {
+		t.Fatalf("flat ref click must be valid: %v", err)
 	}
+	for _, test := range []struct {
+		action map[string]any
+		path   string
+		hint   string
+	}{
+		{map[string]any{"ref": "w1", "action": "close"}, "actions[0].action", `{"type":"close","ref":"w1"}`},
+		{map[string]any{"ref": "r1", "action": "press"}, "actions[0].action", `{"type":"click","ref":"r1"}`},
+		{map[string]any{"type": "press", "ref": "r1"}, "actions[0].type", `{"type":"click","ref":"r1"}`},
+		{map[string]any{"type": "click", "target": map[string]any{"ref": "r4"}}, "actions[0].target", `{"type":"click","ref":"r4"}`},
+		{map[string]any{"type": "keypress", "key": "CTRL+S"}, "actions[0].key", `{"type":"keypress","keys":["CTRL","S"]}`},
+	} {
+		_, err := decodeAXActions([]any{test.action})
+		if err == nil || err.path != test.path || err.hint != test.hint {
+			t.Fatalf("%v: got %#v", test.action, err)
+		}
+		if _, hintErr := decodeAXActions([]any{decodeJSONForTest(t, err.hint)}); hintErr != nil {
+			t.Fatalf("hint %s is not a valid action: %v", err.hint, hintErr)
+		}
+	}
+}
+
+func decodeJSONForTest(t *testing.T, text string) map[string]any {
+	t.Helper()
+	var value map[string]any
+	if err := json.Unmarshal([]byte(text), &value); err != nil {
+		t.Fatalf("decode %s: %v", text, err)
+	}
+	return value
 }
 
 func TestBatchMutationSummaryPreservesActionUnknown(t *testing.T) {
@@ -473,7 +189,7 @@ func TestRefOwnedBatchDerivesOneWindowAndKeyboardInheritance(t *testing.T) {
 		{actionType: "click", targetRef: elementRef},
 		{actionType: "keypress", key: "ENTER"},
 	}
-	context, err := service.deriveA11yBatchContext("", "", actions)
+	context, err := service.deriveA11yBatchContext("", actions, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,26 +204,20 @@ func TestActionPostconditionsArePreflightedBeforeFirstInput(t *testing.T) {
 	backend := &recordingPlatformBackend{}
 	service.backend = backend
 
-	result := service.a11yBatch([]any{
-		map[string]any{
-			"type":   "click",
-			"target": map[string]any{"ref": elementRef},
-		},
-		map[string]any{
-			"type": "keypress",
-			"keys": []any{"ENTER"},
-			"postcondition": map[string]any{
-				"type": "state",
-				"target": map[string]any{
-					"ref": "r999999",
+	result := service.a11yBatch(
+		[]any{
+			map[string]any{"type": "click", "ref": elementRef},
+			map[string]any{
+				"type": "keypress",
+				"keys": []any{"ENTER"},
+				"until": map[string]any{
+					"type": "state", "ref": "r999999", "state": "selected",
 				},
-				"state": "selected",
-				"value": true,
 			},
 		},
-	},
 		observation{},
 		nil,
+		"",
 	)
 	if !result.IsError ||
 		result.StructuredContent["action_attempted"] != false {
@@ -518,7 +228,7 @@ func TestActionPostconditionsArePreflightedBeforeFirstInput(t *testing.T) {
 	}
 	if !strings.Contains(
 		resultText(result),
-		"actions[1].postcondition",
+		"actions[1].until",
 	) {
 		t.Fatalf("preflight error did not identify action guard: %q",
 			resultText(result))
@@ -698,16 +408,14 @@ func TestUnknownActionPostconditionRequiresObservationWhenNoneReturned(t *testin
 	}
 }
 
-func TestAllUntargetedBatchRequiresWindowRef(t *testing.T) {
+func TestRefLessBatchWithoutFocusOrWindowHasNoWindow(t *testing.T) {
 	service, _, _, _ := sheetBatchService(t)
-	_, err := service.deriveA11yBatchContext(
-		"", "", []a11yBatchAction{{
-			actionType: "keypress",
-			key:        "CTRL+S",
-		}},
-	)
-	if err == nil || !strings.Contains(err.Error(), "requires window_ref") {
-		t.Fatalf("expected window_ref rejection, got %v", err)
+	_, err := service.deriveA11yBatchContext("", []a11yBatchAction{{
+		actionType: "keypress",
+		key:        "CTRL+S",
+	}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "the batch has no window") {
+		t.Fatalf("expected no-window rejection, got %v", err)
 	}
 }
 
@@ -721,76 +429,43 @@ func TestCrossWindowBatchFailsBeforeInput(t *testing.T) {
 		":1.84", "/window/2", "pid:10:start:100", "dialog", "Question",
 		appRef,
 	)
-	_, err := service.deriveA11yBatchContext("", "", []a11yBatchAction{
-		{actionType: "click", targetRef: firstRef},
-		{actionType: "click", targetRef: secondRef},
-	},
+	_, err := service.deriveA11yBatchContext(
+		"", []a11yBatchAction{
+			{actionType: "click", targetRef: firstRef},
+			{actionType: "click", targetRef: secondRef},
+		}, nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "multiple logical windows") {
+	if err == nil || !strings.Contains(err.Error(), "batch spans two windows") {
 		t.Fatalf("expected cross-window rejection, got %v", err)
 	}
 }
 
-func TestRefOwnedBatchRejectsDuplicateAppOrWindowRef(t *testing.T) {
+func TestBatchAcceptsMatchingWindowRefAndRejectsAnother(t *testing.T) {
 	service, appRef, windowRef, elementRef := sheetBatchService(t)
-	for name, identity := range map[string]struct {
-		appRef    string
-		windowRef string
-	}{
-		"app_ref":    {appRef: appRef},
-		"window_ref": {windowRef: windowRef},
-	} {
-		_, err := service.deriveA11yBatchContext(identity.appRef, identity.windowRef, []a11yBatchAction{{
-			actionType: "click",
-			targetRef:  elementRef,
-		}},
-		)
-		if err == nil ||
-			!strings.Contains(err.Error(), "must omit app_ref and window_ref") {
-			t.Fatalf("%s duplicate identity was accepted: %v", name, err)
-		}
+	context, err := service.deriveA11yBatchContext(windowRef, []a11yBatchAction{{
+		actionType: "click", targetRef: elementRef,
+	}}, nil)
+	if err != nil || context.windowRef != windowRef {
+		t.Fatalf("matching window_ref was rejected: %#v %v", context, err)
 	}
-}
-
-func TestPublicBatchRejectsSelectorTargets(t *testing.T) {
-	_, err := normalizeA11yBatchActions([]any{map[string]any{
-		"type": "click",
-		"target": map[string]any{
-			"selector": map[string]any{"role": "button", "name": "Save"},
-		},
-	}})
-	if err == nil || !strings.Contains(err.Error(), `target must be {"ref":"rN"} or {"ref":"wN"}`) {
-		t.Fatalf("expected ref-only rejection, got %v", err)
-	}
-}
-
-func TestSetValueThenClickRemainsSchemaValid(t *testing.T) {
-	actions, err := normalizeA11yBatchActions([]any{
-		map[string]any{
-			"type":   "set_value",
-			"target": map[string]any{"ref": "r98"},
-			"value":  "5",
-		},
-		map[string]any{
-			"type":   "set_value",
-			"target": map[string]any{"ref": "r99"},
-			"value":  "2",
-		},
-		map[string]any{
-			"type":   "click",
-			"target": map[string]any{"ref": "r100"},
-		},
-	})
-	if err != nil || len(actions) != 3 {
-		t.Fatalf("set_value followed by click must remain schema-valid: actions=%#v err=%v", actions, err)
+	other := service.windowRefRegistry.Acquire(
+		"libreoffice", "w2:fedcba9876543210fedcba9876543210", `dialog "Question"`, "c1",
+		":1.84", "/window/2", "pid:10:start:100", "dialog", "Question", appRef,
+	)
+	_, err = service.deriveA11yBatchContext(other, []a11yBatchAction{{
+		actionType: "click", targetRef: elementRef,
+	}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "omit window_ref") {
+		t.Fatalf("conflicting window_ref was accepted: %v", err)
 	}
 }
 
 func TestBatchContextCarriesPrivateWindowExpectation(t *testing.T) {
 	service, _, windowRef, elementRef := sheetBatchService(t)
-	context, err := service.deriveA11yBatchContext("", "", []a11yBatchAction{
-		{actionType: "click", targetRef: elementRef},
-	},
+	context, err := service.deriveA11yBatchContext(
+		"", []a11yBatchAction{
+			{actionType: "click", targetRef: elementRef},
+		}, nil,
 	)
 	if err != nil {
 		t.Fatal(err)

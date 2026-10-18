@@ -753,8 +753,8 @@ func TestA11yMixedBatchExecutesEveryPlannedOrderedInputRun(t *testing.T) {
 
 	result := service.a11yBatch([]any{
 		map[string]any{
-			"type":   "click",
-			"target": map[string]any{"ref": elementRef},
+			"type": "click",
+			"ref":  elementRef,
 		},
 		map[string]any{"type": "keypress", "keys": []any{"DOWN"}},
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
@@ -763,7 +763,6 @@ func TestA11yMixedBatchExecutesEveryPlannedOrderedInputRun(t *testing.T) {
 	},
 		observation{mode: observeNone},
 		nil,
-		"",
 		"",
 	)
 	if result.IsError {
@@ -843,8 +842,8 @@ func TestA11yMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 
 	result := service.a11yBatch([]any{
 		map[string]any{
-			"type":   "click",
-			"target": map[string]any{"ref": elementRef},
+			"type": "click",
+			"ref":  elementRef,
 		},
 		map[string]any{"type": "keypress", "keys": []any{"A"}},
 		map[string]any{"type": "keypress", "keys": []any{"B"}},
@@ -852,7 +851,6 @@ func TestA11yMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 	},
 		observation{mode: observeNone},
 		nil,
-		"",
 		"",
 	)
 	if !result.IsError {
@@ -883,7 +881,7 @@ func TestA11yMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 }
 
 func TestA11yWholeOrderedTransportFailurePreservesUncertainty(t *testing.T) {
-	service, appRef, windowRef, _ := orderedInputTestService(t)
+	service, _, windowRef, _ := orderedInputTestService(t)
 	service.backend = &orderedInputRecordingBackend{
 		recordingPlatformBackend: &recordingPlatformBackend{},
 		err:                      errors.New("connection closed after request write"),
@@ -895,7 +893,6 @@ func TestA11yWholeOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 	},
 		observation{mode: observeNone},
 		nil,
-		appRef,
 		windowRef,
 	)
 	if !result.IsError {
@@ -930,8 +927,8 @@ func TestA11yMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 
 	result := service.a11yBatch([]any{
 		map[string]any{
-			"type":   "click",
-			"target": map[string]any{"ref": elementRef},
+			"type": "click",
+			"ref":  elementRef,
 		},
 		map[string]any{"type": "keypress", "keys": []any{"A"}},
 		map[string]any{"type": "keypress", "keys": []any{"B"}},
@@ -939,7 +936,6 @@ func TestA11yMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 	},
 		observation{mode: observeNone},
 		nil,
-		"",
 		"",
 	)
 	if !result.IsError {
@@ -962,7 +958,7 @@ func TestA11yMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 }
 
 func TestA11yBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) {
-	service, appRef, windowRef, _ := orderedInputTestService(t)
+	service, _, windowRef, _ := orderedInputTestService(t)
 	legacy := &recordingPlatformBackend{}
 	backend := &orderedInputRecordingBackend{
 		recordingPlatformBackend: legacy,
@@ -980,7 +976,6 @@ func TestA11yBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) 
 	},
 		observation{mode: observeNone},
 		nil,
-		appRef,
 		windowRef,
 	)
 	if result.IsError {
@@ -1006,7 +1001,7 @@ func TestA11yBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) 
 }
 
 func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testing.T) {
-	service, appRef, windowRef, _ := orderedInputTestService(t)
+	service, _, windowRef, _ := orderedInputTestService(t)
 	current := mixedOrderedInputBatchTestSnapshot()
 	current.WindowHandle = "w2:11111111111111111111111111111111"
 	current.WindowTitle = "Find & Replace"
@@ -1039,7 +1034,6 @@ func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testin
 	},
 		observation{mode: observeDiff},
 		nil,
-		appRef,
 		windowRef,
 	)
 	if result.IsError {
@@ -1084,7 +1078,7 @@ func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testin
 
 	result.StructuredContent["ax_mode"] = a11yModeAct
 	prepared := prepareAXEvidence(result)
-	if prepared.StructuredContent["input_events_emitted"] != true ||
+	if prepared.StructuredContent["input_emitted"] != true ||
 		prepared.StructuredContent["task_effect_verified"] == true {
 		t.Fatalf("recovered action overstated causal evidence: %#v", prepared.StructuredContent)
 	}
@@ -1095,7 +1089,7 @@ func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testin
 }
 
 func TestA11yWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
-	service, appRef, windowRef, _ := orderedInputTestService(t)
+	service, _, windowRef, _ := orderedInputTestService(t)
 	recoveryFailure := ProviderAccessibilityResult{
 		OK:    false,
 		Error: "state_unavailable: no current window",
@@ -1123,7 +1117,6 @@ func TestA11yWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
 	},
 		observation{mode: observeDiff},
 		nil,
-		appRef,
 		windowRef,
 	)
 	if !result.IsError ||
@@ -1147,7 +1140,7 @@ func TestA11yWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
 }
 
 func TestA11yBatchPreservesOrderedPartialEmissionWithoutLegacyRetry(t *testing.T) {
-	service, appRef, windowRef, _ := orderedInputTestService(t)
+	service, _, windowRef, _ := orderedInputTestService(t)
 	legacy := &recordingPlatformBackend{}
 	backend := &orderedInputRecordingBackend{
 		recordingPlatformBackend: legacy,
@@ -1202,7 +1195,6 @@ func TestA11yBatchPreservesOrderedPartialEmissionWithoutLegacyRetry(t *testing.T
 	},
 		observation{mode: observeNone},
 		nil,
-		appRef,
 		windowRef,
 	)
 	if !result.IsError {
