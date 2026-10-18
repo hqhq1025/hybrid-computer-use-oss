@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"strings"
 	"testing"
 )
@@ -89,8 +88,8 @@ func TestMCPStructuredContentIsExplicitOptIn(t *testing.T) {
 		"id":      float64(2),
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "click",
-			"arguments": map[string]any{"element_index": "1"},
+			"name":      "AX",
+			"arguments": map[string]any{"mode": "invalid"},
 		},
 	}, svc)
 	result := call["result"].(toolCallResult)
@@ -126,7 +125,7 @@ func TestMCPInitializeUsesProductOwnedServerName(t *testing.T) {
 	}
 }
 
-func TestMCPRejectsLegacyToolCallsWithoutMigrationCompatibility(t *testing.T) {
+func TestMCPRejectsUnknownToolAsInvalidParams(t *testing.T) {
 	request := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -137,29 +136,68 @@ func TestMCPRejectsLegacyToolCallsWithoutMigrationCompatibility(t *testing.T) {
 		},
 	}
 	response := handleMCPRequest(request, newService())
-	result := response["result"].(toolCallResult)
-	if !result.IsError ||
-		!strings.Contains(resultText(result), "use AX or GUI") {
-		t.Fatalf("legacy MCP tool call was not rejected: %#v", response)
+	rpcError, _ := response["error"].(map[string]any)
+	if rpcError["code"] != -32602 ||
+		!strings.Contains(rpcError["message"].(string), "use AX or GUI") {
+		t.Fatalf("unknown tool must be a -32602 protocol error: %#v", response)
 	}
 }
 
-func TestMCPFramingRecoversAtNewlineAndRejectsOversizedMessages(t *testing.T) {
-	valid := `{"jsonrpc":"2.0","id":1,"method":"ping"}` + "\n"
-	input := strings.NewReader("{not-json}\n" + valid)
+func TestMCPFramingRecoversFromMalformedAndOversizedMessages(t *testing.T) {
+	ping := `{"jsonrpc":"2.0","id":1,"method":"ping"}` + "\n"
+	oversized := `{"x":"` + strings.Repeat("x", maxMCPMessageBytes) + `"}` + "\n"
+	input := strings.NewReader("{not-json}\n" + oversized + ping)
 	var output bytes.Buffer
 	if err := runMCP(input, &output); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[0], `"code":-32700`) ||
-		!strings.Contains(lines[1], `"id":1`) {
-		t.Fatalf("newline framing did not recover cleanly: %q", output.String())
+	if len(lines) != 3 || !strings.Contains(lines[0], `"code":-32700`) ||
+		!strings.Contains(lines[1], `"code":-32600`) ||
+		!strings.Contains(lines[2], `"id":1`) {
+		t.Fatalf("framing did not recover after bad messages: %q", output.String())
 	}
+}
 
-	oversized := strings.NewReader(strings.Repeat("x", maxMCPMessageBytes+1) + "\n")
-	if err := runMCP(oversized, io.Discard); err == nil {
-		t.Fatal("oversized MCP message must terminate the connection")
+func TestMCPAnswersEveryRequestAndNoNotification(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  []string // substrings, one per expected output line; nil = no output
+	}{
+		{"initialized notification", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, nil},
+		{"cancelled notification", `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`, nil},
+		{"request without id is not executed", `{"jsonrpc":"2.0","method":"tools/list"}`, nil},
+		{"client response", `{"jsonrpc":"2.0","id":7,"result":{}}`, nil},
+		{"non-object message", `5`, []string{`"code":-32600`}},
+		{"wrong jsonrpc version", `{"jsonrpc":2,"id":3,"method":"ping"}`, []string{`"id":3`, `"code":-32600`}},
+		{"null id", `{"jsonrpc":"2.0","id":null,"method":"ping"}`, []string{`"id":null`, `"code":-32600`}},
+		{"method not a string", `{"jsonrpc":"2.0","id":4,"method":5}`, []string{`"code":-32600`}},
+		{"params not an object", `{"jsonrpc":"2.0","id":5,"method":"tools/list","params":[]}`, []string{`"code":-32602`}},
+		{"arguments not an object", `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"GUI","arguments":[]}}`, []string{`"code":-32602`}},
+		{"missing tool name", `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{}}`, []string{`"code":-32602`}},
+		{"empty batch", `[]`, []string{`"code":-32600`}},
+		{"batch", `[{"jsonrpc":"2.0","id":"a","method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"}]`, []string{`"id":"a"`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := runMCP(strings.NewReader(tc.input+"\n"), &output); err != nil {
+				t.Fatal(err)
+			}
+			got := strings.TrimSpace(output.String())
+			if tc.want == nil {
+				if got != "" {
+					t.Fatalf("expected no response, got %q", got)
+				}
+				return
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("response %q does not contain %q", got, want)
+				}
+			}
+		})
 	}
 }
 

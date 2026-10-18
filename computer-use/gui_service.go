@@ -365,11 +365,6 @@ func validateGUISnapshotImage(snapshot *appSnapshot) error {
 		int64(config.Width)*int64(config.Height) > maxPixels {
 		return fmt.Errorf("image dimensions exceed the supported desktop limit")
 	}
-	if _, format, err := image.Decode(bytes.NewReader(raw)); err != nil {
-		return fmt.Errorf("invalid image payload")
-	} else if "image/"+format != actualMIME {
-		return fmt.Errorf("image type changed while decoding")
-	}
 	// Older providers may omit MIME while still returning a valid supported
 	// image. Canonicalize the detected type before this snapshot is cached or
 	// rendered so JPEG bytes can never be mislabeled as PNG.

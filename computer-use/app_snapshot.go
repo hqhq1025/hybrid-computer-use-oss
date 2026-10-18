@@ -96,8 +96,8 @@ type axProviderAnnotation struct {
 }
 
 // elementRef is an element's stable ref together with the fields that
-// invalidate it. As in Playwright's ariaSnapshot.ts, a change of role or name
-// issues a new ref, because the element is no longer the same object.
+// invalidate it. A change of role or name issues a new ref, because the
+// element is no longer the same object.
 type elementRef struct {
 	Index    int    `json:"index"`
 	Role     string `json:"role"`
@@ -134,7 +134,6 @@ type appSnapshot struct {
 	ScreenshotEncoding  string                 `json:"screenshotEncoding,omitempty"`
 	CoordinateSpace     string                 `json:"coordinateSpace,omitempty"`
 	FrameID             string                 `json:"frameId,omitempty"`
-	ContentFrameID      string                 `json:"contentFrameId,omitempty"`
 	DesktopLayout       map[string]any         `json:"desktopLayout,omitempty"`
 	Width               int                    `json:"width,omitempty"`
 	Height              int                    `json:"height,omitempty"`

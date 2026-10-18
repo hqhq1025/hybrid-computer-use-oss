@@ -112,8 +112,7 @@ def pixel_buffers_identical(before, after):
 def persistent_pixel_change(before, after_one, after_two):
     """Count only changes present in both post-action captures.
 
-    This is the desktop equivalent of Playwright's "capture until two
-    consecutive screenshots match, then compare". Two pre-action captures
+    Two pre-action captures
     cannot measure noise: they are milliseconds apart, so a 1 Hz text caret
     never blinks between them, the noise floor reads as zero, and a no-op
     keystroke is reported as a screen change located exactly at the caret. A
@@ -202,9 +201,9 @@ def pixel_change_note(change, screenshot_scope="window"):
 
 
 def encoded_screenshot(pixbuf):
-    candidates = []
+    smallest = None
     formats = [
-        ("png", ["compression"], ["9"], "image/png"),
+        ("png", ["compression"], ["3"], "image/png"),
         ("jpeg", ["quality"], ["85"], "image/jpeg"),
         ("jpeg", ["quality"], ["70"], "image/jpeg"),
         ("jpeg", ["quality"], ["55"], "image/jpeg"),
@@ -217,20 +216,25 @@ def encoded_screenshot(pixbuf):
             continue
         if not ok:
             continue
-        encoded = base64.b64encode(bytes(data)).decode("ascii")
-        candidates.append({
-            "data": encoded,
-            "mimeType": mime_type,
-            "encoding": image_format + (
-                "-quality-" + values[0] if image_format == "jpeg"
-                else "-compression-" + values[0]
-            ),
-        })
-        if len(encoded) <= SCREENSHOT_MAX_BASE64_CHARS:
-            return candidates[-1]
-    if not candidates:
+        data = bytes(data)
+        candidate = (data, mime_type, image_format + (
+            "-quality-" + values[0] if image_format == "jpeg"
+            else "-compression-" + values[0]
+        ))
+        if smallest is None or len(data) < len(smallest[0]):
+            smallest = candidate
+        # Base64 uses four characters per three bytes, including padding.
+        if 4 * ((len(data) + 2) // 3) <= SCREENSHOT_MAX_BASE64_CHARS:
+            smallest = candidate
+            break
+    if smallest is None:
         return None
-    return min(candidates, key=lambda candidate: len(candidate["data"]))
+    data, mime_type, encoding = smallest
+    return {
+        "data": base64.b64encode(data).decode("ascii"),
+        "mimeType": mime_type,
+        "encoding": encoding,
+    }
 
 
 def capture_window_image(bounds):
@@ -276,8 +280,8 @@ def gui_model_dimensions(bounds):
     }
 
 
-def capture_gui_image(bounds):
-    """Capture a full desktop image in the public GUI coordinate space."""
+def capture_gui_pixels(bounds):
+    """Capture an owned, unencoded pixbuf in the public GUI coordinate space."""
     if Gdk is None or GdkPixbuf is None or bounds is None:
         return None
     try:
@@ -305,7 +309,7 @@ def capture_gui_image(bounds):
             )
             if pixbuf is None:
                 return None
-        return encoded_screenshot(pixbuf)
+        return pixbuf
     except Exception:
         return None
 

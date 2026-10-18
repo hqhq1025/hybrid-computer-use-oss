@@ -78,8 +78,8 @@ func errorContextEnabled() bool {
 // writeErrorContext writes the UI state at the time of a failure to disk. It
 // returns a note describing the files and whether fresh UI was sampled.
 //
-// This follows Playwright's error-context.md, which saves a page snapshot with
-// each failure because a one-line error cannot be diagnosed afterwards. On the
+// A one-line error cannot be diagnosed afterwards, so each failure saves a
+// snapshot. On the
 // desktop the UI changes a moment later, and no tree from the failure would
 // survive otherwise.
 //

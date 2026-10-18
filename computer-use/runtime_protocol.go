@@ -209,19 +209,18 @@ type semanticTarget struct {
 }
 
 type RuntimeActionEvidence struct {
-	privateNativeRequestID string
-	DiagnosticTimingMS     map[string]float64 `json:"diagnostic_timing_ms,omitempty"`
-	Route                  string             `json:"route"`
-	GeometrySampled        bool               `json:"geometry_sampled"`
-	GeometryStable         *bool              `json:"geometry_stable,omitempty"`
-	WindowFocusVerified    *bool              `json:"window_focus_verified,omitempty"`
-	TargetFocusVerified    *bool              `json:"target_focus_verified,omitempty"`
-	PointOwnerVerified     *bool              `json:"point_owner_verified,omitempty"`
-	Enabled                *bool              `json:"enabled,omitempty"`
-	Editable               *bool              `json:"editable,omitempty"`
-	FocusVerified          *bool              `json:"focus_verified,omitempty"`
-	EditableVerified       *bool              `json:"editable_verified,omitempty"`
-	ReadbackSampled        bool               `json:"readback_sampled"`
-	ReadbackVerified       *bool              `json:"readback_verified,omitempty"`
-	InputEmitted           bool               `json:"input_emitted"`
+	DiagnosticTimingMS  map[string]float64 `json:"diagnostic_timing_ms,omitempty"`
+	Route               string             `json:"route"`
+	GeometrySampled     bool               `json:"geometry_sampled"`
+	GeometryStable      *bool              `json:"geometry_stable,omitempty"`
+	WindowFocusVerified *bool              `json:"window_focus_verified,omitempty"`
+	TargetFocusVerified *bool              `json:"target_focus_verified,omitempty"`
+	PointOwnerVerified  *bool              `json:"point_owner_verified,omitempty"`
+	Enabled             *bool              `json:"enabled,omitempty"`
+	Editable            *bool              `json:"editable,omitempty"`
+	FocusVerified       *bool              `json:"focus_verified,omitempty"`
+	EditableVerified    *bool              `json:"editable_verified,omitempty"`
+	ReadbackSampled     bool               `json:"readback_sampled"`
+	ReadbackVerified    *bool              `json:"readback_verified,omitempty"`
+	InputEmitted        bool               `json:"input_emitted"`
 }

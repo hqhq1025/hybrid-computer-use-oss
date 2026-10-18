@@ -73,9 +73,8 @@ def window_relative(window_bounds, x, y):
     return x - window_bounds["x"], y - window_bounds["y"]
 
 
-# An element is stable once two consecutive samples match: the desktop analogue
-# of Playwright waiting for an unchanged bounding box across two animation
-# frames.
+# An element is stable once two consecutive samples report the same bounding
+# box.
 STABLE_SAMPLE_SECONDS = 0.08
 
 # Maximum wait for an element to stop moving. One second covers most one-off
@@ -91,8 +90,7 @@ def wait_until_stable(element, window_bounds, first=None):
     has already been sampled, to avoid a redundant read.
 
     Only stability is checked, not enablement.
-    Playwright's actionability checks also wait for "enabled", but that signal
-    is unreliable over AT-SPI: Nautilus file icons expose neither ENABLED nor
+    Enablement is unreliable over AT-SPI: Nautilus file icons expose neither ENABLED nor
     SENSITIVE (only SHOWING, VISIBLE and FOCUSABLE) yet offer working "open"
     and "menu" actions, so an ENABLED gate would reject usable targets. A
     "receives events" hit test is skipped for the same reason: it would block
@@ -126,7 +124,7 @@ def wait_until_stable(element, window_bounds, first=None):
 def current_geometry(element, element_record, window_bounds):
     """Replace the record's frame with the live node's current frame.
 
-    Like a Playwright locator, the target is re-resolved at action time. The
+    The target is re-resolved at action time. The
     live node is already resolved, so coordinates must come from it rather
     than from the snapshot record cached by the Go side; otherwise semantic
     actions and synthesized input could target different positions within one

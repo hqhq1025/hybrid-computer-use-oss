@@ -9,6 +9,7 @@ import (
 type axBudgetCandidate struct {
 	parentID string
 	nodeIDs  []string
+	depth    int
 	priority int
 	savings  int
 }
@@ -25,23 +26,15 @@ func axStructuralTreeBudget() int {
 }
 
 func axCriticalState(node *AXNode) bool {
-	if node == nil {
-		return false
-	}
-	return node.States.Active == TriTrue ||
-		node.States.Selected == TriTrue ||
-		node.States.Checked == CheckedTrue ||
-		node.States.Checked == CheckedMixed ||
-		node.States.Expanded == TriTrue ||
-		node.States.Pressed == TriTrue ||
-		node.States.Invalid == TriTrue
+	return axNodeHasState(node)
 }
 
 func axSubtreeContainsCriticalOrBoundary(node *AXNode) bool {
 	if node == nil {
 		return false
 	}
-	if axCriticalState(node) || isAXSemanticBoundary(node.Role) {
+	if node.ForceKeep || axCriticalState(node) ||
+		isAXSemanticBoundary(node.Role) {
 		return true
 	}
 	for _, child := range node.Children {
@@ -175,6 +168,7 @@ func collectAXBudgetCandidates(
 				*out = append(*out, axBudgetCandidate{
 					parentID: parent.ID,
 					nodeIDs:  nodeIDs,
+					depth:    depth,
 					priority: priority,
 					savings:  savings,
 				})
@@ -205,6 +199,91 @@ func findAXNodeByID(nodes []*AXNode, id string) *AXNode {
 	return nil
 }
 
+func axBudgetParentMap(nodes []*AXNode) map[string]string {
+	parents := map[string]string{}
+	var visit func([]*AXNode, string)
+	visit = func(current []*AXNode, parentID string) {
+		for _, node := range current {
+			if node == nil {
+				continue
+			}
+			if parentID != "" {
+				parents[node.ID] = parentID
+			}
+			visit(node.Children, node.ID)
+		}
+	}
+	visit(nodes, "")
+	return parents
+}
+
+func axBudgetIsAncestor(
+	parents map[string]string,
+	ancestor,
+	descendant string,
+) bool {
+	for current := parents[descendant]; current != ""; current = parents[current] {
+		if current == ancestor {
+			return true
+		}
+	}
+	return false
+}
+
+func axBudgetCandidatesOverlap(
+	parents map[string]string,
+	left,
+	right axBudgetCandidate,
+) bool {
+	for _, leftID := range left.nodeIDs {
+		for _, rightID := range right.nodeIDs {
+			if leftID == rightID ||
+				axBudgetIsAncestor(parents, leftID, rightID) ||
+				axBudgetIsAncestor(parents, rightID, leftID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func selectAXBudgetPlan(
+	roots []*AXNode,
+	candidates []axBudgetCandidate,
+	requiredSavings int,
+) []axBudgetCandidate {
+	if requiredSavings <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority < candidates[j].priority
+		}
+		return candidates[i].savings > candidates[j].savings
+	})
+	parents := axBudgetParentMap(roots)
+	selected := make([]axBudgetCandidate, 0, len(candidates))
+	savings := 0
+	for _, candidate := range candidates {
+		if savings >= requiredSavings {
+			break
+		}
+		overlap := false
+		for _, existing := range selected {
+			if axBudgetCandidatesOverlap(parents, candidate, existing) {
+				overlap = true
+				break
+			}
+		}
+		if overlap {
+			continue
+		}
+		selected = append(selected, candidate)
+		savings += candidate.savings
+	}
+	return selected
+}
+
 func mergeAdjacentAXBudgetSummaries(parent *AXNode) {
 	if parent == nil {
 		return
@@ -232,11 +311,12 @@ func applyAXBudgetCandidate(
 	roots []*AXNode,
 	candidate axBudgetCandidate,
 	sequence int,
-) (int, int) {
+) (int, int, int) {
 	parent := findAXNodeByID(roots, candidate.parentID)
 	if parent == nil {
-		return 0, 0
+		return 0, 0, 0
 	}
+	beforeChars := axRenderedNodeChars(parent, candidate.depth)
 	remove := map[string]bool{}
 	for _, id := range candidate.nodeIDs {
 		remove[id] = true
@@ -265,7 +345,7 @@ func applyAXBudgetCandidate(
 		}
 	}
 	if omittedNodes == 0 {
-		return 0, 0
+		return 0, 0, 0
 	}
 	if summary != nil {
 		summary.BudgetOmittedNodes = omittedNodes
@@ -280,7 +360,8 @@ func applyAXBudgetCandidate(
 	for _, child := range parent.Children {
 		child.Parent = parent
 	}
-	return omittedNodes, omittedTargets
+	afterChars := axRenderedNodeChars(parent, candidate.depth)
+	return omittedNodes, omittedTargets, beforeChars - afterChars
 }
 
 func applyAXStructuralBudget(
@@ -298,17 +379,13 @@ func applyAXStructuralBudget(
 	}
 	candidates := []axBudgetCandidate{}
 	collectAXBudgetCandidates(roots, 1, &candidates)
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if candidates[i].priority != candidates[j].priority {
-			return candidates[i].priority < candidates[j].priority
-		}
-		return candidates[i].savings > candidates[j].savings
-	})
-	for index, candidate := range candidates {
-		if context.StageBudgetCharsAfter <= budget {
-			break
-		}
-		removed, targets := applyAXBudgetCandidate(
+	plan := selectAXBudgetPlan(
+		roots,
+		candidates,
+		context.StageBudgetCharsBefore-budget,
+	)
+	for index, candidate := range plan {
+		removed, targets, savings := applyAXBudgetCandidate(
 			roots,
 			candidate,
 			index+1,
@@ -319,8 +396,11 @@ func applyAXStructuralBudget(
 		context.StageBudgetApplied = true
 		context.StageBudgetOmittedNodes += removed
 		context.StageBudgetOmittedTargets += targets
-		context.StageBudgetCharsAfter = axRenderedForestChars(roots)
+		_ = savings
 	}
+	// The plan is disjoint, so all changes are applied without repeated
+	// whole-forest accounting. Render once for the authoritative result.
+	context.StageBudgetCharsAfter = axRenderedForestChars(roots)
 	context.StageBudgetExhausted = context.StageBudgetCharsAfter > budget
 	return roots
 }

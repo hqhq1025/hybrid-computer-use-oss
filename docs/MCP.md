@@ -18,6 +18,26 @@ One `computer-use mcp` process serves one desktop session. It starts one
 persistent platform provider and keeps AX snapshots, element references and the
 GUI layout lease in memory, so never share a process between benchmark tasks.
 
+### Linux screenshot pipeline
+
+The provider captures raw pixels and samples the desktop layout before encoding
+an image. A screenshot-only GUI call uses one captured frame. A mutation batch
+retains its pre-action frame for failure evidence and encodes its final frame
+for delivery. Layout-race retries discard raw captures without compressing them.
+The provider caches encoded images only within the current call, never across calls.
+
+PNG uses lossless compression level 3. If its base64 size would exceed the image
+budget, the provider tries JPEG qualities 85, 70, 55, and 40. Only the selected
+bytes are base64-encoded. If no encoding fits, the existing smallest-image
+fallback remains. Returned MIME and dimensions describe the actual image.
+Lower PNG compression can switch near-budget images to JPEG sooner.
+
+Coordinate actions still validate the captured layout and recheck the live
+layout before each coordinate input. Capture failure before dispatch prevents
+input. After an action failure, the provider attempts a fresh capture. If final capture or
+encoding fails, the response labels any pre-action fallback explicitly.
+If neither image is available, the response reports unknown visual state.
+
 ## Source layout
 
 ```text
@@ -284,7 +304,6 @@ the shell or the application.
 | `COMPUTER_USE_OUTPUT_DIR`, `COMPUTER_USE_OUTPUT_THRESHOLD` | directory and minimum size (4000 characters) for file output |
 | `COMPUTER_USE_MAX_INLINE_CHARS` | inline text budget per result, 24000 characters by default |
 | `COMPUTER_USE_TRACE_FILE` | append one JSONL line per AX action |
-| `COMPUTER_USE_AX_TELEMETRY_LOG` | private AX telemetry log, `/tmp/computer-use-ax-telemetry.jsonl` by default |
 | `COMPUTER_USE_PYTHON_BINARY` | interpreter for the provider, `python3` by default |
 | `COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS` | provider request timeout, 30 seconds by default |
 

@@ -478,12 +478,6 @@ def window_instance_handle(app, window_index, window, strong_handles=None):
     return "pid{}/win{}/{}".format(node_pid(app) or 0, window_index, role)
 
 
-def content_frame_id(screenshot):
-    if not screenshot:
-        return None
-    return "content-v1-" + hashlib.sha256(
-        screenshot.encode("ascii")
-    ).hexdigest()
 
 
 def relative_frame(node, window_bounds):

@@ -166,8 +166,8 @@ func TestObserveNoneKeepsFreshSemanticResolutionEvidence(t *testing.T) {
 }
 
 // TestTextAttributeChanges checks that text attribute changes are reported.
-// Like Playwright's aria snapshot, the snapshot renders only a few semantic
-// properties; exact style queries belong to assertions, as with toHaveCSS.
+// The snapshot renders only a few semantic properties; exact style queries
+// belong to assertions.
 // AT-SPI's Atspi.Text.get_default_attributes() exposes justification, size
 // and weight, so a paragraph alignment change is reported as
 // `justification: left -> right`.

@@ -58,8 +58,7 @@ func (r toolCallResult) withDefaultEvidenceScope(scope string) toolCallResult {
 }
 
 // outputMode reports whether large outputs are written to files ("file") or
-// returned inline ("stdout"). File mode mirrors playwright-mcp's --output-mode
-// option: instead of compressing a large output, it writes the output to a
+// returned inline ("stdout"). In file mode, instead of compressing a large output, it writes the output to a
 // file and returns only the path, and the agent reads the detail when needed.
 // Desktop accessibility trees can reach tens of thousands of characters while
 // the agent usually needs one or two elements.

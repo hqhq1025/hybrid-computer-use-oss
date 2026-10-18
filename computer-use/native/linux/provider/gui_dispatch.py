@@ -33,7 +33,7 @@ from .gui_input import (
     validate_gui_actions,
 )
 from .input_primitives import InputEmissionError
-from .snapshot import build_gui_snapshot
+from .snapshot import capture_gui_snapshot
 from .x11_windows import (
     desktop_bounds,
     desktop_layout_frame_id,
@@ -360,11 +360,6 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
         model_dimensions["width"],
         model_dimensions["height"],
     )
-    size = "{}x{}".format(
-        model_dimensions["width"],
-        model_dimensions["height"],
-    )
-    snapshot = lambda: build_gui_snapshot(bounds)
     validated, coordinate_errors = validate_gui_actions(
         actions,
         model_bounds,
@@ -381,16 +376,42 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             "input_events_emitted": False,
             "input_actions_dispatched": 0,
         }
-    current_snapshot = snapshot()
+    try:
+        current_capture = capture_gui_snapshot(bounds)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": "full-desktop screenshot capture failed before input: {}".format(exc),
+            "dispatched": 0,
+            "input_events_emitted": False,
+            "input_actions_dispatched": 0,
+            "effect_unknown": False,
+            "quiescent": None,
+        }
     prior_lease_state = normalize_gui_lease_state(gui_lease_state)
 
-    def latest_snapshot_or_current():
+    def encode_evidence(captured):
         try:
-            return snapshot()
+            return captured.encode()
         except Exception:
-            return current_snapshot
+            return {}
 
-    if not current_snapshot.get("screenshotPngBase64"):
+    def failure_evidence(fresh=True):
+        if fresh:
+            try:
+                latest = encode_evidence(capture_gui_snapshot())
+                if latest.get("screenshotPngBase64"):
+                    return latest, "A fresh full-desktop screenshot is attached."
+            except Exception:
+                pass
+        fallback = encode_evidence(current_capture)
+        if fallback.get("screenshotPngBase64"):
+            return fallback, (
+                "The pre-action screenshot is attached because final observation "
+                "failed; it does not show the effects of any emitted input.")
+        return fallback, "No screenshot is available; visual state is unknown."
+
+    if not current_capture.has_image:
         return {
             "ok": False,
             "error": "full-desktop screenshot capture is unavailable; gui failed closed "
@@ -401,12 +422,12 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             "input_actions_dispatched": 0,
             "effect_unknown": False,
             "quiescent": None,
-            "snapshot": current_snapshot,
+            "snapshot": encode_evidence(current_capture),
         }
     wait_metrics = gui_wait_metrics(validated)
     frame_guarded_actions = any(
         action["type"] in GUI_FRAME_GUARDED_ACTION_TYPES for action in validated)
-    if frame_guarded_actions and not current_snapshot.get("frameId"):
+    if frame_guarded_actions and not current_capture.frame_id:
         return {
             "ok": False,
             "error": "desktop layout could not be sampled consistently around the "
@@ -416,15 +437,15 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             "input_actions_dispatched": 0,
             "effect_unknown": False,
             "quiescent": None,
-            "snapshot": current_snapshot,
+            "snapshot": encode_evidence(current_capture),
         }
     lease_revalidated = bool(
         frame_guarded_actions
         and prior_lease_state in {"suspect", "stale"}
-        and current_snapshot.get("frameId")
+        and current_capture.frame_id
     )
     if frame_id and frame_guarded_actions:
-        if current_snapshot.get("frameId") != frame_id:
+        if current_capture.frame_id != frame_id:
             return {
                 "ok": False,
                 "error": "STALE GUI FRAME: the desktop layout changed since the "
@@ -436,7 +457,7 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
                 "input_actions_dispatched": 0,
                 "effect_unknown": False,
                 "quiescent": None,
-                "snapshot": current_snapshot,
+                "snapshot": encode_evidence(current_capture),
             }
 
     mutating = any(
@@ -457,14 +478,14 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
                 live_layout = desktop_layout_state(live_bounds)
                 live_frame_id = desktop_layout_frame_id(live_layout)
                 if live_frame_id != frame_id:
+                    error_snapshot, evidence_note = failure_evidence()
                     return {
                         "ok": False,
                         "error": "STALE GUI FRAME before action {} ({}): desktop layout "
                                  "changed during the batch, so this coordinate action was "
                                  "not emitted.".format(index + 1, action_type),
                         "text": "GUI stopped before emitting the stale coordinate action. "
-                                "Earlier actions, if any, are reflected in the attached "
-                                "full-desktop screenshot.",
+                                + evidence_note,
                         "dispatched": dispatched,
                         "input_events_emitted": input_actions_dispatched > 0,
                         "input_actions_dispatched": input_actions_dispatched,
@@ -472,7 +493,7 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
                         "effect_unknown": bool(input_actions_dispatched),
                         "mutation_unknown": bool(input_actions_dispatched),
                         "quiescent": None,
-                        "snapshot": latest_snapshot_or_current(),
+                        "snapshot": error_snapshot,
                     }
             if (pointer_settle_credit is not None
                     and action_type in GUI_KEYBOARD_ACTION_TYPES):
@@ -512,14 +533,14 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
                     and not isinstance(exc, InputEmissionError)
                 )
             )
+            error_snapshot, evidence_note = failure_evidence()
             return {
                 "ok": False,
                 "error": "gui action {} ({}) failed after {} dispatched action(s): {}".format(
                     index + 1, action_type or "unknown", dispatched, exc),
-                "text": "GUI stopped at the first failed action. The attached full-desktop "
-                        "screenshot is {}. The failing action may have emitted a "
-                        "partial input sequence; no application effect is inferred.".format(
-                            size),
+                "text": "GUI stopped at the first failed action. " + evidence_note
+                        + " The failing action may have emitted a partial input "
+                        "sequence; no application effect is inferred.",
                 "dispatched": dispatched,
                 "input_events_emitted": input_events_emitted,
                 "input_actions_dispatched": input_actions_dispatched,
@@ -531,7 +552,7 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
                     input_events_emitted
                     or partial_input_possible),
                 "quiescent": None,
-                "snapshot": latest_snapshot_or_current(),
+                "snapshot": error_snapshot,
             }
     try:
         settle_result = (
@@ -550,15 +571,21 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             or (capture_window_pixels(bounds) if mutating else None)
         )
         before_final_pixels = capture_window_pixels(bounds) if mutating else None
-        final_snapshot = snapshot()
+        final_capture = (
+            current_capture if observation_only else capture_gui_snapshot())
         after_final_pixels = capture_window_pixels(bounds) if mutating else None
+        if not final_capture.has_image:
+            raise RuntimeError("full-desktop screenshot capture is unavailable")
+        final_snapshot = final_capture.encode()
+        if not final_snapshot.get("screenshotPngBase64"):
+            raise RuntimeError("full-desktop screenshot encoding is unavailable")
     except Exception as exc:
+        error_snapshot, evidence_note = failure_evidence(fresh=False)
         return {
             "ok": False,
             "error": "gui post-dispatch observation failed after {} dispatched "
                      "action(s): {}".format(dispatched, exc),
-            "text": "GUI actions may already have changed the desktop. The latest "
-                    "pre-action screenshot is attached because final capture failed.",
+            "text": "GUI final observation failed. " + evidence_note,
             "dispatched": dispatched,
             "input_events_emitted": input_actions_dispatched > 0,
             "input_actions_dispatched": input_actions_dispatched,
@@ -566,10 +593,11 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             "effect_unknown": bool(input_actions_dispatched),
             "mutation_unknown": bool(input_actions_dispatched),
             "quiescent": None,
-            "snapshot": current_snapshot,
+            "snapshot": error_snapshot,
         }
     final_capture_coherent = (
-        pixel_buffers_identical(before_final_pixels, after_final_pixels)
+        final_capture.matches_bounds(bounds)
+        and pixel_buffers_identical(before_final_pixels, after_final_pixels)
         if mutating else None
     )
     if mutating and final_capture_coherent is not True:
@@ -602,6 +630,7 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
     )
     if lease_revalidated:
         gui_result["gui_lease_revalidated"] = True
+    size = "{}x{}".format(final_snapshot.get("width"), final_snapshot.get("height"))
     focus_note = ""
     if any(action["type"] in {"type", "keypress"} for action in validated):
         focus_note = (

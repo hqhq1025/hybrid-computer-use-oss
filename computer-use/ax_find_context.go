@@ -14,13 +14,36 @@ func axFindContextMeaningful(node *AXNode) bool {
 }
 
 func isAXSemanticBoundary(role CanonicalRole) bool {
+	if descriptor := canonicalRoleDescriptorForCanonicalRole(role); descriptor.SemanticClass == "boundary" {
+		return true
+	}
 	switch role {
-	case "window", "dialog", "document", "grid", "table", "tree",
-		"treegrid", "list", "menu", "menubar", "toolbar", "tablist",
-		"tabpanel", "form", "region", "group":
+	case "grid", "table", "tree", "treegrid", "list", "toolbar",
+		"tablist", "tabpanel", "form", "region", "group":
 		return true
 	default:
 		return false
+	}
+}
+
+func canonicalRoleDescriptorForCanonicalRole(role CanonicalRole) RoleDescriptor {
+	for _, descriptor := range roleOntology {
+		if descriptor.ModelRole == role {
+			return descriptor
+		}
+	}
+	return RoleDescriptor{ModelRole: role, SemanticClass: "unknown"}
+}
+
+func isAXCollectionItemRole(role CanonicalRole) bool {
+	if role == "gridcell" {
+		return true
+	}
+	switch canonicalRoleDescriptorForCanonicalRole(role).SemanticClass {
+	case "item":
+		return true
+	default:
+		return role == "article"
 	}
 }
 

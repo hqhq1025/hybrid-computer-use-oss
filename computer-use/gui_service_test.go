@@ -28,7 +28,6 @@ func TestGUIModelResponseKeepsLayoutProvenancePrivate(t *testing.T) {
 		ScreenshotPNGBase64: "png",
 		CoordinateSpace:     "screen_image_px",
 		FrameID:             "current-frame",
-		ContentFrameID:      "content-frame",
 		DesktopLayout: map[string]any{
 			"activeWindow": "0x20",
 			"windows":      []any{map[string]any{"id": "0x20"}},

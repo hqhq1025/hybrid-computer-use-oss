@@ -14,8 +14,7 @@ import (
 // means pulling another tree and comparing once, which gives the wrong answer
 // when it runs a moment too early.
 //
-// Like Playwright's expect(...).toBeVisible(), an assertion is reliable
-// because it re-checks within a timeout window. That matters more on the
+// An assertion is reliable because it re-checks within a timeout window. That matters more on the
 // desktop, where UI changes raise no load event and a window can appear after
 // the post-action settle wait has ended.
 //

@@ -56,8 +56,6 @@ func TestAXObserveRejectsGuessedWholeTreeGeometry(t *testing.T) {
 // TestChannelCapabilitySwitch checks that a whole channel can be disabled and
 // that its tools then disappear from tools/list. A model tries every tool it
 // can see, and a refused call wastes a turn; a hidden tool is never tried.
-// Playwright MCP makes coordinate input an opt-in capability (--caps=vision)
-// for the same reason.
 func TestChannelCapabilitySwitch(t *testing.T) {
 	names := func() map[string]bool {
 		out := map[string]bool{}

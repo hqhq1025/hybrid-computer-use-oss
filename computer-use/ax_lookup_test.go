@@ -6,10 +6,8 @@ import (
 )
 
 // TestElementIntentCrossCheck covers the cross-check between a declared intent
-// and the resolved element. The declaration is modeled on the element
-// parameter of Playwright MCP tools ("Human-readable element description"),
-// which exists for readability and permissions but also makes intent
-// verifiable. It guards against a silent failure: after a dialog opens, all
+// and the resolved element. The declaration helps readability and makes
+// intent verifiable. It guards against a silent failure: after a dialog opens, all
 // indices shift, and a click on an index from an earlier snapshot lands on a
 // different control, such as a menu instead of a spin button, without any
 // error.
@@ -99,8 +97,7 @@ func TestSynthesisNotesStayWithinTheirEvidence(t *testing.T) {
 	if err == nil {
 		t.Fatal("a missing index must be an error")
 	}
-	// Follows Playwright's error shape: tool prefix, structured fields, a call
-	// log and the next step.
+	// Error shape: tool prefix, structured fields, a call log and the next step.
 	for _, fragment := range []string{
 		"indices 0..59",
 		"Call log:",
@@ -161,8 +158,8 @@ func TestSelectorLookup(t *testing.T) {
 	if err == nil {
 		t.Fatal(`"Save" matches both a push button and a menu and must be reported as ambiguous`)
 	}
-	// Candidate lines follow Playwright's strict-mode violation error: index,
-	// description, and an `aka` selector that can be used directly.
+	// Candidate lines carry index, description, and an `aka` selector that can
+	// be used directly.
 	for _, fragment := range []string{"ambiguous", "matches 2 elements",
 		`4    push button "Save"`, `9    menu "Save"`, "aka", "adding the role"} {
 		if !strings.Contains(err.Error(), fragment) {
@@ -194,9 +191,8 @@ func TestSelectorLookup(t *testing.T) {
 }
 
 // TestSelectorFallsBackToDescription covers description as the second identity
-// source for selectors. The priority follows Playwright's selector generator,
-// which scores role plus accessible name at 100 and label or alt text at
-// 140-160 (lower is better), far ahead of nth= at 10000; an element index is
+// source for selectors. Role plus name ranks first, description second, and
+// positional selection last; an element index is
 // the equivalent of nth. Adding descriptions raised the share of uniquely
 // identifiable nodes across seven desktop apps from 55% to 66%.
 func TestSelectorFallsBackToDescription(t *testing.T) {
@@ -419,8 +415,7 @@ func TestSelectorPredicatesApplyOrFailLoudly(t *testing.T) {
 	}
 
 	// The error must list the supported syntax and state that >>, nth= and
-	// :right-of do not exist; otherwise the model invents syntax from its
-	// memory of Playwright.
+	// :right-of do not exist; otherwise the model invents web-locator syntax.
 	_, err = lookupElement(snapshot, `push button "OK" >> nth=0`)
 	for _, want := range []string{"[checked]", "desc=", "nth=", ">>", ":right-of"} {
 		if !strings.Contains(err.Error(), want) {

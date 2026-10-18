@@ -105,8 +105,7 @@ python3 -m venv external/OSWorld-V2/.venv
 external/OSWorld-V2/.venv/bin/pip install -e external/OSWorld-V2
 python3 scripts/install-osworld-v2.py external/OSWorld-V2
 
-make agents   # downloads the pinned agent CLIs and the Node runtime
-make build
+make build-local   # agent CLIs go under artifacts/
 cp configs/env.example .env   # then fill in the paths
 ```
 
@@ -122,8 +121,6 @@ external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_batch \
 
 [Running OSWorld](docs/OSWORLD.md) walks through guest images, model
 gateways, setup canaries, single tasks, batches and result files.
-[Experiment Configuration](docs/REPRODUCIBILITY.md) covers task selection,
-instruction snapshots, queue execution and result summaries.
 
 ## Documentation
 
@@ -131,7 +128,6 @@ instruction snapshots, queue execution and result summaries.
 - [Computer Use MCP](docs/MCP.md): build, run, client setup, contract, troubleshooting.
 - [Platform support](docs/PLATFORMS.md): native packages and permissions.
 - [Running OSWorld](docs/OSWORLD.md): the evaluation runbook.
-- [Experiment Configuration](docs/REPRODUCIBILITY.md): prepare and execute a task queue.
 - [Agent profiles](docs/AGENT_PROFILES.md): how the four task agents are configured.
 - [AX, GUI and CDP](docs/AX_AND_CDP.md): desktop session and browser channels.
 - [Instructions](docs/INSTRUCTIONS.md): base policy, operating profiles and injection routes.

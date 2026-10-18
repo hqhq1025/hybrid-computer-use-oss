@@ -325,23 +325,22 @@ def text_attributes(node):
 def render_element_line(record, render_depth, boxes=True):
     """Render one element record as a tree line.
 
-    The grammar is modeled on Playwright's aria snapshot:
+    Grammar:
 
         <indent><index> <role> "<name>" [<states>] [desc="..."]
             [placeholder="..."] [actions=a,b] {x,y,w,h}: "<value>"
 
     - All free text is quoted, so a name cannot be confused with a field
       separator.
-    - Extra attributes go in square brackets, like the aria snapshot's
-      `[checked]` and `[level=1]`.
+    - Extra attributes go in square brackets, such as `[checked]` and
+      `[level=1]`.
     - Geometry is compacted to `{x,y,w,h}`: 14 characters where
       `Frame: {x: 687, y: 23, width: 64, height: 46}` takes 45, with no loss
       of information. Geometry is 35-50% of a rendered tree, so this saves
       about two thirds of it.
-    - `boxes=False` omits geometry entirely, like Playwright's `boxes`
-      option. Actions take coordinates from the stored record, not from this
+    - `boxes=False` omits geometry entirely. Actions take coordinates from the stored record, not from this
       line.
-    - The value comes last, after a colon, as in aria's
+    - The value comes last, after a colon, as in
       `- textbox: Enter your name`.
     - Empty segments are omitted.
     - The index leads the line; the Go side keys rendered lines by it.

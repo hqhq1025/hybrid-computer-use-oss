@@ -11,27 +11,10 @@ import (
 	"unicode"
 )
 
-// toolError follows Playwright's error shape: the chain of facts first, the
-// advice after. A Playwright action timeout (1.55.1, issue #37695) reads:
-//
-//	Error: locator.click: Test timeout of 30000ms exceeded.
-//	Call log:
-//	  - waiting for getByText('Get started')
-//	    - locator resolved to <a href="/docs/intro">Get started</a>
-//	  - attempting click action
-//	    - waiting for element to be visible, enabled and stable
-//
-// It states facts rather than advice: what it waited for, what the locator
-// resolved to, how far the checks got and in which state it failed. Its core
-// errors carry no advice strings such as "Consider using force: true".
-//
-// The exception is its MCP layer, whose consumer is an LLM:
-//
-//	Ref e3 not found in the current page snapshot. Try capturing new snapshot.
-//
-// That message names the next tool to call. The consumer here is also an LLM,
-// so errors carry both the chain of facts and an explicit next step, labeled
-// separately so that speculation never enters the call log.
+// toolError puts the chain of facts first and the advice after: what was
+// looked up, what it resolved to, and in which state it failed, then an
+// explicit next step. The consumer is an LLM, so the next step is labeled
+// separately and speculation never enters the fact chain.
 type toolError struct {
 	tool    string
 	summary string
@@ -74,8 +57,8 @@ func (e *toolError) Error() string {
 		b.WriteString("\n\nCall log:")
 		for _, line := range e.log {
 			// Indented lines continue the previous entry (as in candidate
-			// lists) and get no "- " bullet, following Playwright's call-log
-			// rule that lines with leading spaces render as sub-lines.
+			// lists) and get no "- " bullet: lines with leading spaces render
+			// as sub-lines.
 			if strings.HasPrefix(line, " ") {
 				b.WriteString("\n  " + line)
 			} else {
@@ -108,8 +91,7 @@ func snapshotAge(snapshot *appSnapshot) string {
 }
 
 // closestElements finds the elements that best match the declared intent,
-// each with a directly usable selector. It corresponds to the "aka <locator>"
-// candidate list of a Playwright strict-mode violation.
+// each with a directly usable selector.
 func closestElements(snapshot *appSnapshot, declared string, limit int) []string {
 	if snapshot == nil || strings.TrimSpace(declared) == "" {
 		return nil

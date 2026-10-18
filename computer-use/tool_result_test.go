@@ -117,8 +117,7 @@ func TestActionOutcomeSeparatesAttemptFromPredicateAndTaskEffect(t *testing.T) {
 }
 
 // TestOutputSpillsToFileOnlyWhenAskedAndOnlyWhenBig checks that large output
-// can be written to a file and replaced by its path, following playwright-mcp's
-// --output-mode file|stdout. Rather than compressing the content, the agent
+// can be written to a file and replaced by its path. Rather than compressing the content, the agent
 // reads the file when it needs detail: a LibreOffice or VS Code tree runs to
 // tens of thousands of characters while the agent usually needs one or two
 // elements.

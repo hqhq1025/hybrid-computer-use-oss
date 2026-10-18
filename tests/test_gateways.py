@@ -260,3 +260,32 @@ def test_gemini_gateway_budgets_generate_calls_and_records_usage(tmp_path):
     assert rows[0]["reasoning_tokens"] == 1 and rows[0]["response_id"] == "g1"
     assert rows[1]["budget_rejected"] is True
     assert "request_ordinal" not in rows[2]
+
+
+def test_openai_deployment_route_rewrites_model_and_pins_task(tmp_path):
+    gateway = openai_proxy.OpenAIGateway(
+        upstreams=["east.example", "east.example@m-extra"],
+        model_upstreams={},
+        token_log=TokenLog(tmp_path / "tokens.jsonl"),
+        max_requests_per_task=0,
+        token=StaticToken(),
+    )
+    assert gateway.host_for_task("task-a", "m") == "east.example"
+    assert gateway.host_for_task("task-b", "m") == "east.example@m-extra"
+    assert gateway.host_for_task("task-b", "m") == "east.example@m-extra"
+    assert openai_proxy.split_host("east.example@m-extra") == ("east.example", 443)
+
+
+def test_openai_pins_each_task_to_one_resource(tmp_path):
+    gateway = openai_proxy.OpenAIGateway(
+        upstreams=["relay.local:8541"],
+        model_upstreams={},
+        token_log=TokenLog(tmp_path / "tokens.jsonl"),
+        max_requests_per_task=0,
+        token=StaticToken(),
+    )
+    gateway.pin_resources = ["a.example", "b.example"]
+    assert gateway.resource_for_task("task-1") == "a.example"
+    assert gateway.resource_for_task("task-2") == "b.example"
+    assert gateway.resource_for_task("task-1") == "a.example"
+    assert gateway.resource_for_task("task-3") == "a.example"

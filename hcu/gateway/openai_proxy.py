@@ -8,6 +8,15 @@ two reasons:
 
 * Accounting. Some agents drop reasoning-token counts before reporting usage,
   so usage is recorded on the wire, one JSONL row per request.
+* Deployments. An upstream may be written ``HOST@DEPLOYMENT``; requests
+  routed to it have their ``model`` replaced by that deployment name. Azure
+  rate limits are per deployment, so several deployments of the same model on
+  one resource add capacity without changing the model.
+* Resource pinning. With ``--pin-resources`` the gateway forwards to a local
+  relay (such as an Azure bridge) and pins each task to one Azure resource by
+  sending ``X-HCU-Resource``. Encrypted reasoning that the agent replays can be
+  decrypted only by the resource that produced it; the relay may still move a
+  rate-limited request between deployments of that resource.
 * Task affinity. Agents that continue with ``previous_response_id`` rely on
   server-side state that exists only in the region that served the previous
   call. A task is therefore pinned to one upstream for its whole run; tasks
@@ -65,7 +74,10 @@ UPSTREAM_KINDS = {
     "openai": {"prefix": "", "query": ""},
 }
 AAD_RESOURCE = "https://cognitiveservices.azure.com"
-REQUEST_TIMEOUT = urllib3.Timeout(connect=15, read=1800)
+# A silent upstream is abandoned after 10 minutes. Normal responses finish well
+# within that (p99 78 s on the V1 panel); a relay may hold a rate-limited
+# request for up to about 5 minutes before the first byte.
+REQUEST_TIMEOUT = urllib3.Timeout(connect=15, read=600)
 BUDGETED_PATH = "/v1/responses"
 UNFORWARDED_REQUEST_HEADERS = frozenset({
     "host",
@@ -174,6 +186,8 @@ class OpenAIGateway:
         self._affinity_lock = threading.Lock()
         self._affinity: dict[tuple[str, str], str] = {}
         self._next_upstream: dict[tuple[str, ...], int] = {}
+        self.pin_resources: list[str] = []
+        self._task_resource: dict[str, str] = {}
         self.budget = GenerationBudget(max_requests_per_task)
         self._pool_lock = threading.Lock()
         self._pools: dict[str, urllib3.HTTPSConnectionPool] = {}
@@ -223,6 +237,19 @@ class OpenAIGateway:
                     "(pinned for the rest of the task)"
                 )
             return host
+
+    def resource_for_task(self, task: str | None) -> str | None:
+        """Pin a task to one Azure resource on first sight, round-robin."""
+        if not self.pin_resources:
+            return None
+        task = task or "_notask"
+        with self._affinity_lock:
+            resource = self._task_resource.get(task)
+            if resource is None:
+                resource = self.pin_resources[len(self._task_resource) % len(self.pin_resources)]
+                self._task_resource[task] = resource
+                log(f"task {task[:8]} -> resource {resource} (pinned)")
+            return resource
 
     def pool(self, host: str) -> urllib3.HTTPSConnectionPool:
         with self._pool_lock:
@@ -384,11 +411,15 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
                 self.reject_budget(row, rejection)
                 return
             try:
-                host = gateway.host_for_task(task, row["model"])
+                route = gateway.host_for_task(task, row["model"])
             except Exception as exc:
                 self.fail(502, f"upstream routing failed: {exc}", row)
                 return
-            row["endpoint"] = host
+            row["endpoint"] = route
+            host, _, deployment = route.partition("@")
+            if deployment and row["model"] is not None:
+                request["model"] = deployment
+                body = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
             try:
                 token = gateway.token.get()
             except Exception as exc:
@@ -403,6 +434,10 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
             }
             headers["Authorization"] = f"Bearer {token}"
             headers["Host"] = host
+            resource = gateway.resource_for_task(task)
+            if resource:
+                headers["X-HCU-Resource"] = resource
+                row["resource"] = resource
             headers["content-length"] = str(len(body))
             headers["accept-encoding"] = "identity"
 
@@ -488,6 +523,7 @@ def parse_hosts(value: str) -> list[str]:
 
 
 def split_host(host: str) -> tuple[str, int]:
+    host = host.partition("@")[0]
     name, separator, port = host.rpartition(":")
     if not separator or not port.isdigit():
         return host, 443
@@ -554,6 +590,14 @@ def main() -> int:
             "disables the response cap. Consecutive failures remain bounded."
         ),
     )
+    parser.add_argument(
+        "--pin-resources",
+        default="",
+        help=(
+            "Comma-separated Azure resource hosts. Each task is pinned to one, "
+            "sent to the relay as X-HCU-Resource."
+        ),
+    )
     args = parser.parse_args()
     if args.max_requests_per_task < 0:
         parser.error("--max-requests-per-task must be at least 0")
@@ -571,11 +615,12 @@ def main() -> int:
         host
         for host in upstreams + [h for hosts in model_upstreams.values() for h in hosts]
         if "://" in host or "/" in host or any(ch.isspace() for ch in host)
+        or host.count("@") > 1 or host.endswith("@")
     ]
     if invalid:
         parser.error(
-            "upstreams must be bare hosts, optionally with a port, without "
-            "scheme, path or whitespace: "
+            "upstreams must be bare hosts, optionally with a port and "
+            "@DEPLOYMENT, without scheme, path or whitespace: "
             + ", ".join(invalid)
         )
 
@@ -594,6 +639,7 @@ def main() -> int:
         upstream_kind=args.upstream_kind,
         upstream_scheme=args.upstream_scheme,
     )
+    gateway.pin_resources = parse_hosts(args.pin_resources)
     gateway.restore()
     try:
         gateway.token.refresh()

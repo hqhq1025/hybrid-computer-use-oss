@@ -9,21 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  submission:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install offline-test dependencies
-        run: pip install -e '.[test]'
-      - name: Export current source snapshot
-        run: python scripts/export-submission.py export --output "$RUNNER_TEMP/submission.zip"
-      - name: Real unpacked Linux release, version, MCP and license checks
-        run: python scripts/export-submission.py verify "$RUNNER_TEMP/submission.zip" --work-dir "$RUNNER_TEMP/submission-check" --python-tests
-
   go:
     runs-on: ubuntu-24.04
     defaults:

@@ -8,8 +8,6 @@ import (
 
 type DistillationContext struct {
 	Snapshot                  *AXSnapshotV1
-	CanonicalByID             map[string]*AXNode
-	CanonicalRefs             map[string]bool
 	CanonicalTruth            map[string]bool
 	StageSuppressedProperties int
 	StageBudgetApplied        bool
@@ -123,21 +121,6 @@ func collectAXTargetIDs(nodes []*AXNode) map[string]bool {
 		for _, node := range current {
 			if axNodeTargetTruth(node) {
 				out[node.ID] = true
-			}
-			visit(node.Children)
-		}
-	}
-	visit(nodes)
-	return out
-}
-
-func collectAXRefs(nodes []*AXNode) map[string]bool {
-	out := map[string]bool{}
-	var visit func([]*AXNode)
-	visit = func(current []*AXNode) {
-		for _, node := range current {
-			if node.Ref != "" {
-				out[node.Ref] = true
 			}
 			visit(node.Children)
 		}
@@ -279,14 +262,9 @@ func removeUnaddressableControlsPlugin() DistillationPlugin {
 							return nil, 1, 0, nil
 						}
 					}
-					// A visible control whose identity cannot currently be
-					// proven still carries semantic information. Keep it with
-					// an explicit addressability marker rather than making it
-					// look absent or silently encouraging coordinate fallback.
-					if len(node.Children) == 0 &&
-						node.AddressabilityReason == "" {
-						return nil, 1, 0, nil
-					}
+					// Unknown addressability is an incomplete fact, not proof
+					// that the control is disposable. Preserve it until the
+					// provider explains why it cannot be targeted.
 					return []*AXNode{node}, 0, 0, nil
 				},
 			)
@@ -409,18 +387,6 @@ func relationDuplicatePlugin() DistillationPlugin {
 			}
 			return []*AXNode{node}, 0, 0, nil
 		})
-	}}
-}
-
-func removeRepeatingTextPlugin() DistillationPlugin {
-	return distillationPlugin{name: "remove_name_repeating_text", fn: func(
-		_ *DistillationContext, roots []*AXNode,
-	) ([]*AXNode, int, int, error) {
-		// String equality or containment does not prove that a child text node
-		// contributed to the parent's accessible name. Exact relation-backed
-		// duplicates are handled by relationDuplicatePlugin; all other text is
-		// retained until provider provenance proves it redundant.
-		return roots, 0, 0, nil
 	}}
 }
 
@@ -566,31 +532,6 @@ func markAXDistinguishingAncestors(roots []*AXNode) {
 	}
 }
 
-func restoreAmbiguityPlugin() DistillationPlugin {
-	return distillationPlugin{name: "restore_ambiguity_disambiguators", fn: func(
-		context *DistillationContext, roots []*AXNode,
-	) ([]*AXNode, int, int, error) {
-		before := ambiguityCount(context.Snapshot.CanonicalRoots)
-		after := ambiguityCount(roots)
-		if after > before {
-			return nil, 0, 0, fmt.Errorf(
-				"distillation increased target ambiguity from %d to %d",
-				before, after,
-			)
-		}
-		return roots, 0, 0, nil
-	}}
-}
-
-func collectionItemRoleV1(role CanonicalRole) bool {
-	switch role {
-	case "listitem", "gridcell", "treeitem", "article", "option":
-		return true
-	default:
-		return false
-	}
-}
-
 func summarizeCollectionsPlugin() DistillationPlugin {
 	return distillationPlugin{name: "summarize_homogeneous_collections", fn: func(
 		_ *DistillationContext, roots []*AXNode,
@@ -603,7 +544,7 @@ func summarizeCollectionsPlugin() DistillationPlugin {
 				visit(parent.Children)
 				groups := map[CanonicalRole][]int{}
 				for index, child := range parent.Children {
-					if collectionItemRoleV1(child.Role) {
+					if isAXCollectionItemRole(child.Role) {
 						groups[child.Role] = append(groups[child.Role], index)
 					}
 				}
@@ -618,6 +559,7 @@ func summarizeCollectionsPlugin() DistillationPlugin {
 					for order, index := range indices {
 						child := parent.Children[index]
 						if order < 3 || order >= len(indices)-2 ||
+							child.ForceKeep ||
 							axSubtreeHasTarget(child) || axNodeHasState(child) {
 							continue
 						}
@@ -685,9 +627,7 @@ func defaultDistillationPlugins() []DistillationPlugin {
 		coalesceTextPlugin(),
 		unwrapNeutralPlugin(),
 		relationDuplicatePlugin(),
-		removeRepeatingTextPlugin(),
 		suppressCohortPropertiesPlugin(),
-		restoreAmbiguityPlugin(),
 		summarizeCollectionsPlugin(),
 		outputBudgetAuditPlugin(),
 	}
@@ -700,8 +640,6 @@ func distillAXSnapshot(snapshot *AXSnapshotV1) error {
 	markAXDistinguishingAncestors(snapshot.Roots)
 	context := &DistillationContext{
 		Snapshot:       snapshot,
-		CanonicalByID:  snapshot.ByID,
-		CanonicalRefs:  collectAXRefs(snapshot.CanonicalRoots),
 		CanonicalTruth: collectAXTargetIDs(snapshot.CanonicalRoots),
 	}
 	roots := snapshot.Roots

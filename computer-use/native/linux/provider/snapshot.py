@@ -2,6 +2,8 @@
 
 import hashlib
 import time
+from copy import deepcopy
+from dataclasses import dataclass, field
 from .foundation import (
     Atspi,
     DEFAULT_TEXT_LIMIT,
@@ -28,7 +30,6 @@ from .ax_records import StableIndexer
 
 from .x11_windows import (
     app_windows,
-    content_frame_id,
     desktop_bounds,
     desktop_layout_frame_id,
     desktop_layout_state,
@@ -40,8 +41,9 @@ from .x11_windows import (
 )
 
 from .gui_capture import (
-    capture_gui_image,
+    capture_gui_pixels,
     capture_window_image,
+    encoded_screenshot,
     gui_model_dimensions,
 )
 
@@ -233,7 +235,7 @@ def build_snapshot(
     button is "Position Y", that a screenshot can only guess from label
     proximity.
 
-    ``boxes`` defaults to False, like Playwright's option of the same name;
+    ``boxes`` defaults to False;
     geometry takes 35-50% of the rendered tree. Frames share the
     window-relative space of the AX window screenshot and mainly serve
     debugging. Element-targeted clicks read coordinates from the records
@@ -323,30 +325,73 @@ def build_snapshot(
     }
 
 
-def build_gui_snapshot(bounds=None):
-    """Capture only the full desktop; GUI never resolves an app or walks AT-SPI."""
+@dataclass(frozen=True)
+class CapturedGUISnapshot:
+    """Call-local frame; owned pixels and capture metadata never change.
+
+    Only encoding is lazy. Nothing may write to the privately owned pixbuf.
+    Returned dictionaries are copies so response edits cannot alter the cache.
+    """
+
+    _metadata: dict
+    _pixbuf: object
+    _bounds: object = None
+    _encoded: object = field(default=None, init=False, repr=False, compare=False)
+    _encoding_error: object = field(default=None, init=False, repr=False, compare=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "_metadata", deepcopy(self._metadata))
+        object.__setattr__(self, "_bounds", deepcopy(self._bounds))
+
+    @property
+    def has_image(self):
+        return self._pixbuf is not None
+
+    @property
+    def frame_id(self):
+        return self._metadata.get("frameId")
+
+    def matches_bounds(self, bounds):
+        return self._bounds == bounds
+
+    def encode(self):
+        if self._encoding_error is not None:
+            raise RuntimeError(self._encoding_error)
+        if self._encoded is None:
+            try:
+                screenshot = encoded_screenshot(self._pixbuf) if self.has_image else None
+            except Exception as exc:
+                object.__setattr__(self, "_encoding_error", str(exc)[:512])
+                raise
+            data = screenshot.get("data") if screenshot else None
+            encoded = dict(self._metadata, **{
+                "screenshotPngBase64": data,
+                "screenshotMimeType": screenshot.get("mimeType") if screenshot else None,
+                "screenshotEncoding": screenshot.get("encoding") if screenshot else None,
+            })
+            object.__setattr__(self, "_encoded", encoded)
+        return deepcopy(self._encoded)
+
+
+def capture_gui_snapshot(bounds=None):
+    """Bracket raw desktop capture with layout samples, without encoding."""
     if bounds is None:
         bounds = desktop_bounds()
-    screenshot = None
+    pixbuf = None
     layout = None
     for _ in range(GUI_SNAPSHOT_LAYOUT_ATTEMPTS):
         before_layout = desktop_layout_state(bounds)
-        screenshot = capture_gui_image(bounds)
+        pixbuf = capture_gui_pixels(bounds)
         after_layout = desktop_layout_state(bounds)
         if before_layout is not None and before_layout == after_layout:
             layout = after_layout
             break
     dimensions = gui_model_dimensions(bounds)
-    return {
+    return CapturedGUISnapshot({
         "sampledAt": utc_timestamp(),
         "coordinateSpace": "screen_image_px",
         "width": dimensions["width"] if dimensions is not None else None,
         "height": dimensions["height"] if dimensions is not None else None,
         "frameId": desktop_layout_frame_id(layout),
         "desktopLayout": layout,
-        "contentFrameId": content_frame_id(
-            screenshot.get("data") if screenshot else None),
-        "screenshotPngBase64": screenshot.get("data") if screenshot else None,
-        "screenshotMimeType": screenshot.get("mimeType") if screenshot else None,
-        "screenshotEncoding": screenshot.get("encoding") if screenshot else None,
-    }
+    }, pixbuf, bounds)

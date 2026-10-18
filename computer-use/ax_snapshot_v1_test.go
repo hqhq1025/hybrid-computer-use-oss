@@ -90,9 +90,7 @@ func TestDistillationPipelineReportsEveryStageAndPreservesTargets(t *testing.T) 
 		"coalesce_text",
 		"unwrap_neutral_single_child",
 		"remove_relation_proven_duplicate_labels",
-		"remove_name_repeating_text",
 		"suppress_redundant_cohort_properties",
-		"restore_ambiguity_disambiguators",
 		"summarize_homogeneous_collections",
 		"apply_output_budget",
 	}
@@ -771,7 +769,7 @@ func TestRendererDeduplicatesFieldsAndPureIconText(t *testing.T) {
 	}
 }
 
-func TestRendererUsesPlaywrightStyleOneSpaceHierarchy(t *testing.T) {
+func TestRendererUsesOneSpaceHierarchy(t *testing.T) {
 	window := &AXNode{ID: "window", Role: "window", Name: "Bills"}
 	toolbar := &AXNode{
 		ID: "toolbar", Role: "toolbar", Name: "Spaces Toolbar",
@@ -801,7 +799,7 @@ func TestRendererUsesPlaywrightStyleOneSpaceHierarchy(t *testing.T) {
 		`   - button "Mail (Ctrl+1)" [ref=r1]`,
 	}, "\n")
 	if got := strings.Join(lines, "\n"); got != want {
-		t.Fatalf("Playwright-style AX tree mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Fatalf("AX tree mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 

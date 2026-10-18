@@ -31,9 +31,8 @@ func windowFocusWasConfirmed(request axServiceRequest) bool {
 // tracePath is the file that receives one JSONL line per action; tracing is
 // off by default.
 //
-// The trace is modeled on Playwright's trace viewer: a problem can be
-// diagnosed from each step's before and after state without reproducing it,
-// which a transcript alone does not allow. It is off by default because every
+// A problem can be diagnosed from each step's before and after state without
+// reproducing it, which a transcript alone does not allow. It is off by default because every
 // step serializes two tree summaries and most calls are never reviewed. It is
 // enabled by a path rather than a boolean, because where to write belongs to
 // the caller and a diagnostic facility should not choose a directory itself.

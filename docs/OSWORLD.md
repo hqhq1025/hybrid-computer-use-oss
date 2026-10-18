@@ -92,8 +92,7 @@ external/OSWorld-V2/.venv/bin/pip install -U pip
 external/OSWorld-V2/.venv/bin/pip install -e external/OSWorld-V2
 
 python3 scripts/install-osworld-v2.py external/OSWorld-V2
-make agents
-make build
+make build-local
 ```
 
 The checkout above is the known upstream source reference, not an installation
@@ -103,14 +102,8 @@ revisions. Review upstream changes to the patched files before using a different
 checkout. Structural compatibility does not prove evaluator equivalence.
 Reinstall the overlay whenever you replace or clean the checkout.
 
-`make agents` downloads the agent releases and the Node runtime pinned in
-`configs/agent-artifacts.lock.json`. Downloads use the recorded HTTPS URLs,
-verify the publisher archive against the recorded SHA256 and validate its
-required contents before replacing an artifact. This download-integrity check
-is separate from run or release admission. To
-use another build, pass `--agent-binary` to `run_task` (or
-`agent_binary` in a batch or queue config); it replaces the agent's file under
-the artifact directory.
+Place the agent CLIs under `artifacts/`, or pass `--agent-binary` to `run_task`
+(or `agent_binary` in a batch or queue config).
 
 Run every `hcu.osworld` command from the repository root with the OSWorld-V2
 virtual environment, so that both `hcu` and `desktop_env` are importable.
@@ -118,9 +111,8 @@ Relative path arguments are resolved against your working directory.
 
 ## Guest images and task assets
 
-- V1: `scripts/fetch-osworld-v1-image.sh DIR` downloads the official
-  `Ubuntu.qcow2.zip` from a pinned Hugging Face revision, verifies its recorded
-  SHA256, validates the archive and extracts the image.
+- V1: download and unzip the official `Ubuntu.qcow2.zip` from the
+  `xlangai/ubuntu_osworld` Hugging Face dataset.
 - V2 task definitions: the OSWorld-V2 task classes (`task_*.py`) are gated and
   not part of the GitHub checkout. Accept the terms of the Hugging Face
   datasets `xlangai/osworld_v2_tasks` and `xlangai/osworld_v2_assets_gated`,
@@ -397,7 +389,7 @@ option and token log:
 
 `--model` and `--effort` default to the agent's own values (see
 [Agent profiles](AGENT_PROFILES.md)), so they can be omitted. Grok Build cannot
-resume a session, and Gemini CLI needs the Node runtime from `make agents`;
+resume a session, and Gemini CLI needs a Node runtime under `artifacts/`;
 both are described there.
 
 Other useful options:
@@ -535,9 +527,6 @@ and unknown task counts and the known sum separately. Archived interruptions
 are listed, not selected as better attempts, and their costs are not silently
 added to the current-attempt total. Configuration/identity conflicts, duplicate
 result locations and cross-run evidence links fail instead of being combined.
-
-See [Experiment Configuration](REPRODUCIBILITY.md) for task selection,
-instruction snapshots and queue execution.
 
 ## Operational notes
 

@@ -1,20 +1,13 @@
 SHELL := /bin/bash
 VERSION := $(shell cat VERSION)
 
-.PHONY: agents build build-local build-macos build-windows test test-transports smoke
-
-agents:
-	python3 scripts/download-agent-artifacts.py
-
-build:
-	./scripts/build-release.sh
+.PHONY: build-local build-macos build-windows test test-transports smoke
 
 build-local:
 	mkdir -p artifacts
 	cd computer-use && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 		-ldflags "-s -w -X main.version=$(VERSION)" \
 		-o ../artifacts/computer-use .
-	bash scripts/install-license-notices.sh "$(CURDIR)/artifacts"
 
 build-macos:
 	./computer-use/native/macos/build.sh "$(CURDIR)/artifacts/macos"

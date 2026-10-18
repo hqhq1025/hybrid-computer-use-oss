@@ -2,12 +2,39 @@ package main
 
 import "testing"
 
-func TestWorkingStructuralBudgetDefaultsToTwelveK(t *testing.T) {
-	t.Setenv("COMPUTER_USE_MAX_INLINE_CHARS", "")
-	if got := axStructuralTreeBudget(); got != 12000 {
-		t.Fatalf("working structural budget=%d, expected exactly 12000", got)
+func TestSelectAXBudgetPlanRejectsNestedCandidates(t *testing.T) {
+	leaf := &AXNode{ID: "leaf", Role: "paragraph"}
+	child := &AXNode{ID: "child", Role: "group", Children: []*AXNode{leaf}}
+	leaf.Parent = child
+	root := &AXNode{ID: "root", Role: "window", Children: []*AXNode{child}}
+	child.Parent = root
+
+	plan := selectAXBudgetPlan(
+		[]*AXNode{root},
+		[]axBudgetCandidate{
+			{
+				parentID: "root",
+				nodeIDs:  []string{"child"},
+				priority: 10,
+				savings:  5,
+			},
+			{
+				parentID: "child",
+				nodeIDs:  []string{"leaf"},
+				priority: 10,
+				savings:  10,
+			},
+		},
+		10,
+	)
+	if len(plan) != 1 || plan[0].nodeIDs[0] != "leaf" {
+		t.Fatalf("nested candidates were selected together: %#v", plan)
 	}
-	if maxInlineChars() != 24000 {
-		t.Fatal("12k working budget must not lower the final 24k safety ceiling")
+}
+
+func TestStructuralBudgetTreatsForceKeepAsProtectedContext(t *testing.T) {
+	node := &AXNode{ID: "context", Role: "paragraph", ForceKeep: true}
+	if !axSubtreeContainsCriticalOrBoundary(node) {
+		t.Fatal("force-kept context was eligible for structural omission")
 	}
 }

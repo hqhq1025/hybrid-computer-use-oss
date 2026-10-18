@@ -1,11 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
-	"time"
 )
 
 func enforceAXImageOutputPolicy(
@@ -469,41 +466,4 @@ func axEvidenceReportsInputEmission(evidence map[string]any) bool {
 		return true
 	}
 	return false
-}
-
-func persistAXTelemetry(
-	args map[string]any,
-	telemetry any,
-) {
-	path := strings.TrimSpace(
-		os.Getenv("COMPUTER_USE_AX_TELEMETRY_LOG"),
-	)
-	if path == "" {
-		path = "/tmp/computer-use-ax-telemetry.jsonl"
-	}
-	payload := map[string]any{
-		"timestamp_utc": time.Now().UTC().Format(time.RFC3339Nano),
-		"mode":          optionalString(args, "mode"),
-		"scope":         optionalString(args, "scope"),
-		"view":          optionalString(args, "view"),
-		"telemetry":     telemetry,
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "AX telemetry marshal failed: %v\n", err)
-		return
-	}
-	handle, err := os.OpenFile(
-		path,
-		os.O_CREATE|os.O_APPEND|os.O_WRONLY,
-		0600,
-	)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "AX telemetry log open failed: %v\n", err)
-		return
-	}
-	defer handle.Close()
-	if _, err := handle.Write(append(encoded, '\n')); err != nil {
-		fmt.Fprintf(os.Stderr, "AX telemetry log write failed: %v\n", err)
-	}
 }

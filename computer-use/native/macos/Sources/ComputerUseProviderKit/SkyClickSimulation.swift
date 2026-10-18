@@ -101,7 +101,7 @@ enum SkyClickDispatcher {
     private static let primerWindowPoint = CGPoint(x: -1, y: -1)
     private static let dispatchLock = NSLock()
 
-    // Raw private event fields used by the Chromium-compatible Cua Driver path.
+    // Raw private event fields used by the Chromium-compatible path.
     private enum EventField {
         static let gesturePhase: UInt32 = 0
         static let clickState: UInt32 = 1
@@ -176,7 +176,7 @@ enum SkyClickDispatcher {
                     spi: spi
                 )
 
-                // The current Cua Driver Chromium recipe deliberately posts through
+                // The Chromium recipe deliberately posts through
                 // both channels: SkyLight reaches Chromium/Catalyst while the public
                 // path preserves AppKit compatibility. This is one dispatch policy,
                 // not a retry after an observed failure.

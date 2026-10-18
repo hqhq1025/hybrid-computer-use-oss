@@ -33,15 +33,12 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 		e.next = selectorPredicateHelp
 		return nil, e
 	}
-	// Identity comes from two tiers, prioritized as in Playwright's selector
-	// generator, which scores role plus accessible name at 100 and label or
-	// alt text at 140-160 (lower wins), all far ahead of nth= at 10000.
+	// Identity comes from two tiers, both far ahead of positional selection.
 	//
 	// The tiers here are name, then description. Description is a tier of its
 	// own because some toolkits describe many nodes that have no name.
 	//
-	// AT-SPI accessible_id, the counterpart of Playwright's test-id tier, is
-	// unset in practice, so that tier is unavailable on the desktop.
+	// AT-SPI accessible_id would be a stronger tier, but it is unset in practice, so that tier is unavailable on the desktop.
 	var byName, byDescription []elementRecord
 	for _, record := range snapshot.Elements {
 		if !selectorRoleMatches(&record, role) {
@@ -111,8 +108,7 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 		return nil, e
 	}
 
-	// Never pick one of several matches. This is Playwright's strict-mode
-	// rule: picking the first match would silently act on the wrong element,
+	// Never pick one of several matches: picking the first match would silently act on the wrong element,
 	// while an error tells the caller at once that the match was unexpected.
 	e := base(fmt.Sprintf("the selector %q is ambiguous: it matches %d elements.",
 		selector, len(matches)))

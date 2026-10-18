@@ -406,15 +406,3 @@ func (s *service) stabilizeFindRefs(
 	}
 	visit(findSnapshot.Roots)
 }
-
-func axNodeByIndex(nodes []*AXNode, index int) *AXNode {
-	for _, node := range nodes {
-		if node.ProviderIndex == index {
-			return node
-		}
-		if found := axNodeByIndex(node.Children, index); found != nil {
-			return found
-		}
-	}
-	return nil
-}

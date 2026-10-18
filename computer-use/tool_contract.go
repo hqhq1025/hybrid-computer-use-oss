@@ -56,13 +56,12 @@ type toolDefinition struct {
 
 const axToolProjectionContract = ""
 
-// enabledChannels reads the channel capability switch, modeled on Playwright's
-// --caps=vision. COMPUTER_USE_CHANNELS is a comma-separated list; by default
+// enabledChannels reads the channel capability switch. COMPUTER_USE_CHANNELS is a comma-separated list; by default
 // all three channels (a11y, gui, keyboard) are enabled.
 //
 // A disabled channel's tools are absent from tools/list rather than rejected
 // at call time: a model tries every tool it can see, and each rejection wastes
-// a turn. Playwright makes coordinate input opt-in for the same reason.
+// a turn.
 //
 // The switch serves ablation experiments that need a channel truly disabled,
 // not just its screenshots, and deployments that trust only semantic actions

@@ -65,9 +65,8 @@ struct SkyLightSPICapability: Equatable, Sendable {
 
 /// Runtime-only bridge for the private SkyLight functions used by `sky_click`.
 ///
-/// The declarations and event-field recipe are derived from the MIT-licensed
-/// Cua Driver and yabai implementations. Keep all undocumented ABI in this
-/// file so a future macOS compatibility change has one review boundary.
+/// Keep all undocumented ABI in this file so a future macOS compatibility
+/// change has one review boundary. Licenses: licenses/MIT-cua-yabai.txt.
 final class SkyLightSPI: @unchecked Sendable {
     static let shared = SkyLightSPI()
 

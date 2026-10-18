@@ -2804,21 +2804,12 @@
         "tool": "Nope"
       },
       "response": {
+        "error": {
+          "code": -32602,
+          "message": "Unknown tool \"Nope\"; use AX or GUI"
+        },
         "id": 44,
-        "jsonrpc": "2.0",
-        "result": {
-          "content": [
-            {
-              "text": "unsupported public tool \"Nope\"; use AX or GUI",
-              "type": "text"
-            }
-          ],
-          "isError": true,
-          "structuredContent": {
-            "evidence_scope": "error_only",
-            "task_effect_verified": false
-          }
-        }
+        "jsonrpc": "2.0"
       }
     }
   ],

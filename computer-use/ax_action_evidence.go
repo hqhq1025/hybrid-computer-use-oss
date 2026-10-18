@@ -138,10 +138,10 @@ func imperceptibleColorShift(from, to string) bool {
 // textAttributeChanges compares the formatting attributes of the same element
 // in two snapshots.
 //
-// The approach follows Playwright, whose aria snapshot renders only a few
-// semantic attributes ([checked], [level=1]) and leaves arbitrary style
-// queries to assertions such as toHaveCSS: a snapshot is a summary for the
-// agent and an assertion is a precise query, so they need not share fields.
+// The rendered snapshot carries only a few semantic attributes ([checked],
+// [level=1]) and leaves arbitrary style queries to assertions: a snapshot is a
+// summary for the agent and an assertion is a precise query, so they need not
+// share fields.
 // Likewise, AT-SPI exposes justification, size, weight and fg-color through
 // Atspi.Text.get_default_attributes() even though the rendered tree omits
 // them, so a formatting change that leaves the tree text unchanged is still

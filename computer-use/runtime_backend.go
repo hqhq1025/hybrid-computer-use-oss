@@ -50,19 +50,6 @@ func accessibilityOperationCanMutate(request axServiceRequest) bool {
 		(request.Action != nil && request.Action.Intent() != AccessibilityResolveTarget)
 }
 
-func providerRequestCanMutate(request ProviderWireRequest) bool {
-	switch request.Operation {
-	case ProviderWireResolveAndAct:
-		return request.Action != nil && request.Action.Intent != AccessibilityResolveTarget
-	case ProviderWireOrderedInput:
-		return request.OrderedInput != nil
-	case ProviderWireDesktopBatch, ProviderWireWindowAction:
-		return true
-	default:
-		return false
-	}
-}
-
 func (s *service) platformBackend() PlatformBackend {
 	if s.backend != nil {
 		return s.backend

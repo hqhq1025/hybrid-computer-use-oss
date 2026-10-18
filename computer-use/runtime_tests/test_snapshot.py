@@ -1801,7 +1801,7 @@ class PruneCostTests(AtspiPatchedTestCase):
 
 
 class StableIndexTests(unittest.TestCase):
-    """Indices survive across snapshots, following Playwright's ariaSnapshot.ts.
+    """Indices survive across snapshots.
 
     If opening a dialog renumbered every element, a click with an index from
     the previous snapshot would silently hit a different control.
@@ -1813,7 +1813,7 @@ class StableIndexTests(unittest.TestCase):
         self.assertEqual(indexer.index_for([0, 1], "push button", "Save"), 7)
 
     def test_role_or_name_change_invalidates_the_number(self):
-        """As in Playwright, a changed role or name gets a new index.
+        """A changed role or name gets a new index.
 
         The element is no longer the same thing.
         """
@@ -1995,9 +1995,9 @@ class TruncatedNameIdentityTests(AtspiPatchedTestCase):
 
 
 class SnapshotGrammarTests(unittest.TestCase):
-    """Snapshot line grammar, modeled on Playwright's aria snapshot format.
+    """Snapshot line grammar: `- role "name" [attr=value]`.
 
-    Playwright writes `- role "name" [attr=value]`. Free text must be quoted:
+    Free text must be quoted:
     names can contain colons, such as `panel PageShape: Weekday in school` in
     LibreOffice Impress, so an unquoted
     `<idx> <role> <name> Description: <desc>` line cannot separate the name

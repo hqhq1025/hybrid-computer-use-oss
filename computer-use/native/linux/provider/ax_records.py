@@ -1,10 +1,7 @@
 """Canonical AX records and stable local indexing."""
 
-# StableIndexer adapts Playwright's role/name-based reference retention rule.
-# Adapted portions: Copyright (c) Microsoft Corporation.
-# Licensed under the Apache License, Version 2.0.
+# Portions of StableIndexer: Copyright (c) Microsoft Corporation, Apache-2.0.
 # See licenses/Apache-2.0.txt and licenses/Playwright-NOTICE.txt.
-# This Python adaptation uses AT-SPI path mappings instead of DOM element state.
 
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
@@ -35,7 +32,7 @@ from .ax_node_properties import (
 class StableIndexer:
     """Assign element indices that survive across snapshots.
 
-    Adapted from Playwright's ariaSnapshot.ts (Apache-2.0): an index is not a
+    An index is not a
     traversal ordinal but a cached id per element, reissued only when the
     element's role or name changes. An element whose role, name and full-name
     hash are unchanged keeps the same index in every snapshot.

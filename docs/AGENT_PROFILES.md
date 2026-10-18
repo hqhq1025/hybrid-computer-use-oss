@@ -18,9 +18,7 @@ override them.
 All agents use:
 
 - the same `computer-use` binary;
-- the releases pinned in `configs/agent-artifacts.lock.json` (currently Codex
-  0.151.0, Claude Code 2.1.251, Gemini CLI 0.60.0, Grok Build 1.0.40 and the
-  Node 20.19.5 runtime Gemini CLI needs);
+- the agent CLI binaries placed under `artifacts/`;
 - the common safety and outcome policy in `instructions/base.md`, plus one
   selected interaction guide (normally `instructions/hybrid.md`); selecting
   no operating profile omits only the guide, not the base policy;

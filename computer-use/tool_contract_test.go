@@ -348,7 +348,6 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 	for fieldName, jsonName := range map[string]string{
 		"CoordinateSpace": "coordinateSpace,omitempty",
 		"FrameID":         "frameId,omitempty",
-		"ContentFrameID":  "contentFrameId,omitempty",
 		"DesktopLayout":   "desktopLayout,omitempty",
 		"Width":           "width,omitempty",
 		"Height":          "height,omitempty",
@@ -360,13 +359,12 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 	}
 	var snapshot appSnapshot
 	if err := json.Unmarshal(
-		[]byte(`{"coordinateSpace":"screen_image_px","frameId":"abc","contentFrameId":"pixels","width":1920,"height":1080}`),
+		[]byte(`{"coordinateSpace":"screen_image_px","frameId":"abc","width":1920,"height":1080}`),
 		&snapshot,
 	); err != nil {
 		t.Fatal(err)
 	}
 	if snapshot.CoordinateSpace != "screen_image_px" || snapshot.FrameID != "abc" ||
-		snapshot.ContentFrameID != "pixels" ||
 		snapshot.Width != 1920 || snapshot.Height != 1080 {
 		t.Fatalf("GUI metadata did not survive runtime decoding: %#v", snapshot)
 	}
