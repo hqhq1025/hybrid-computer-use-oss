@@ -43,7 +43,7 @@ def validate_guest_current_date(
         raise RuntimeError(
             "Guest current date does not match the immutable run-bound date: "
             f"expected={expected_date}, observed={observed_date}. "
-            "The runner must align the guest to OSW_RUN_TIMEZONE before task "
+            "The runner must align the guest to the run timezone before task "
             "setup."
         )
     return observed_date

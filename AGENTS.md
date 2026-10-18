@@ -58,12 +58,12 @@ Run before reporting a change:
 make test
 ```
 
-For changes to the runner, also dry-run a batch for both benchmark versions
-with the OSWorld-V2 virtual environment:
+For changes to the runner, also dry-run both example configs with the
+OSWorld-V2 virtual environment:
 
 ```bash
-external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_batch \
-  --config configs/osworld-v1-codex-queue.example.json --dry-run
-external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_batch \
-  --config configs/osworld-v2-codex-queue.example.json --dry-run
+external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_queue \
+  configs/osworld-v1-codex-queue.example.json --dry-run
+external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_queue \
+  configs/osworld-v2-codex-queue.example.json --dry-run
 ```

@@ -113,6 +113,7 @@ def make_run(runner, tmp_path, phases=()):
     run = SimpleNamespace(
         args=SimpleNamespace(
             task_id="score-test", agent="codex", model="offline", effort="high",
+            benchmark_version="v1",
             max_model_calls=1, poll_interval=0, max_user_simulator_turns=0,
             timeout=0,
         ),
@@ -126,31 +127,19 @@ def make_run(runner, tmp_path, phases=()):
     return run
 
 
-def assert_sealed(run, expected_score, expected_status):
-    payloads = {
-        name: json.loads((run.result_dir / name).read_text())
-        for name in ("result.json", "raw_evaluator.json", "meta.json")
-    }
-    for name, payload in payloads.items():
-        assert payload["score"] == expected_score, name
-        status_key = "status" if name == "raw_evaluator.json" else "raw_evaluator_status"
-        assert payload[status_key] == expected_status, name
-        json.dumps(payload, allow_nan=False)
-    text = (run.result_dir / "result.txt").read_text()
-    assert json.loads(text) == expected_score
-    if expected_status == "error":
-        assert payloads["meta.json"]["status"] == "completed_with_evaluator_error"
-        with pytest.raises(ValueError):
-            float(text)
-    row = read_task(run.result_dir, {"id": run.args.task_id}, {"run_id": "score-test"})
-    assert row["status"] == ("evaluator_error" if expected_status == "error" else "valid")
+def assert_result(run, expected_score, expected_status):
+    result = json.loads((run.result_dir / "result.json").read_text())
+    json.dumps(result, allow_nan=False)
+    assert result["score"] == expected_score
+    assert result["status"] == expected_status
+    assert json.loads((run.result_dir / "meta.json").read_text())["status"] == expected_status
+    row = read_task(run.result_dir, {"id": run.args.task_id})
+    assert row["status"] == ("valid" if expected_status == "completed" else "evaluator_error")
     assert row["raw_score"] == expected_score
-    assert row["effective_score"] == expected_score
     totals = aggregate([row])
-    assert totals["raw_observed_count"] == int(expected_status == "completed")
-    assert totals["effective_known_count"] == int(expected_status == "completed")
+    assert totals["scored"] == int(expected_status == "completed")
     assert totals["final_score"] == expected_score
-    return payloads
+    return result
 
 
 @pytest.mark.parametrize("value", [{}, None, float("nan"), float("inf"), -float("inf")])
@@ -162,23 +151,22 @@ def test_phase_error_is_null_at_every_consumption_boundary(runner, tmp_path, val
     assert outcome.phase_results[0]["score"] is None
     assert outcome.phase_details[0]["gate_stop"] == "official_evaluator_error"
     assert outcome.official_evaluator_errors[0]["result_repr"] == repr(value)
-    assert outcome.evaluator_payload["result_repr"] == repr(value)
     env.evaluate.assert_called_once_with()
     assert runner.finish_run(run, env, "unused", outcome) == 0
-    payloads = assert_sealed(run, None, "error")
-    assert payloads["result.json"]["result_repr"] == repr(value)
-    assert json.loads((tmp_path / "phase_details.json").read_text())[0]["score"] is None
+    result = assert_result(run, None, "evaluator_error")
+    assert result["evaluator_errors"][0]["result_repr"] == repr(value)
+    assert result["phases"][0]["score"] is None
 
 
 @pytest.mark.parametrize("value,expected", [(False, 0.0), (True, 1.0), (0.34567, 0.3457)])
-def test_valid_score_survives_phase_and_sealing(runner, tmp_path, value, expected):
+def test_valid_score_survives_phase_and_result(runner, tmp_path, value, expected):
     run = make_run(runner, tmp_path)
     env = SimpleNamespace(evaluate=lambda: value, action_history=[])
     outcome = runner.run_phases(run, env, "unused")
     assert outcome.total_score == float(value)
     assert not outcome.official_evaluator_errors
     runner.finish_run(run, env, "unused", outcome)
-    assert_sealed(run, expected, "completed")
+    assert_result(run, expected, "completed")
 
 
 @pytest.mark.parametrize("total", [None, float("nan"), float("inf"), -float("inf")])
@@ -186,10 +174,9 @@ def test_final_boundary_rejects_invalid_aggregate(runner, tmp_path, total):
     run = make_run(runner, tmp_path)
     outcome = runner.PhaseOutcome(total_score=total)
     runner.finish_run(run, None, "unused", outcome)
-    payloads = assert_sealed(run, None, "error")
-    error = payloads["raw_evaluator.json"]["errors"][0]
-    assert error["stage"] == "aggregation"
-    assert error["result_repr"] == repr(total)
+    result = assert_result(run, None, "evaluator_error")
+    assert result["evaluator_errors"][0]["stage"] == "aggregation"
+    assert result["evaluator_errors"][0]["result_repr"] == repr(total)
 
 
 @pytest.mark.parametrize("values,expected,error", [
@@ -218,6 +205,18 @@ def test_multiphase_accounting_and_aggregate_validation(
         assert outcome.phase_results[1]["score"] is None
         phases[2]["setup"].assert_not_called()
         phases[2]["evaluate"].assert_not_called()
-        assert json.loads((tmp_path / "phase_results.json").read_text())[1]["score"] is None
     runner.finish_run(run, env, "unused", outcome)
-    assert_sealed(run, expected, "error" if error else "completed")
+    result = assert_result(run, expected, "evaluator_error" if error else "completed")
+    assert len(result["phases"]) == (2 if len(values) == 3 else len(values))
+
+
+def test_runner_failure_writes_an_error_result(runner, tmp_path):
+    run = make_run(runner, tmp_path)
+    try:
+        raise RuntimeError("codex turn 1 exited: rate limit exceeded")
+    except RuntimeError as exc:
+        assert runner.record_failure(run, None, exc) == 1
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["status"] == "error" and result["score"] is None
+    assert result["failure_classification"] == "upstream_rate_limit"
+    assert read_task(tmp_path, {"id": "score-test"})["status"] == "error"

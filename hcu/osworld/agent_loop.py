@@ -38,7 +38,6 @@ from hcu.osworld.guest import (
     request_launch,
     save_guest_artifact,
 )
-from hcu.osworld.results import write_local
 from hcu.osworld.prompts import (
     ASK_USER_SENTINEL,
     DEFAULT_USER_RESPONSE,
@@ -49,22 +48,23 @@ from hcu.osworld.prompts import (
     user_response_prompt,
 )
 from hcu.osworld.traces import concise_failure_message, summarize_agent_trace
-from hcu.osworld.usage import (
-    count_model_requests,
-    task_generation_retry_exhausted,
-    task_model_budget_rejected,
-    validate_task_model_budget,
-)
+from hcu.osworld.usage import read_task_log
 
 if TYPE_CHECKING:
     from desktop_env.desktop_env import DesktopEnv
 
 
+def write_text(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+
+
 AGENT_WATCHDOG_GRACE_SEC = 120.0
 AGENT_WATCHDOG_INTERVAL_SEC = 30.0
 AGENT_WATCHDOG_ABSENT_THRESHOLD = 2
-STREAM_RETRY_LIMIT = 1
-STREAM_RETRY_BACKOFF_SEC = 30.0
+# The gateway already waits out most rate limits. A turn that still ends in a
+# rate limit resumes the same session; the backoff extends the phase deadline.
+RATE_LIMIT_RESUME_LIMIT = 2
+RATE_LIMIT_RESUME_BACKOFF_SEC = 60.0
 TOOL_ARGUMENT_RETRY_LIMIT = 1
 # Also bounds final-response tool execution when the operator sets no timeout.
 MODEL_PROGRESS_TIMEOUT_SEC = 1800.0
@@ -273,7 +273,7 @@ def append_artifact(path: Path, data: bytes | None) -> None:
 
 
 def upload_prompt(env: DesktopEnv, local_path: Path, content: str) -> None:
-    write_local(local_path, content)
+    write_text(local_path, content)
     env.setup_controller._upload_file_setup([
         {"local_path": str(local_path), "path": GUEST_PROMPT},
     ])
@@ -298,13 +298,21 @@ def wait_for_agent_turn(
         process_name=AGENT_PROFILES[agent]["process"],
     )
     done_payload = None
-    budget_exhausted = False
     stop_attempted = False
 
-    def validate_budget() -> None:
-        validate_task_model_budget(token_log, affinity_task, settings.max_model_calls)
-        if task_generation_retry_exhausted(token_log, affinity_task):
+    def read_log():
+        state = read_task_log(token_log, affinity_task)
+        if state.retry_exhausted:
             raise RuntimeError("Gateway consecutive generation failure limit exhausted")
+        return state
+
+    def fetch_done() -> dict | None:
+        raw = fetch_guest_file(base_url, GUEST_DONE)
+        if raw:
+            candidate = json.loads(raw)
+            if candidate.get("turn_token") == expected_turn_token:
+                return candidate
+        return None
 
     def stop_agent() -> None:
         nonlocal stop_attempted
@@ -325,40 +333,41 @@ def wait_for_agent_turn(
 
     artifacts = {}
     original_error = None
+    rate_limit_wait_sec = 0.0
     try:
+        state = read_log()
+        initial_wait = state.rate_limit_wait_sec
+        progress = (state.completed_responses, state.rate_limit_waits)
         last_progress = time.monotonic()
-        completed_responses = count_model_requests(token_log, affinity_task)
-        while time.monotonic() < min(deadline, last_progress + MODEL_PROGRESS_TIMEOUT_SEC):
-            validate_budget()
-            done_raw = fetch_guest_file(base_url, GUEST_DONE)
-            if done_raw:
-                candidate = json.loads(done_raw)
-                if candidate.get("turn_token") == expected_turn_token:
-                    done_payload = candidate
-                    break
+        while True:
+            # Gateway rate-limit waits are infrastructure time: they extend
+            # the deadline and count as progress.
+            rate_limit_wait_sec = state.rate_limit_wait_sec - initial_wait
+            if time.monotonic() >= min(
+                deadline + rate_limit_wait_sec,
+                last_progress + MODEL_PROGRESS_TIMEOUT_SEC,
+            ):
+                break
+            done_payload = fetch_done()
+            if done_payload is not None:
+                break
             watchdog.check(base_url, label)
-            observed = count_model_requests(token_log, affinity_task)
-            if observed > completed_responses:
-                completed_responses = observed
-                last_progress = time.monotonic()
             # Response N may still execute tools; only rejection of N+1 stops it.
-            if task_model_budget_rejected(token_log, affinity_task):
-                budget_exhausted = True
+            if state.budget_rejected:
                 break
             time.sleep(settings.poll_interval)
+            state = read_log()
+            if (state.completed_responses, state.rate_limit_waits) != progress:
+                progress = (state.completed_responses, state.rate_limit_waits)
+                last_progress = time.monotonic()
 
-        validate_budget()
-        budget_exhausted = budget_exhausted or task_model_budget_rejected(token_log, affinity_task)
+        state = read_log()
+        budget_exhausted = state.budget_rejected
         truncated = done_payload is None or budget_exhausted
         if truncated:
             stop_agent()
-            done_raw = fetch_guest_file(base_url, GUEST_DONE)
-            if done_raw:
-                candidate = json.loads(done_raw)
-                if candidate.get("turn_token") == expected_turn_token:
-                    done_payload = candidate
-            validate_budget()
-            budget_exhausted = budget_exhausted or task_model_budget_rejected(token_log, affinity_task)
+            done_payload = fetch_done() or done_payload
+            budget_exhausted = read_log().budget_rejected
     except BaseException as exc:
         original_error = exc
         raise
@@ -404,6 +413,7 @@ def wait_for_agent_turn(
         "final_message": final_message,
         "thread_id": thread_id_from_trace(trace_raw, agent),
         "workload_unit": workload_unit,
+        "rate_limit_wait_sec": round(rate_limit_wait_sec, 3),
     }
 
 
@@ -452,7 +462,7 @@ def run_agent_phase(
         }
 
     turn_index = 0
-    transport_retries = 0
+    rate_limit_resumes = 0
     tool_argument_retries = 0
     while True:
         turn_index += 1
@@ -478,7 +488,7 @@ def run_agent_phase(
                 )
             command = [GUEST_LAUNCHER, "resume", session_id, label]
         workload_unit = request_launch(base_url, command)
-        write_local(
+        write_text(
             result_dir / f"{label}-workload-unit.json",
             json.dumps(
                 {
@@ -503,6 +513,7 @@ def run_agent_phase(
             workload_unit=workload_unit,
             deadline=deadline,
         )
+        deadline += turn["rate_limit_wait_sec"]
         trace_summary = summarize_agent_trace(turn["trace_raw"], agent)
         observed_thread_id = turn["thread_id"] or session_id
         turns.append({
@@ -521,8 +532,9 @@ def run_agent_phase(
             "failure_classification": (
                 trace_summary["failure_classification"]
             ),
+            "rate_limit_wait_sec": turn["rate_limit_wait_sec"],
             "retry_assisted": (
-                transport_retries > 0 or tool_argument_retries > 0
+                rate_limit_resumes > 0 or tool_argument_retries > 0
             ),
         })
         if turn["truncated"]:
@@ -540,10 +552,9 @@ def run_agent_phase(
                 failure_classification == "upstream_rate_limit"
                 and can_resume
                 and observed_thread_id
-                and transport_retries < STREAM_RETRY_LIMIT
-                and time.monotonic() + STREAM_RETRY_BACKOFF_SEC < deadline
+                and rate_limit_resumes < RATE_LIMIT_RESUME_LIMIT
             ):
-                transport_retries += 1
+                rate_limit_resumes += 1
                 session_id = observed_thread_id
                 upload_prompt(
                     env,
@@ -554,13 +565,14 @@ def run_agent_phase(
                     ),
                 )
                 print(
-                    f"{agent} stream rate limit; resuming the same session after "
-                    f"{STREAM_RETRY_BACKOFF_SEC:.0f}s "
-                    f"({transport_retries}/{STREAM_RETRY_LIMIT})",
+                    f"{agent} turn ended on a rate limit; resuming the same session "
+                    f"after {RATE_LIMIT_RESUME_BACKOFF_SEC:.0f}s "
+                    f"({rate_limit_resumes}/{RATE_LIMIT_RESUME_LIMIT})",
                     file=sys.stderr,
                     flush=True,
                 )
-                time.sleep(STREAM_RETRY_BACKOFF_SEC)
+                time.sleep(RATE_LIMIT_RESUME_BACKOFF_SEC)
+                deadline += RATE_LIMIT_RESUME_BACKOFF_SEC
                 continue
             if (
                 failure_classification == "tool_argument_too_large"

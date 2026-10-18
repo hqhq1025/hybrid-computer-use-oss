@@ -71,8 +71,7 @@ def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch, version)
     spec.loader.exec_module(runner)
     args = argparse.Namespace(
         agent="codex", model="selected-model", effort="xhigh",
-        gateway_base="http://gateway:8600", claude_gateway_base="http://unused:8537",
-        gemini_gateway_base="http://unused:8571",
+        gateway="http://gateway:8600",
         benchmark_version=version, channels="",
     )
     run = runner.TaskRun(

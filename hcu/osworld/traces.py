@@ -9,6 +9,14 @@ from hcu.osworld.prompts import split_completion_message
 
 
 FAILURE_SUMMARY_MAX_CHARS = 4096
+# Codex reports "rate limit exceeded", Azure "exceeded token rate limit",
+# Gemini "RESOURCE_EXHAUSTED"; all are infrastructure, not agent failures.
+RATE_LIMIT_PATTERN = re.compile(
+    r"rate[ _-]?limit|too many requests|resource_exhausted"
+)
+# Classifications that describe the model service, not the agent. The queue
+# re-runs such tasks instead of recording a failure.
+INFRASTRUCTURE_FAILURES = frozenset({"upstream_rate_limit"})
 
 
 def empty_trace_summary() -> dict:
@@ -275,7 +283,7 @@ def summarize_agent_trace(raw: bytes | None, agent: str) -> dict:
 
 def classify_turn_failure(message: str) -> str:
     normalized = (message or "").casefold()
-    if "exceeded rate limit" in normalized or "rate_limit" in normalized:
+    if RATE_LIMIT_PATTERN.search(normalized):
         return "upstream_rate_limit"
     if (
         "tool_argument_too_large" in normalized

@@ -9,11 +9,7 @@ import urllib.request
 import pytest
 
 from hcu.gateway import anthropic_proxy, common, gemini_proxy, openai_proxy
-from hcu.osworld.usage import (
-    collect_task_proxy_usage,
-    count_model_requests,
-    task_generation_retry_exhausted,
-)
+from hcu.osworld.usage import collect_task_proxy_usage, read_task_log
 from test_gateways import FakeResponse, StaticToken, log_rows, post, serve
 
 
@@ -88,20 +84,20 @@ def gateway_server(tmp_path, kind, responses, limit=2):
 @pytest.mark.parametrize("stream", [False, True])
 def test_errors_retry_without_consuming_generation_budget(tmp_path, kind, stream):
     responses = [
-        FakeResponse(429, b'{"error":"rate limited"}'),
+        FakeResponse(503, b'{"error":"unavailable"}'),
         RuntimeError("connection failed"),
         success_response(kind, stream),
         success_response(kind, stream),
     ]
     with gateway_server(tmp_path, kind, responses) as (gateway, upstream, base, path):
-        assert [post(base, path, {}) for _ in range(5)] == [429, 502, 200, 200, 429]
+        assert [post(base, path, {}) for _ in range(5)] == [503, 502, 200, 200, 429]
     rows = log_rows(gateway.token_log.path)
     assert len(upstream.calls) == 4
     assert [row.get("model_step_completed", False) for row in rows] == [
         False, False, True, True, False,
     ]
-    assert count_model_requests(gateway.token_log.path, "task-test") == 2
-    assert not task_generation_retry_exhausted(gateway.token_log.path, "task-test")
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 2
+    assert not read_task_log(gateway.token_log.path, "task-test").retry_exhausted
     # The fake records byte-for-byte bodies, including retries.
     assert all(call[1]["body"] == b"{}" for call in upstream.calls)
 
@@ -148,7 +144,7 @@ def test_non_generation_and_get_do_not_consume_budget(tmp_path, kind):
     assert [row.get("model_step_completed", False) for row in rows] == [
         False, False, True, False, False,
     ]
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
     assert len(upstream.calls) == 4
     summary, _ = collect_task_proxy_usage(gateway.token_log.path, "task-test")
     assert summary["request_attempts"] == 5
@@ -177,7 +173,7 @@ def test_transport_disconnect_releases_slot(tmp_path, monkeypatch, kind):
     rows = log_rows(gateway.token_log.path)
     assert rows[0]["client_disconnected"]
     assert "model_step_completed" not in rows[0]
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
 
 
 @pytest.mark.parametrize("kind", PATHS)
@@ -192,8 +188,8 @@ def test_failed_retries_have_a_separate_persistent_circuit_breaker(tmp_path, kin
     gateway.restore()
     assert gateway.budget.admit({"task": "task-test"}, True) == "generation_retry_exhausted"
     assert len(upstream.calls) == limit
-    assert count_model_requests(gateway.token_log.path, "task-test") == 0
-    assert task_generation_retry_exhausted(gateway.token_log.path, "task-test")
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 0
+    assert read_task_log(gateway.token_log.path, "task-test").retry_exhausted
     assert not log_rows(gateway.token_log.path)[-1].get("budget_rejected")
 
 
@@ -208,8 +204,8 @@ def test_success_resets_failure_streak_and_survives_restart(tmp_path, kind):
     gateway.restore()
     assert gateway.budget.admit({"task": "task-test"}, True) == "budget_rejected"
     assert len(upstream.calls) == 10
-    assert count_model_requests(gateway.token_log.path, "task-test") == 2
-    assert not task_generation_retry_exhausted(gateway.token_log.path, "task-test")
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 2
+    assert not read_task_log(gateway.token_log.path, "task-test").retry_exhausted
 
 
 @pytest.mark.parametrize("kind", PATHS)
@@ -239,7 +235,7 @@ def test_concurrent_last_slot_is_reserved_without_terminal_rejection(tmp_path, k
             assert pending.result(timeout=5) == 200
         assert post(base, path, {}) == 429
     assert len(upstream.calls) == 1
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
 
 
 def test_legacy_rows_and_non_object_logs_are_not_delivery_evidence(tmp_path):
@@ -249,7 +245,7 @@ def test_legacy_rows_and_non_object_logs_are_not_delivery_evidence(tmp_path):
         '{"task":"task-other","model_step_completed":true}\n'
         '{"task":"task-test","model_step_completed":true}\n{"partial":'
     )
-    assert count_model_requests(path, "task-test") == 1
+    assert read_task_log(path, "task-test").completed_responses == 1
 
 
 @pytest.mark.parametrize("kind", PATHS)
@@ -258,7 +254,7 @@ def test_uncapped_gateway_still_marks_successful_generations(tmp_path, kind):
         gateway, _upstream, base, path,
     ):
         assert [post(base, path, {}) for _ in range(3)] == [200, 200, 200]
-    assert count_model_requests(gateway.token_log.path, "task-test") == 3
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 3
 
 
 @pytest.mark.parametrize("kind", PATHS)
@@ -267,7 +263,7 @@ def test_malformed_success_body_is_not_a_generation(tmp_path, kind):
         FakeResponse(200, b'{"broken":'), success_response(kind),
     ], limit=1) as (gateway, _upstream, base, path):
         assert [post(base, path, {}) for _ in range(3)] == [200, 200, 429]
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
     assert log_rows(gateway.token_log.path)[0]["generation_error"]
 
 
@@ -288,7 +284,7 @@ def test_output_token_limit_is_a_delivered_response(tmp_path, kind, stream):
         gateway, _upstream, base, path,
     ):
         assert [post(base, path, {}) for _ in range(2)] == [200, 429]
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
 
 
 def test_openai_auth_failure_releases_reservation(tmp_path):
@@ -305,7 +301,7 @@ def test_openai_auth_failure_releases_reservation(tmp_path):
         assert post(base, path, {}) == 200
         assert post(base, path, {}) == 429
     assert len(upstream.calls) == 1
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
 
 
 def test_real_relay_write_failure_is_not_delivery():
@@ -418,8 +414,8 @@ def test_gemini_json_array_stream_counts_delivery_and_final_cumulative_usage(tmp
         assert post(base, path, {}) == 200
         assert post(base, path, {}) == 429
     assert len(upstream.calls) == 1
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
-    assert not task_generation_retry_exhausted(gateway.token_log.path, "task-test")
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
+    assert not read_task_log(gateway.token_log.path, "task-test").retry_exhausted
     summary, _ = collect_task_proxy_usage(gateway.token_log.path, "task-test")
     assert summary["accounted_model_responses"] == 1
     assert summary["total_tokens"] == 5
@@ -439,7 +435,7 @@ def test_gemini_unsuccessful_arrays_release_the_reservation(tmp_path, body):
     ], limit=1) as (gateway, upstream, base, path):
         assert [post(base, path, {}) for _ in range(3)] == [200, 200, 429]
     assert len(upstream.calls) == 2
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
     assert log_rows(gateway.token_log.path)[0]["generation_error"]
 
 
@@ -451,7 +447,7 @@ def test_non_gemini_terminal_arrays_are_not_successful_generations(tmp_path, kin
     ], limit=1) as (gateway, upstream, base, path):
         assert [post(base, path, {}) for _ in range(3)] == [200, 200, 429]
     assert len(upstream.calls) == 2
-    assert count_model_requests(gateway.token_log.path, "task-test") == 1
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
     rows = log_rows(gateway.token_log.path)
     assert rows[0]["generation_error"]
     assert not rows[0].get("model_step_completed")

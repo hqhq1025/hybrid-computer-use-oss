@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import datetime
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import shlex
@@ -23,11 +24,12 @@ import uuid
 
 from hcu.paths import (
     DEFAULT_ARTIFACT_DIR,
+    DEFAULT_ASSET_CACHE,
     DEFAULT_BASE_INSTRUCTIONS_FILE,
     DEFAULT_INSTRUCTIONS_FILE,
+    DEFAULT_RESULTS_DIR,
     OSWORLD_ROOT,
     anchor_path_args,
-    results_root,
 )
 from hcu.osworld.agent_loop import TurnSettings, run_agent_phase
 from hcu.osworld.agents import (
@@ -73,17 +75,13 @@ from hcu.osworld.guest import (
     safe_tag,
     transient_workload_command,
 )
-from hcu.osworld.preflight import (
-    validate_dedicated_docker_runtime,
-    validate_official_asset_runtime,
-)
+from hcu.osworld.preflight import docker_runtime
 from hcu.osworld.prompts import (
     COMPLETE_SENTINEL,
     INFEASIBLE_SENTINEL,
     split_completion_message,
     task_prompt,
 )
-from hcu.osworld.results import write_local
 from hcu.osworld.runtime import (
     align_guest_run_clock,
     install_guest_runtime,
@@ -106,12 +104,19 @@ from hcu.osworld.traces import (
     summarize_agent_trace,
 )
 from hcu.osworld.usage import (
+    check_gateway_budget,
     collect_task_proxy_usage,
     normalize_budget_termination,
     reconcile_trace_and_proxy_usage,
 )
+from desktop_env.file_source import configure as configure_assets
 from desktop_env.cache import run_scoped_cache_dir
 from desktop_env.desktop_env import DesktopEnv
+
+
+def write_text(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+
 
 # Where each agent's artifact lands in the guest.
 GUEST_AGENT_BINARIES = {
@@ -120,6 +125,8 @@ GUEST_AGENT_BINARIES = {
     "gemini-cli": GUEST_GEMINI_ARCHIVE,
     "grok-build": GUEST_GROK,
 }
+
+GATEWAY_PORTS = {"openai": 8611, "anthropic": 8537, "gemini": 8571}
 
 CLAUDE_MCP_ADAPTER = (
     Path(__file__).resolve().parent
@@ -168,31 +175,13 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--gateway-base",
-        default=os.environ.get(
-            "HCU_OPENAI_GATEWAY",
-            "http://172.17.0.1:8611",
-        ),
+        "--gateway",
+        default="",
         help=(
-            "OpenAI Responses gateway reachable from the QEMU guest; serves "
-            "Codex and Grok Build."
+            "Model gateway URL reachable from the QEMU guest. Default: the "
+            "Docker bridge gateway at the agent's port (OpenAI 8611, "
+            "Anthropic 8537, Gemini 8571)."
         ),
-    )
-    parser.add_argument(
-        "--claude-gateway-base",
-        default=os.environ.get(
-            "HCU_ANTHROPIC_GATEWAY",
-            "http://172.17.0.1:8537",
-        ),
-        help="Anthropic-compatible gateway reachable from the QEMU guest.",
-    )
-    parser.add_argument(
-        "--gemini-gateway-base",
-        default=os.environ.get(
-            "HCU_GEMINI_GATEWAY",
-            "http://172.17.0.1:8571",
-        ),
-        help="Gemini API gateway reachable from the QEMU guest.",
     )
     parser.add_argument(
         "--artifact-dir",
@@ -238,7 +227,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--result-dir",
         default="",
-        help="Defaults to HCU_RESULTS_DIR/osworld-<version>/<run-tag>.",
+        help="Default: runs/single/<run-tag> in this repository.",
+    )
+    parser.add_argument(
+        "--asset-cache",
+        default=str(DEFAULT_ASSET_CACHE),
+        help="Setup asset download cache, keyed by source URL.",
+    )
+    parser.add_argument(
+        "--offline-assets",
+        action="store_true",
+        help="Fail setup instead of downloading an asset missing from the cache.",
+    )
+    parser.add_argument(
+        "--timezone", default="UTC",
+        help="Guest timezone; also decides the task's current date.",
+    )
+    parser.add_argument(
+        "--run-started-at", default="",
+        help="UTC start of the whole run (ISO 8601); fixes the task date across a panel.",
     )
     parser.add_argument(
         "--timeout",
@@ -371,7 +378,7 @@ class TaskRun:
         return self.result_dir / "agent-base-instructions.md"
 
     def write_meta(self, **json_options) -> None:
-        write_local(
+        write_text(
             self.result_dir / "meta.json",
             json.dumps(self.meta, **json_options, indent=2),
         )
@@ -402,23 +409,16 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
         f"{safe_tag(args.agent)}-{safe_tag(args.model)}-{safe_tag(args.effort)}-"
         f"{uuid.uuid4()}"
     )
-    results = results_root()
-    benchmark_dir = f"osworld-{args.benchmark_version}"
     result_dir = Path(
-        args.result_dir or results / benchmark_dir / run_tag
+        args.result_dir or DEFAULT_RESULTS_DIR / "single" / run_tag
     ).resolve()
     result_dir.mkdir(parents=True, exist_ok=False)
-    token_log_value = args.token_log or str(
-        results
-        / benchmark_dir
-        / (
-            f"{AGENT_PROFILES[args.agent]['gateway']}-tokens.jsonl"
-        )
-    )
-    token_log = Path(token_log_value).resolve()
+    token_log = Path(
+        args.token_log or result_dir.parent / "gateway-tokens.jsonl"
+    ).resolve()
     if args.max_model_calls > 0 and not token_log.is_file():
         raise FileNotFoundError(
-            f"--max-model-calls requires the proxy token log: {token_log}"
+            f"--max-model-calls requires the gateway token log: {token_log}"
         )
     affinity_task = f"{TASK_AFFINITY_PREFIX}{run_tag}"
 
@@ -459,12 +459,10 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
     )
     phases = task_phases(task)
     run_started_at_utc = (
-        str(os.environ.get("OSW_RUN_STARTED_AT_UTC") or "").strip()
+        args.run_started_at
         or datetime.datetime.now(datetime.timezone.utc).isoformat()
     )
-    run_timezone = str(
-        os.environ.get("OSW_RUN_TIMEZONE") or "UTC"
-    ).strip()
+    run_timezone = args.timezone
     explicit_task_date = (
         task.get("task_current_date")
         if hasattr(task, "get") and callable(getattr(task, "get"))
@@ -507,16 +505,10 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
 def stage_local_files(run: TaskRun) -> None:
     """Write the agent configuration, instructions and launcher locally."""
     args = run.args
-    affinity_prefix = TASK_AFFINITY_PREFIX.rstrip("-")
-    gateway_bases = {
-        "openai": args.gateway_base,
-        "anthropic": args.claude_gateway_base,
-        "gemini": args.gemini_gateway_base,
-    }
     run.agent_endpoint = task_gateway_base(
-        gateway_bases[run.profile["gateway"]],
+        args.gateway,
         run.run_tag,
-        affinity_prefix=affinity_prefix,
+        affinity_prefix=TASK_AFFINITY_PREFIX.rstrip("-"),
     )
     if args.agent == "codex":
         config = codex_config(
@@ -542,8 +534,8 @@ def stage_local_files(run: TaskRun) -> None:
             effort=args.effort,
             channels=args.channels,
         )
-    write_local(run.config_path, config)
-    write_local(
+    write_text(run.config_path, config)
+    write_text(
         run.prompt_path,
         task_prompt(
             run.instruction,
@@ -563,14 +555,14 @@ def stage_local_files(run: TaskRun) -> None:
             base_instructions = claude_system_prompt(base_instructions, instructions)
         elif args.agent == "grok-build":
             base_instructions = grok_system_prompt(base_instructions, instructions)
-    write_local(run.base_instructions_copy, base_instructions)
+    write_text(run.base_instructions_copy, base_instructions)
     if args.agent == "gemini-cli":
-        write_local(
+        write_text(
             run.gemini_trusted_path,
             json.dumps({"/home/user": "TRUST_FOLDER"}) + "\n",
         )
-        write_local(run.gemini_experiments_path, gemini_experiments())
-    write_local(
+        write_text(run.gemini_experiments_path, gemini_experiments())
+    write_text(
         run.launcher_path,
         launcher_script(
             agent=args.agent,
@@ -582,11 +574,7 @@ def stage_local_files(run: TaskRun) -> None:
     )
 
 
-def initial_meta(
-    run: TaskRun,
-    docker_runtime: dict,
-    asset_runtime: dict,
-) -> dict:
+def initial_meta(run: TaskRun, docker_runtime: dict) -> dict:
     args = run.args
     return {
         "run_tag": run.run_tag,
@@ -594,7 +582,8 @@ def initial_meta(
         "benchmark_version": args.benchmark_version,
         "task_domain": args.task_domain or None,
         "docker_runtime": docker_runtime,
-        "asset_runtime": asset_runtime,
+        "asset_cache": args.asset_cache,
+        "offline_assets": args.offline_assets,
         "instruction": run.instruction,
         "task_current_date": run.current_date,
         "task_current_date_source": (
@@ -628,8 +617,6 @@ def initial_meta(
         "base_instructions_file": str(run.base_instructions_file),
         "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "initializing",
-        "score": None,
-        "error": None,
     }
 
 
@@ -808,6 +795,7 @@ def prepare_guest(run: TaskRun, env: DesktopEnv) -> str:
         timeout=20,
     )
     meta["gateway_health"] = health.get("output", "").strip()
+    check_gateway_budget(meta["gateway_health"], args.max_model_calls)
 
     agent_version = (
         f"{shlex.quote(GUEST_GEMINI_NODE)} {shlex.quote(GUEST_GEMINI_CLI)}"
@@ -1003,23 +991,6 @@ def run_phases(run: TaskRun, env: DesktopEnv, base_url: str) -> PhaseOutcome:
             and phase_score <= 0.0
         ):
             phase_detail["gate_stop"] = "zero_score_gate"
-        if run.phases:
-            write_local(
-                run.result_dir / "phase_results.json",
-                json.dumps(
-                    outcome.phase_results,
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-            )
-        write_local(
-            run.result_dir / "phase_details.json",
-            json.dumps(
-                outcome.phase_details,
-                ensure_ascii=False,
-                indent=2,
-            ),
-        )
         if phase_detail.get("gate_stop"):
             break
     return outcome
@@ -1065,115 +1036,77 @@ def summarize_usage(run: TaskRun, outcome: PhaseOutcome) -> dict:
     )
 
 
+def write_result(run: TaskRun, status: str, **fields) -> dict:
+    """Write ``result.json``, the one authoritative record of a task run.
+
+    Every run that gets this far writes exactly one: ``completed`` or
+    ``evaluator_error`` after evaluation, ``error`` when the run failed.
+    """
+    args = run.args
+    result = {
+        "task_id": args.task_id,
+        "benchmark_version": args.benchmark_version,
+        "agent": args.agent,
+        "model": args.model,
+        "effort": args.effort,
+        "status": status,
+        "score": None,
+        **fields,
+        "duration_sec": round(time.monotonic() - run.started, 1),
+    }
+    (run.result_dir / "result.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
+    run.meta.update({
+        "status": status,
+        "end_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+    run.write_meta(ensure_ascii=False)
+    return result
+
+
 def finish_run(
     run: TaskRun,
     env: DesktopEnv,
     base_url: str,
     outcome: PhaseOutcome,
 ) -> int:
-    """Write the evaluator result and seal the run."""
-    args = run.args
+    """Clamp the summed phase scores and write the result."""
     score = None
-    if not outcome.official_evaluator_errors:
-        # Validate again before clamping: finite phase scores can overflow in
-        # aggregate, and an unpopulated outcome must not become a valid zero.
-        aggregate_channel = run_official_evaluator(lambda: outcome.total_score)
-        if aggregate_channel["status"] == "completed":
-            total_score = aggregate_channel["result"]["score"]
-            score = round(max(0.0, min(1.0, total_score)), 4)
-        else:
-            outcome.official_evaluator_errors.append({
+    errors = outcome.official_evaluator_errors
+    if not errors:
+        total = outcome.total_score
+        if total is None or not math.isfinite(total):
+            # Finite phase scores can still overflow when summed.
+            errors.append({
                 "stage": "aggregation",
-                "error": aggregate_channel["error"],
-                "traceback": aggregate_channel["traceback"],
-                "result_repr": aggregate_channel["result_repr"],
+                "error": "aggregate score is not a finite number",
+                "result_repr": repr(total),
             })
-    raw_evaluator_status = (
-        "error" if outcome.official_evaluator_errors else "completed"
-    )
-    if run.phases:
-        result_payload = {
-            "score": score,
-            "phase_results": outcome.phase_results,
-            "phase_details": outcome.phase_details,
-        }
-    else:
-        result_payload = dict(outcome.evaluator_payload or {"score": score})
-        result_payload["score"] = score
-        result_payload["phase_details"] = outcome.phase_details
-    result_payload.update({
-        "raw_evaluator_status": raw_evaluator_status,
-        "official_evaluator_errors": outcome.official_evaluator_errors,
-    })
-    write_local(run.result_dir / "final.txt", outcome.final_message + "\n")
-    write_local(
-        run.result_dir / "raw_evaluator.json",
-        json.dumps(
-            {
-                "score": score,
-                "status": raw_evaluator_status,
-                "errors": outcome.official_evaluator_errors,
-                "phase_results": outcome.phase_results,
-                "phase_details": outcome.phase_details,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-    )
-
-    delivery = phase_delivery_status(run.phases, outcome.phase_details)
-    result_payload["phase_delivery"] = delivery
-    summary = summarize_usage(run, outcome)
+        else:
+            score = round(max(0.0, min(1.0, total)), 4)
     done_payload = outcome.done_payload
-    result_payload.update({
-        "task_id": args.task_id,
-        "agent": args.agent,
-        "model": args.model,
-        "effort": args.effort,
-        "agent_returncode": (
-            done_payload.get("returncode") if done_payload else None
-        ),
-        "truncated": outcome.truncated,
-        "truncated_phases": outcome.truncated_phases,
-        "termination_reason": (
-            "max_model_calls"
-            if outcome.budget_exhausted
-            else "timeout"
-            if outcome.truncated
+    result = write_result(
+        run,
+        "evaluator_error" if errors else "completed",
+        score=score,
+        termination_reason=(
+            "max_model_calls" if outcome.budget_exhausted
+            else "timeout" if outcome.truncated
             else "completed"
         ),
-        "final_message": outcome.final_message,
-        "trace_summary": summary,
-        "duration_sec": round(time.monotonic() - run.started, 1),
-    })
-    write_local(
-        run.result_dir / "result.json",
-        json.dumps(result_payload, ensure_ascii=False, indent=2),
+        truncated=outcome.truncated,
+        truncated_phases=outcome.truncated_phases,
+        evaluator_errors=errors,
+        final_message=outcome.final_message,
+        agent_returncode=done_payload.get("returncode") if done_payload else None,
+        phase_delivery=phase_delivery_status(run.phases, outcome.phase_details),
+        phases=outcome.phase_details,
+        usage=summarize_usage(run, outcome),
     )
-    write_local(run.result_dir / "result.txt", json.dumps(score) + "\n")
-
-    run.meta.update({
-        "status": (
-            "truncated"
-            if outcome.truncated
-            else "completed_with_evaluator_error"
-            if outcome.official_evaluator_errors
-            else "completed"
-        ),
-        "score": score,
-        "raw_evaluator_status": raw_evaluator_status,
-        "official_evaluator_errors": outcome.official_evaluator_errors,
-        "end_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "duration_sec": result_payload["duration_sec"],
-        "agent_returncode": result_payload["agent_returncode"],
-        "termination_reason": result_payload["termination_reason"],
-        "final_message": outcome.final_message,
-        "trace_summary": summary,
-    })
-    run.write_meta(ensure_ascii=False)
     print(json.dumps(
-        {"result_dir": str(run.result_dir), **result_payload},
-        ensure_ascii=False,
+        {"result_dir": str(run.result_dir), "status": result["status"], "score": score},
     ))
     return 0
 
@@ -1182,19 +1115,9 @@ def record_failure(run: TaskRun, env: DesktopEnv | None, exc: Exception) -> int:
     """Record a fatal run error together with guest diagnostics."""
     raw_error_text = f"{type(exc).__name__}: {exc}"
     failure_classification = classify_turn_failure(raw_error_text)
-    error_text = concise_failure_message(raw_error_text)
-    infra_diagnostic = None
     if env is not None:
         infra_diagnostic = collect_guest_infra_diagnostic(
             env.setup_controller.http_server
-        )
-        infra_diagnostic["primary_failure_classification"] = (
-            failure_classification
-        )
-        infra_diagnostic["causal_to_primary_failure"] = (
-            False
-            if failure_classification == "tool_argument_too_large"
-            else None
         )
         infra_output = str(infra_diagnostic.pop("output", ""))
         if infra_output:
@@ -1203,28 +1126,18 @@ def record_failure(run: TaskRun, env: DesktopEnv | None, exc: Exception) -> int:
                 encoding="utf-8",
             )
         (run.result_dir / "fatal-guest-infra.json").write_text(
-            json.dumps(
-                infra_diagnostic,
-                ensure_ascii=False,
-                indent=2,
-            ),
+            json.dumps(infra_diagnostic, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-    run.meta.update({
-        "status": "error",
-        "error": error_text,
-        "failure_classification": failure_classification,
-        "traceback": concise_failure_message(traceback.format_exc()),
-        "infra_diagnostic": infra_diagnostic,
-        "end_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "duration_sec": round(time.monotonic() - run.started, 1),
-    })
-    run.write_meta(ensure_ascii=False)
-    (run.result_dir / "error.txt").write_text(
-        run.meta["traceback"],
-        encoding="utf-8",
+    trace = concise_failure_message(traceback.format_exc())
+    write_result(
+        run,
+        "error",
+        failure_classification=failure_classification,
+        error=concise_failure_message(raw_error_text),
+        traceback=trace,
     )
-    print(run.meta["traceback"], file=sys.stderr)
+    print(trace, file=sys.stderr)
     return 1
 
 
@@ -1272,33 +1185,9 @@ def close_guest(run: TaskRun, env: DesktopEnv) -> None:
             "last_cleanup_status",
             None,
         )
-    if cleanup_status is None:
-        return
-    write_local(
-        run.result_dir / "cleanup.json",
-        json.dumps(
-            cleanup_status,
-            ensure_ascii=False,
-            indent=2,
-        ),
-    )
-    try:
-        current_meta = json.loads(
-            (run.result_dir / "meta.json").read_text(
-                encoding="utf-8"
-            )
-        )
-    except (OSError, json.JSONDecodeError):
-        current_meta = run.meta
-    current_meta["container_cleanup"] = cleanup_status
-    write_local(
-        run.result_dir / "meta.json",
-        json.dumps(
-            current_meta,
-            ensure_ascii=False,
-            indent=2,
-        ),
-    )
+    if cleanup_status is not None:
+        run.meta["container_cleanup"] = cleanup_status
+        run.write_meta(ensure_ascii=False)
 
 
 def main() -> int:
@@ -1313,13 +1202,18 @@ def main() -> int:
         "base_instructions_file",
         "result_dir",
         "token_log",
+        "asset_cache",
     )
     os.chdir(OSWORLD_ROOT)
+    configure_assets(args.asset_cache, offline=args.offline_assets)
+    runtime = docker_runtime()
+    if not args.gateway:
+        bridge = (runtime["bridge_gateways"] or ["172.17.0.1"])[0]
+        port = GATEWAY_PORTS[AGENT_PROFILES[args.agent]["gateway"]]
+        args.gateway = f"http://{bridge}:{port}"
     run = prepare_run(args)
-    asset_runtime = validate_official_asset_runtime(args.benchmark_version, run.task)
-    docker_runtime = validate_dedicated_docker_runtime()
     stage_local_files(run)
-    run.meta = initial_meta(run, docker_runtime, asset_runtime)
+    run.meta = initial_meta(run, runtime)
     run.write_meta()
 
     env = None

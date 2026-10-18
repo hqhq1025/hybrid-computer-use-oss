@@ -22,11 +22,16 @@ two reasons:
   call. A task is therefore pinned to one upstream for its whole run; tasks
   are spread across upstreams round-robin.
 
-The gateway never retries and never switches upstreams: switching would
-invalidate ``previous_response_id`` mid-trajectory. Retries belong to the
-agent, whose retries reuse the same ``/t/<task>/`` path and therefore the same
-upstream. Rate limits and upstream errors are relayed unchanged and flagged
-in the accounting row.
+Rate limits are absorbed before the agent sees them. Azure reports a token
+rate limit either as HTTP 429 or as an HTTP 200 stream ending in an error
+event; the gateway waits (``retry-after`` or exponential backoff with jitter,
+bounded by ``--rate-limit-max-wait``) and resends. With direct upstreams, a
+request without ``previous_response_id`` may instead move to another
+deployment of the same model on the same resource; the task is then pinned
+there. A task never changes resource, and a request that continues
+server-side state never moves. Behind a relay (``--pin-resources``) the relay
+chooses the deployment. Other upstream errors
+are relayed unchanged; the agent owns those retries.
 
 Usage::
 
@@ -58,6 +63,8 @@ import urllib3
 from hcu.gateway.common import (
     GenerationBudget,
     MAX_CONSECUTIVE_GENERATION_FAILURES,
+    RATE_LIMIT_MAX_WAIT_SEC,
+    forward_with_rate_limit_retry,
     TokenLog,
     new_stats,
     read_log_rows,
@@ -172,6 +179,7 @@ class OpenAIGateway:
         token: AzureToken | StaticToken,
         upstream_kind: str = "azure",
         upstream_scheme: str = "https",
+        rate_limit_max_wait: float = RATE_LIMIT_MAX_WAIT_SEC,
     ) -> None:
         if upstream_kind not in UPSTREAM_KINDS:
             raise ValueError(f"unknown upstream kind {upstream_kind!r}")
@@ -182,12 +190,17 @@ class OpenAIGateway:
         self.token = token
         self.upstream_kind = upstream_kind
         self.upstream_scheme = upstream_scheme
+        self.rate_limit_max_wait = rate_limit_max_wait
         self.stats = new_stats()
         self._affinity_lock = threading.Lock()
         self._affinity: dict[tuple[str, str], str] = {}
         self._next_upstream: dict[tuple[str, ...], int] = {}
         self.pin_resources: list[str] = []
         self._task_resource: dict[str, str] = {}
+        # Per-upstream token headroom (remaining, observed_at) and the time a
+        # rate-limited upstream is expected to accept requests again.
+        self._headroom: dict[str, tuple[int, float]] = {}
+        self._cooldown_until: dict[str, float] = {}
         self.budget = GenerationBudget(max_requests_per_task)
         self._pool_lock = threading.Lock()
         self._pools: dict[str, urllib3.HTTPSConnectionPool] = {}
@@ -216,21 +229,43 @@ class OpenAIGateway:
         if affinity:
             log(f"restored {len(affinity)} task/model upstream affinities")
 
+    def _pick(self, upstreams: list[str], pool_key: tuple[str, ...], exclude=()) -> str | None:
+        """Prefer upstreams outside cooldown with the most token headroom.
+
+        Unknown or stale (over a minute old) headroom counts as unlimited, so
+        with no observations the choice is round-robin. Callers hold the lock.
+        """
+        now = time.time()
+        index = self._next_upstream.get(pool_key, 0)
+        self._next_upstream[pool_key] = index + 1
+        candidates = [host for host in upstreams if host not in exclude]
+        if not candidates:
+            return None
+
+        def rank(position: int) -> tuple:
+            host = candidates[position]
+            remaining, observed = self._headroom.get(host, (None, 0.0))
+            fresh = remaining is not None and now - observed < 60
+            return (
+                self._cooldown_until.get(host, 0.0) > now,
+                -(remaining if fresh else float("inf")),
+                (position - index) % len(candidates),
+            )
+
+        return candidates[min(range(len(candidates)), key=rank)]
+
     def host_for_task(self, task: str | None, model: str | None) -> str:
-        """Pin a task to one upstream on first sight; never switch later."""
+        """Pin a task to one upstream on first sight."""
         task = task or "_notask"
         model = str(model or "")
         upstreams = self.model_upstreams.get(model) or self.upstreams
         if not upstreams:
             raise RuntimeError(f"model {model or '<unknown>'} has no upstreams")
         key = (task, model)
-        pool_key = tuple(upstreams)
         with self._affinity_lock:
             host = self._affinity.get(key)
             if host is None:
-                index = self._next_upstream.get(pool_key, 0)
-                host = upstreams[index % len(upstreams)]
-                self._next_upstream[pool_key] = index + 1
+                host = self._pick(upstreams, tuple(upstreams))
                 self._affinity[key] = host
                 log(
                     f"task {task[:8]} model={model or '<unknown>'} -> {host} "
@@ -250,6 +285,39 @@ class OpenAIGateway:
                 self._task_resource[task] = resource
                 log(f"task {task[:8]} -> resource {resource} (pinned)")
             return resource
+    def observe(self, host: str, headers, rate_limited_for: float | None) -> None:
+        """Record an upstream's token headroom and rate-limit cooldown."""
+        remaining = headers.get("x-ratelimit-remaining-tokens")
+        with self._affinity_lock:
+            if remaining is not None and str(remaining).isdigit():
+                self._headroom[host] = (int(remaining), time.time())
+            if rate_limited_for is not None:
+                # Without a hint, assume the per-minute window needs a while.
+                self._cooldown_until[host] = time.time() + max(rate_limited_for, 10.0)
+
+    def spill(self, task: str | None, model: str | None, current: str) -> str | None:
+        """Move a task to another deployment of its model on the same resource.
+
+        Agents replay encrypted reasoning that only the producing Azure
+        resource can decrypt, so a task never leaves its resource (the host
+        part of ``HOST@DEPLOYMENT``).
+        """
+        if self.pin_resources:
+            return None  # the relay owns deployment choice within the resource
+        task = task or "_notask"
+        model = str(model or "")
+        resource = current.partition("@")[0]
+        upstreams = [
+            host for host in self.model_upstreams.get(model) or self.upstreams
+            if host.partition("@")[0] == resource
+        ]
+        with self._affinity_lock:
+            host = self._pick(upstreams, tuple(upstreams), exclude=(current,))
+            if host is None or self._cooldown_until.get(host, 0.0) > time.time():
+                return None
+            self._affinity[(task, model)] = host
+        log(f"task {task[:8]} rate-limited on {current}; moved to {host}")
+        return host
 
     def pool(self, host: str) -> urllib3.HTTPSConnectionPool:
         with self._pool_lock:
@@ -277,6 +345,7 @@ class OpenAIGateway:
             "max_completed_responses_per_task": self.max_requests_per_task,
             "step_unit": "successful_task_agent_response",
             "max_consecutive_generation_failures": MAX_CONSECUTIVE_GENERATION_FAILURES,
+            "rate_limit_max_wait_sec": self.rate_limit_max_wait,
             **self.stats,
         }
 
@@ -395,6 +464,7 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
                 "previous_response_id": None,
                 "model": None,
             }
+            request = {}
             if body[:1] == b"{":
                 try:
                     request = json.loads(body)
@@ -411,53 +481,72 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
                 self.reject_budget(row, rejection)
                 return
             try:
-                route = gateway.host_for_task(task, row["model"])
+                row["endpoint"] = gateway.host_for_task(task, row["model"])
             except Exception as exc:
                 self.fail(502, f"upstream routing failed: {exc}", row)
                 return
-            row["endpoint"] = route
-            host, _, deployment = route.partition("@")
-            if deployment and row["model"] is not None:
-                request["model"] = deployment
-                body = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
-            try:
-                token = gateway.token.get()
-            except Exception as exc:
-                self.fail(502, f"AAD token acquisition failed: {exc}", row)
-                return
-
-            # Only authentication and Host are replaced; the body is untouched.
-            headers = {
+            forwarded_headers = {
                 key: value
                 for key, value in self.headers.items()
                 if key.lower() not in UNFORWARDED_REQUEST_HEADERS
             }
-            headers["Authorization"] = f"Bearer {token}"
-            headers["Host"] = host
             resource = gateway.resource_for_task(task)
             if resource:
-                headers["X-HCU-Resource"] = resource
                 row["resource"] = resource
-            headers["content-length"] = str(len(body))
-            headers["accept-encoding"] = "identity"
+
+            def send():
+                # Only authentication, Host and a deployment's model name change.
+                host, _, deployment = row["endpoint"].partition("@")
+                payload = body
+                if deployment and row["model"] is not None:
+                    payload = json.dumps(
+                        {**request, "model": deployment},
+                        ensure_ascii=False, separators=(",", ":"),
+                    ).encode()
+                headers = {
+                    **forwarded_headers,
+                    "Authorization": f"Bearer {gateway.token.get()}",
+                    "Host": host,
+                    "content-length": str(len(payload)),
+                    "accept-encoding": "identity",
+                }
+                if resource:
+                    headers["X-HCU-Resource"] = resource
+                gateway.stats["calls"] += 1
+                response = gateway.pool(host).urlopen(
+                    method, upstream_path, body=payload, headers=headers,
+                    preload_content=True, retries=False, timeout=REQUEST_TIMEOUT,
+                )
+                gateway.observe(row["endpoint"], response.headers, None)
+                return response
+
+            def on_rate_limit(delay: float) -> bool:
+                gateway.stats["rate_limited"] += 1
+                current = row["endpoint"]
+                gateway.observe(current, {}, delay)
+                # Without previous_response_id the request carries its whole
+                # context, so another deployment of the same model can serve it.
+                moved = (
+                    None if row["previous_response_id"]
+                    else gateway.spill(task, row["model"], current)
+                )
+                if moved is None:
+                    log(f"rate limit on {current} task={(task or '')[:8]}; waiting {delay:.1f}s")
+                    return False
+                row["endpoint"] = moved
+                row.setdefault("spilled_from", []).append(current)
+                return True
 
             started = time.time()
-            gateway.stats["calls"] += 1
             try:
-                response = gateway.pool(host).urlopen(
-                    method,
-                    upstream_path,
-                    body=body,
-                    headers=headers,
-                    preload_content=True,
-                    retries=False,
-                    timeout=REQUEST_TIMEOUT,
+                response = forward_with_rate_limit_retry(
+                    send, row, gateway.token_log, gateway.rate_limit_max_wait, on_rate_limit,
                 )
             except Exception as exc:
                 row["latency_sec"] = round(time.time() - started, 3)
                 self.fail(
                     502,
-                    f"upstream {host} connection failed: {type(exc).__name__}: {exc}",
+                    f"upstream {row['endpoint']} request failed: {type(exc).__name__}: {exc}",
                     row,
                 )
                 return
@@ -470,18 +559,12 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
             row["http_status"] = status
             row["latency_sec"] = round(time.time() - started, 3)
             task_label = (task or "")[:8]
-            if status == 429:
-                gateway.stats["rate_limited"] += 1
-                row["rate_limited"] = True
-                log(f"429 from {host} task={task_label}; relayed without retry")
-            elif status >= 500:
-                gateway.stats["errors"] += 1
-                row["upstream_error"] = True
-                log(f"{status} from {host} task={task_label}: {response_body[:200]!r}")
+            if row.get("rate_limited"):
+                log(f"rate limit on {row['endpoint']} task={task_label} outlasted the wait; relayed")
             elif status >= 400:
                 gateway.stats["errors"] += 1
                 row["upstream_error"] = True
-                log(f"{status} from {host} task={task_label}: {response_body[:300]!r}")
+                log(f"{status} from {row['endpoint']} task={task_label}: {response_body[:300]!r}")
 
             try:
                 payload = None
@@ -598,6 +681,13 @@ def main() -> int:
             "sent to the relay as X-HCU-Resource."
         ),
     )
+    parser.add_argument(
+        "--rate-limit-max-wait", type=float, default=RATE_LIMIT_MAX_WAIT_SEC,
+        help=(
+            "Seconds the gateway may wait out upstream rate limits for one "
+            "request before relaying the rate limit to the agent."
+        ),
+    )
     args = parser.parse_args()
     if args.max_requests_per_task < 0:
         parser.error("--max-requests-per-task must be at least 0")
@@ -638,6 +728,7 @@ def main() -> int:
         token=token,
         upstream_kind=args.upstream_kind,
         upstream_scheme=args.upstream_scheme,
+        rate_limit_max_wait=args.rate_limit_max_wait,
     )
     gateway.pin_resources = parse_hosts(args.pin_resources)
     gateway.restore()

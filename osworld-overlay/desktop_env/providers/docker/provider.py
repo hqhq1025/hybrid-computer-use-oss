@@ -138,7 +138,7 @@ class DockerProvider(Provider):
             raise DockerNetworkConflictError(
                 "Docker bridge subnet has conflicting host routes: "
                 + json.dumps(conflicts, sort_keys=True)
-                + ". Use the dedicated OSWorld Docker daemon."
+                + ". Remove the stale route or point DOCKER_HOST at a daemon whose bridge does not collide."
             )
 
     def prepare_volume(self, path_to_vm: str, volume_size: int | None, os_type: str):

@@ -16,6 +16,7 @@ def canary_module(monkeypatch):
     dependencies = {
         "hcu.osworld.task_loader": {"load_task_config": None},
         "desktop_env.cache": {"run_scoped_cache_dir": lambda *args: "/unused-cache"},
+        "desktop_env.file_source": {"configure": lambda *args, **kwargs: None},
         "desktop_env.desktop_env": {"DesktopEnv": None},
         "desktop_env.providers.volume": {"validate_guest_image_capacity": lambda *args: 1},
     }
@@ -58,8 +59,7 @@ def test_canary_uses_environment_evaluator_and_closes_guest(
         assert kwargs["prefer_class"] == (version == "v2")
         return selected
 
-    def preflight(actual_version, task):
-        assert actual_version == version and task is selected
+    def preflight():
         events.append("preflight")
         return {}
 
@@ -98,15 +98,14 @@ def test_canary_uses_environment_evaluator_and_closes_guest(
         task_id="selected", task_domain=None, run_evaluator=outcome != "disabled",
         evaluator_fixture=[] if outcome == "disabled" else [(fixture, "/tmp/fixture")],
         volume_size=40, ram_size="4G", health_url=[], client_password="mock",
-        retain_container=False,
+        retain_container=False, asset_cache=tmp_path / "cache", offline_assets=True,
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OSWORLD_DOCKER_RAM_SIZE", "original")
     monkeypatch.setattr(module, "OSWORLD_ROOT", tmp_path)
     monkeypatch.setattr(module, "parse_args", lambda: args)
     monkeypatch.setattr(module, "load_task_config", load)
-    monkeypatch.setattr(module, "validate_official_asset_runtime", preflight)
-    monkeypatch.setattr(module, "validate_dedicated_docker_runtime", lambda: {})
+    monkeypatch.setattr(module, "docker_runtime", preflight)
     monkeypatch.setattr(module, "DesktopEnv", create)
     if outcome == "error":
         with pytest.raises(RuntimeError, match="evaluator failed"):

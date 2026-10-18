@@ -58,11 +58,14 @@ First open-source release of Hybrid Computer Use.
   AX-only, GUI-only and no-skill configurations support channel ablations.
 - The Python `hcu` package runs Codex, Claude Code, Gemini CLI and Grok Build
   in isolated OSWorld V1 or V2 Docker/QEMU guests. It provides setup canaries,
-  single-task runs, bounded batches and rolling queues with restart recovery,
-  launch staggering and a rate-limit circuit breaker.
-- Batch and queue runners share one configuration schema. Each configuration
-  selects one benchmark generation, and unknown configuration keys fail
-  validation. `HCU_QUEUE` selects the default rolling-queue configuration.
+  single-task runs and a bounded queue with restart recovery. One JSON
+  config describes a run; unknown keys fail validation. Each task writes
+  one authoritative `result.json`.
+- Gateways wait out upstream rate limits before the agent sees them and may
+  move a stateless request to another deployment; rate-limited tasks are
+  retried as infrastructure failures, never scored as agent failures.
+- Setup assets come from local paths or a URL-keyed download cache;
+  `--offline-assets` forbids downloads.
 - Task-scoped OpenAI Responses, Anthropic Messages and Gemini gateways keep
   model credentials on the host and record token usage. The official
   evaluator supplies scores; result files also report evaluator errors,

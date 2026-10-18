@@ -122,14 +122,42 @@ def test_zero_exit_does_not_hide_a_retry_circuit_failure(polling):
         polling.run()
 
 
-@pytest.mark.parametrize("limit", [None, 0, 2])
-def test_gateway_limit_mismatch_fails_closed(polling, limit):
-    polling.write_rows({
-        "task": "task-test", "generation_request": True, "request_limit": limit,
-    })
-    polling.done_at = 0
-    with pytest.raises(RuntimeError, match="budget mismatch"):
-        polling.run()
+@pytest.mark.parametrize("health, limit, ok", [
+    ('{"max_completed_responses_per_task": 1}', 1, True),
+    ('{"max_completed_responses_per_task": 2}', 1, False),
+    ('{"max_completed_responses_per_task": 0}', 1, False),
+    ("not json", 1, False),
+    ("not json", 0, True),
+])
+def test_gateway_cap_is_checked_once_before_the_agent_starts(health, limit, ok):
+    from hcu.osworld.usage import check_gateway_budget
+
+    if ok:
+        check_gateway_budget(health, limit)
+    else:
+        with pytest.raises(RuntimeError, match="budget mismatch"):
+            check_gateway_budget(health, limit)
+
+
+def test_rate_limit_waits_extend_the_deadline_and_count_as_progress(polling, monkeypatch):
+    monkeypatch.setattr(agent_loop, "MODEL_PROGRESS_TIMEOUT_SEC", 5)
+    waits = []
+
+    def fetch(*_args):
+        polling.polls += 1
+        # The gateway waits out a rate limit every 4 s for 12 s of a 5 s deadline.
+        if polling.now in (2, 6, 10):
+            waits.append({"task": "task-test", "rate_limit_wait": True, "wait_sec": 4})
+            polling.write_rows(*waits)
+        if polling.now >= 14:
+            return b'{"turn_token":"turn","returncode":0}'
+        return None
+
+    monkeypatch.setattr(agent_loop, "fetch_guest_file", fetch)
+    result = polling.run(deadline=5)
+    assert not result["truncated"]
+    assert result["rate_limit_wait_sec"] == 12
+    assert not polling.kills
 
 
 @pytest.mark.parametrize("last_response", [False, True])
@@ -150,7 +178,6 @@ def test_explicit_shorter_deadline_is_preserved(polling):
 
 
 @pytest.mark.parametrize("failure, message", [
-    ({"generation_request": True, "request_limit": 2}, "budget mismatch"),
     ({"generation_retry_exhausted": True}, "consecutive generation failure"),
 ])
 @pytest.mark.parametrize("after_stop", [False, True])
@@ -166,7 +193,6 @@ def test_completion_fetch_revalidates_new_failure_rows(polling, monkeypatch, fai
 
 
 @pytest.mark.parametrize("failure, message", [
-    ({"generation_request": True, "request_limit": 0}, "budget mismatch"),
     ({"generation_retry_exhausted": True}, "consecutive generation failure"),
 ])
 def test_budget_failures_export_turn_and_aggregate_artifacts(polling, monkeypatch, failure, message):
@@ -196,7 +222,7 @@ def test_secondary_cleanup_failures_preserve_original_exception(polling, monkeyp
     original = RuntimeError("original budget failure")
     saved = []
 
-    def validate(*_args):
+    def read_log(*_args):
         raise original
 
     def save(_base, guest_path, _local_path):
@@ -208,7 +234,7 @@ def test_secondary_cleanup_failures_preserve_original_exception(polling, monkeyp
     def stop(*_args, **_kwargs):
         raise OSError("stop failed")
 
-    monkeypatch.setattr(agent_loop, "validate_task_model_budget", validate)
+    monkeypatch.setattr(agent_loop, "read_task_log", read_log)
     monkeypatch.setattr(agent_loop, "save_guest_artifact", save)
     if stop_fails:
         monkeypatch.setattr(agent_loop, "request_execute", stop)

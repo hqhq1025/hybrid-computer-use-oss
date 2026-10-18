@@ -1,35 +1,35 @@
-"""Filesystem locations shared by the harness entry points.
-
-Every location can be overridden through the environment so that the
-repository, the OSWorld checkout, the agent artifacts and the results can
-live on different volumes.
-"""
+"""Filesystem locations shared by the harness entry points."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+import sys
 
-REPO_ROOT = Path(
-    os.environ.get(
-        "HYBRID_COMPUTER_USE_ROOT",
-        Path(__file__).resolve().parents[1],
-    )
-).expanduser().resolve()
-OSWORLD_ROOT = Path(
-    os.environ.get("OSWORLD_V2_ROOT", REPO_ROOT / "external" / "OSWorld-V2")
-).expanduser().resolve()
-DEFAULT_ARTIFACT_DIR = Path(
-    os.environ.get("HCU_ARTIFACT_DIR", REPO_ROOT / "artifacts")
-).expanduser()
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _osworld_root() -> Path:
+    """The OSWorld-V2 checkout whose ``desktop_env`` the harness imports.
+
+    Entry points are meant to run with that checkout's ``.venv/bin/python``,
+    so the checkout is the interpreter's parent directory. ``OSWORLD_V2_ROOT``
+    overrides this; ``external/OSWorld-V2`` is the fallback.
+    """
+    if os.environ.get("OSWORLD_V2_ROOT"):
+        return Path(os.environ["OSWORLD_V2_ROOT"]).expanduser().resolve()
+    interpreter_checkout = Path(sys.prefix).resolve().parent
+    if (interpreter_checkout / "desktop_env").is_dir():
+        return interpreter_checkout
+    return REPO_ROOT / "external" / "OSWorld-V2"
+
+
+OSWORLD_ROOT = _osworld_root()
+DEFAULT_ARTIFACT_DIR = REPO_ROOT / "artifacts"
+DEFAULT_RESULTS_DIR = REPO_ROOT / "runs"
+DEFAULT_ASSET_CACHE = REPO_ROOT / "assets"
 DEFAULT_INSTRUCTIONS_FILE = REPO_ROOT / "instructions/hybrid.md"
 DEFAULT_BASE_INSTRUCTIONS_FILE = REPO_ROOT / "instructions/base.md"
-
-
-def results_root() -> Path:
-    return Path(
-        os.environ.get("HCU_RESULTS_DIR", REPO_ROOT / "runs")
-    ).expanduser().resolve()
 
 
 def anchor_path_args(args, *names: str) -> None:

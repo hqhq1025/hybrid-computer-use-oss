@@ -9,13 +9,11 @@ from pathlib import Path
 import time
 
 
-from hcu.paths import OSWORLD_ROOT, anchor_path_args
-from hcu.osworld.preflight import (
-    validate_dedicated_docker_runtime,
-    validate_official_asset_runtime,
-)
+from hcu.paths import DEFAULT_ASSET_CACHE, OSWORLD_ROOT, anchor_path_args
+from hcu.osworld.preflight import docker_runtime
 from hcu.osworld.task import task_value
 from hcu.osworld.task_loader import load_task_config
+from desktop_env.file_source import configure as configure_assets
 from desktop_env.cache import run_scoped_cache_dir
 from desktop_env.desktop_env import DesktopEnv
 from desktop_env.providers.volume import validate_guest_image_capacity
@@ -71,6 +69,14 @@ def parse_args() -> argparse.Namespace:
             "evaluator. Requires --run-evaluator."
         ),
     )
+    parser.add_argument(
+        "--asset-cache", type=Path, default=DEFAULT_ASSET_CACHE,
+        help="Setup asset download cache, keyed by source URL.",
+    )
+    parser.add_argument(
+        "--offline-assets", action="store_true",
+        help="Fail setup instead of downloading an asset missing from the cache.",
+    )
     parser.add_argument("--volume-size", type=int, default=40)
     parser.add_argument("--ram-size", default="4G")
     parser.add_argument(
@@ -90,7 +96,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    anchor_path_args(args, "guest_image", "result_dir")
+    anchor_path_args(args, "guest_image", "result_dir", "asset_cache")
     os.chdir(OSWORLD_ROOT)
     if args.evaluator_fixture and not args.run_evaluator:
         raise ValueError("--evaluator-fixture requires --run-evaluator")
@@ -107,8 +113,7 @@ def main() -> int:
         eval_version=args.benchmark_version,
         prefer_class=args.benchmark_version == "v2",
     )
-    asset_runtime = validate_official_asset_runtime(args.benchmark_version, task)
-    docker_runtime = validate_dedicated_docker_runtime()
+    configure_assets(args.asset_cache, offline=args.offline_assets)
     task_volume_size = task_value(task, "volume_size")
     volume_size = args.volume_size
     if task_volume_size is not None:
@@ -139,8 +144,9 @@ def main() -> int:
             }
             for local_path, guest_path in args.evaluator_fixture
         ],
-        "docker_runtime": docker_runtime,
-        "asset_runtime": asset_runtime,
+        "docker_runtime": docker_runtime(),
+        "asset_cache": str(args.asset_cache),
+        "offline_assets": args.offline_assets,
         "status": "initializing",
     }
     try:

@@ -5,7 +5,6 @@ import subprocess
 
 import pytest
 
-from hcu.osworld.batch_config import runner_command, validate_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,130 +18,6 @@ def require_osworld_checkout() -> Path:
     if not (OSWORLD_ROOT / "desktop_env").is_dir() or not python.is_file():
         pytest.skip(f"OSWorld-V2 checkout with .venv not found at {OSWORLD_ROOT}")
     return python
-
-
-def test_v1_batch_selects_qemu_runner_and_domain(tmp_path):
-    command = runner_command(
-        {
-            "benchmark_version": "v1",
-            "agent": "codex",
-            "model": "gpt-5.4",
-            "effort": "xhigh",
-            "client_password": "password",
-        },
-        {
-            "id": "task-uuid",
-            "task_domain": "libreoffice_calc",
-        },
-        tmp_path,
-    )
-    assert command[1:3] == ["-m", "hcu.osworld.run_task"]
-    assert command[command.index("--benchmark-version") + 1] == "v1"
-    assert command[command.index("--task-domain") + 1] == "libreoffice_calc"
-    assert command[command.index("--client-password") + 1] == "password"
-
-
-def test_v2_batch_defaults_to_v2(tmp_path):
-    command = runner_command({}, {"id": "001"}, tmp_path)
-    assert command[command.index("--benchmark-version") + 1] == "v2"
-    assert "--task-domain" not in command
-
-
-def test_batch_expands_environment_backed_paths(tmp_path, monkeypatch):
-    monkeypatch.setenv("TEST_GUEST_IMAGE", "/images/v2.qcow2")
-    command = runner_command(
-        {
-            "guest_image": "${TEST_GUEST_IMAGE}",
-            "client_password": "osworld-public-evaluation",
-            "max_model_calls": 200,
-        },
-        {"id": "001"},
-        tmp_path,
-    )
-    assert command[command.index("--guest-image") + 1] == "/images/v2.qcow2"
-    assert (
-        command[command.index("--client-password") + 1]
-        == "osworld-public-evaluation"
-    )
-    assert command[command.index("--max-model-calls") + 1] == "200"
-
-
-# Required example-queue coverage by benchmark version and agent.
-EXAMPLE_AGENTS = {
-    "v1": ("codex", "claude-code", "gemini-cli", "grok-build"),
-    "v2": ("codex", "claude-code"),
-}
-V1_PASSWORD = "password"
-V1_VOLUME_SIZE = 64
-V2_PASSWORD = "osworld-public-evaluation"
-V2_VOLUME_SIZE = 100
-
-
-def example_configs():
-    """Every example queue, keyed by its benchmark version and agent."""
-    found = {}
-    for path in sorted((ROOT / "configs").glob("osworld-*-queue.example.json")):
-        config = json.loads(path.read_text(encoding="utf-8"))
-        found.setdefault(config["benchmark_version"], {})[config["agent"]] = config
-    return found
-
-
-def test_example_queues_cover_the_harnesses_and_bind_their_guests():
-    configs = example_configs()
-    assert set(configs) == set(EXAMPLE_AGENTS)
-    for version, agents in EXAMPLE_AGENTS.items():
-        assert tuple(sorted(configs[version])) == tuple(sorted(agents))
-        for agent, config in configs[version].items():
-            validate_config(config)
-            assert config["benchmark_version"] == version
-            assert config["agent"] == agent
-            assert config["run_id"] == f"example-osworld-{version}-{agent}"
-    for config in configs["v1"].values():
-        assert config["client_password"] == V1_PASSWORD
-        assert {task["volume_size"] for task in config["tasks"]} == {V1_VOLUME_SIZE}
-    for config in configs["v2"].values():
-        assert config["client_password"] == V2_PASSWORD
-        assert {task["volume_size"] for task in config["tasks"]} == {V2_VOLUME_SIZE}
-
-
-def test_example_queues_point_each_agent_at_its_own_gateway():
-    from hcu.osworld.agents import AGENT_PROFILES
-
-    for version, configs in example_configs().items():
-        for agent, config in configs.items():
-            gateway = AGENT_PROFILES[agent]["gateway"]
-            key = {
-                "openai": "gateway_base",
-                "anthropic": "claude_gateway_base",
-                "gemini": "gemini_gateway_base",
-            }[gateway]
-            assert config[key].startswith("${HCU_")
-            assert config["token_log"].endswith(
-                f"{gateway}-tokens.jsonl"
-            )
-
-
-@pytest.mark.parametrize("key", ["hybrid_skill_file", "skill_file", "no_skill"])
-def test_config_rejects_old_instruction_keys(key):
-    with pytest.raises(ValueError, match=key):
-        validate_config({"tasks": ["001"], key: "/s.md"})
-
-
-def test_config_rejects_unknown_task_keys():
-    with pytest.raises(ValueError, match="flavor"):
-        validate_config({"tasks": [{"id": "001", "flavor": "x"}]})
-
-
-def test_task_level_resources_override_config_defaults(tmp_path):
-    command = runner_command(
-        {"volume_size": 64, "ram_size": "8G", "task_domain": "chrome"},
-        {"id": "a", "volume_size": 100, "task_domain": "gimp"},
-        tmp_path / "a",
-    )
-    assert command[command.index("--volume-size") + 1] == "100"
-    assert command[command.index("--ram-size") + 1] == "8G"
-    assert command[command.index("--task-domain") + 1] == "gimp"
-    assert command[command.index("--result-dir") + 1] == str(tmp_path / "a")
 
 
 @pytest.mark.parametrize(
@@ -181,9 +56,9 @@ profile = run_task.AGENT_PROFILES[agent]
 args = argparse.Namespace(
     agent=agent, model=profile["default_model"],
     effort=profile["default_effort"],
-    gateway_base="http://gateway:8600",
-    claude_gateway_base="http://gateway:8537",
-    gemini_gateway_base="http://gateway:8571",
+    gateway={"openai": "http://gateway:8600", "anthropic": "http://gateway:8537",
+             "gemini": "http://gateway:8571"}[profile["gateway"]],
+    asset_cache="/unused/cache", offline_assets=False,
     benchmark_version="v1", channels="", task_id="001", task_domain="",
 )
 run = run_task.TaskRun(
@@ -208,7 +83,7 @@ print(json.dumps({
     "executables": executables,
     "system_prompt": run.base_instructions_copy.read_text(),
     "instructions": run.instructions_copy.read_text() if run.instructions_copy.exists() else None,
-    "metadata": run_task.initial_meta(run, {}, {}),
+    "metadata": run_task.initial_meta(run, {}),
     "launcher": run.launcher_path.read_text(),
 }))
 """
@@ -326,46 +201,6 @@ def test_channel_ablation_exposes_one_tool_to_each_agent():
     assert "env" not in json.loads(claude_mcp_config())["mcpServers"]["computer_use"]
 
 
-@pytest.mark.parametrize("agent", ["codex", "claude-code", "gemini-cli", "grok-build"])
-@pytest.mark.parametrize("config, expected", [
-    ({"no_instructions": True}, ""),
-    ({"instructions_file": ""}, ""),
-    ({"instructions_file": "${TEST_INSTRUCTIONS}"}, "/profile/instructions.md"),
-    ({"no_instructions": False, "instructions_file": "custom.md"}, "custom.md"),
-    ({"no_instructions": True, "instructions_file": "ignored.md"}, ""),
-    ({}, None),
-])
-def test_batch_forwards_channels_and_instructions(tmp_path, monkeypatch, agent, config, expected):
-    monkeypatch.setenv("TEST_INSTRUCTIONS", "/profile/instructions.md")
-    config = {"channels": "gui,keyboard", "agent": agent, "tasks": ["001"], **config}
-    validate_config(config)
-    command = runner_command(
-        config, {"id": "001"}, tmp_path
-    )
-    assert command[command.index("--channels") + 1] == "gui,keyboard"
-    assert command[command.index("--agent") + 1] == agent
-    assert "--skill-file" not in command
-    if expected is None:
-        assert "--instructions-file" not in command
-    else:
-        assert command.count("--instructions-file") == 1
-        assert command[command.index("--instructions-file") + 1] == expected
-
-
-def test_example_queue_instructions_resolve_to_real_files(tmp_path, monkeypatch):
-    monkeypatch.setenv("HYBRID_COMPUTER_USE_ROOT", str(ROOT))
-    for configs in example_configs().values():
-        for config in configs.values():
-            command = runner_command(config, config["tasks"][0], tmp_path)
-            for flag, name in (
-                ("--instructions-file", "hybrid.md"),
-                ("--base-instructions-file", "base.md"),
-            ):
-                path = Path(command[command.index(flag) + 1])
-                assert path == ROOT / "instructions" / name
-                assert path.is_file()
-
-
 def test_gemini_and_grok_expose_only_the_requested_channel():
     from hcu.osworld.agents import gemini_settings, grok_config
 
@@ -388,9 +223,3 @@ def test_gemini_and_grok_expose_only_the_requested_channel():
     assert "computer_use.env" not in grok_config(
         model="grok-4.7", base_url="http://g/t/task-x/v1", effort="xhigh"
     )
-
-
-def test_batch_leaves_model_and_effort_defaults_to_the_agent(tmp_path):
-    command = runner_command({"agent": "gemini-cli"}, {"id": "001"}, tmp_path)
-    assert command[command.index("--effort") + 1] == ""
-    assert command[command.index("--model") + 1] == ""

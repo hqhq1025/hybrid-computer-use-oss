@@ -98,6 +98,8 @@ CODEX_BUNDLED_SYSTEM_SKILLS = (
 
 CODEX_PROVIDER_ID = "osworld_gateway"
 CODEX_PROVIDER_NAME = "OSWorld task-scoped model gateway"
+# Longer than the gateway's rate-limit wait plus one slow generation.
+CODEX_STREAM_IDLE_TIMEOUT_MS = 900_000
 
 
 def task_gateway_base(
@@ -259,6 +261,8 @@ enabled = false
 name = {json.dumps(CODEX_PROVIDER_NAME)}
 base_url = {json.dumps(base_url)}
 wire_api = "responses"
+# The gateway holds a rate-limited request open while it waits for capacity.
+stream_idle_timeout_ms = {CODEX_STREAM_IDLE_TIMEOUT_MS}
 
 [mcp_servers.computer_use]
 command = {json.dumps(mcp_command)}

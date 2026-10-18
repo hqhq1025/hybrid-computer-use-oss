@@ -146,6 +146,7 @@ def main() -> int:
         upstream_token=args.upstream_token,
         token_log=TokenLog(Path(args.out)),
         max_requests_per_task=args.max_requests_per_task,
+        rate_limit_max_wait=args.rate_limit_max_wait,
     )
     return serve_passthrough(gateway, args.host, args.port)
 

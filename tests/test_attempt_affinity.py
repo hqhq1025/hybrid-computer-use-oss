@@ -33,7 +33,7 @@ def test_same_second_attempts_have_independent_affinity(tmp_path, monkeypatch, e
     token_log = tmp_path / "tokens.jsonl"
     token_log.touch()
     monkeypatch.setattr(run_task, "time", SimpleNamespace(strftime=lambda _: "20000101-120000"))
-    monkeypatch.setattr(run_task, "results_root", lambda: tmp_path / "results")
+    monkeypatch.setattr(run_task, "DEFAULT_RESULTS_DIR", tmp_path / "results")
     monkeypatch.setattr(run_task, "load_task_config", lambda *a, **kw: {"instruction": "offline"})
     monkeypatch.setattr(run_task, "resolve_guest_image", lambda *a: "/unused/image.qcow2")
     runs = []
@@ -43,6 +43,7 @@ def test_same_second_attempts_have_independent_affinity(tmp_path, monkeypatch, e
             "--agent-binary", str(artifact), "--mcp-binary", str(artifact),
             "--base-instructions-file", str(artifact), "--instructions-file", "",
             "--token-log", str(token_log), "--max-model-calls", "1",
+            "--gateway", "http://unused:8611",
         ]
         if explicit_result_dirs:
             argv += ["--result-dir", str(tmp_path / queue / "same-task")]

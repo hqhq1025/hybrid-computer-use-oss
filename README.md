@@ -106,21 +106,19 @@ external/OSWorld-V2/.venv/bin/pip install -e external/OSWorld-V2
 python3 scripts/install-osworld-v2.py external/OSWorld-V2
 
 make build-local   # agent CLIs go under artifacts/
-cp configs/env.example .env   # then fill in the paths
 ```
 
-OSWorld-V2 task classes and assets are gated on Hugging Face and have to be
-downloaded into the checkout separately; [Running OSWorld](docs/OSWORLD.md)
-lists the commands. After loading the edited environment file, preview the
-current V2 example without starting a VM or spending model quota:
+OSWorld-V2 task classes are gated on Hugging Face and have to be downloaded
+into the checkout separately; [Running OSWorld](docs/OSWORLD.md) lists the
+commands. Preview a run without starting a VM or spending model quota:
 
 ```bash
-external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_batch \
-  --config configs/osworld-v2-codex-queue.example.json --dry-run
+external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_queue \
+  configs/osworld-v1-codex-queue.example.json --dry-run
 ```
 
 [Running OSWorld](docs/OSWORLD.md) walks through guest images, model
-gateways, setup canaries, single tasks, batches and result files.
+gateways, setup canaries, single tasks, panels and result files.
 
 ## Documentation
 

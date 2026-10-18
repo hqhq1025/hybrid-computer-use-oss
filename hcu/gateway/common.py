@@ -13,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import random
+import re
 import threading
 import time
 import urllib.parse
@@ -122,6 +124,159 @@ def relay_response(handler, status: int, headers, body: bytes) -> bool:
 
 REQUEST_TIMEOUT = urllib3.Timeout(connect=15, read=1800)
 MAX_CONSECUTIVE_GENERATION_FAILURES = 5
+# A rate-limited generation is retried inside the gateway before the agent
+# sees it. The agent's request stays open and receives no bytes meanwhile, so
+# the wait plus one generation must fit the agents' request timeouts: Gemini
+# CLI and Grok Build allow 600 s, Codex is configured for 900 s.
+RATE_LIMIT_MAX_WAIT_SEC = 300.0
+RATE_LIMIT_MAX_ATTEMPTS = 30
+RATE_LIMIT_BACKOFF_BASE_SEC = 2.0
+RATE_LIMIT_BACKOFF_CAP_SEC = 60.0
+RATE_LIMIT_TEXT = re.compile(
+    r"rate[ _-]?limit|too many requests|resource_exhausted|overloaded", re.IGNORECASE,
+)
+RETRY_HINT_TEXT = re.compile(
+    r"(?:retry after|try again in)\s+(\d+(?:\.\d+)?)\s*(ms|s|sec|seconds?)?", re.IGNORECASE,
+)
+
+
+sleep = time.sleep  # replaced in tests
+
+
+def parse_duration(value: str) -> float | None:
+    """Seconds from ``12``, ``1.5``, ``250ms`` or OpenAI's ``1m30s`` form."""
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    parts = re.findall(r"(\d+(?:\.\d+)?)(ms|h|m|s)", value)
+    if not parts or "".join(number + unit for number, unit in parts) != value:
+        return None
+    scale = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
+    return sum(float(number) * scale[unit] for number, unit in parts)
+
+
+def error_texts(payload: dict) -> list[str]:
+    """Code, type, status and message strings of one error-shaped record."""
+    texts = []
+    for record in (payload, payload.get("error"), (payload.get("response") or {}).get("error")):
+        if isinstance(record, dict):
+            texts.extend(
+                str(record[key]) for key in ("code", "type", "status", "message")
+                if record.get(key)
+            )
+    return texts
+
+
+def rate_limit_delay(status: int, headers, body: bytes) -> float | None:
+    """Return the upstream's retry hint (0.0 if none) for a rate limit, else None.
+
+    Azure reports token-rate limits either as HTTP 429 or as an HTTP 200 SSE
+    stream that ends in an ``error``/``response.failed`` event, so the body is
+    inspected as well as the status.
+    """
+    if status not in {200, 429}:
+        return None
+    try:
+        payloads = response_payloads(body, headers, allow_json_array=True)
+    except (ValueError, TypeError):
+        payloads = []
+    texts = [
+        text
+        for payload in payloads
+        if payload.get("type") in {"error", "response.failed"} or payload.get("error")
+        for text in error_texts(payload)
+    ]
+    if status == 200 and not any(RATE_LIMIT_TEXT.search(text) for text in texts):
+        return None
+    hints = []
+    for key, scale in (
+        ("retry-after-ms", 0.001), ("retry-after", 1.0),
+        ("x-ratelimit-reset-tokens", 1.0), ("x-ratelimit-reset-requests", 1.0),
+    ):
+        raw = headers.get(key)
+        seconds = parse_duration(str(raw)) if raw is not None else None
+        if seconds is not None:
+            hints.append(seconds * scale if key == "retry-after-ms" else seconds)
+            break
+    for text in texts:
+        match = RETRY_HINT_TEXT.search(text)
+        if match:
+            seconds = float(match.group(1))
+            hints.append(seconds / 1000 if match.group(2) == "ms" else seconds)
+            break
+    return max(hints, default=0.0)
+
+
+def backoff_delay(hint: float, attempt: int) -> float:
+    """Upstream hint plus jitter, else capped exponential backoff with jitter."""
+    if hint > 0:
+        return hint + random.uniform(0, 1)
+    return min(
+        RATE_LIMIT_BACKOFF_CAP_SEC, RATE_LIMIT_BACKOFF_BASE_SEC * 2 ** attempt,
+    ) * random.uniform(0.5, 1.0)
+
+
+RELAY_WAIT_HEADER = "x-hcu-rate-limit-wait"
+
+
+def relay_rate_limit_wait(headers) -> float:
+    """Seconds a local relay spent absorbing rate limits for this response."""
+    try:
+        value = float(next((v for k, v in (headers or {}).items()
+                            if k.lower() == RELAY_WAIT_HEADER), 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if 0 < value < 3600 else 0.0
+
+
+def forward_with_rate_limit_retry(send, row: dict, token_log: "TokenLog", max_wait: float,
+                                  spill=None):
+    """Call ``send()`` until the response is not a rate limit or ``max_wait`` is spent.
+
+    ``max_wait`` bounds the rate-limit wait of the whole request, including
+    waits a relay reports in ``X-HCU-Rate-Limit-Wait``.
+
+    The agent never sees a rate limit the gateway can absorb. ``spill(delay)``
+    may move the request to another deployment and return True to resend at
+    once. Each wait is logged before it starts, so the runner can exclude it
+    from the task's wall-clock limits. Waits never touch the task budget.
+    """
+    waited = 0.0
+    attempt = 0
+    while True:
+        response = send()
+        relay_wait = relay_rate_limit_wait(response.headers)
+        if relay_wait > 0:
+            # A relay already absorbed rate limits inside this request; log the
+            # wait like our own so the runner excludes it from task limits, and
+            # spend it from the same budget so a relay that gives up is not
+            # resent for another full relay wait.
+            waited += relay_wait
+            row["rate_limit_wait_sec"] = round(row.get("rate_limit_wait_sec", 0) + relay_wait, 3)
+            token_log.record({
+                "ts": time.time(), "task": row.get("task"), "endpoint": row.get("endpoint"),
+                "rate_limit_wait": True, "wait_sec": round(relay_wait, 3), "source": "relay",
+            })
+        hint = rate_limit_delay(response.status, response.headers, response.data)
+        if hint is None:
+            return response
+        delay = min(backoff_delay(hint, attempt), max_wait - waited)
+        attempt += 1
+        row["rate_limit_retries"] = attempt
+        if attempt < RATE_LIMIT_MAX_ATTEMPTS and spill is not None and spill(delay):
+            continue
+        if attempt >= RATE_LIMIT_MAX_ATTEMPTS or delay <= 0:
+            row["rate_limited"] = True
+            return response
+        waited += delay
+        row["rate_limit_wait_sec"] = round(row.get("rate_limit_wait_sec", 0) + delay, 3)
+        token_log.record({
+            "ts": time.time(), "task": row.get("task"), "endpoint": row.get("endpoint"),
+            "rate_limit_wait": True, "wait_sec": round(delay, 3),
+        })
+        sleep(delay)
 
 
 def response_payloads(body: bytes, headers, *, allow_json_array: bool = False) -> list[dict]:
@@ -179,7 +334,7 @@ class GenerationBudget:
                 if row.get("model_step_completed") is True:
                     self._completed[task] = self._completed.get(task, 0) + 1
                     self._failures[task] = 0
-                elif row.get("generation_admitted") is True:
+                elif row.get("generation_admitted") is True and not row.get("rate_limited"):
                     self._failures[task] = self._failures.get(task, 0) + 1
 
     def admit(self, row: dict, generation: bool) -> str | None:
@@ -217,7 +372,9 @@ class GenerationBudget:
                     self._failures[task] = 0
                     row["model_step_completed"] = True
                     row["request_ordinal"] = self._completed[task]
-                else:
+                elif not row.get("rate_limited"):
+                    # A rate limit the gateway already waited out is an
+                    # infrastructure condition, not a failing agent request.
                     failures = self._failures.get(task, 0) + 1
                     self._failures[task] = failures
                     if failures >= MAX_CONSECUTIVE_GENERATION_FAILURES:
@@ -249,12 +406,14 @@ class PassthroughGateway:
         token_log: TokenLog,
         max_requests_per_task: int,
         pool: urllib3.PoolManager | None = None,
+        rate_limit_max_wait: float = RATE_LIMIT_MAX_WAIT_SEC,
     ) -> None:
         self.upstream_base = upstream_base.rstrip("/")
         self.upstream_token = upstream_token
         self.token_log = token_log
         self.max_requests_per_task = max_requests_per_task
         self.pool = pool or urllib3.PoolManager(maxsize=128, block=False, retries=False)
+        self.rate_limit_max_wait = rate_limit_max_wait
         self.stats = new_stats()
         self.budget = GenerationBudget(max_requests_per_task)
 
@@ -293,6 +452,7 @@ class PassthroughGateway:
             "max_completed_responses_per_task": self.max_requests_per_task,
             "step_unit": "successful_task_agent_response",
             "max_consecutive_generation_failures": MAX_CONSECUTIVE_GENERATION_FAILURES,
+            "rate_limit_max_wait_sec": self.rate_limit_max_wait,
             **self.stats,
         }
 
@@ -365,16 +525,26 @@ def make_passthrough_handler(
             headers["accept-encoding"] = "identity"
             headers["content-length"] = str(len(body))
 
-            started = time.monotonic()
-            gateway.stats["calls"] += 1
-            try:
-                response = gateway.pool.request(
+            def send():
+                gateway.stats["calls"] += 1
+                return gateway.pool.request(
                     method,
                     upstream_url,
                     body=body,
                     headers=headers,
                     preload_content=True,
                     timeout=REQUEST_TIMEOUT,
+                )
+
+            def count_rate_limit(_delay: float) -> bool:
+                gateway.stats["rate_limited"] += 1
+                return False
+
+            started = time.monotonic()
+            try:
+                response = forward_with_rate_limit_retry(
+                    send, row, gateway.token_log, gateway.rate_limit_max_wait,
+                    count_rate_limit,
                 )
             except Exception as exc:
                 self.fail(
@@ -387,10 +557,7 @@ def make_passthrough_handler(
             response_body = response.data
             row["http_status"] = response.status
             row["latency_sec"] = round(time.monotonic() - started, 3)
-            if response.status == 429:
-                row["rate_limited"] = True
-                gateway.stats["rate_limited"] += 1
-            elif response.status >= 400:
+            if response.status >= 400 and not row.get("rate_limited"):
                 row["upstream_error"] = True
                 gateway.stats["errors"] += 1
 
@@ -466,6 +633,10 @@ def add_passthrough_arguments(parser, *, port: int, upstream_env: str, token_env
     parser.add_argument(
         "--upstream-token",
         default=os.environ.get(token_env, ""),
+    )
+    parser.add_argument(
+        "--rate-limit-max-wait", type=float, default=RATE_LIMIT_MAX_WAIT_SEC,
+        help="Seconds the gateway may wait out upstream rate limits per request.",
     )
     parser.add_argument(
         "--max-requests-per-task", type=int, default=0,

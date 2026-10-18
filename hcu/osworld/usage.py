@@ -8,6 +8,7 @@ usage against the agent trace.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 
@@ -45,6 +46,8 @@ def collect_task_proxy_usage(
         "total_tokens": 0,
         "errors": 0,
         "rate_limited_requests": 0,
+        "rate_limit_waits": 0,
+        "rate_limit_wait_sec": 0.0,
         "endpoints": [],
         "endpoint_affinity_ok": True,
     }
@@ -55,6 +58,12 @@ def collect_task_proxy_usage(
     endpoints = set()
     for row in read_log_rows(token_log):
         if row.get("task") != affinity_task:
+            continue
+        if row.get("rate_limit_wait") is True:
+            summary["rate_limit_waits"] += 1
+            summary["rate_limit_wait_sec"] = round(
+                summary["rate_limit_wait_sec"] + float(row.get("wait_sec") or 0), 3
+            )
             continue
         matching_lines.append(
             json.dumps(row, ensure_ascii=False, separators=(",", ":"))
@@ -174,44 +183,53 @@ def normalize_budget_termination(
     return trace_summary
 
 
-def count_model_requests(token_log: Path, affinity_task: str) -> int:
-    """Count delivered generations, never attempts or legacy admission rows."""
-    return sum(
-        row.get("task") == affinity_task and row.get("model_step_completed") is True
-        for row in read_log_rows(token_log)
-    )
+@dataclass
+class TaskLogState:
+    """What the runner needs from the token log while an agent turn runs."""
+
+    completed_responses: int = 0
+    budget_rejected: bool = False
+    retry_exhausted: bool = False
+    rate_limit_waits: int = 0
+    rate_limit_wait_sec: float = 0.0
 
 
-def task_generation_retry_exhausted(token_log: Path, affinity_task: str) -> bool:
-    return any(
-        row.get("task") == affinity_task and row.get("generation_retry_exhausted") is True
-        for row in read_log_rows(token_log)
-    )
+def read_task_log(token_log: Path, affinity_task: str) -> TaskLogState:
+    """Read the token log once and summarize this task's rows.
 
-
-def validate_task_model_budget(token_log: Path, affinity_task: str, limit: int) -> None:
-    """Fail closed on a mismatched gateway cap, as soon as its log reports it.
-
-    The gateway owns admission so the runner cannot safely repair this mismatch
-    by killing an agent while it executes the last response's tools.
+    Only delivered generations count toward the budget, never attempts.
+    ``rate_limit_wait`` rows announce gateway waits, which are infrastructure
+    time and extend the runner's deadlines.
     """
-    if limit <= 0:
-        return
+    state = TaskLogState()
     for row in read_log_rows(token_log):
-        if row.get("task") == affinity_task and row.get("generation_request") is True:
-            if row.get("request_limit") != limit:
-                raise RuntimeError(
-                    "Task/gateway successful-response budget mismatch: "
-                    f"runner={limit}, gateway={row.get('request_limit')!r}. "
-                    "Set the gateway --max-requests-per-task to the runner budget."
-                )
+        if row.get("task") != affinity_task:
+            continue
+        if row.get("rate_limit_wait") is True:
+            state.rate_limit_waits += 1
+            state.rate_limit_wait_sec += float(row.get("wait_sec") or 0)
+            continue
+        state.completed_responses += row.get("model_step_completed") is True
+        state.budget_rejected |= row.get("budget_rejected") is True
+        state.retry_exhausted |= row.get("generation_retry_exhausted") is True
+    return state
 
 
-def task_model_budget_rejected(
-    token_log: Path,
-    affinity_task: str,
-) -> bool:
-    return any(
-        row.get("task") == affinity_task and row.get("budget_rejected") is True
-        for row in read_log_rows(token_log)
-    )
+def check_gateway_budget(health_output: str, max_model_calls: int) -> None:
+    """Fail before the agent starts if the gateway enforces a different cap.
+
+    The gateway owns admission, so a mismatch cannot be repaired later
+    without killing an agent while it executes the last response's tools.
+    """
+    if max_model_calls <= 0:
+        return
+    try:
+        limit = json.loads(health_output).get("max_completed_responses_per_task")
+    except (ValueError, AttributeError):
+        limit = None
+    if limit != max_model_calls:
+        raise RuntimeError(
+            "Task/gateway successful-response budget mismatch: "
+            f"runner={max_model_calls}, gateway={limit!r}. "
+            "Start the gateway with --max-requests-per-task equal to max_model_calls."
+        )
