@@ -9,11 +9,11 @@ from .foundation import (
     MAX_DEPTH,
     MAX_ELEMENTS,
     MAX_RENDERED_CHARS,
+    FIND_FIRST_BUDGET,
     MENU_ROLES,
+    NodeFacts,
     TREE_DEADLINE_SECONDS,
     is_interactive_role,
-    node_name,
-    node_pid,
     node_role,
     process_generation,
     provider_bus_name,
@@ -35,15 +35,79 @@ from .ax_virtual_table import (
 )
 
 
+class FocusProbe:
+    """Find the focused node during the snapshot walk instead of a second walk.
+
+    focused_summary() and selected_text() need the node that
+    find_first(window, FOCUSED) returns. render_tree() visits nodes in the
+    same preorder and reads every node's state set anyway, so it can note the
+    first FOCUSED node at no extra cost, as long as it has visited exactly the
+    nodes find_first() would visit up to that point.
+
+    The walks diverge where render_tree() skips a subtree that find_first()
+    enters (node, depth, size or time budget; collapsed menu; per-node
+    failure) or enumerates children that find_first() does not (unreadable
+    child count). After the first divergence the probe stops looking and
+    reports that the answer is unknown, and the caller runs find_first().
+    find_first() also gives up after FIND_FIRST_BUDGET nodes; the probe
+    reproduces that limit, so "no focus within the budget" is also a
+    definite answer.
+    """
+
+    SEARCHING = "searching"
+    FOUND = "found"
+    NONE = "none"
+    UNKNOWN = "unknown"
+
+    def __init__(self, budget=FIND_FIRST_BUDGET):
+        self.state = self.SEARCHING
+        self.budget = budget
+        self.facts = None
+
+    def visit(self, facts):
+        if self.state != self.SEARCHING:
+            return
+        if self.budget <= 0:
+            self.state = self.NONE
+            return
+        self.budget -= 1
+        if facts.has_state(Atspi.StateType.FOCUSED):
+            self.state = self.FOUND
+            self.facts = facts
+
+    def skipped(self):
+        if self.state == self.SEARCHING:
+            self.state = self.UNKNOWN
+
+    def finish(self):
+        """Close the walk: an exhausted search found no focused node."""
+        if self.state == self.SEARCHING:
+            self.state = self.NONE
+
+    @property
+    def known(self):
+        return self.state in (self.FOUND, self.NONE)
+
+
 def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 boxes=True, indexer=None,
                 max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, prune=True,
                 max_rendered_chars=MAX_RENDERED_CHARS,
                 deadline_seconds=TREE_DEADLINE_SECONDS,
-                include_annotations=False):
+                include_annotations=False, focus_probe=None):
+    """Render one window subtree.
+
+    ``focus_probe``, when given, is a FocusProbe that records the first
+    FOCUSED node in the order find_first() would visit, from state sets this
+    walk reads anyway; see FocusProbe.
+    """
     records = []
     lines = []
     annotations = []
+    # Facts shared by all nodes of this snapshot, such as the process id of
+    # each application bus name; see NodeFacts.pid().
+    snapshot_scope = {}
+    root_facts = NodeFacts(root, snapshot_scope)
     no_child_count_hint = object()
     unknown_child_count = object()
     provider_probe_errors = {}
@@ -63,25 +127,34 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 provider_probe_errors.get(field, 0) + 1
             )
 
-    def strict_child_count(node):
-        try:
-            return max(0, int(node.get_child_count() or 0))
-        except Exception as exc:
-            record_provider_errors(
-                {"child_count": type(exc).__name__}
-            )
-            return unknown_child_count
+    def strict_child_count(node, facts=None):
+        if facts is None:
+            facts = NodeFacts(node)
+        raw, error = facts.strict("child_count")
+        if error is None:
+            try:
+                return max(0, int(raw or 0))
+            except Exception as exc:
+                error = type(exc).__name__
+        record_provider_errors({"child_count": error})
+        return unknown_child_count
 
-    def child_entries(node, count_hint=no_child_count_hint):
+    def child_entries(node, count_hint=no_child_count_hint, facts=None):
         """Return a lazy bounded child iterator plus enumerability metadata."""
         count = (
-            strict_child_count(node)
+            strict_child_count(node, facts)
             if count_hint is no_child_count_hint
             else count_hint
         )
+        if facts is None:
+            facts = NodeFacts(node)
         if count is unknown_child_count:
-            if state_contains(node, Atspi.StateType.MANAGES_DESCENDANTS):
+            if facts.has_state(Atspi.StateType.MANAGES_DESCENDANTS):
                 return iter(()), False, None
+            if focus_probe is not None:
+                # find_first() treats an unreadable count as zero children;
+                # this walk tries to enumerate them, so the orders diverge.
+                focus_probe.skipped()
 
             def unknown_children():
                 consecutive_errors = 0
@@ -114,7 +187,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
 
             return unknown_children(), True, None
 
-        if not should_enumerate_children(node, count):
+        if not should_enumerate_children(node, count, facts=facts):
             return iter(()), False, count
         fanout = min(count, MAX_CHILD_FANOUT)
         if count > fanout:
@@ -172,16 +245,22 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             if node is not None:
                 dropped["count"] += 1
                 dropped["budget"] += 1
+            if focus_probe is not None:
+                focus_probe.skipped()
             return
         if depth > max_tree_depth:
             dropped["count"] += 1
             dropped["depth"] += 1
+            if focus_probe is not None:
+                focus_probe.skipped()
             return
         # The character budget is separate from the node budget; see
         # MAX_RENDERED_CHARS.
         if budget["chars"] >= max_rendered_chars:
             dropped["count"] += 1
             dropped["chars"] += 1
+            if focus_probe is not None:
+                focus_probe.skipped()
             return
         # The time budget is separate from both; see TREE_DEADLINE_SECONDS.
         # The root is exempt: an empty tree has no addressable element, and
@@ -189,9 +268,17 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         if deadline is not None and records and time.monotonic() >= deadline:
             dropped["count"] += 1
             dropped["time"] += 1
+            if focus_probe is not None:
+                focus_probe.skipped()
             return
 
         child_count_hint = no_child_count_hint
+        facts = (
+            root_facts if node is root and depth == 0
+            else NodeFacts(node, snapshot_scope)
+        )
+        if focus_probe is not None:
+            focus_probe.visit(facts)
 
         # Pruning keeps only nodes with an interactive role that are visible
         # on screen. Only the node's own line is dropped and its children are
@@ -205,7 +292,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         # value, placeholder and automationId are read only for kept nodes.
         if prune and depth > 0:
             probe, probe_errors = strict_prune_probe(
-                node, window_bounds, text_limit
+                node, window_bounds, text_limit, facts=facts
             )
             record_provider_errors(probe_errors)
             child_count_hint = probe["child_count"]
@@ -249,7 +336,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 dropped["count"] += 1
                 dropped["filtered"] += 1
                 children, _, _ = child_entries(
-                    node, child_count_hint)
+                    node, child_count_hint, facts)
                 for child_index, child in children:
                     if child is None:
                         continue
@@ -259,7 +346,10 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                           path + [child_index], render_depth, parent_text)
                 return
 
-        record = record_for(node, None, path, window_bounds, text_limit=text_limit)
+        record = record_for(
+            node, None, path, window_bounds, text_limit=text_limit,
+            facts=facts,
+        )
 
         # Under budget pressure, keep named, actionable and valued nodes by
         # dropping structural containers first. Only the container's own line
@@ -273,7 +363,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         ):
             dropped["count"] += 1
             dropped["pressure"] += 1
-            children, _, _ = child_entries(node, child_count_hint)
+            children, _, _ = child_entries(node, child_count_hint, facts)
             for child_index, child in children:
                 if child is None:
                     continue
@@ -303,20 +393,22 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
 
         # Collapsed menu: keep the node itself, which is still the semantic
         # target of a plain click, but do not descend into its items. Role
-        # and state come from the libatspi cache, so this costs no D-Bus
-        # round trip.
+        # and state were already read for this node, so this check costs no
+        # further provider round trip.
         if (
             depth > 0
             and role.lower() in MENU_ROLES
-            and not state_contains(node, Atspi.StateType.SHOWING)
+            and not facts.has_state(Atspi.StateType.SHOWING)
         ):
             pending = (
-                strict_child_count(node)
+                strict_child_count(node, facts)
                 if child_count_hint is no_child_count_hint
                 else child_count_hint
             )
             if pending is unknown_child_count:
                 pending = 0
+            if pending and focus_probe is not None:
+                focus_probe.skipped()
             if pending:
                 annotations.append({
                     "parentRuntimeId": path[:],
@@ -332,7 +424,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             return
 
         children, children_enumerable, planned_children = child_entries(
-            node, child_count_hint
+            node, child_count_hint, facts
         )
         if not children_enumerable:
             # Huge or self-managing containers cannot be enumerated; address
@@ -373,6 +465,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         child_slots_seen = 0
         while True:
             if len(records) >= max_tree_nodes:
+                if focus_probe is not None:
+                    focus_probe.skipped()
                 remaining = (
                     max(1, planned_children - child_slots_seen)
                     if planned_children is not None
@@ -438,6 +532,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             del records[records_before:]
             del lines[lines_before:]
             budget["chars"] = chars_before
+            if focus_probe is not None:
+                focus_probe.skipped()
             if node is None:
                 return
             dropped["count"] += 1
@@ -506,6 +602,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 )
 
     visit(root, 0, root_path)
+    if focus_probe is not None:
+        focus_probe.finish()
     if dropped["count"]:
         # The omission summary keeps causes, counts and recovery paths but
         # does not repeat the whole tutorial in every snapshot: the tool
@@ -586,9 +684,9 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         })
     window_bus = provider_bus_name(root)
     window_path = provider_object_path(root)
-    window_generation = process_generation(node_pid(root))
-    window_role = node_role(root)
-    window_name = node_name(root)
+    window_generation = process_generation(root_facts.pid())
+    window_role = str(root_facts.value("role", "") or "")
+    window_name = str(root_facts.value("name", "") or "")
     for record in records:
         record["providerWindowBusName"] = window_bus
         record["providerWindowObjectPath"] = window_path

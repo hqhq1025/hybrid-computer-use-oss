@@ -203,7 +203,6 @@ public enum ProviderV2OperationAdapter {
                 "actions": payload["actions"]!,
                 "settle_ms": payload["settle_ms"] ?? 0,
                 "frame_id": payload["frame_id"] ?? "",
-                "lease_state": payload["lease_state"] ?? "",
             ]
         case "window_list":
             var result: [String: Any] = [
@@ -327,7 +326,7 @@ public enum ProviderV2ResponseBuilder {
         for key in [
             "text", "error", "notes", "snapshot", "apps",
             "resolved_element", "candidates", "candidate_count",
-            "candidates_truncated", "lease_state",
+            "candidates_truncated",
             "external_desktop_transition",
         ] {
             if let value = runtime[key] {

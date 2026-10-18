@@ -57,6 +57,215 @@ class ShouldEnumerateChildrenTests(AtspiPatchedTestCase):
         self.assertTrue(runtime.should_enumerate_children(ordinary))
 
 
+class _CountingNode(_TreeNode):
+    """A tree node that counts every provider read by field."""
+
+    class _App:
+        bus_name = ":1.42"
+
+    app = _App()
+
+    def __init__(self, reads, **kwargs):
+        super().__init__(**kwargs)
+        self.reads = reads
+
+    def _count(self, field):
+        key = (self.title or self.description or self.role, field)
+        self.reads[key] = self.reads.get(key, 0) + 1
+
+    def get_child_count(self):
+        self._count("child_count")
+        return super().get_child_count()
+
+    def get_state_set(self):
+        self._count("states")
+        return super().get_state_set()
+
+    def get_component_iface(self):
+        self._count("component")
+        return super().get_component_iface()
+
+    def get_role_name(self):
+        self._count("role")
+        return super().get_role_name()
+
+    def get_name(self):
+        self._count("name")
+        return super().get_name()
+
+    def get_description(self):
+        self._count("description")
+        return super().get_description()
+
+    def get_process_id(self):
+        self._count("pid")
+        return super().get_process_id()
+
+
+class SingleReadPerNodeTests(AtspiPatchedTestCase):
+    """Each provider field is read at most once per node per snapshot.
+
+    Every read is a D-Bus round trip. The pruning probe, the enumeration
+    guards and the record builder used to read the same fields again, which
+    tripled the cost of a Calc snapshot.
+    """
+
+    def _tree(self, reads):
+        hidden = _CountingNode(
+            reads, role="panel", name="Offscreen", description="tip", w=0,
+            h=0)
+        hidden.component = None
+        named = _CountingNode(reads, role="panel", name="Line Spacing")
+        button = _CountingNode(reads, role="push button", name="OK")
+        root = _CountingNode(
+            reads, role="frame", name="Window", w=100, h=100,
+            kids=(hidden, named, button))
+        return root
+
+    def test_every_field_is_read_at_most_once(self):
+        reads = {}
+        records, _lines = runtime.render_tree(
+            self._tree(reads), None, [0], prune=True,
+            indexer=runtime.StableIndexer({}))
+
+        self.assertEqual(
+            [record["name"] for record in records],
+            ["Window", "Line Spacing", "OK"])
+        repeated = {key: count for key, count in reads.items() if count > 1}
+        self.assertEqual(repeated, {})
+
+    def test_invisible_node_is_pruned_without_reading_its_text(self):
+        reads = {}
+        runtime.render_tree(
+            self._tree(reads), None, [0], prune=True,
+            indexer=runtime.StableIndexer({}))
+
+        self.assertNotIn(("Offscreen", "name"), reads)
+        self.assertNotIn(("Offscreen", "description"), reads)
+        self.assertNotIn(("Offscreen", "role"), reads)
+
+    def test_process_id_is_read_once_per_application(self):
+        reads = {}
+        runtime.render_tree(
+            self._tree(reads), None, [0], prune=True,
+            indexer=runtime.StableIndexer({}))
+
+        pid_reads = sum(
+            count for (_node, field), count in reads.items()
+            if field == "pid")
+        # One read for the records of the bus, one for the window identity
+        # fields added after traversal.
+        self.assertLessEqual(pid_reads, 2)
+
+
+class FocusProbeTests(AtspiPatchedTestCase):
+    """The snapshot walk answers find_first(FOCUSED) or says it cannot."""
+
+    def _focused(self, name, **kwargs):
+        node = _TreeNode(role="push button", name=name, **kwargs)
+        node.states.add(STATE.FOCUSED)
+        return node
+
+    def _walk(self, root, **kwargs):
+        probe = runtime.FocusProbe()
+        runtime.render_tree(
+            root, None, [0], prune=True, indexer=runtime.StableIndexer({}),
+            focus_probe=probe, **kwargs)
+        return probe
+
+    def test_probe_returns_the_node_find_first_returns(self):
+        # The first focused node in preorder sits inside an invisible,
+        # pruned container; the walk still visits it.
+        early = self._focused("Early", w=0, h=0)
+        hidden = _TreeNode(role="filler", w=0, h=0, kids=(early,))
+        late = self._focused("Late")
+        root = _TreeNode(
+            role="frame", name="Window", w=100, h=100, kids=(hidden, late))
+
+        probe = self._walk(root)
+
+        self.assertTrue(probe.known)
+        expected = runtime.find_first(
+            root, lambda node: runtime.state_contains(node, STATE.FOCUSED))
+        self.assertIs(probe.facts.node, expected)
+        self.assertIs(expected, early)
+
+    def test_no_focused_node_is_a_definite_answer(self):
+        root = _TreeNode(
+            role="frame", name="Window", w=100, h=100,
+            kids=(_TreeNode(role="push button", name="OK"),))
+
+        probe = self._walk(root)
+
+        self.assertTrue(probe.known)
+        self.assertIsNone(probe.facts)
+
+    def test_node_budget_cut_before_focus_makes_the_answer_unknown(self):
+        buttons = [
+            _TreeNode(role="push button", name="B{}".format(index))
+            for index in range(3)
+        ]
+        root = _TreeNode(
+            role="frame", name="Window", w=100, h=100,
+            kids=tuple(buttons) + (self._focused("Target"),))
+
+        probe = self._walk(root, max_tree_nodes=2)
+
+        self.assertFalse(probe.known)
+
+    def test_collapsed_menu_makes_the_answer_unknown(self):
+        item = self._focused("Hidden item")
+        menu = _TreeNode(role="menu", name="File", kids=(item,))
+        menu.states = {STATE.VISIBLE}
+        root = _TreeNode(
+            role="frame", name="Window", w=100, h=100, kids=(menu,))
+
+        probe = self._walk(root)
+
+        self.assertFalse(probe.known)
+
+    def test_focus_found_before_a_later_cut_stays_known(self):
+        first = self._focused("First")
+        rest = [
+            _TreeNode(role="push button", name="R{}".format(index))
+            for index in range(4)
+        ]
+        root = _TreeNode(
+            role="frame", name="Window", w=100, h=100,
+            kids=(first,) + tuple(rest))
+
+        probe = self._walk(root, max_tree_nodes=3)
+
+        self.assertTrue(probe.known)
+        self.assertIs(probe.facts.node, first)
+
+    def test_unknown_probe_falls_back_to_one_find_first(self):
+        window = object()
+        focused = object()
+        probe = runtime.FocusProbe()
+        probe.skipped()
+        calls = []
+
+        def fake_find_first(root, predicate, budget=None):
+            calls.append(root)
+            return focused
+
+        with mock.patch.object(runtime, "iter_apps", return_value=[window]), \
+                mock.patch.object(runtime, "node_pid", return_value=7), \
+                mock.patch.object(runtime, "main_window",
+                                  return_value=(0, window)), \
+                mock.patch.object(runtime, "find_first",
+                                  side_effect=fake_find_first), \
+                mock.patch.object(runtime, "node_role", return_value="entry"), \
+                mock.patch.object(runtime, "node_name", return_value="Name"):
+            summary, selected = runtime.focus_and_selection(
+                7, walked_window=window, focus_probe=probe)
+
+        self.assertEqual(calls, [window])
+        self.assertEqual(summary, 'entry "Name"')
+        self.assertIsNone(selected)
+
+
 class NodeRenderIsolationTests(AtspiPatchedTestCase):
     def test_node_budget_stops_before_fetching_the_next_child(self):
         child = _TreeNode(role="push button", name="Never fetched")
@@ -210,7 +419,8 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
         with mock.patch.object(runtime, "record_for", side_effect=record), \
                 mock.patch.object(
                     runtime, "should_enumerate_children",
-                    side_effect=lambda node, count=None: node is not broken):
+                    side_effect=lambda node, count=None, facts=None: (
+                        node is not broken)):
             records, lines = runtime.render_tree(
                 root, None, [0], prune=False,
                 indexer=runtime.StableIndexer({}))

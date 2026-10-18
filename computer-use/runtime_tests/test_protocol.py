@@ -28,7 +28,6 @@ class RuntimeActionEvidenceFailureTests(unittest.TestCase):
         self.assertTrue(evidence["geometry_sampled"])
         self.assertTrue(evidence["input_emitted"])
         self.assertFalse(evidence["readback_sampled"])
-        self.assertEqual(response["guiLeaseState"], "suspect")
         self.assertEqual(response["failureCode"], "effect_unknown")
         self.assertEqual(
             response["failurePhase"], "post_action_observation"
@@ -37,16 +36,6 @@ class RuntimeActionEvidenceFailureTests(unittest.TestCase):
             response["underlyingFailureCode"], "post_emit_failure"
         )
         self.assertNotIn("no action was attempted", response["error"])
-
-    def test_preflight_failure_does_not_change_gui_lease(self):
-        response = runtime.operation_failure_response(runtime.OperationFailure(
-            "target missing",
-            failure_code="semantic_target_not_found",
-            failure_phase="precondition",
-            input_events_emitted=False,
-        ))
-
-        self.assertNotIn("guiLeaseState", response)
 
 
 class CoordinateActionabilityGateTests(unittest.TestCase):
@@ -237,6 +226,8 @@ class ProviderWireV2Tests(unittest.TestCase):
         ) as require_session, mock.patch.object(
             wire_v2.Atspi, "init"
         ) as atspi_init, mock.patch.object(
+            wire_v2.ui_events, "start"
+        ) as monitor_start, mock.patch.object(
             wire_v2,
             "perform_provider_request",
             return_value={"ok": True, "apps": []},
@@ -252,6 +243,7 @@ class ProviderWireV2Tests(unittest.TestCase):
         )
         require_session.assert_called_once_with()
         atspi_init.assert_called_once_with()
+        monitor_start.assert_called_once_with()
 
     def test_shared_invalid_request_corpus_is_rejected(self):
         fixture_path = (
@@ -728,14 +720,8 @@ class RuntimeStartupErrorBoundaryTests(unittest.TestCase):
 
 class ExternalDesktopTransitionTests(unittest.TestCase):
     def test_new_active_native_window_missing_from_ax_inventory_is_external(self):
-        before = {
-            "activeWindow": "0x1",
-            "windows": [{"id": "0x1"}],
-        }
-        after = {
-            "activeWindow": "0x2",
-            "windows": [{"id": "0x1"}, {"id": "0x2"}],
-        }
+        before = {"activeWindow": "0x1", "windowIds": {"0x1"}}
+        after = {"activeWindow": "0x2", "windowIds": {"0x1", "0x2"}}
         self.assertTrue(
             runtime.external_desktop_transition_after_ax_mutation(
                 before,
@@ -746,14 +732,8 @@ class ExternalDesktopTransitionTests(unittest.TestCase):
         )
 
     def test_ax_visible_window_transition_is_not_external(self):
-        before = {
-            "activeWindow": "0x1",
-            "windows": [{"id": "0x1"}],
-        }
-        after = {
-            "activeWindow": "0x2",
-            "windows": [{"id": "0x1"}, {"id": "0x2"}],
-        }
+        before = {"activeWindow": "0x1", "windowIds": {"0x1"}}
+        after = {"activeWindow": "0x2", "windowIds": {"0x1", "0x2"}}
         self.assertFalse(
             runtime.external_desktop_transition_after_ax_mutation(
                 before,
@@ -764,14 +744,8 @@ class ExternalDesktopTransitionTests(unittest.TestCase):
         )
 
     def test_existing_window_focus_change_is_not_external(self):
-        before = {
-            "activeWindow": "0x1",
-            "windows": [{"id": "0x1"}, {"id": "0x2"}],
-        }
-        after = {
-            "activeWindow": "0x2",
-            "windows": [{"id": "0x1"}, {"id": "0x2"}],
-        }
+        before = {"activeWindow": "0x1", "windowIds": {"0x1", "0x2"}}
+        after = {"activeWindow": "0x2", "windowIds": {"0x1", "0x2"}}
         self.assertFalse(
             runtime.external_desktop_transition_after_ax_mutation(
                 before,
@@ -821,3 +795,29 @@ class WindowActionMutationBoundaryTests(unittest.TestCase):
 
         self.assertEqual(result["recovery_context"], recovery_context)
         self.assertTrue(result["mutation"]["mutation_unknown"])
+
+
+class PhaseTimingTests(unittest.TestCase):
+    """Phase timing is an operator diagnostic and never reaches responses."""
+
+    def _run(self, value):
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"COMPUTER_USE_PROVIDER_TIMING": value}), \
+                mock.patch("sys.stderr", stderr):
+            phase_timing.start()
+            phase_timing.lap("first")
+            phase_timing.lap("second")
+            phase_timing.finish("observe", "req-1")
+        return stderr.getvalue()
+
+    def test_timing_is_silent_by_default(self):
+        self.assertEqual(self._run(""), "")
+
+    def test_enabled_timing_writes_one_diagnostic_line(self):
+        lines = self._run("1").splitlines()
+        self.assertEqual(len(lines), 1)
+        record = json.loads(lines[0])
+        self.assertEqual(record["stage"], "timing")
+        self.assertEqual(record["request_id"], "req-1")
+        detail = json.loads(record["diagnostic"])
+        self.assertEqual(sorted(detail["phasesMs"]), ["first", "second"])

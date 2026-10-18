@@ -58,8 +58,7 @@ internal sealed partial class ProviderServer
                     "protocol_version",
                     "actions",
                     "settle_ms",
-                    "frame_id",
-                    "lease_state"),
+                    "frame_id"),
                 ["window_list"] = Fields(
                     "protocol_version",
                     "app",
@@ -180,7 +179,6 @@ internal sealed partial class ProviderServer
             case "desktop":
                 ValidateDesktopActions(payload["actions"]);
                 ValidateOptionalString(payload, "frame_id", "desktop");
-                ValidateOptionalString(payload, "lease_state", "desktop");
                 if (RequiredIntValue(payload, "settle_ms") < 0)
                 {
                     throw InvalidRequest(

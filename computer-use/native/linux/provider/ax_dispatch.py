@@ -41,11 +41,10 @@ from .ax_node_properties import (
 
 from .x11_windows import (
     _x11_window_inventory_cache,
-    desktop_bounds,
-    desktop_layout_state,
     main_window,
     select_window_by_handle,
     window_identity_set,
+    x11_root_window_state,
 )
 
 from .app_resolver import app_window_inventory, list_apps_inventory, windowless_snapshot
@@ -69,6 +68,8 @@ from .gui_capture import (
 )
 from .gui_dispatch import finalize_gui_response, perform_gui
 from . import action_evidence as action_evidence_state
+from .phase_timing import lap
+from . import ui_events
 
 from .actionability import (
     current_geometry,
@@ -145,7 +146,6 @@ from .ax_snapshot_diagnostics import (
 )
 from .ax_transition_evidence import (
     external_desktop_transition_after_ax_mutation,
-    gui_lease_after_ax_mutation,
     public_element_record,
 )
 
@@ -207,7 +207,6 @@ def dispatch_provider_operation(
                 operation.get("actions"),
                 operation.get("settle_ms", 800),
                 operation.get("frame_id"),
-                operation.get("lease_state"),
             )
         except Exception as exc:
             response = {
@@ -237,8 +236,12 @@ def dispatch_provider_operation(
             screenshot_scope=observation.get("screenshot_scope", "window"),
             app_identity=operation.get("app_identity"),
             target_window_handle=operation.get("window_handle"),
+            # An unchanged window may return its previous tree; see
+            # tree_reuse. Post-action snapshots below always walk.
+            reuse_tree=True,
         )
         response = {"ok": True, "snapshot": snapshot}
+        lap("observe_snapshot")
         # Modal notes come first: they determine how the rest of the tree
         # should be read.
         elements = snapshot.get("elements") or []
@@ -300,8 +303,10 @@ def dispatch_provider_operation(
         }
 
     app = resolve_operation_app(operation)
-    gui_bounds_before = desktop_bounds()
-    gui_layout_before = desktop_layout_state(gui_bounds_before)
+    # One xprop round: the managed client list and the active window are all
+    # the external-transition check reads. Window geometry is not needed.
+    root_window_before = x11_root_window_state()
+    lap("resolve_app_and_root_window")
     element_record = operation.get("element")
     semantic_target = operation.get("target")
     semantic_note = None
@@ -362,13 +367,20 @@ def dispatch_provider_operation(
                 failure_phase="precondition",
                 input_events_emitted=False,
             )
+    lap("resolve_target")
     pixel_bounds = bounds
     # Capture pixels once before the action and twice after it; only a change
     # present in both later captures counts. Semantic targets are resolved
     # across all visible app-owned windows first, so pixel capture and later
     # focus actions bind to the window that actually matched rather than the
     # one main_window() picked before resolution.
-    pixels_before = safe(lambda: capture_window_pixels(pixel_bounds))
+    # Without a post-action snapshot there is no pixel note, so skip the sample.
+    pixels_before = (
+        safe(lambda: capture_window_pixels(pixel_bounds))
+        if observation.get("capture_snapshot") is not False
+        else None
+    )
+    lap("pixels_before")
     # Refresh the geometry from the live node right after resolving it;
     # otherwise semantic actions would use the live node while synthesized
     # input used the snapshot geometry.
@@ -377,6 +389,10 @@ def dispatch_provider_operation(
     # compares against it to detect opened or closed windows and decide
     # whether to wait longer for focus to settle.
     windows_before = safe(lambda: window_identity_set(app))
+    lap("geometry_and_windows_before")
+    # Dispatch queued AT-SPI events now, so the settle wait counts only events
+    # the application emits after the input.
+    ui_events.pump()
     # Every action reports the route it actually took and whether the result
     # was verified. A fresh accessibility tree in the response looks like
     # confirmation but is only a snapshot, not evidence that the action took
@@ -446,9 +462,6 @@ def dispatch_provider_operation(
                 "input_events_emitted": True,
                 "desktop_state_mutated": True,
                 "mutation_unknown": False,
-                "guiLeaseState": gui_lease_after_ax_mutation(
-                    gui_layout_before, gui_bounds_before
-                ),
                 "actionEvidence": action_evidence,
                 "notes": notes,
             }
@@ -852,8 +865,8 @@ def dispatch_provider_operation(
             'unsupportedProviderAction("{}")'.format(action_intent)
         )
 
+    lap("action")
     if observation.get("capture_snapshot") is False:
-        after_layout = desktop_layout_state(gui_bounds_before)
         response = {
             "ok": True,
             "actionEvidence": action_evidence,
@@ -861,13 +874,6 @@ def dispatch_provider_operation(
             "desktop_state_mutated": bool(action_evidence.get("input_emitted")),
             "mutation_unknown": False,
             "observationSkipped": True,
-            "guiLeaseState": (
-                "suspect"
-                if gui_layout_before is None or after_layout is None
-                else "fresh"
-                if gui_layout_before == after_layout
-                else "stale"
-            ),
         }
         if element_record is not None:
             response["resolvedElement"] = public_element_record(element_record)
@@ -876,6 +882,7 @@ def dispatch_provider_operation(
         return response
 
     settle_note = wait_for_ui_to_settle(app, windows_before)
+    lap("settle_wait")
     if settle_note:
         notes.append(settle_note)
     # Compare pixels only after the UI settles: right after the action the UI
@@ -884,6 +891,7 @@ def dispatch_provider_operation(
     after_bounds = safe(lambda: extents(main_window(app)[1])) or bounds
     after_pixel_bounds = after_bounds
     pixels_after_one = safe(lambda: capture_window_pixels(after_pixel_bounds))
+    lap("after_bounds_and_pixels_after_one")
     after_snapshot = build_snapshot(
         operation.get("app", ""),
         text_limit=parse_text_limit(
@@ -899,6 +907,7 @@ def dispatch_provider_operation(
         screenshot_scope=observation.get("screenshot_scope", "window"),
         app_identity=operation.get("app_identity"),
     )
+    lap("post_action_snapshot")
     # Modal notes matter most right after an action opens a modal dialog,
     # because the caller's element list predates the dialog. Insert them first
     # so they are read before any action note.
@@ -908,23 +917,17 @@ def dispatch_provider_operation(
     # webview tab) is exactly when the caller must learn that this channel
     # cannot see the content, and it often will not observe again separately.
     notes += content_host_diagnostic(after_snapshot.get("elements") or [])
-    after_layout = desktop_layout_state(gui_bounds_before)
+    root_window_after = x11_root_window_state()
     app_windows_after = safe(lambda: window_identity_set(app))
+    lap("diagnostics_root_and_windows_after")
     response = {
         "ok": True,
         "snapshot": after_snapshot,
         "actionEvidence": action_evidence,
-        "guiLeaseState": (
-            "suspect"
-            if gui_layout_before is None or after_layout is None
-            else "fresh"
-            if gui_layout_before == after_layout
-            else "stale"
-        ),
         "externalDesktopTransition": (
             external_desktop_transition_after_ax_mutation(
-                gui_layout_before,
-                after_layout,
+                root_window_before,
+                root_window_after,
                 windows_before,
                 app_windows_after,
             )
@@ -945,6 +948,7 @@ def dispatch_provider_operation(
         pixels_before, pixels_after_one,
         safe(lambda: capture_window_pixels(after_pixel_bounds))),
         "window")
+    lap("pixels_after_two_and_diff")
     if change_note:
         notes.append(change_note)
     if notes:

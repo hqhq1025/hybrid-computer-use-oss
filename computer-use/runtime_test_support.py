@@ -41,10 +41,13 @@ from native.linux.provider import (  # noqa: E402
     gui_dispatch,
     gui_input,
     input_primitives,
+    phase_timing,
     ref_continuity,
     recovery,
     response_builder,
     snapshot,
+    tree_reuse,
+    ui_events,
     window_diagnostics,
     window_resolver,
     wire_v2,
@@ -54,6 +57,7 @@ from native.linux.provider import (  # noqa: E402
 PROVIDER_MODULES = (
     foundation,
     action_evidence,
+    phase_timing,
     app_resolver,
     x11_windows,
     atspi_inventory,
@@ -64,6 +68,8 @@ PROVIDER_MODULES = (
     gui_capture,
     gui_dispatch,
     snapshot,
+    tree_reuse,
+    ui_events,
     ref_continuity,
     recovery,
     element_resolver,
@@ -177,7 +183,6 @@ def perform_provider_operation(operation):
                 "actions": operation.get("actions") or [],
                 "settle_ms": operation.get("settle_ms", 800),
                 "frame_id": operation.get("frame_id"),
-                "lease_state": operation.get("lease_state"),
             },
         )
     if intent == "window_list":

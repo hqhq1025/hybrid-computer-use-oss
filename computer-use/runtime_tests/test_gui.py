@@ -6,18 +6,22 @@ import base64
 import random
 
 
+def captured(value, matches_bounds=True):
+    """Return a CapturedGUISnapshot double; ``pixels`` is its comparison sample."""
+    if isinstance(value, Exception):
+        return value
+    value = dict(value)
+    result = mock.Mock(spec=runtime.CapturedGUISnapshot)
+    result.pixels = value.pop("pixels", None)
+    result.has_image = bool(value.get("screenshotPngBase64"))
+    result.frame_id = value.get("frameId")
+    result.matches_bounds.return_value = matches_bounds
+    result.encode.return_value = value
+    return result
+
+
 def patch_gui_capture(*, return_value=None, side_effect=None):
     """Mock raw capture explicitly; existing dispatch cases supply wire fixtures."""
-    def captured(value):
-        if isinstance(value, Exception):
-            return value
-        result = mock.Mock(spec=runtime.CapturedGUISnapshot)
-        result.has_image = bool(value.get("screenshotPngBase64"))
-        result.frame_id = value.get("frameId")
-        result.matches_bounds.return_value = True
-        result.encode.return_value = value
-        return result
-
     if side_effect is not None:
         return mock.patch.object(runtime, "capture_gui_snapshot",
                                  side_effect=[captured(value) for value in side_effect])
@@ -46,7 +50,8 @@ class GUICapturePipelineTests(unittest.TestCase):
         self.encoder = self.patch("encoded_screenshot", side_effect=self.encode_pixels)
         self.execute = self.patch(
             "execute_gui_action", side_effect=lambda action: self.events.append("action"))
-        self.pixels = self.patch("capture_window_pixels", side_effect=self.sample_pixels)
+        self.pixels = self.patch("pixbuf_sample", side_effect=self.sample_pixels)
+        self.patch("scale_to_model", side_effect=lambda pixbuf, _bounds: pixbuf)
         self.wait = self.patch("wait_for_gui_settle", return_value={
             "stable": True, "elapsed_ms": 300, "polls": 3,
             "stable_samples": 4, "stable_for_ms": 300, "pixels": self.frame})
@@ -87,8 +92,10 @@ class GUICapturePipelineTests(unittest.TestCase):
         self.assertTrue(response["quiescent"])
         self.assertEqual(self.capture.call_count, 2)
         self.encoder.assert_called_once_with(mock.sentinel.after)
+        # The final grab is both the delivered image and the "after" sample;
+        # no raw desktop sample is taken between it and its encoding.
         self.assertEqual(self.events[-6:],
-                         ["pixels", "layout", "capture", "layout", "pixels", "encode"])
+                         ["action", "layout", "capture", "layout", "encode", "pixels"])
 
     def test_cache_is_call_local(self):
         first = runtime.perform_gui([{"type": "screenshot"}])
@@ -129,19 +136,19 @@ class GUICapturePipelineTests(unittest.TestCase):
         self.encoder.assert_called_once_with(mock.sentinel.before)
         self.assertEqual(response["snapshot"]["frameId"], self.frame_id)
 
-    def test_live_layout_rejects_first_coordinate_before_emission(self):
-        changed = dict(self.layout, activeWindow="b")
-        self.layout_mock.side_effect = [self.layout, self.layout, changed, changed, changed]
+    def test_first_coordinate_uses_the_pre_action_bracket_without_resampling(self):
         response = self.click()
-        self.assertFalse(response["ok"])
-        self.execute.assert_not_called()
-        self.encoder.assert_called_once_with(mock.sentinel.after)
-        self.assertEqual(response["snapshot"]["frameId"],
-                         runtime.desktop_layout_frame_id(changed))
+        self.assertTrue(response["ok"])
+        self.execute.assert_called_once()
+        # Two layout samples bracket the pre-action grab; the first coordinate
+        # action is emitted right after them. Two more bracket the final grab.
+        self.assertEqual(self.layout_mock.call_count, 4)
+        self.assertEqual(self.events[:5],
+                         ["layout", "capture", "layout", "pixels", "action"])
 
     def test_live_layout_rejects_later_coordinate_with_fresh_evidence(self):
         changed = dict(self.layout, activeWindow="b")
-        self.layout_mock.side_effect = [self.layout, self.layout, self.layout,
+        self.layout_mock.side_effect = [self.layout, self.layout,
                                         changed, changed, changed]
         response = runtime.perform_gui([
             {"type": "click", "x": 1, "y": 2},
@@ -342,67 +349,11 @@ class GUIEncodingTests(unittest.TestCase):
                     self.assertEqual(decoded.read_pixel_bytes().get_data(), data)
 
 
-class GUILeaseTests(unittest.TestCase):
+class GUICoordinateProvenanceTests(unittest.TestCase):
     def setUp(self):
         self.bounds = runtime.frame(0, 0, 100, 100)
 
-    def test_ax_mutation_layout_failure_marks_lease_suspect(self):
-        with mock.patch.object(
-            runtime, "desktop_layout_state", return_value=None
-        ):
-            self.assertEqual(
-                runtime.gui_lease_after_ax_mutation(
-                    {"windows": []}, self.bounds
-                ),
-                "suspect",
-            )
-
-    def test_ax_mutation_layout_change_marks_lease_stale(self):
-        with mock.patch.object(
-            runtime,
-            "desktop_layout_state",
-            return_value={"windows": ["after"]},
-        ):
-            self.assertEqual(
-                runtime.gui_lease_after_ax_mutation(
-                    {"windows": ["before"]}, self.bounds
-                ),
-                "stale",
-            )
-
-    def test_stale_lease_is_revalidated_by_fresh_gui_snapshot(self):
-        snapshot = {
-            "frameId": "layout",
-            "screenshotPngBase64": "png",
-        }
-        settled = {
-            "stable": True,
-            "elapsed_ms": 300,
-            "polls": 3,
-            "stable_samples": 4,
-            "stable_for_ms": 300,
-        }
-        with mock.patch.object(
-            runtime, "desktop_bounds", return_value=self.bounds
-        ), patch_gui_capture( return_value=snapshot
-        ), mock.patch.object(
-            runtime, "execute_gui_action"
-        ) as execute, mock.patch.object(
-            runtime, "wait_for_gui_settle", return_value=settled
-        ), mock.patch.object(
-            runtime, "capture_window_pixels", return_value=None
-        ):
-            response = runtime.perform_gui(
-                [{"type": "click", "x": 10, "y": 10}],
-                gui_lease_state="stale",
-            )
-
-        self.assertTrue(response["ok"])
-        self.assertTrue(response["gui_lease_revalidated"])
-        self.assertEqual(response["gui_lease_state"], "fresh")
-        execute.assert_called_once()
-
-    def test_suspect_lease_rejects_coordinate_input_without_fresh_layout(self):
+    def test_coordinate_input_without_layout_provenance_is_rejected(self):
         snapshot = {
             "frameId": None,
             "screenshotPngBase64": "png",
@@ -413,7 +364,6 @@ class GUILeaseTests(unittest.TestCase):
         ), mock.patch.object(runtime, "execute_gui_action") as execute:
             response = runtime.perform_gui(
                 [{"type": "click", "x": 10, "y": 10}],
-                gui_lease_state="suspect",
             )
 
         self.assertFalse(response["ok"])
@@ -1017,6 +967,44 @@ class GUIScreenCoordinateTests(unittest.TestCase):
         self.assertIsNone(snapshot["frameId"])
         self.assertEqual(snapshot["screenshotPngBase64"], "png")
 
+    def test_gui_snapshot_reuses_each_closing_layout_sample(self):
+        layouts = [
+            {"desktop": {"x": 0, "y": 0, "width": 1920, "height": 1080},
+             "activeWindow": hex(index + 1), "windows": []}
+            for index in range(runtime.GUI_SNAPSHOT_LAYOUT_ATTEMPTS + 1)
+        ]
+        with mock.patch.object(
+                runtime, "desktop_layout_state", side_effect=layouts) as layout, \
+                mock.patch.object(
+                    runtime, "capture_gui_pixels", return_value=mock.sentinel.pixels):
+            snapshot = runtime.capture_gui_snapshot(self.desktop)
+
+        self.assertIsNone(snapshot.frame_id)
+        self.assertEqual(
+            layout.call_count, runtime.GUI_SNAPSHOT_LAYOUT_ATTEMPTS + 1)
+
+    def test_gui_snapshot_title_change_during_capture_keeps_frame(self):
+        first = {
+            "desktop": {"x": 0, "y": 0, "width": 1920, "height": 1080},
+            "activeWindow": "0x20",
+            "windows": [{"id": "0x20", "x": 10, "y": 20, "width": 800,
+                         "height": 600, "title": "Saving...",
+                         "overrideRedirect": False}],
+        }
+        retitled = json.loads(json.dumps(first))
+        retitled["windows"][0]["title"] = "Saved"
+        with mock.patch.object(
+                runtime, "desktop_layout_state",
+                side_effect=[first, retitled]) as layout, \
+                mock.patch.object(
+                    runtime, "capture_gui_pixels",
+                    return_value=mock.sentinel.pixels) as capture:
+            snapshot = runtime.capture_gui_snapshot(self.desktop)
+
+        capture.assert_called_once()
+        self.assertEqual(layout.call_count, 2)
+        self.assertEqual(snapshot.frame_id, runtime.desktop_layout_frame_id(first))
+
     def test_gui_layout_frame_ignores_pixel_only_changes(self):
         layout = {
             "desktop": {"x": 0, "y": 0, "width": 1920, "height": 1080},
@@ -1278,6 +1266,32 @@ class GUIScreenCoordinateTests(unittest.TestCase):
         self.assertEqual(response["input_actions_dispatched"], 0)
         execute.assert_not_called()
         self.assertNotIn("snapshot", response)
+
+    def test_out_of_image_point_is_rejected_once_with_batch_index(self):
+        execute = mock.Mock()
+        validate = mock.Mock(wraps=runtime.validate_gui_action)
+        actions = [
+            {"type": "type", "text": "hello"},
+            {"type": "click", "x": self.desktop["width"] + 5, "y": 20},
+        ]
+        with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
+                mock.patch.object(runtime, "execute_gui_action", execute), \
+                mock.patch.object(runtime, "validate_gui_action", validate), \
+                patch_gui_capture(
+                    return_value={"frameId": "layout", "screenshotPngBase64": "png"}):
+            response = runtime.perform_gui(actions)
+
+        self.assertFalse(response["ok"])
+        self.assertIn("coordinate pre-validation", response["error"])
+        self.assertEqual(
+            [(item["index"], item["type"]) for item in response["validation_errors"]],
+            [(1, "click")],
+        )
+        self.assertIn("outside the full desktop image bounds",
+                      response["validation_errors"][0]["error"])
+        # Each action is validated once; the second pass only maps coordinates.
+        self.assertEqual(validate.call_count, len(actions))
+        execute.assert_not_called()
 
     def test_gui_limits_are_enforced_by_runtime_validation(self):
         cases = [
@@ -1644,12 +1658,11 @@ class GUIScreenCoordinateTests(unittest.TestCase):
         with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
                 mock.patch.object(runtime, "execute_gui_action"), \
                 mock.patch.object(
-                    runtime, "capture_window_pixels", return_value=pixels), \
-                mock.patch.object(
                     runtime, "wait_for_gui_settle",
                     return_value=settled) as wait, \
                 patch_gui_capture(
-                    return_value={"frameId": "layout", "screenshotPngBase64": "png"}):
+                    return_value={"frameId": "layout", "screenshotPngBase64": "png",
+                                  "pixels": pixels}):
             response = runtime.perform_gui(
                 [{"type": "click", "x": 1, "y": 2}],
                 settle_ms=900,
@@ -1680,14 +1693,14 @@ class GUIScreenCoordinateTests(unittest.TestCase):
             "pixels": after,
         }
         with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
-                mock.patch.object(
-                    runtime, "capture_window_pixels",
-                    side_effect=[before, after, after]), \
                 mock.patch.object(runtime, "execute_gui_action"), \
                 mock.patch.object(
                     runtime, "wait_for_gui_settle", return_value=settled), \
-                patch_gui_capture(
-                    return_value={"frameId": "layout", "screenshotPngBase64": "png"}):
+                patch_gui_capture(side_effect=[
+                    {"frameId": "layout", "screenshotPngBase64": "png",
+                     "pixels": before},
+                    {"frameId": "layout", "screenshotPngBase64": "png",
+                     "pixels": after}]):
             response = runtime.perform_gui(
                 [{"type": "click", "x": 1, "y": 2}],
                 settle_ms=900,
@@ -1720,14 +1733,12 @@ class GUIScreenCoordinateTests(unittest.TestCase):
             "pixels": frame,
         }
         with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
-                mock.patch.object(
-                    runtime, "capture_window_pixels",
-                    side_effect=[frame, frame, frame]), \
                 mock.patch.object(runtime, "execute_gui_action"), \
                 mock.patch.object(
                     runtime, "wait_for_gui_settle", return_value=settled), \
                 patch_gui_capture(
-                    return_value={"frameId": "layout", "screenshotPngBase64": "png"}):
+                    return_value={"frameId": "layout", "screenshotPngBase64": "png",
+                                  "pixels": frame}):
             response = runtime.perform_gui(
                 [{"type": "click", "x": 1, "y": 2}],
             )
@@ -1875,7 +1886,7 @@ class GUIScreenCoordinateTests(unittest.TestCase):
                 patch_gui_capture( return_value=current), \
                 mock.patch.object(
                     runtime, "desktop_layout_state",
-                    side_effect=[layout_a, layout_b]), \
+                    side_effect=[layout_b]), \
                 mock.patch.object(
                     runtime, "execute_gui_action", side_effect=execute):
             response = runtime.perform_gui(
@@ -1960,43 +1971,66 @@ class GUIScreenCoordinateTests(unittest.TestCase):
         self.assertTrue(response["mutation_unknown"])
         self.assertEqual(response["snapshot"], initial)
 
-    def test_final_capture_change_clears_quiescent(self):
-        stable = {
-            "data": bytes([0, 0, 0]),
-            "stride": 3,
-            "channels": 3,
-            "width": 1,
-            "height": 1,
-        }
-        changed = dict(stable, data=bytes([1, 0, 0]))
+    def _settled_click(self, settle_pixels, before, delivered, matches=True):
         settled = {
             "stable": True,
             "elapsed_ms": 300,
             "polls": 3,
             "stable_samples": 4,
             "stable_for_ms": 300,
-            "pixels": stable,
+            "pixels": settle_pixels,
         }
+        captures = [
+            captured({"frameId": "layout", "screenshotPngBase64": "png",
+                      "pixels": before}),
+            captured({"frameId": "layout", "screenshotPngBase64": "png-final",
+                      "pixels": delivered}, matches_bounds=matches),
+        ]
         with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
-                patch_gui_capture(
-                    return_value={
-                        "frameId": "layout",
-                        "screenshotPngBase64": "png",
-                    }), \
-                mock.patch.object(
-                    runtime, "capture_window_pixels",
-                    side_effect=[stable, stable, changed]), \
+                mock.patch.object(runtime, "capture_gui_snapshot",
+                                  side_effect=captures), \
                 mock.patch.object(runtime, "execute_gui_action"), \
                 mock.patch.object(
                     runtime, "wait_for_gui_settle", return_value=settled):
-            response = runtime.perform_gui([
-                {"type": "click", "x": 1, "y": 2},
-            ])
+            return runtime.perform_gui([{"type": "click", "x": 1, "y": 2}])
+
+    def test_final_capture_change_clears_quiescent(self):
+        stable = {"data": bytes([0, 0, 0]), "stride": 3, "channels": 3,
+                  "width": 1, "height": 1}
+        changed = dict(stable, data=bytes([1, 0, 0]))
+        response = self._settled_click(stable, stable, changed)
+
+        self.assertTrue(response["ok"])
+        self.assertIsNone(response["quiescent"])
+        self.assertIn("changed again", response["text"])
+        # The before/after comparison describes the attached image itself.
+        self.assertTrue(response["changed_since_before"])
+        self.assertEqual(response["snapshot"]["screenshotPngBase64"], "png-final")
+
+    def test_quiescent_requires_the_delivered_frame_to_equal_the_settle_sample(self):
+        # Regression: the settle verdict used to be checked against two extra
+        # raw samples taken around the final grab, never against the grab that
+        # was encoded. A frame that changed only inside that grab still read as
+        # quiescent=true next to an image of a different state.
+        settled = {"data": bytes([0, 0, 0]), "stride": 3, "channels": 3,
+                   "width": 1, "height": 1}
+        same = dict(settled)
+        repainted = dict(settled, data=bytes([0, 9, 0]))
+
+        self.assertTrue(self._settled_click(settled, settled, same)["quiescent"])
+        response = self._settled_click(settled, settled, repainted)
+        self.assertIsNone(response["quiescent"])
+        self.assertIsNone(response["guiResult"]["quiescent"])
+        self.assertIn("changed again", response["text"])
+
+    def test_final_frame_with_other_geometry_has_no_pixel_verdict(self):
+        frame = {"data": bytes([0, 0, 0]), "stride": 3, "channels": 3,
+                 "width": 1, "height": 1}
+        response = self._settled_click(frame, frame, frame, matches=False)
 
         self.assertTrue(response["ok"])
         self.assertIsNone(response["quiescent"])
         self.assertIsNone(response["changed_since_before"])
-        self.assertIn("changed again", response["text"])
 
     def test_gui_exception_still_has_structured_result(self):
         with mock.patch.object(

@@ -13,6 +13,7 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/ax_snapshot.py",
 	"native/linux/provider/ax_virtual_table.py",
 	"native/linux/provider/action_evidence.py",
+	"native/linux/provider/phase_timing.py",
 	"native/linux/provider/app_resolver.py",
 	"native/linux/provider/window_resolver.py",
 	"native/linux/provider/window_diagnostics.py",
@@ -32,6 +33,8 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/ax_transition_evidence.py",
 	"native/linux/provider/primitives.py",
 	"native/linux/provider/tree_walk.py",
+	"native/linux/provider/tree_reuse.py",
+	"native/linux/provider/ui_events.py",
 	"native/linux/provider/response_builder.py",
 	"native/linux/provider/wire_v2.py",
 }

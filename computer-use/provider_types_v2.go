@@ -308,7 +308,6 @@ type ProviderDesktopRequest struct {
 	Actions         []ProviderDesktopAction `json:"actions"`
 	SettleMS        int                     `json:"settle_ms"`
 	FrameID         string                  `json:"frame_id,omitempty"`
-	LeaseState      string                  `json:"lease_state,omitempty"`
 }
 
 type ProviderWindowListRequest struct {
@@ -355,8 +354,6 @@ type ProviderGUIResult struct {
 	WaitActionsRequested     *int                              `json:"wait_actions_requested,omitempty"`
 	WaitSecondsRequested     *float64                          `json:"wait_seconds_requested,omitempty"`
 	KeyboardMicroWaitActions *int                              `json:"keyboard_micro_wait_actions,omitempty"`
-	LeaseState               string                            `json:"gui_lease_state,omitempty"`
-	LeaseRevalidated         *bool                             `json:"gui_lease_revalidated,omitempty"`
 }
 
 type ProviderFailure struct {
@@ -392,7 +389,6 @@ type ProviderAccessibilityResult struct {
 	Candidates                []ProviderTargetCandidate `json:"candidates,omitempty"`
 	CandidateCount            int                       `json:"candidate_count,omitempty"`
 	CandidatesTruncated       bool                      `json:"candidates_truncated,omitempty"`
-	LeaseState                string                    `json:"lease_state,omitempty"`
 	ExternalDesktopTransition bool                      `json:"external_desktop_transition,omitempty"`
 	ObservationSkipped        bool                      `json:"observation_skipped,omitempty"`
 
@@ -425,7 +421,6 @@ type ProviderDesktopResult struct {
 	ValidationErrors []map[string]any       `json:"validation_errors,omitempty"`
 	Failure          *ProviderFailure       `json:"failure,omitempty"`
 	Mutation         *ProviderMutationFacts `json:"mutation,omitempty"`
-	LeaseState       string                 `json:"lease_state,omitempty"`
 }
 
 type ProviderWindowResult struct {
@@ -441,7 +436,6 @@ type ProviderWindowResult struct {
 	RecoveryContext           *ProviderRecoveryContext `json:"recovery_context,omitempty"`
 	Mutation                  *ProviderMutationFacts   `json:"mutation,omitempty"`
 	ActionEvidence            *ProviderActionEvidence  `json:"action_evidence,omitempty"`
-	LeaseState                string                   `json:"lease_state,omitempty"`
 	ExternalDesktopTransition bool                     `json:"external_desktop_transition,omitempty"`
 }
 
@@ -480,21 +474,6 @@ func (result *ProviderAccessibilityResult) prepareForService() {
 			result.Mutation.MutationUnknown = true
 		}
 	}
-}
-
-func (result ProviderGUIResult) modelMap() map[string]any {
-	data, err := json.Marshal(result)
-	if err != nil {
-		return nil
-	}
-	var value map[string]any
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil
-	}
-	if len(value) == 0 {
-		return nil
-	}
-	return value
 }
 
 func decodeProviderDesktopActions(

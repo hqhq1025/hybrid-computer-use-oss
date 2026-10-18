@@ -53,8 +53,6 @@ def operation_failure_response(exc, recovery_operation=None):
         response["failureSubject"] = exc.failure_subject
     if exc.replacement_window:
         response["replacementWindow"] = exc.replacement_window
-    if emitted:
-        response["guiLeaseState"] = "suspect"
     read_only_stale_window = bool(
         not emitted
         and failure_code == "stale_window_ref"
@@ -108,7 +106,6 @@ def unexpected_operation_failure_response(exc, recovery_operation=None):
         "failureFactsComplete": False,
     }
     if emitted:
-        response["guiLeaseState"] = "suspect"
         if recovery_operation is not None:
             response["recoveryContext"] = _bounded_recovery_response(
                 recovery_operation

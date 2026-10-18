@@ -281,7 +281,12 @@ def gui_model_dimensions(bounds):
 
 
 def capture_gui_pixels(bounds):
-    """Capture an owned, unencoded pixbuf in the public GUI coordinate space."""
+    """Grab the full desktop once, at native resolution and unencoded.
+
+    The same grab serves as the delivered image (scaled lazily by
+    scale_to_model) and as the exact comparison sample (pixbuf_sample), so a
+    pixel verdict always describes the image the model receives.
+    """
     if Gdk is None or GdkPixbuf is None or bounds is None:
         return None
     try:
@@ -297,21 +302,43 @@ def capture_gui_pixels(bounds):
         )
         if pixbuf is None or pixbuf_looks_black(pixbuf):
             return None
-        dimensions = gui_model_dimensions(bounds)
-        if (
-            pixbuf.get_width() != dimensions["width"]
-            or pixbuf.get_height() != dimensions["height"]
-        ):
-            pixbuf = pixbuf.scale_simple(
-                dimensions["width"],
-                dimensions["height"],
-                GdkPixbuf.InterpType.BILINEAR,
-            )
-            if pixbuf is None:
-                return None
         return pixbuf
     except Exception:
         return None
+
+
+def pixbuf_sample(pixbuf):
+    """Return the comparison sample of a grab, shaped like capture_window_pixels."""
+    if pixbuf is None:
+        return None
+    try:
+        return {
+            "data": pixbuf.read_pixel_bytes().get_data(),
+            "stride": pixbuf.get_rowstride(),
+            "channels": pixbuf.get_n_channels(),
+            "width": pixbuf.get_width(),
+            "height": pixbuf.get_height(),
+        }
+    except Exception:
+        return None
+
+
+def scale_to_model(pixbuf, bounds):
+    """Return the delivered image for a native grab of ``bounds``."""
+    dimensions = gui_model_dimensions(bounds)
+    if (
+        dimensions["width"] == max(1, int(round(bounds["width"])))
+        and dimensions["height"] == max(1, int(round(bounds["height"])))
+    ):
+        return pixbuf
+    scaled = pixbuf.scale_simple(
+        dimensions["width"],
+        dimensions["height"],
+        GdkPixbuf.InterpType.BILINEAR,
+    )
+    if scaled is None:
+        raise RuntimeError("full-desktop screenshot scaling failed")
+    return scaled
 
 
 def pixbuf_looks_black(pixbuf):

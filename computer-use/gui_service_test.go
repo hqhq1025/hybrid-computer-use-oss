@@ -35,13 +35,15 @@ func TestGUIModelResponseKeepsLayoutProvenancePrivate(t *testing.T) {
 		Width:  1920,
 		Height: 1080,
 	}
-	text := guiMetadata(snapshot, map[string]any{
-		"dispatched":               1,
-		"input_events_emitted":     true,
-		"input_actions_dispatched": 1,
-		"effect_unknown":           true,
-		"quiescent":                true,
-		"visual_change_observed":   false,
+	one, yes, no, percent := 1, true, false, 0.5
+	text := guiMetadata(snapshot, ProviderGUIResult{
+		Dispatched:             &one,
+		InputEventsEmitted:     &yes,
+		InputActionsDispatched: &one,
+		EffectUnknown:          &yes,
+		Quiescent:              &yes,
+		VisualChangeObserved:   &no,
+		VisualChangePercent:    &percent,
 	})
 	for _, fragment := range []string{
 		`"coordinate_space":"screen_image_px"`,
@@ -71,10 +73,11 @@ func TestGUIModelResponseKeepsLayoutProvenancePrivate(t *testing.T) {
 }
 
 func TestCompactGUIResultPreservesUnknownEffect(t *testing.T) {
-	compact := compactGUIResult(map[string]any{
-		"dispatched":           1,
-		"input_events_emitted": true,
-		"effect_unknown":       true,
+	one, yes := 1, true
+	compact := compactGUIResult(ProviderGUIResult{
+		Dispatched:         &one,
+		InputEventsEmitted: &yes,
+		EffectUnknown:      &yes,
 	})
 	if compact["effect_unknown"] != true {
 		t.Fatalf("GUI compact evidence hid effect_unknown: %#v", compact)
@@ -250,27 +253,20 @@ func TestGUIResponseRejectsDeclaredMIMEThatDoesNotMatchImage(t *testing.T) {
 }
 
 func TestGUIFrameGuardAppliesOnlyToCoordinateActions(t *testing.T) {
-	if guiBatchUsesFrameProvenance([]any{
-		map[string]any{"type": "keypress", "keys": []any{"CTRL", "S"}},
-		map[string]any{"type": "type", "text": "hello"},
+	if guiBatchUsesFrameProvenance([]ProviderDesktopAction{
+		{Type: "keypress", Keys: []string{"CTRL", "S"}},
+		{Type: "type", Text: "hello"},
 	}) {
 		t.Fatal("keyboard/text-only GUI batches must not depend on screenshot coordinates")
 	}
-	for _, action := range []map[string]any{
-		{"type": "click", "x": 1.0, "y": 2.0},
-		{"type": "drag", "path": []any{}},
-		{"type": "scroll", "x": 1.0, "y": 2.0, "scroll_y": 1.0},
-	} {
-		if !guiBatchUsesFrameProvenance([]any{action}) {
-			t.Fatalf("coordinate action must require frame guard: %#v", action)
+	for _, action := range []string{"click", "double_click", "move", "drag", "scroll"} {
+		if !guiBatchUsesFrameProvenance([]ProviderDesktopAction{{Type: action}}) {
+			t.Fatalf("coordinate action must require frame guard: %s", action)
 		}
 	}
-	for _, action := range []map[string]any{
-		{"type": "activate_window", "x": 100.0, "y": 100.0},
-		{"type": "close_window", "x": 100.0, "y": 100.0},
-	} {
-		if guiBatchUsesFrameProvenance([]any{action}) {
-			t.Fatalf("removed GUI window action must not enter frame provenance: %#v", action)
+	for _, action := range []string{"activate_window", "close_window"} {
+		if guiBatchUsesFrameProvenance([]ProviderDesktopAction{{Type: action}}) {
+			t.Fatalf("removed GUI window action must not enter frame provenance: %s", action)
 		}
 	}
 }
@@ -293,15 +289,50 @@ func TestGUIValidationErrorsListEveryRejectedAction(t *testing.T) {
 	}
 }
 
-func TestApplyRuntimeGUILeaseUsesFailureEvidence(t *testing.T) {
-	service := newService()
-	service.guiLeaseState = "fresh"
-	service.applyRuntimeGUILease(&ProviderDesktopResult{
-		OK:         false,
-		LeaseState: "suspect",
-		Error:      "post-action observation failed",
-	})
-	if service.guiLeaseState != "suspect" {
-		t.Fatalf("failure response lease=%q, want suspect", service.guiLeaseState)
+func TestGUICoordinateBatchWithoutPriorScreenshotObservesWithoutInput(t *testing.T) {
+	internalScreenshot := 1
+	backend := &recordingPlatformBackend{desktopResponse: &ProviderDesktopResult{
+		OK:        true,
+		GUIResult: ProviderGUIResult{Dispatched: &internalScreenshot},
+		Snapshot: &appSnapshot{
+			ScreenshotPNGBase64: testPNGBase64(t, 100, 80),
+			CoordinateSpace:     "screen_image_px",
+			FrameID:             "fresh-frame",
+			Width:               100,
+			Height:              80,
+		},
+	}}
+	service := newServiceWithBackend(backend)
+	result := service.gui([]any{
+		map[string]any{"type": "click", "x": 10.0, "y": 20.0},
+	}, 800)
+	if len(backend.desktopRequests) != 1 {
+		t.Fatalf("want exactly one observation request, got %#v", backend.desktopRequests)
+	}
+	request := backend.desktopRequests[0]
+	// The real backends validate before dispatch; an empty batch used to fail
+	// here with "provider desktop actions are required" and no screenshot.
+	if err := validateProviderDesktopRequest(request); err != nil {
+		t.Fatalf("observation request is not a valid provider batch: %v", err)
+	}
+	if len(request.Actions) != 1 || request.Actions[0].Type != "screenshot" {
+		t.Fatalf("observation request must be one screenshot action: %#v", request.Actions)
+	}
+	if !result.IsError {
+		t.Fatal("coordinate batch without a prior screenshot must not report success")
+	}
+	text := resultText(result)
+	if !strings.Contains(text, "require a prior GUI screenshot") ||
+		!strings.Contains(text, "No actions were emitted") {
+		t.Fatalf("missing actionable note: %s", text)
+	}
+	if strings.Contains(text, `"dispatched"`) {
+		t.Fatalf("internal observation must not count as a dispatched action: %s", text)
+	}
+	if len(result.Content) < 2 || result.Content[len(result.Content)-1].Type != "image" {
+		t.Fatalf("fresh screenshot was not attached: %#v", result.Content)
+	}
+	if service.guiSnapshot == nil || service.guiSnapshot.FrameID != "fresh-frame" {
+		t.Fatal("the delivered fresh screenshot must become the coordinate frame")
 	}
 }

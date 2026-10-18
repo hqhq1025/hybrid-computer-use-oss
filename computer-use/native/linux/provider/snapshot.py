@@ -12,6 +12,7 @@ from .foundation import (
     MAX_ELEMENTS,
     SCREENSHOT_SCOPE_SCREEN,
     a11y_screenshots_enabled,
+    child_count,
     extents,
     has_text_iface,
     limit_text,
@@ -25,8 +26,9 @@ from .foundation import (
     state_contains,
 )
 
-from .ax_snapshot import render_tree
-from .ax_records import StableIndexer
+from .ax_snapshot import FocusProbe, render_tree
+from .tree_reuse import RecordingIndexer, TreeReuseCache, window_fingerprint
+from . import ui_events
 
 from .x11_windows import (
     app_windows,
@@ -45,6 +47,8 @@ from .gui_capture import (
     capture_window_image,
     encoded_screenshot,
     gui_model_dimensions,
+    pixbuf_sample,
+    scale_to_model,
 )
 
 from .atspi_inventory import (
@@ -52,6 +56,7 @@ from .atspi_inventory import (
     resolve_app_identity,
 )
 from .primitives import quoted
+from .phase_timing import lap
 from .tree_walk import find_first
 from .window_diagnostics import (
     foreign_foreground_note,
@@ -82,49 +87,99 @@ def element_reference(role, name):
     return role + " " + quoted(name)
 
 
-def focused_summary(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
-    try:
-        for app in iter_apps():
-            if node_pid(app) != app_pid:
-                continue
-            _, win = main_window(app)
-            focused = find_first(
-                win, lambda node: state_contains(node, Atspi.StateType.FOCUSED)
-            )
-            if focused is None:
-                return None
-            role = node_role(focused)
-            name = limit_text(node_name(focused), text_limit=text_limit)
-            return element_reference(role, name)
-    except Exception:
+def is_focused(node):
+    return state_contains(node, Atspi.StateType.FOCUSED)
+
+
+def same_provider_node(first, second):
+    """Return whether two accessibles name the same provider object."""
+    first_path = provider_object_path(first)
+    return bool(first_path) and (
+        first_path == provider_object_path(second)
+        and provider_bus_name(first) == provider_bus_name(second)
+    )
+
+
+def focused_node(app_pid, walked_window=None, focus_probe=None):
+    """Return the focused node of the application's main window, or None.
+
+    The focused node is the first FOCUSED node of ``main_window()`` in
+    find_first() order. When ``walked_window`` is that same window and the
+    snapshot walk already settled the answer (see FocusProbe), the walk's
+    answer is used and the window is not searched again.
+    """
+    for app in iter_apps():
+        if node_pid(app) != app_pid:
+            continue
+        _, win = main_window(app)
+        if (
+            focus_probe is not None
+            and focus_probe.known
+            and walked_window is not None
+            and same_provider_node(win, walked_window)
+        ):
+            return focus_probe.facts.node if focus_probe.facts else None
+        return find_first(win, is_focused)
+    return None
+
+
+def focus_summary_of(focused, text_limit=DEFAULT_TEXT_LIMIT):
+    if focused is None:
         return None
+    role = node_role(focused)
+    name = limit_text(node_name(focused), text_limit=text_limit)
+    return element_reference(role, name)
+
+
+def selected_text_of(focused, text_limit=DEFAULT_TEXT_LIMIT):
+    if focused is None or not has_text_iface(focused):
+        return None
+    text_iface = safe(focused.get_text_iface)
+    selections = safe(lambda: Atspi.Text.get_text_selections(text_iface), [])
+    if selections:
+        selection = selections[0]
+        end_offset = selection.end_offset
+        if text_limit is not None:
+            end_offset = min(end_offset, selection.start_offset + text_limit + 1)
+        value = Atspi.Text.get_text(
+            text_iface, selection.start_offset, end_offset
+        )
+        return limit_text(value, text_limit=text_limit)
+    return None
+
+
+def focus_and_selection(
+    app_pid, text_limit=DEFAULT_TEXT_LIMIT, walked_window=None,
+    focus_probe=None,
+):
+    """Return ``(focusedSummary, selectedText)`` from one focus lookup.
+
+    A failure while locating focus makes both values None; a failure while
+    reading one of them makes only that value None.
+    """
+    try:
+        focused = focused_node(
+            app_pid, walked_window=walked_window, focus_probe=focus_probe
+        )
+    except Exception:
+        return None, None
+    try:
+        summary = focus_summary_of(focused, text_limit=text_limit)
+    except Exception:
+        summary = None
+    try:
+        selected = selected_text_of(focused, text_limit=text_limit)
+    except Exception:
+        selected = None
+    return summary, selected
+
+
+def focused_summary(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
+    return focus_and_selection(app_pid, text_limit=text_limit)[0]
 
 
 def selected_text(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
-    try:
-        for app in iter_apps():
-            if node_pid(app) != app_pid:
-                continue
-            _, win = main_window(app)
-            focused = find_first(
-                win, lambda node: state_contains(node, Atspi.StateType.FOCUSED)
-            )
-            if focused is None or not has_text_iface(focused):
-                return None
-            text_iface = safe(focused.get_text_iface)
-            selections = safe(lambda: Atspi.Text.get_text_selections(text_iface), [])
-            if selections:
-                selection = selections[0]
-                end_offset = selection.end_offset
-                if text_limit is not None:
-                    end_offset = min(end_offset, selection.start_offset + text_limit + 1)
-                value = Atspi.Text.get_text(
-                    text_iface, selection.start_offset, end_offset
-                )
-                return limit_text(value, text_limit=text_limit)
-    except Exception:
-        return None
-    return None
+    return focus_and_selection(app_pid, text_limit=text_limit)[1]
 
 
 def top_level_window_inventory(app, selected_index=None):
@@ -153,6 +208,25 @@ def top_level_window_inventory(app, selected_index=None):
             "showing": state_contains(window, Atspi.StateType.SHOWING),
         })
     return inventory
+
+
+# Window trees kept for reuse by later requests of this provider process.
+TREES = TreeReuseCache(ui_events.MONITOR)
+
+# Omission reasons that make a walk unfit for reuse: a walk cut by the time
+# budget or by provider read errors depends on transient conditions, so a
+# later request must walk again rather than inherit the gaps.
+TRANSIENT_OMISSIONS = ("time", "render_error", "provider_probe_error")
+
+
+def walk_is_reusable(annotations):
+    for item in annotations or []:
+        if item.get("kind") != "provider_omission":
+            continue
+        reasons = str(item.get("reason") or "").split(",")
+        if any(reason in TRANSIENT_OMISSIONS for reason in reasons):
+            return False
+    return True
 
 
 def utc_timestamp():
@@ -219,8 +293,14 @@ def build_snapshot(
     screenshot_scope="window",
     app_identity=None,
     target_window_handle=None,
+    reuse_tree=False,
 ):
     """Build an application snapshot.
+
+    ``reuse_tree=True`` lets an unchanged window return the tree of an
+    earlier walk instead of walking it again; see tree_reuse for the checks.
+    Every walk, reused or not, may be reused later. Post-action snapshots
+    pass False so that the tree after an action is always read fresh.
 
     ``include_screenshot=None`` defers to a11y_screenshots_enabled(); True or
     False forces the choice. Callers request AX screenshots explicitly with
@@ -248,27 +328,72 @@ def build_snapshot(
         if app_identity is not None
         else resolve_app(query)
     )
+    lap("snapshot.resolve_app")
     window_index, window, window_selection = select_window_by_handle(
         app, target_window_handle
     )
+    lap("snapshot.select_window")
     bounds = extents(window)
-    records, lines, annotations = render_tree(
-        window,
-        bounds,
-        [window_index],
-        text_limit=text_limit,
-        max_tree_nodes=max_tree_nodes,
-        max_tree_depth=max_tree_depth,
-        prune=prune,
-        boxes=boxes,
-        indexer=StableIndexer(known_refs),
-        include_annotations=True,
-    )
-    pid = node_pid(app)
     handle = window_instance_handle(app, window_index, window)
     title = window_label(window, text_limit=text_limit)
-    focused = focused_summary(pid, text_limit=text_limit)
-    selected = selected_text(pid, text_limit=text_limit)
+    app_bus = provider_bus_name(app)
+    reuse_key = (
+        app_bus,
+        provider_object_path(window),
+        window_index,
+        handle,
+        text_limit,
+        max_tree_nodes,
+        max_tree_depth,
+        bool(prune),
+        bool(boxes),
+    )
+    fingerprint = window_fingerprint(
+        bounds, title, child_count(window), window_selection
+    )
+    cached = (
+        TREES.lookup(app_bus, reuse_key, fingerprint, known_refs)
+        if reuse_tree
+        else None
+    )
+    if cached is not None:
+        records, lines, annotations = deepcopy(cached[0])
+        focus_probe = cached[1]
+        lap("snapshot.reuse_tree")
+    else:
+        walk = TREES.begin_walk(app_bus)
+        indexer = RecordingIndexer(known_refs)
+        focus_probe = FocusProbe()
+        records, lines, annotations = render_tree(
+            window,
+            bounds,
+            [window_index],
+            text_limit=text_limit,
+            max_tree_nodes=max_tree_nodes,
+            max_tree_depth=max_tree_depth,
+            prune=prune,
+            boxes=boxes,
+            indexer=indexer,
+            include_annotations=True,
+            focus_probe=focus_probe,
+        )
+        if walk is not None and walk_is_reusable(annotations):
+            try:
+                stored = deepcopy((records, lines, annotations))
+            except Exception:
+                stored = None
+            if stored is not None:
+                TREES.store(
+                    reuse_key, fingerprint, walk, indexer.calls,
+                    (stored, focus_probe),
+                )
+        lap("snapshot.render_tree")
+    pid = node_pid(app)
+    focused, selected = focus_and_selection(
+        pid, text_limit=text_limit, walked_window=window,
+        focus_probe=focus_probe,
+    )
+    lap("snapshot.handle_title_focus")
     screenshot_bounds = (
         desktop_bounds()
         if screenshot_scope == SCREENSHOT_SCOPE_SCREEN
@@ -279,7 +404,8 @@ def build_snapshot(
         if (a11y_screenshots_enabled() if include_screenshot is None else include_screenshot)
         else None
     )
-    return {
+    lap("snapshot.screenshot")
+    snapshot = {
         "app": {
             "name": node_name(app),
             "bundleIdentifier": node_name(app),
@@ -323,6 +449,8 @@ def build_snapshot(
         # encoding/json ignores it; the dispatcher pops it into the notes.
         "modalNotes": modal_diagnostic(window, app) + foreign_foreground_note(app),
     }
+    lap("snapshot.inventory_and_notes")
+    return snapshot
 
 
 @dataclass(frozen=True)
@@ -338,6 +466,7 @@ class CapturedGUISnapshot:
     _bounds: object = None
     _encoded: object = field(default=None, init=False, repr=False, compare=False)
     _encoding_error: object = field(default=None, init=False, repr=False, compare=False)
+    _sample: object = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, "_metadata", deepcopy(self._metadata))
@@ -354,12 +483,21 @@ class CapturedGUISnapshot:
     def matches_bounds(self, bounds):
         return self._bounds == bounds
 
+    @property
+    def pixels(self):
+        """Exact native comparison sample of the grab behind the delivered image."""
+        if self._sample is None and self.has_image:
+            object.__setattr__(self, "_sample", pixbuf_sample(self._pixbuf))
+        return self._sample
+
     def encode(self):
         if self._encoding_error is not None:
             raise RuntimeError(self._encoding_error)
         if self._encoded is None:
             try:
-                screenshot = encoded_screenshot(self._pixbuf) if self.has_image else None
+                screenshot = encoded_screenshot(
+                    scale_to_model(self._pixbuf, self._bounds)
+                ) if self.has_image else None
             except Exception as exc:
                 object.__setattr__(self, "_encoding_error", str(exc)[:512])
                 raise
@@ -379,13 +517,22 @@ def capture_gui_snapshot(bounds=None):
         bounds = desktop_bounds()
     pixbuf = None
     layout = None
+    # Each attempt's closing sample also opens the next attempt, so A attempts
+    # cost A+1 layout queries. Identity is the coordinate frame id, which
+    # ignores window titles: a title change cannot move a coordinate.
+    before_layout = desktop_layout_state(bounds)
     for _ in range(GUI_SNAPSHOT_LAYOUT_ATTEMPTS):
-        before_layout = desktop_layout_state(bounds)
         pixbuf = capture_gui_pixels(bounds)
         after_layout = desktop_layout_state(bounds)
-        if before_layout is not None and before_layout == after_layout:
+        if (
+            before_layout is not None
+            and after_layout is not None
+            and desktop_layout_frame_id(before_layout)
+            == desktop_layout_frame_id(after_layout)
+        ):
             layout = after_layout
             break
+        before_layout = after_layout
     dimensions = gui_model_dimensions(bounds)
     return CapturedGUISnapshot({
         "sampledAt": utc_timestamp(),

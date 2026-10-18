@@ -29,6 +29,7 @@ from .gui_capture import (
 )
 from .gui_input import (
     execute_gui_action,
+    gui_actions_to_screen,
     gui_wait_metrics,
     validate_gui_actions,
 )
@@ -239,12 +240,7 @@ def finalize_gui_response(response):
     return response
 
 
-def normalize_gui_lease_state(value):
-    state = str(value or "absent").strip().lower()
-    return state if state in {"fresh", "suspect", "stale", "absent"} else "absent"
-
-
-def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
+def perform_gui(actions, settle_ms=800, frame_id=None):
     if actions is None:
         return {
             "ok": False,
@@ -302,7 +298,7 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             "input_actions_dispatched": 0,
         }
     settle_ms = normalized_settle_ms
-    _static_actions, static_errors = validate_gui_actions(actions)
+    static_actions, static_errors = validate_gui_actions(actions)
     if len(actions) > 1 and any(
             action.get("type") == "screenshot"
             for action in actions if isinstance(action, dict)):
@@ -327,7 +323,7 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
         }
     total_wait = sum(
         action.get("seconds", 0)
-        for action in _static_actions
+        for action in static_actions
         if action["type"] == "wait"
     )
     if total_wait > GUI_MAX_TOTAL_WAIT_SECONDS:
@@ -360,8 +356,8 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
         model_dimensions["width"],
         model_dimensions["height"],
     )
-    validated, coordinate_errors = validate_gui_actions(
-        actions,
+    validated, coordinate_errors = gui_actions_to_screen(
+        static_actions,
         model_bounds,
         bounds,
     )
@@ -388,8 +384,6 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             "effect_unknown": False,
             "quiescent": None,
         }
-    prior_lease_state = normalize_gui_lease_state(gui_lease_state)
-
     def encode_evidence(captured):
         try:
             return captured.encode()
@@ -439,11 +433,6 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             "quiescent": None,
             "snapshot": encode_evidence(current_capture),
         }
-    lease_revalidated = bool(
-        frame_guarded_actions
-        and prior_lease_state in {"suspect", "stale"}
-        and current_capture.frame_id
-    )
     if frame_id and frame_guarded_actions:
         if current_capture.frame_id != frame_id:
             return {
@@ -466,14 +455,18 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
     )
     observation_only = (
         len(validated) == 1 and validated[0]["type"] == "screenshot")
-    before_pixels = capture_window_pixels(bounds) if mutating else None
+    # The pre-action screenshot is the "before" frame: same grab, no extra sample.
+    before_pixels = current_capture.pixels if mutating else None
     dispatched = 0
     input_actions_dispatched = 0
     pointer_settle_credit = None
     for index, action in enumerate(validated):
         action_type = action["type"]
         try:
-            if frame_id and action_type in GUI_FRAME_GUARDED_ACTION_TYPES:
+            # The initial frame check sampled the layout just before this loop;
+            # re-sample only once an earlier action or wait could have moved it.
+            if (frame_id and dispatched
+                    and action_type in GUI_FRAME_GUARDED_ACTION_TYPES):
                 live_bounds = desktop_bounds()
                 live_layout = desktop_layout_state(live_bounds)
                 live_frame_id = desktop_layout_frame_id(live_layout)
@@ -566,14 +559,8 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
                 "reason": "observation_only",
             }
         )
-        settled_pixels = (
-            settle_result.get("pixels")
-            or (capture_window_pixels(bounds) if mutating else None)
-        )
-        before_final_pixels = capture_window_pixels(bounds) if mutating else None
         final_capture = (
             current_capture if observation_only else capture_gui_snapshot())
-        after_final_pixels = capture_window_pixels(bounds) if mutating else None
         if not final_capture.has_image:
             raise RuntimeError("full-desktop screenshot capture is unavailable")
         final_snapshot = final_capture.encode()
@@ -595,19 +582,20 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
             "quiescent": None,
             "snapshot": error_snapshot,
         }
-    final_capture_coherent = (
-        final_capture.matches_bounds(bounds)
-        and pixel_buffers_identical(before_final_pixels, after_final_pixels)
-        if mutating else None
+    # Every pixel verdict describes the delivered image itself. A stable run
+    # counts only when the delivered frame is byte-identical to its last
+    # sample; otherwise the desktop moved on and quiescent would describe a
+    # different state than the attached image.
+    after_pixels = (
+        final_capture.pixels
+        if not observation_only and final_capture.matches_bounds(bounds)
+        else None
     )
-    if mutating and final_capture_coherent is not True:
-        if settle_result.get("stable"):
-            settle_result = dict(settle_result)
-            settle_result["stable"] = False
-            settle_result["invalidated_by_final_capture"] = True
-        after_pixels = None
-    else:
-        after_pixels = after_final_pixels or settled_pixels
+    if settle_result.get("stable") and pixel_buffers_identical(
+            settle_result.get("pixels"), after_pixels) is not True:
+        settle_result = dict(settle_result)
+        settle_result["stable"] = False
+        settle_result["invalidated_by_final_capture"] = True
     visual = (
         gui_visual_change(before_pixels, after_pixels)
         if mutating else gui_visual_change(None, None)
@@ -625,11 +613,6 @@ def perform_gui(actions, settle_ms=800, frame_id=None, gui_lease_state=None):
         "visual_change_observed": visual["changed_since_before"] if mutating else None,
         **wait_metrics,
     }
-    gui_result["gui_lease_state"] = (
-        "fresh" if final_snapshot.get("frameId") else "suspect"
-    )
-    if lease_revalidated:
-        gui_result["gui_lease_revalidated"] = True
     size = "{}x{}".format(final_snapshot.get("width"), final_snapshot.get("height"))
     focus_note = ""
     if any(action["type"] in {"type", "keypress"} for action in validated):

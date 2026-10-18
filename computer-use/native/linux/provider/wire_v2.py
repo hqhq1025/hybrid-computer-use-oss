@@ -5,6 +5,8 @@ import sys
 import traceback
 from typing import Any
 
+from . import phase_timing
+from . import ui_events
 from .ax_dispatch import perform_provider_request
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
@@ -610,7 +612,6 @@ def _validate_payload(operation, payload):
                 "actions",
                 "settle_ms",
                 "frame_id",
-                "lease_state",
             },
             ("protocol_version", "actions", "settle_ms"),
         )
@@ -765,7 +766,6 @@ def _accessibility_result(response):
         ("candidates", "candidates"),
         ("candidateCount", "candidate_count"),
         ("candidatesTruncated", "candidates_truncated"),
-        ("guiLeaseState", "lease_state"),
         ("externalDesktopTransition", "external_desktop_transition"),
         ("observationSkipped", "observation_skipped"),
     )
@@ -783,8 +783,6 @@ def _desktop_result(response):
         result["gui_result"] = gui_result
     if response.get("validation_errors"):
         result["validation_errors"] = response["validation_errors"]
-    if response.get("guiLeaseState"):
-        result["lease_state"] = response["guiLeaseState"]
     return result
 
 
@@ -796,7 +794,6 @@ def _window_result(response):
         ("windowTitles", "window_titles"),
         ("actionEvidence", "action_evidence"),
         ("recoveryContext", "recovery_context"),
-        ("guiLeaseState", "lease_state"),
         ("externalDesktopTransition", "external_desktop_transition"),
     )
     for source, destination in mappings:
@@ -982,10 +979,24 @@ def _initialize_provider(request):
     except Exception:
         _write_operator_exception(request, "startup")
         raise
+    # Without the event monitor the provider still works: every observe
+    # walks the tree and the settle wait uses its fixed floor.
+    ui_events.start()
     _provider_initialized = True
 
 
 def execute(request):
+    phase_timing.start()
+    try:
+        return _execute(request)
+    finally:
+        phase_timing.finish(
+            request.get("operation") if isinstance(request, dict) else None,
+            request.get("request_id") if isinstance(request, dict) else None,
+        )
+
+
+def _execute(request):
     validate_request(request)
     operation = request["operation"]
     payload_key = {

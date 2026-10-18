@@ -159,12 +159,19 @@ def selected_option_name(node):
     return ""
 
 
-def element_value(node, text_limit=DEFAULT_TEXT_LIMIT):
+def element_value(node, text_limit=DEFAULT_TEXT_LIMIT, role=None):
+    """Return the node's text or numeric value; see selected_option_name().
+
+    ``role`` passes a role the caller already read, so it is not read from
+    the provider a second time.
+    """
     direct = text_value(node, text_limit=text_limit) or numeric_value(node)
     if direct:
         return direct
     # Only dropdown roles pay for the descendant scan.
-    role = str(node_role(node) or "")
+    if role is None:
+        role = node_role(node)
+    role = str(role or "")
     if role in ("combo box", "list box"):
         return limit_text(selected_option_name(node), text_limit=text_limit)
     return direct
@@ -226,7 +233,7 @@ def plain_text_from_rich_text(value):
     return " ".join(text.split())
 
 
-def node_description(node, text_limit=DEFAULT_TEXT_LIMIT):
+def node_description(node, text_limit=DEFAULT_TEXT_LIMIT, facts=None):
     """Return the control's description (AT-SPI `get_description`).
 
     GTK usually fills it with the tooltip, and it is often the only readable
@@ -245,7 +252,12 @@ def node_description(node, text_limit=DEFAULT_TEXT_LIMIT):
     name) and rewriting it would break matching across snapshots.
     """
     getter = getattr(node, "get_description", None)
-    raw = str(safe(getter, "") or "") if callable(getter) else ""
+    if not callable(getter):
+        raw = ""
+    elif facts is not None:
+        raw = str(facts.value("description", "") or "")
+    else:
+        raw = str(safe(getter, "") or "")
     return limit_text(plain_text_from_rich_text(raw), text_limit=text_limit)
 
 
@@ -374,7 +386,8 @@ def render_element_line(record, render_depth, boxes=True):
     return line
 
 
-def state_segment(node, has_click_action=False, borrowed_name=False):
+def state_segment(node, has_click_action=False, borrowed_name=False,
+                  facts=None):
     """Render notable states as compact marks such as `[checked expanded]`.
 
     Report only states whose presence is meaningful, and never infer meaning
@@ -390,7 +403,14 @@ def state_segment(node, has_click_action=False, borrowed_name=False):
     marks = []
     for name, label in NOTABLE_STATES:
         state = getattr(Atspi.StateType, name, None)
-        if state is not None and state_contains(node, state):
+        if state is None:
+            continue
+        present = (
+            facts.has_state(state)
+            if facts is not None
+            else state_contains(node, state)
+        )
+        if present:
             marks.append(label)
     # `has-click-action` is a capability, not an AT-SPI state, but it belongs
     # in the same group: the agent should see at a glance whether the element

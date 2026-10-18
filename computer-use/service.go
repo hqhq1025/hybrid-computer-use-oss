@@ -27,7 +27,6 @@ type service struct {
 	backend                   PlatformBackend
 	snapshots                 map[string]*appSnapshot
 	guiSnapshot               *appSnapshot
-	guiLeaseState             string
 	lastDiagnostics           map[string]map[string]string
 	observations              observationLedger
 	exposedHiddenRefs         map[string]map[int]elementRecord

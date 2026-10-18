@@ -213,7 +213,6 @@ func (s *service) stabilizePostActionTransientCommit(
 		s.refRegistry = probe.refRegistry
 		s.windowRefRegistry = probe.windowRefRegistry
 		s.appRefRegistry = probe.appRefRegistry
-		s.guiLeaseState = probe.guiLeaseState
 		s.findCursorRegistry.Reset()
 		s.rememberSnapshot(app, refreshed)
 		notes = append([]string{
@@ -336,7 +335,6 @@ func (s *service) stabilizePostActionWindowIdentity(
 	s.refRegistry = probe.refRegistry
 	s.windowRefRegistry = probe.windowRefRegistry
 	s.appRefRegistry = probe.appRefRegistry
-	s.guiLeaseState = probe.guiLeaseState
 	if trigger == "provider_window_change" {
 		s.findCursorRegistry.Reset()
 	}
@@ -483,7 +481,6 @@ func (s *service) stabilizePostActionContent(
 	s.refRegistry = probe.refRegistry
 	s.windowRefRegistry = probe.windowRefRegistry
 	s.appRefRegistry = probe.appRefRegistry
-	s.guiLeaseState = probe.guiLeaseState
 	s.rememberSnapshot(app, refreshed)
 	notes = append([]string{
 		"[content] The same logical window was refreshed once after a compact " +

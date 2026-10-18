@@ -9,7 +9,9 @@ from .foundation import (
     OperationFailure,
     SETTLE_FOCUS_TIMEOUT_SECONDS,
     SETTLE_MIN_SECONDS,
+    SETTLE_EVENT_FLOOR_SECONDS,
     SETTLE_POLL_SECONDS,
+    SETTLE_QUIET_SECONDS,
     inventory_complete,
     limit_text,
     node_name,
@@ -26,6 +28,43 @@ from .x11_windows import (
 )
 from .primitives import quoted
 from .window_diagnostics import accepts_user_input
+from . import ui_events
+
+
+def wait_for_app_quiet(monitor, bus, min_seconds, floor_seconds,
+                       quiet_seconds, clock):
+    """Wait until the application has reacted and gone quiet.
+
+    Without the event monitor the settle wait slept a fixed ``min_seconds``.
+    With it, the wait ends at the earliest of:
+
+    - ``min_seconds`` after the start, as before (also the whole wait when
+      the application emits no event at all);
+    - ``quiet_seconds`` after the application's latest event, but not
+      before ``floor_seconds``: the reaction to the input has finished.
+
+    Only an application that reacts and then stays silent for
+    ``quiet_seconds`` ends the wait early. A window that appears after such
+    a silence and before ``min_seconds`` is missed here although the fixed
+    wait would have caught it; dialogs measured in GTK, VCL and Gecko
+    applications join the tree within about 0.07 s while the application is
+    still emitting events, which the floor covers.
+    """
+    started = clock()
+    deadline = started + min_seconds
+    floor = started + min(floor_seconds, min_seconds)
+    if not monitor.wait_for_event(bus, min_seconds):
+        return
+    while True:
+        now = clock()
+        if now >= deadline:
+            return
+        last = monitor.last_event_at(bus)
+        quiet_until = max(
+            floor, (last if last is not None else now) + quiet_seconds)
+        if now >= quiet_until:
+            return
+        monitor.wait_for_event(bus, min(quiet_until, deadline) - now)
 
 
 def wait_for_ui_to_settle(
@@ -36,6 +75,9 @@ def wait_for_ui_to_settle(
     poll_seconds=SETTLE_POLL_SECONDS,
     clock=time.monotonic,
     sleep=time.sleep,
+    monitor=None,
+    quiet_seconds=SETTLE_QUIET_SECONDS,
+    floor_seconds=SETTLE_EVENT_FLOOR_SECONDS,
 ):
     """Wait for the UI to settle after an action, before the caller snapshots.
 
@@ -47,24 +89,35 @@ def wait_for_ui_to_settle(
     boundary, which slower applications or busier machines hit again, so the
     wait is based on state:
 
+    - First wait for the application to react: with the event monitor
+      active, until it has been quiet for ``quiet_seconds`` after its
+      reaction, at least ``floor_seconds`` and at most ``min_seconds``
+      (wait_for_app_quiet); without the monitor, a fixed ``min_seconds``.
     - If the set of top-level windows is unchanged, nothing opened or
       closed; return at once, so the common path is not slowed down.
     - Otherwise wait until a newly appeared window reports ACTIVE or MODAL,
       or, if windows only closed, until a remaining window takes focus.
+      Events from the application end each poll interval early.
 
     On timeout, return a note instead of None: a new window that did not
     take focus means the snapshot may show a different window than the
     caller expects.
 
-    Limitation: a window that appears after `min_seconds` is not detected.
-    Dialogs in Gecko, VCL, GTK and Qt applications join the AT-SPI tree
-    within about 0.07 s, so the 0.12 s minimum leaves a margin without a
-    fixed observation period that would add hundreds of milliseconds to
-    every action. A slower application yields a snapshot of the pre-action
-    state without the new window: a visible failure rather than a consistent
-    tree of the wrong window.
+    Limitation: a window that appears after the first phase is not
+    detected. Dialogs in Gecko, VCL, GTK and Qt applications usually join
+    the AT-SPI tree within about 0.07 s, while the application is still
+    emitting events for the action. A slower application yields a snapshot
+    of the pre-action state without the new window: a visible failure
+    rather than a consistent tree of the wrong window.
     """
-    sleep(min_seconds)
+    if monitor is None:
+        monitor = ui_events.MONITOR
+    bus = provider_bus_name(app) if monitor.active else ""
+    if bus:
+        wait_for_app_quiet(
+            monitor, bus, min_seconds, floor_seconds, quiet_seconds, clock)
+    else:
+        sleep(min_seconds)
     if before is None:
         return None
     deadline = clock() + timeout_seconds
@@ -98,7 +151,10 @@ def wait_for_ui_to_settle(
                 "this action opened — confirm the window title before using any "
                 "target ref from it.".format(timeout_seconds)
             )
-        sleep(poll_seconds)
+        if bus:
+            monitor.wait_for_event(bus, poll_seconds)
+        else:
+            sleep(poll_seconds)
 
 
 def loose(text):

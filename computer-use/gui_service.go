@@ -26,11 +26,13 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 		}
 	}
 	privateFrameID := ""
-	if guiBatchUsesFrameProvenance(actions) {
+	if guiBatchUsesFrameProvenance(providerActions) {
 		if s.guiSnapshot == nil || s.guiSnapshot.FrameID == "" {
+			// Observe only: the provider wire rejects an empty batch, and an
+			// explicit screenshot action is the one batch that emits no input.
 			observed, err := s.callProviderDesktop(ProviderDesktopRequest{
 				ProtocolVersion: providerProtocolV2,
-				Actions:         []ProviderDesktopAction{},
+				Actions:         []ProviderDesktopAction{{Type: "screenshot"}},
 			})
 			if err != nil {
 				if result, rejected := runtimeRequestRejectionResult(err); rejected {
@@ -38,6 +40,8 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 				}
 				return textResult(err.Error(), true)
 			}
+			// The internal screenshot is not one of the caller's actions.
+			observed.GUIResult.Dispatched = nil
 			result := s.guiResponse(*observed)
 			result.IsError = true
 			if len(result.Content) > 0 {
@@ -55,7 +59,6 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 		Actions:         providerActions,
 		SettleMS:        settleMS,
 		FrameID:         privateFrameID,
-		LeaseState:      s.guiLeaseState,
 	})
 	if err != nil {
 		if result, rejected := runtimeRequestRejectionResult(err); rejected {
@@ -63,7 +66,7 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 		}
 		var timeout *runtimeTimeoutError
 		var transport *runtimeTransportError
-		mayMutate := guiBatchCanMutateDesktop(actions)
+		mayMutate := guiBatchCanEmitInput(providerActions)
 		requestMayHaveReachedProvider := errors.As(err, &timeout) ||
 			(errors.As(err, &transport) && transport.requestSent)
 		mutationUnknown := mayMutate && requestMayHaveReachedProvider
@@ -71,8 +74,7 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 			s.invalidateAccessibilitySnapshots()
 		}
 		if timeout != nil || transport != nil {
-			guiResult := emptyGUIResult()
-			guiResult["mutation_unknown"] = mutationUnknown
+			guiResult := ProviderGUIResult{MutationUnknown: &mutationUnknown}
 			failureCode := "runtime_timeout"
 			phase := "runtime"
 			if timeout != nil && strings.TrimSpace(timeout.phase) != "" {
@@ -106,7 +108,9 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 				result.StructuredContent = evidence
 				return result
 			}
-			payload, _ := json.Marshal(map[string]any{"gui_result": guiResult})
+			payload, _ := json.Marshal(map[string]any{
+				"gui_result": emptyGUIResult(mutationUnknown),
+			})
 			result := textResult(string(payload)+"\n"+message, true)
 			result.StructuredContent = evidence
 			return result
@@ -116,12 +120,14 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 	return s.guiResponse(*response)
 }
 
-func emptyGUIResult() map[string]any {
+// emptyGUIResult is the full GUI evidence schema for a batch the runtime never
+// reported on; only mutation_unknown can be true.
+func emptyGUIResult(mutationUnknown bool) map[string]any {
 	return map[string]any{
 		"dispatched":               0,
 		"input_events_emitted":     false,
 		"input_actions_dispatched": 0,
-		"mutation_unknown":         false,
+		"mutation_unknown":         mutationUnknown,
 		"partial_input_possible":   false,
 		"effect_unknown":           false,
 		"quiescent":                nil,
@@ -133,17 +139,9 @@ func emptyGUIResult() map[string]any {
 	}
 }
 
-func guiBatchUsesFrameProvenance(actions any) bool {
-	items, ok := actions.([]any)
-	if !ok {
-		return false
-	}
-	for _, item := range items {
-		action, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(optionalString(action, "type"))) {
+func guiBatchUsesFrameProvenance(actions []ProviderDesktopAction) bool {
+	for _, action := range actions {
+		switch strings.ToLower(strings.TrimSpace(action.Type)) {
 		case "click", "double_click", "move", "drag", "scroll":
 			return true
 		}
@@ -151,17 +149,9 @@ func guiBatchUsesFrameProvenance(actions any) bool {
 	return false
 }
 
-func guiBatchCanEmitInput(actions any) bool {
-	items, ok := actions.([]any)
-	if !ok {
-		return false
-	}
-	for _, item := range items {
-		action, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(optionalString(action, "type"))) {
+func guiBatchCanEmitInput(actions []ProviderDesktopAction) bool {
+	for _, action := range actions {
+		switch strings.ToLower(strings.TrimSpace(action.Type)) {
 		case "click", "double_click", "move", "drag", "scroll",
 			"type", "keypress":
 			return true
@@ -170,11 +160,7 @@ func guiBatchCanEmitInput(actions any) bool {
 	return false
 }
 
-func guiBatchCanMutateDesktop(actions any) bool {
-	return guiBatchCanEmitInput(actions)
-}
-
-func guiMetadata(snapshot *appSnapshot, guiResult map[string]any) string {
+func guiMetadata(snapshot *appSnapshot, guiResult ProviderGUIResult) string {
 	if snapshot == nil {
 		return ""
 	}
@@ -196,41 +182,44 @@ func guiMetadata(snapshot *appSnapshot, guiResult map[string]any) string {
 	return string(metadata)
 }
 
-func compactGUIResult(full map[string]any) map[string]any {
+// compactGUIResult is the model-visible subset of the runtime's GUI evidence.
+func compactGUIResult(full ProviderGUIResult) map[string]any {
 	out := map[string]any{}
-	if count, ok := intEvidence(full["dispatched"]); ok && count > 0 {
-		out["dispatched"] = count
+	if full.Dispatched != nil && *full.Dispatched > 0 {
+		out["dispatched"] = *full.Dispatched
 	}
-	if count, ok := intEvidence(full["input_actions_dispatched"]); ok &&
-		count > 0 {
-		out["input_actions_dispatched"] = count
+	if full.InputActionsDispatched != nil && *full.InputActionsDispatched > 0 {
+		out["input_actions_dispatched"] = *full.InputActionsDispatched
 	}
-	for _, key := range []string{
-		"input_events_emitted",
-		"partial_input_possible",
-		"mutation_unknown",
-		"effect_unknown",
+	for key, value := range map[string]*bool{
+		"input_events_emitted":   full.InputEventsEmitted,
+		"partial_input_possible": full.PartialInputPossible,
+		"mutation_unknown":       full.MutationUnknown,
+		"effect_unknown":         full.EffectUnknown,
 	} {
-		if value, ok := full[key].(bool); ok && value {
+		if isTrue(value) {
 			out[key] = true
 		}
 	}
-	for _, key := range []string{
-		"quiescent",
-		"visual_change_observed",
+	for key, value := range map[string]*bool{
+		"quiescent":              full.Quiescent,
+		"visual_change_observed": full.VisualChangeObserved,
 	} {
-		if value, ok := full[key].(bool); ok {
-			out[key] = value
+		if value != nil {
+			out[key] = *value
 		}
 	}
 	return out
 }
 
-func guiInvalidatesAccessibility(guiResult map[string]any) bool {
-	emitted, _ := guiResult["input_events_emitted"].(bool)
-	partial, _ := guiResult["partial_input_possible"].(bool)
-	unknown, _ := guiResult["mutation_unknown"].(bool)
-	return emitted || partial || unknown
+func guiInvalidatesAccessibility(guiResult ProviderGUIResult) bool {
+	return isTrue(guiResult.InputEventsEmitted) ||
+		isTrue(guiResult.PartialInputPossible) ||
+		isTrue(guiResult.MutationUnknown)
+}
+
+func isTrue(value *bool) bool {
+	return value != nil && *value
 }
 
 func guiValidationErrorText(response ProviderDesktopResult) string {
@@ -256,26 +245,9 @@ func (s *service) invalidateAccessibilitySnapshots() {
 	s.findCursorRegistry.Reset()
 }
 
-func (s *service) applyRuntimeGUILease(response *ProviderDesktopResult) {
-	if response == nil {
-		return
-	}
-	if response.LeaseState != "" {
-		s.guiLeaseState = response.LeaseState
-		return
-	}
-	if response.GUIResult.LeaseState != "" {
-		s.guiLeaseState = response.GUIResult.LeaseState
-	}
-}
-
 func (s *service) guiResponse(response ProviderDesktopResult) toolCallResult {
-	s.applyRuntimeGUILease(&response)
-	guiResult := response.GUIResult.modelMap()
-	if guiResult == nil {
-		guiResult = map[string]any{}
-	}
-	mergeProviderMutationIntoGUIResult(guiResult, response.Mutation)
+	guiResult := response.GUIResult
+	mergeProviderMutationIntoGUIResult(&guiResult, response.Mutation)
 	// GUI input can change any application without passing through the accessibility
 	// track. Once the runtime confirms event emission, every cached tree and expect
 	// baseline is stale, including responses that later report a partial failure.
@@ -373,32 +345,32 @@ func validateGUISnapshotImage(snapshot *appSnapshot) error {
 }
 
 func mergeProviderMutationIntoGUIResult(
-	guiResult map[string]any,
+	guiResult *ProviderGUIResult,
 	mutation *ProviderMutationFacts,
 ) {
-	if guiResult == nil || mutation == nil {
+	if mutation == nil {
 		return
 	}
-	for key, value := range map[string]bool{
-		"input_events_emitted":   mutation.InputEventsEmitted,
-		"partial_input_possible": mutation.PartialInputPossible,
-		"mutation_unknown":       mutation.MutationUnknown,
-	} {
+	setTrue := func(field **bool, value bool) {
 		if value {
-			guiResult[key] = true
+			*field = &value
 		}
 	}
+	setTrue(&guiResult.InputEventsEmitted, mutation.InputEventsEmitted)
+	setTrue(&guiResult.PartialInputPossible, mutation.PartialInputPossible)
+	setTrue(&guiResult.MutationUnknown, mutation.MutationUnknown)
 }
 
 func guiObservationFailure(
 	response ProviderDesktopResult,
-	guiResult map[string]any,
+	guiResult ProviderGUIResult,
 	defaultMessage string,
 ) toolCallResult {
 	mayHaveMutated := providerMutationCanInvalidate(response.Mutation) ||
 		guiInvalidatesAccessibility(guiResult)
 	if mayHaveMutated {
-		guiResult["mutation_unknown"] = true
+		unknown := true
+		guiResult.MutationUnknown = &unknown
 	}
 	visible := compactGUIResult(guiResult)
 	payload := map[string]any{}

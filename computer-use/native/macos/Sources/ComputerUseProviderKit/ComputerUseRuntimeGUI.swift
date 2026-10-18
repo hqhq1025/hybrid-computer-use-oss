@@ -141,7 +141,7 @@ extension ComputerUseRuntimeBridge {
 
         return guiFinalObservationResult(
             actionCount: actions.count, inputActionsDispatched: inputActionsDispatched,
-            emitted: emitted, leaseState: string(operation["lease_state"])
+            emitted: emitted
         ) {
             try sampleGUIStillness(
                 settleMS: int(operation["settle_ms"]) ?? 0,
@@ -153,7 +153,7 @@ extension ComputerUseRuntimeBridge {
 }
 
 func guiFinalObservationResult(
-    actionCount: Int, inputActionsDispatched: Int, emitted: Bool, leaseState: String,
+    actionCount: Int, inputActionsDispatched: Int, emitted: Bool,
     capture: () throws -> GUIStillnessResult<DesktopVisualSample>
 ) -> [String: Any] {
         do {
@@ -169,7 +169,6 @@ func guiFinalObservationResult(
                     "partial_input_possible": false,
                     "effect_unknown": emitted,
                     "mutation_unknown": false,
-                    "gui_lease_state": leaseState,
                     "quiescent": observation.quiescent,
                 ],
                 "input_events_emitted": emitted,

@@ -115,7 +115,6 @@ func accessibilityResultFromWindow(
 		RecoveryContext:           result.RecoveryContext,
 		Mutation:                  result.Mutation,
 		ActionEvidence:            result.ActionEvidence,
-		LeaseState:                result.LeaseState,
 		ExternalDesktopTransition: result.ExternalDesktopTransition,
 	}
 	accessibility.prepareForService()

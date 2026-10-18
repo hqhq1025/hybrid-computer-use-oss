@@ -1129,9 +1129,8 @@ func TestPostActionWindowIdentityStabilizationRejectedProbeIsTransactional(t *te
 
 	service := newServiceWithBackend(&recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
-			OK:         true,
-			LeaseState: "probe-lease",
-			Snapshot:   sibling,
+			OK:       true,
+			Snapshot: sibling,
 		},
 	})
 	if err := service.buildAndRenderAXSnapshotV1(
@@ -1141,7 +1140,6 @@ func TestPostActionWindowIdentityStabilizationRejectedProbeIsTransactional(t *te
 		t.Fatal(err)
 	}
 	service.rememberSnapshot("Editor", immediate)
-	service.guiLeaseState = "original-lease"
 	refsBefore := service.refRegistry.clone()
 	windowsBefore := service.windowRefRegistry.clone()
 	appsBefore := service.appRefRegistry.clone()
@@ -1160,10 +1158,6 @@ func TestPostActionWindowIdentityStabilizationRejectedProbeIsTransactional(t *te
 		!reflect.DeepEqual(service.windowRefRegistry, windowsBefore) ||
 		!reflect.DeepEqual(service.appRefRegistry, appsBefore) {
 		t.Fatal("rejected identity probe mutated a live ref registry")
-	}
-	if service.guiLeaseState != "original-lease" {
-		t.Fatalf("rejected identity probe changed GUI lease to %q",
-			service.guiLeaseState)
 	}
 }
 

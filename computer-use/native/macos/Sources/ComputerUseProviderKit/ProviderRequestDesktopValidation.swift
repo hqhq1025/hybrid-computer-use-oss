@@ -10,7 +10,7 @@ extension ProviderRequestValidator {
             path: path,
             allowed: [
                 "protocol_version", "actions", "settle_ms",
-                "frame_id", "lease_state",
+                "frame_id",
             ]
         )
         guard let actions = payload["actions"] as? [Any], !actions.isEmpty else {

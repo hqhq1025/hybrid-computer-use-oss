@@ -586,6 +586,10 @@ class ActionNotesTests(AtspiPatchedTestCase):
             "build_snapshot",
             mock.Mock(side_effect=AssertionError("snapshot must be skipped")),
         )
+        self._patch(
+            "capture_window_pixels",
+            mock.Mock(side_effect=AssertionError("no pixel note, no pixel sample")),
+        )
         response = runtime.dispatch_provider_operation(
             {
                 "app": "x",

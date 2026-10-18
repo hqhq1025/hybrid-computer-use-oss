@@ -171,9 +171,6 @@ func (s *service) readSnapshot(app string, request axServiceRequest) (*appSnapsh
 	if err != nil {
 		return nil, nil, s.runtimeFailureResult(request, diagnosticSnapshot, err)
 	}
-	if response.LeaseState != "" {
-		s.guiLeaseState = response.LeaseState
-	}
 	if !response.OK {
 		return nil, nil, s.runtimeReportedFailure(app, request, *response)
 	}
@@ -209,9 +206,6 @@ func (s *service) readSnapshot(app string, request axServiceRequest) (*appSnapsh
 		response, err = s.callProviderAccessibilityOperation(request)
 		if err != nil {
 			return nil, nil, s.runtimeFailureResult(request, diagnosticSnapshot, err)
-		}
-		if response.LeaseState != "" {
-			s.guiLeaseState = response.LeaseState
 		}
 		if !response.OK {
 			return nil, nil, s.runtimeReportedFailure(app, request, *response)

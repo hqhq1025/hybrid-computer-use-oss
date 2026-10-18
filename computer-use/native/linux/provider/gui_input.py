@@ -187,14 +187,10 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
 
     normalized = {"type": action_type}
     if action_type in {"click", "double_click", "move"}:
-        if bounds is None:
-            normalized["x"] = finite_gui_number(
-                action.get("x"), "gui {} x".format(action_type))
-            normalized["y"] = finite_gui_number(
-                action.get("y"), "gui {} y".format(action_type))
-        else:
-            normalized["x"], normalized["y"] = screen_absolute_point(
-                action.get("x"), action.get("y"), bounds, native_bounds)
+        normalized["x"] = finite_gui_number(
+            action.get("x"), "gui {} x".format(action_type))
+        normalized["y"] = finite_gui_number(
+            action.get("y"), "gui {} y".format(action_type))
     if action_type == "click":
         button = str(action.get("button") or "left").strip().lower()
         if button not in {"left", "right", "wheel", "back", "forward"}:
@@ -216,22 +212,13 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
         for point in path:
             x = point.get("x") if isinstance(point, dict) else None
             y = point.get("y") if isinstance(point, dict) else None
-            if bounds is None:
-                normalized["path"].append((
-                    finite_gui_number(x, "gui drag x"),
-                    finite_gui_number(y, "gui drag y"),
-                ))
-            else:
-                normalized["path"].append(
-                    screen_absolute_point(x, y, bounds, native_bounds)
-                )
+            normalized["path"].append((
+                finite_gui_number(x, "gui drag x"),
+                finite_gui_number(y, "gui drag y"),
+            ))
     elif action_type == "scroll":
-        if bounds is None:
-            normalized["x"] = finite_gui_number(action.get("x"), "gui scroll x")
-            normalized["y"] = finite_gui_number(action.get("y"), "gui scroll y")
-        else:
-            normalized["x"], normalized["y"] = screen_absolute_point(
-                action.get("x"), action.get("y"), bounds, native_bounds)
+        normalized["x"] = finite_gui_number(action.get("x"), "gui scroll x")
+        normalized["y"] = finite_gui_number(action.get("y"), "gui scroll y")
         dx = finite_gui_number(action.get("scroll_x", 0), "gui scroll scroll_x")
         dy = finite_gui_number(action.get("scroll_y", 0), "gui scroll scroll_y")
         if abs(dx) > GUI_MAX_SCROLL_DELTA or abs(dy) > GUI_MAX_SCROLL_DELTA:
@@ -270,25 +257,58 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
         parse_key("+".join(normalized["keys"]))
     elif action_type == "wait":
         normalized["seconds"] = 1.0
+    if bounds is not None:
+        normalized = gui_action_to_screen(normalized, bounds, native_bounds)
     return normalized
 
 
-def validate_gui_actions(actions, bounds=None, native_bounds=None):
-    normalized = []
+def gui_action_to_screen(normalized, bounds, native_bounds=None):
+    """Map a validated action's image coordinates to X root coordinates.
+
+    Validation has already proven every coordinate finite, so this step can
+    only reject a point outside the delivered image.
+    """
+    converted = dict(normalized)
+    if "x" in converted and "y" in converted:
+        converted["x"], converted["y"] = screen_absolute_point(
+            converted["x"], converted["y"], bounds, native_bounds)
+    if "path" in converted:
+        converted["path"] = [
+            screen_absolute_point(x, y, bounds, native_bounds)
+            for x, y in converted["path"]
+        ]
+    return converted
+
+
+def _collect_action_errors(items, convert):
+    converted = []
     errors = []
-    for index, action in enumerate(actions):
-        action_type = action.get("type") if isinstance(action, dict) else None
+    for index, item in enumerate(items):
+        action_type = item.get("type") if isinstance(item, dict) else None
         try:
-            normalized.append(
-                validate_gui_action(action, bounds, native_bounds)
-            )
+            converted.append(convert(item))
         except Exception as exc:
             errors.append({
                 "index": index,
                 "type": action_type or "unknown",
                 "error": str(exc),
             })
-    return normalized, errors
+    return converted, errors
+
+
+def validate_gui_actions(actions, bounds=None, native_bounds=None):
+    return _collect_action_errors(
+        actions,
+        lambda action: validate_gui_action(action, bounds, native_bounds),
+    )
+
+
+def gui_actions_to_screen(validated, bounds, native_bounds=None):
+    """Convert an already validated batch; errors use the batch indexes."""
+    return _collect_action_errors(
+        validated,
+        lambda action: gui_action_to_screen(action, bounds, native_bounds),
+    )
 
 
 def execute_gui_action(action):

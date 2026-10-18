@@ -28,7 +28,7 @@ func guiFinalObservationKeepsLatestSampleAndMatchingLayout() throws {
     var now = 0.0
     var captures = 0
     let result = guiFinalObservationResult(
-        actionCount: 2, inputActionsDispatched: 2, emitted: true, leaseState: "bound"
+        actionCount: 2, inputActionsDispatched: 2, emitted: true
     ) {
         try sampleGUIStillness(settleMS: 800, capture: { _ in
             captures += 1
@@ -51,7 +51,7 @@ func guiSamplingFailurePreservesInputAndResetEvidence() throws {
             var captures = 0
             let result = guiFinalObservationResult(
                 actionCount: 3, inputActionsDispatched: emitted ? 2 : 0,
-                emitted: emitted, leaseState: ""
+                emitted: emitted
             ) {
                 try sampleGUIStillness(settleMS: 800, capture: { _ in
                     captures += 1

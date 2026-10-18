@@ -6,6 +6,7 @@
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
     DEFAULT_TEXT_LIMIT,
+    NodeFacts,
     limit_text,
     node_name,
     node_pid,
@@ -14,9 +15,7 @@ from .foundation import (
     provider_bus_name,
     provider_object_path,
     safe,
-    state_value,
 )
-from .x11_windows import relative_frame
 from .primitives import name_fingerprint
 from .ax_node_properties import (
     accessible_id,
@@ -197,13 +196,22 @@ def semantic_relations(node, text_limit=DEFAULT_TEXT_LIMIT):
     return out, complete
 
 
-def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT):
-    bounds = relative_frame(node, window_bounds)
-    role = node_role(node)
+def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
+               facts=None):
+    """Build the canonical record of one node.
+
+    ``facts`` carries the reads that the traversal already made for this
+    node (see NodeFacts); every field read here goes through it so that no
+    field is read from the provider twice in one snapshot.
+    """
+    if facts is None:
+        facts = NodeFacts(node)
+    bounds = facts.relative_frame(window_bounds)
+    role = str(facts.value("role", "") or "")
     # Read the action table once for both fields; see node_actions() about the
     # LibreOffice ATK bridge.
     actions, has_click_action = node_actions(node)
-    own_name = node_name(node)
+    own_name = str(facts.value("name", "") or "")
     relations, relations_complete = semantic_relations(
         node, text_limit=text_limit
     )
@@ -227,21 +235,24 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT):
         "automationId": accessible_id(node),
         "providerBusName": provider_bus_name(node),
         "providerObjectPath": provider_object_path(node),
-        "processGeneration": process_generation(node_pid(node)),
-        "showing": state_value(node, Atspi.StateType.SHOWING),
-        "visible": state_value(node, Atspi.StateType.VISIBLE),
+        "processGeneration": process_generation(facts.pid()),
+        "showing": facts.state_flag(Atspi.StateType.SHOWING),
+        "visible": facts.state_flag(Atspi.StateType.VISIBLE),
         "name": name,
         "controlType": role,
         "localizedControlType": role,
         "className": str(safe(node.get_toolkit_name, "") or ""),
-        "value": element_value(node, text_limit=text_limit),
+        "value": element_value(node, text_limit=text_limit, role=role),
         "nativeWindowHandle": 0,
         "frame": bounds,
         "actions": actions,
         "states": state_segment(
-            node, has_click_action=has_click_action, borrowed_name=borrowed
+            node, has_click_action=has_click_action, borrowed_name=borrowed,
+            facts=facts,
         ),
-        "description": node_description(node, text_limit=text_limit),
+        "description": node_description(
+            node, text_limit=text_limit, facts=facts
+        ),
         "placeholder": placeholder_text(
             node, text_limit=text_limit, role=role
         ),

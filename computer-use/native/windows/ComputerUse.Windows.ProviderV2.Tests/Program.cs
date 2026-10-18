@@ -1091,8 +1091,7 @@ var validSchemaCases = new[]
               {"type":"move","x":10,"y":20}
             ],
             "settle_ms":0,
-            "frame_id":"layout-1",
-            "lease_state":"current"
+            "frame_id":"layout-1"
           }
         }
         """
