@@ -47,21 +47,21 @@ func guiFrameChangesWithActiveWindow() {
 }
 
 @Test
-func gui1080pDesktopIsDeliveredAtNativeResolution() {
+func gui1080pDesktopIsDeliveredAtTheSizeTheModelSees() {
     let delivered = desktopDeliveredBounds(
         CGRect(x: 0, y: 0, width: 1920, height: 1080)
     )
 
-    #expect(delivered == CGRect(x: 0, y: 0, width: 1920, height: 1080))
+    #expect(delivered == CGRect(x: 0, y: 0, width: 1365, height: 768))
 }
 
 @Test
-func guiLargerDesktopIsAspectBoundedTo1080p() {
+func guiLargerDesktopIsAspectBoundedTo768p() {
     let delivered = desktopDeliveredBounds(
         CGRect(x: 0, y: 0, width: 2560, height: 1440)
     )
 
-    #expect(delivered == CGRect(x: 0, y: 0, width: 1920, height: 1080))
+    #expect(delivered == CGRect(x: 0, y: 0, width: 1365, height: 768))
 }
 
 @Test
@@ -70,21 +70,22 @@ func guiHeightLimitIsIndependentFromWidthLimit() {
         CGRect(x: 0, y: 0, width: 1920, height: 1200)
     )
 
-    #expect(delivered == CGRect(x: 0, y: 0, width: 1728, height: 1080))
+    #expect(delivered == CGRect(x: 0, y: 0, width: 1229, height: 768))
 }
 
 @Test
-func guiNativeResolutionCoordinatesMapOneToOneWithDesktopOrigin() {
+func guiDeliveredCoordinatesMapByPixelCenterWithDesktopOrigin() {
     let native = CGRect(x: -1920, y: -100, width: 1920, height: 1080)
     let delivered = desktopDeliveredBounds(native)
     let point = guiPoint(
-        ["x": 959.5, "y": 539.5],
+        ["x": 682, "y": 383.5],
         deliveredBounds: delivered,
         nativeBounds: native
     )
 
-    #expect(point.x == -960.5)
-    #expect(point.y == 439.5)
+    // 1920/1365 is not exact in binary floating point.
+    #expect(abs(point.x - -960.5) < 1e-9)
+    #expect(abs(point.y - 439.5) < 1e-9)
 }
 
 @Test
@@ -92,11 +93,11 @@ func guiBoundedCoordinatesMapByPixelCenter() {
     let native = CGRect(x: 0, y: 0, width: 2560, height: 1440)
     let delivered = desktopDeliveredBounds(native)
     let point = guiPoint(
-        ["x": 959.5, "y": 539.5],
+        ["x": 682, "y": 383.5],
         deliveredBounds: delivered,
         nativeBounds: native
     )
 
-    #expect(point.x == 1279.5)
-    #expect(point.y == 719.5)
+    #expect(abs(point.x - 1279.5) < 1e-9)
+    #expect(abs(point.y - 719.5) < 1e-9)
 }

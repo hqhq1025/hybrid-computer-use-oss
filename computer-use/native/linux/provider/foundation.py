@@ -87,8 +87,12 @@ GUI_MAX_KEY_LENGTH = 64
 GUI_MAX_TEXT_LENGTH = 10000
 GUI_MAX_TOTAL_WAIT_SECONDS = 20
 GUI_MAX_SETTLE_MS = 3000
-GUI_MODEL_MAX_WIDTH = 1920
-GUI_MODEL_MAX_HEIGHT = 1080
+# The GUI screenshot is delivered at the size the model sees. GPT-5.4 at
+# detail high shrinks a 1920x1080 image to 1365x768 (the short side to 768),
+# so a larger image would put the model's coordinates in a smaller space than
+# the delivered pixels. 1366x768 also fits Claude's image limit unscaled.
+GUI_MODEL_MAX_WIDTH = 1366
+GUI_MODEL_MAX_HEIGHT = 768
 GUI_SETTLE_POLL_SECONDS = 0.1
 GUI_QUIESCENT_MIN_SAMPLES = 4
 GUI_QUIESCENT_MIN_SECONDS = 0.3

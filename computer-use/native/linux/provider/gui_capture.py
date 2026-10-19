@@ -272,11 +272,15 @@ def gui_model_dimensions(bounds):
         float(GUI_MODEL_MAX_WIDTH) / native_width,
         float(GUI_MODEL_MAX_HEIGHT) / native_height,
     )
+    width = max(1, int(round(native_width * scale)))
+    height = max(1, int(round(native_height * scale)))
+    # Rounding makes the two axes differ slightly; coordinates map back per
+    # axis with these exact ratios.
     return {
-        "width": max(1, int(round(native_width * scale))),
-        "height": max(1, int(round(native_height * scale))),
-        "scale_x": scale,
-        "scale_y": scale,
+        "width": width,
+        "height": height,
+        "scale_x": float(width) / native_width,
+        "scale_y": float(height) / native_height,
     }
 
 

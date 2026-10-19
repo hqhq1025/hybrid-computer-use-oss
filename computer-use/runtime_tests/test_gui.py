@@ -370,7 +370,7 @@ class GUICapturePipelineTests(unittest.TestCase):
         self.encoder.assert_called_once()
 
     def test_changed_native_geometry_invalidates_final_pixel_coherence(self):
-        # Both native sizes scale to 1920x1080; delivered dimensions are insufficient.
+        # Both native sizes scale to 1365x768; delivered dimensions are insufficient.
         initial = runtime.frame(0, 0, 2560, 1440)
         final = runtime.frame(0, 0, 3840, 2160)
         self.bounds_mock.side_effect = [initial, final]
@@ -378,8 +378,8 @@ class GUICapturePipelineTests(unittest.TestCase):
         self.assertTrue(response["ok"])
         self.assertIsNone(response["quiescent"])
         self.assertIsNone(response["changed_since_before"])
-        self.assertEqual(response["snapshot"]["width"], 1920)
-        self.assertEqual(response["snapshot"]["height"], 1080)
+        self.assertEqual(response["snapshot"]["width"], 1365)
+        self.assertEqual(response["snapshot"]["height"], 768)
         self.assertIn("changed again", response["text"])
 
 
@@ -912,7 +912,7 @@ class GUIScreenCoordinateTests(unittest.TestCase):
             (-1820.0, -50.0),
         )
 
-    def test_native_image_point_maps_one_to_one_to_desktop(self):
+    def test_delivered_image_point_maps_back_by_pixel_center(self):
         dimensions = runtime.gui_model_dimensions(self.desktop)
         model = runtime.frame(
             0, 0, dimensions["width"], dimensions["height"])
@@ -926,27 +926,45 @@ class GUIScreenCoordinateTests(unittest.TestCase):
         self.assertAlmostEqual(x, 959.5, places=3)
         self.assertAlmostEqual(y, 539.5, places=3)
 
-    def test_1080p_desktop_is_delivered_at_native_resolution(self):
+    def test_1080p_desktop_is_delivered_at_the_size_the_model_sees(self):
+        # GPT-5.4 at detail high shrinks a 1920x1080 image to 1365x768 before
+        # the model sees it, so coordinates read from that image were 0.71x
+        # the delivered pixels. Delivering 1365x768 makes them one space.
         dimensions = runtime.gui_model_dimensions(self.desktop)
 
-        self.assertEqual(dimensions["width"], 1920)
-        self.assertEqual(dimensions["height"], 1080)
-        self.assertEqual(dimensions["scale_x"], 1.0)
-        self.assertEqual(dimensions["scale_y"], 1.0)
-        self.assertAlmostEqual(
-            dimensions["width"] / dimensions["height"],
-            self.desktop["width"] / self.desktop["height"],
-            places=2,
-        )
+        self.assertEqual((dimensions["width"], dimensions["height"]), (1365, 768))
+        self.assertAlmostEqual(dimensions["scale_x"], 1365 / 1920)
+        self.assertAlmostEqual(dimensions["scale_y"], 768 / 1080)
 
-    def test_larger_desktop_is_bounded_to_1080p(self):
-        dimensions = runtime.gui_model_dimensions(
-            runtime.frame(0, 0, 2560, 1440))
+    def test_delivered_image_stays_within_the_model_image_box(self):
+        for native, delivered in [
+            ((1280, 720), (1280, 720)),
+            ((1366, 768), (1366, 768)),
+            ((2560, 1440), (1365, 768)),
+            ((1920, 1200), (1229, 768)),
+            ((3440, 1440), (1366, 572)),
+            ((1080, 1920), (432, 768)),
+        ]:
+            with self.subTest(native=native):
+                dimensions = runtime.gui_model_dimensions(
+                    runtime.frame(0, 0, *native))
+                self.assertEqual(
+                    (dimensions["width"], dimensions["height"]), delivered)
+                self.assertAlmostEqual(
+                    dimensions["scale_x"], delivered[0] / native[0])
+                self.assertAlmostEqual(
+                    dimensions["scale_y"], delivered[1] / native[1])
 
-        self.assertEqual(dimensions["width"], 1920)
-        self.assertEqual(dimensions["height"], 1080)
-        self.assertEqual(dimensions["scale_x"], 0.75)
-        self.assertEqual(dimensions["scale_y"], 0.75)
+    def test_last_delivered_pixel_maps_inside_the_native_desktop(self):
+        dimensions = runtime.gui_model_dimensions(self.desktop)
+        model = runtime.frame(0, 0, dimensions["width"], dimensions["height"])
+        x, y = runtime.screen_absolute_point(
+            model["width"] - 1, model["height"] - 1, model, self.desktop)
+
+        self.assertLessEqual(x, 1919)
+        self.assertLessEqual(y, 1079)
+        self.assertGreater(x, 1917)
+        self.assertGreater(y, 1077)
 
     def test_out_of_bounds_point_is_rejected_instead_of_moved(self):
         with self.assertRaises(RuntimeError) as ctx:
@@ -974,6 +992,8 @@ class GUIScreenCoordinateTests(unittest.TestCase):
         with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
                 mock.patch.object(runtime, "capture_gui_pixels",
                                   return_value=mock.sentinel.pixels) as capture, \
+                mock.patch.object(runtime, "scale_to_model",
+                                  return_value=mock.sentinel.scaled) as scale, \
                 mock.patch.object(runtime, "encoded_screenshot",
                                   return_value={"data": "png", "mimeType": "image/png",
                                                 "encoding": "png-compression-3"}) as encode, \
@@ -987,11 +1007,12 @@ class GUIScreenCoordinateTests(unittest.TestCase):
             snapshot = runtime.capture_gui_snapshot().encode()
 
         capture.assert_called_once_with(self.desktop)
-        encode.assert_called_once_with(mock.sentinel.pixels)
+        scale.assert_called_once_with(mock.sentinel.pixels, self.desktop)
+        encode.assert_called_once_with(mock.sentinel.scaled)
         self.assertEqual(snapshot["screenshotPngBase64"], "png")
         self.assertEqual(snapshot["coordinateSpace"], "screen_image_px")
-        self.assertEqual(snapshot["width"], 1920)
-        self.assertEqual(snapshot["height"], 1080)
+        self.assertEqual(snapshot["width"], 1365)
+        self.assertEqual(snapshot["height"], 768)
         self.assertEqual(
             snapshot["frameId"],
             runtime.desktop_layout_frame_id(layout),
@@ -1038,7 +1059,8 @@ class GUIScreenCoordinateTests(unittest.TestCase):
             ],
         }
         second = dict(first, activeWindow="0x20")
-        with mock.patch.object(
+        with mock.patch.object(runtime, "scale_to_model", side_effect=lambda pixbuf, bounds: pixbuf), \
+                mock.patch.object(
                 runtime, "desktop_layout_state",
                 side_effect=[first, second, second, second]), \
                 mock.patch.object(
@@ -1064,7 +1086,8 @@ class GUIScreenCoordinateTests(unittest.TestCase):
                 "activeWindow": hex(active + 1),
                 "windows": [],
             })
-        with mock.patch.object(
+        with mock.patch.object(runtime, "scale_to_model", side_effect=lambda pixbuf, bounds: pixbuf), \
+                mock.patch.object(
                 runtime, "desktop_layout_state", side_effect=layouts), \
                 mock.patch.object(
                     runtime, "capture_gui_pixels", return_value=mock.sentinel.pixels), \
@@ -1123,7 +1146,8 @@ class GUIScreenCoordinateTests(unittest.TestCase):
                 {"id": "0x20", "x": 10, "y": 20, "width": 800, "height": 600},
             ],
         }
-        with mock.patch.object(runtime, "desktop_layout_state",
+        with mock.patch.object(runtime, "scale_to_model", side_effect=lambda pixbuf, bounds: pixbuf), \
+                mock.patch.object(runtime, "desktop_layout_state",
                                return_value=layout), \
                 mock.patch.object(
                     runtime, "capture_gui_pixels",

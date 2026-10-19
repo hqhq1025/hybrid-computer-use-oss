@@ -1400,14 +1400,14 @@ var fullHdSize = WindowsDesktopImageGeometry.DeliveredSize(1920, 1080);
 var fourKSize = WindowsDesktopImageGeometry.DeliveredSize(3840, 2160);
 var ultrawideSize = WindowsDesktopImageGeometry.DeliveredSize(3440, 1440);
 var portraitSize = WindowsDesktopImageGeometry.DeliveredSize(1440, 2560);
-if (nativeSize != new System.Drawing.Size(1280, 800) ||
-    fullHdSize != new System.Drawing.Size(1920, 1080) ||
-    fourKSize != new System.Drawing.Size(1920, 1080) ||
-    ultrawideSize != new System.Drawing.Size(1920, 804) ||
-    portraitSize != new System.Drawing.Size(608, 1080))
+if (nativeSize != new System.Drawing.Size(1229, 768) ||
+    fullHdSize != new System.Drawing.Size(1365, 768) ||
+    fourKSize != new System.Drawing.Size(1365, 768) ||
+    ultrawideSize != new System.Drawing.Size(1366, 572) ||
+    portraitSize != new System.Drawing.Size(432, 768))
 {
     throw new InvalidDataException(
-        "Windows desktop delivery did not preserve aspect ratio within 1920x1080.");
+        "Windows desktop delivery did not preserve aspect ratio within 1366x768.");
 }
 
 var mappedOrigin = WindowsDesktopImageGeometry.ToNativeCoordinate(

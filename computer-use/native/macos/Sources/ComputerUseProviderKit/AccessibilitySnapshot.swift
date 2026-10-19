@@ -322,8 +322,11 @@ let screenshotCaptureTimeout: TimeInterval = 5
 let screenshotResultMaxPNGBytes = 900_000
 let screenshotResultMaxDimension: CGFloat = 1280
 let screenshotResultMinScale: CGFloat = 0.25
-let guiScreenshotResultMaxWidth: CGFloat = 1920
-let guiScreenshotResultMaxHeight: CGFloat = 1080
+// The GUI screenshot is delivered at the size the model sees: GPT-5.4 at
+// detail high shrinks 1920x1080 to 1365x768, which would otherwise put the
+// model's coordinates in a smaller space than the delivered pixels.
+let guiScreenshotResultMaxWidth: CGFloat = 1366
+let guiScreenshotResultMaxHeight: CGFloat = 768
 private let windowVisibilityRecoveryDelay: TimeInterval = 0.7
 let axWebAreaRole = "AXWebArea"
 let axContentsAttribute = "AXContents"

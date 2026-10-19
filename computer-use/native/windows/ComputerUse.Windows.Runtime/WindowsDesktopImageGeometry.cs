@@ -4,8 +4,10 @@ namespace ComputerUse.Windows.Runtime;
 
 internal static class WindowsDesktopImageGeometry
 {
-    internal const int MaxDeliveredWidth = 1920;
-    internal const int MaxDeliveredHeight = 1080;
+    // The GUI screenshot is delivered at the size the model sees: GPT-5.4 at
+    // detail high shrinks 1920x1080 to 1365x768.
+    internal const int MaxDeliveredWidth = 1366;
+    internal const int MaxDeliveredHeight = 768;
 
     internal static Size DeliveredSize(int nativeWidth, int nativeHeight)
     {

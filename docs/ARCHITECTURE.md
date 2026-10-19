@@ -101,9 +101,12 @@ a private layout lease. Before each coordinate action the provider compares
 the current desktop layout with the lease; if it changed, the action is
 rejected before any input and a fresh screenshot is returned.
 
-The provider returns the standard OSWorld desktop at its native 1920x1080.
-Larger desktops are scaled to fit 1920x1080, and coordinates are mapped back
-to the native desktop privately.
+The provider returns the desktop scaled to fit 1366x768, the size the model
+sees: GPT-5.4 at detail high shrinks a 1920x1080 image to 1365x768 before the
+model reads it, so a larger image would put the model's coordinates in a
+smaller space than the returned pixels. Coordinates are pixels of the returned
+image and are mapped back to the native desktop per axis, privately. `zoom`
+returns native pixels of a region when the scaled screenshot is too coarse.
 
 ## Identity And Distribution
 
