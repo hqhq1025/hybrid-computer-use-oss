@@ -563,6 +563,37 @@ func (s *service) pressKey(
 	return s.actionResult(app, request)
 }
 
+// selectRange selects the text or cells from ref through toRef, a substring
+// text of ref, or the whole ref. The provider reads the selection back and
+// fails when it cannot prove it (ax_select.py).
+func (s *service) selectRange(app, ref, toRef, text string, obs observation) toolCallResult {
+	if app == "" {
+		return textResult("Missing required argument: app", true)
+	}
+	resolution, result := s.resolveActionElement(app, ref, "", "select")
+	if result.IsError {
+		return result
+	}
+	command := axSelectCommand{Text: text}
+	if toRef != "" {
+		end, endResult := s.resolveActionElement(app, toRef, "", "select")
+		if endResult.IsError {
+			return endResult
+		}
+		if end.semantic == nil {
+			return textResult("select: to_ref has no live target identity; observe or find again", true)
+		}
+		command.To = end.semantic
+	}
+	request := axServiceRequest{
+		App: app, Action: command,
+		IncludeScreenshot: obs.resolvedScreenshot(), Observe: obs.resolvedMode(),
+		CaptureSnapshot: obs.captureSnapshot,
+	}
+	applyActionElementResolution(&request, resolution)
+	return s.actionResult(app, request)
+}
+
 func (s *service) setValue(app, elementIndex, declared, value string, obs observation) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)

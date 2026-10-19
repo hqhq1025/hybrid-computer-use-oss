@@ -126,6 +126,7 @@ ACTION_INPUT_CONTRACTS = {
     "type": ({"text"}, {"text"}),
     "keypress": ({"key"}, {"key"}),
     "set_value": ({"value"}, {"value"}),
+    "select": ({"text", "to_target"}, set()),
 }
 ELEMENT_FIELDS = {
     "index",
@@ -500,7 +501,7 @@ def _validate_action_input(payload):
             required,
         )
     has_target = payload.get("target") is not None or payload.get("element") is not None
-    if intent in {"resolve_target", "click", "set_value"} and not has_target:
+    if intent in {"resolve_target", "click", "set_value", "select"} and not has_target:
         raise ProviderRequestError(
             "invalid_provider_request",
             "action.{} requires an exact target".format(intent),
@@ -541,6 +542,20 @@ def _validate_action_input(payload):
             "invalid_provider_request",
             "action.input.value must be a string",
         )
+    if intent == "select":
+        text = input_object.get("text")
+        if text is not None and (not isinstance(text, str) or not text):
+            raise ProviderRequestError(
+                "invalid_provider_request",
+                "action.input.text must be a non-empty string",
+            )
+        if input_object.get("to_target") is not None:
+            if text is not None:
+                raise ProviderRequestError(
+                    "invalid_provider_request",
+                    "action.input accepts text or to_target, not both",
+                )
+            _validate_target(input_object["to_target"], "action.input.to_target")
 
 
 def _validate_payload(operation, payload):

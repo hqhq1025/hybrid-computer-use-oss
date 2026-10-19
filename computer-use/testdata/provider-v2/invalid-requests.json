@@ -128,6 +128,50 @@
     }
   },
   {
+    "name": "action rejects select without target",
+    "request": {
+      "protocol": "computer-use-provider-v2",
+      "schema_version": 2,
+      "request_id": "invalid-action-select",
+      "operation": "resolve_and_act",
+      "action": {
+        "protocol_version": 2,
+        "intent": "select",
+        "app": "Editor",
+        "input": {
+          "text": "Ada"
+        }
+      }
+    }
+  },
+  {
+    "name": "action rejects select with text and range end",
+    "request": {
+      "protocol": "computer-use-provider-v2",
+      "schema_version": 2,
+      "request_id": "invalid-action-select-both",
+      "operation": "resolve_and_act",
+      "action": {
+        "protocol_version": 2,
+        "intent": "select",
+        "app": "Editor",
+        "target": {
+          "selector": "paragraph",
+          "role": "paragraph",
+          "hasName": false
+        },
+        "input": {
+          "text": "Ada",
+          "to_target": {
+            "selector": "paragraph",
+            "role": "paragraph",
+            "hasName": false
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "app identity rejects numeric provider bus",
     "request": {
       "protocol": "computer-use-provider-v2",

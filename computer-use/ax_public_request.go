@@ -130,7 +130,7 @@ var axModeFields = map[string][]string{
 }
 
 var axActionTypes = []string{
-	"click", "type", "keypress", "set_value", "scroll", "activate", "close", "wait",
+	"click", "type", "keypress", "set_value", "select", "scroll", "activate", "close", "wait",
 }
 
 // axFindFilters are the query fields shared by find and a wait step.
@@ -142,6 +142,7 @@ var axActionFields = map[string][]string{
 	"type":      {"ref", "text"},
 	"keypress":  {"ref", "keys"},
 	"set_value": {"ref", "value"},
+	"select":    {"ref", "to_ref", "text"},
 	"scroll":    {"ref", "direction", "pages"},
 	"activate":  {"ref", "title"},
 	"close":     {"ref", "title"},
@@ -452,6 +453,29 @@ func decodeAXAction(object map[string]any, path string) (axBatchAction, *axArgEr
 				return action, axInvalid(path+".value", fmt.Sprintf("value is limited to %d characters", maxActionText), "")
 			}
 			action.value = value
+		}
+	case "select":
+		if action.targetRef == "" {
+			return action, axInvalid(path+".ref", "select needs ref: an rN copied from observe or find",
+				`{"type":"select","ref":"r1"}`).withRule(axRuleRequiredForType)
+		}
+		if action.toRef, err = axOptionalPattern(object, "to_ref", path, axElementRefPattern, "rN"); err != nil {
+			return action, err
+		}
+		if raw, present := object["text"]; present {
+			text, ok := raw.(string)
+			if !ok || text == "" {
+				return action, axInvalid(path+".text", "select text must be a non-empty substring of the ref element",
+					`{"type":"select","ref":"`+action.targetRef+`","text":"..."}`)
+			}
+			if len([]rune(text)) > maxActionText {
+				return action, axInvalid(path+".text", fmt.Sprintf("text is limited to %d characters", maxActionText), "")
+			}
+			action.text = text
+		}
+		if action.toRef != "" && action.text != "" {
+			return action, axInvalid(path, "select takes to_ref or text, not both",
+				`{"type":"select","ref":"`+action.targetRef+`","to_ref":"`+action.toRef+`"}`).withRule(axRuleOneOf)
 		}
 	case "type":
 		raw, present := object["text"]

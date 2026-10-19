@@ -10,12 +10,14 @@ import (
 type axBatchAction struct {
 	actionType string
 	targetRef  string
-	direction  string
-	pages      float64
-	text       string
-	key        string
-	value      string
-	title      string
+	// toRef is the range end of a select action.
+	toRef     string
+	direction string
+	pages     float64
+	text      string
+	key       string
+	value     string
+	title     string
 	// wait is set for a wait step, which sends no input.
 	wait *axWait
 }
@@ -238,6 +240,14 @@ func (s *service) executeAXBatchAction(
 			action.targetRef,
 			noDeclaredTarget,
 			action.value,
+			obs,
+		).withEvidenceScope("delivery_or_local_ui")
+	case "select":
+		return s.selectRange(
+			context.appToken,
+			action.targetRef,
+			action.toRef,
+			action.text,
 			obs,
 		).withEvidenceScope("delivery_or_local_ui")
 	case "type":

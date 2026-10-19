@@ -1,0 +1,429 @@
+"""The AX select action: select text, a cell range or an item, then read it back.
+
+Probed on LibreOffice 7.3 (gtk3) with AT-SPI 2:
+
+- Text.set_selection/add_selection select inside one accessible object only.
+  A Writer paragraph and an Impress bullet are separate objects, and
+  add_selection on a second paragraph replaces the first, so no AT-SPI call
+  selects across paragraphs. Writer does extend a selection across
+  paragraphs from the keyboard: after set_caret_offset at the start of the
+  first paragraph, each ctrl+shift+Down extends to the end of the next
+  paragraph, and every covered paragraph then reports its selected span.
+- Writer selects exactly the requested offsets. Impress moves a selection
+  that starts at offset 0 to offset 1, so the provider reads the span back
+  and reports what was actually selected rather than what was asked for.
+- A Calc sheet implements Selection: select_child for each cell index of a
+  rectangle builds a real range (ctrl+c copied the 2x2 block, Delete cleared
+  it), and get_selected_child reads it back.
+- The Start Center thumbnail list implements Selection on its items.
+
+Every route reads the result back from the provider before reporting
+success; a route that cannot prove the selection fails instead of guessing.
+"""
+
+import time
+
+from .foundation import (
+    Atspi,
+    OperationFailure,
+    node_name,
+    node_role,
+    provider_object_path,
+    safe,
+    state_contains,
+)
+from .ax_actions import send_key
+from .input_primitives import require_window_focus
+
+# Each ctrl+shift+Down extends a Writer selection by one paragraph; the
+# provider waits up to this long for the next paragraph to report its span.
+EXTEND_STEP_SECONDS = 1.0
+# Upper bound of keyboard extensions for one select; at most this many
+# paragraphs can be covered from rA to rB.
+MAX_EXTEND_STEPS = 40
+POLL_SECONDS = 0.05
+# Cells selected one by one through Selection.select_child.
+MAX_SELECTED_CELLS = 2000
+SELECTION_SUMMARY_LIMIT = 80
+
+
+def _failure(message, code="select_unavailable", emitted=False, phase="precondition"):
+    return OperationFailure(
+        message,
+        failure_code=code,
+        failure_phase=phase,
+        input_events_emitted=emitted,
+        failure_subject="element",
+    )
+
+
+def _text_iface(node):
+    if node is None:
+        return None
+    return safe(lambda: node.get_text_iface())
+
+
+def text_length(node):
+    iface = _text_iface(node)
+    if iface is None:
+        return None
+    return safe(lambda: int(Atspi.Text.get_character_count(iface)))
+
+
+def text_selections(node):
+    """Return the node's selected spans as [(start, end)], or None if unreadable."""
+    iface = _text_iface(node)
+    if iface is None:
+        return None
+    try:
+        count = int(Atspi.Text.get_n_selections(iface))
+        spans = []
+        for index in range(count):
+            span = Atspi.Text.get_selection(iface, index)
+            spans.append((int(span.start_offset), int(span.end_offset)))
+        return spans
+    except Exception:
+        return None
+
+
+def text_between(node, start, end):
+    iface = _text_iface(node)
+    if iface is None:
+        return ""
+    return str(safe(lambda: Atspi.Text.get_text(iface, start, end), "") or "")
+
+
+def _quote(text):
+    text = str(text or "").replace("\n", " ")
+    if len(text) > SELECTION_SUMMARY_LIMIT:
+        text = text[:SELECTION_SUMMARY_LIMIT] + "..."
+    return '"' + text.replace('"', '\\"') + '"'
+
+
+def _same(first, second):
+    return (
+        first is second
+        or (provider_object_path(first) != ""
+            and provider_object_path(first) == provider_object_path(second))
+    )
+
+
+def _wait_until(predicate, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        if predicate():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(POLL_SECONDS)
+
+
+def _selection_container(node):
+    """Return the parent that manages the node's selection, or None."""
+    parent = safe(lambda: node.get_parent())
+    if parent is None or safe(lambda: parent.get_selection_iface()) is None:
+        return None
+    return parent
+
+
+# ---------------------------------------------------------------------------
+# Text inside one element
+
+
+def select_text_range(node, start, end):
+    """Select [start, end) in one text element; return the span read back."""
+    iface = _text_iface(node)
+    if iface is None:
+        raise _failure(
+            "select_unavailable: the element has no text interface; no input "
+            "was emitted.")
+    length = text_length(node)
+    if length is None:
+        raise _failure(
+            "select_unavailable: the element's text length could not be "
+            "read; no input was emitted.")
+    if not 0 <= start <= end <= length:
+        raise _failure(
+            "select_invalid_range: {}..{} is outside the element's text "
+            "(length {}); no input was emitted.".format(start, end, length),
+            code="invalid_argument")
+    existing = text_selections(node) or []
+    try:
+        accepted = (
+            Atspi.Text.set_selection(iface, 0, start, end)
+            if existing else Atspi.Text.add_selection(iface, start, end)
+        )
+    except Exception:
+        accepted = False
+    if not accepted:
+        raise _failure(
+            "select_unavailable: the application refused the text selection; "
+            "no input was emitted.")
+    spans = []
+    _wait_until(lambda: bool(_store(spans, text_selections(node))), 0.6)
+    return spans[-1] if spans else []
+
+
+def _store(bucket, value):
+    if value:
+        bucket.append(value)
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Text across sibling elements (Writer paragraphs)
+
+
+def _text_run(first, last):
+    """Return the sibling text elements from ``first`` to ``last``, or None."""
+    parent = safe(lambda: first.get_parent())
+    if parent is None or not _same(parent, safe(lambda: last.get_parent())):
+        return None
+    count = int(safe(lambda: parent.get_child_count(), 0) or 0)
+    run = []
+    inside = False
+    for index in range(count):
+        child = safe(lambda i=index: parent.get_child_at_index(i))
+        if child is None:
+            continue
+        if _same(child, first):
+            inside = True
+        if inside:
+            if _text_iface(child) is None:
+                return None
+            run.append(child)
+        if _same(child, last):
+            return run if inside else None
+    return None
+
+
+def _covered_to_end(node):
+    length = text_length(node)
+    if length == 0:
+        # Writer reports no span for an empty paragraph; its SELECTED state
+        # is the only evidence that the selection covers it.
+        return state_contains(node, Atspi.StateType.SELECTED)
+    spans = text_selections(node) or []
+    return length is not None and any(end >= length for _start, end in spans)
+
+
+def select_text_run(window, first, last):
+    """Select from the start of ``first`` through the end of ``last``.
+
+    Returns ``(run, emitted)``. AT-SPI has no cross-object selection, so the
+    provider puts the caret at the start of ``first`` and extends with
+    ctrl+shift+Down, the Writer command that selects to the end of the next
+    paragraph, until ``last`` reports a span reaching its end.
+    """
+    run = _text_run(first, last)
+    if run is None:
+        raise _failure(
+            "select_unavailable: to_ref must be a later text sibling of ref "
+            "in the same container (for example two paragraphs of one "
+            "document); no input was emitted.", code="invalid_argument")
+    iface = _text_iface(first)
+    require_window_focus(window, "select")
+    if not safe(lambda: Atspi.Text.set_caret_offset(iface, 0), False):
+        raise _failure(
+            "select_unavailable: the caret could not be placed at the start "
+            "of ref; no input was emitted.")
+    time.sleep(0.15)
+    emitted = False
+    # Each press covers at least one more paragraph, so press k must have
+    # covered run[k]; waiting for exactly that element avoids a timeout per
+    # press while still failing at once when Writer stops extending.
+    for step in range(min(MAX_EXTEND_STEPS, len(run))):
+        send_key("ctrl+shift+Down")
+        emitted = True
+        if not _wait_until(lambda s=step: _covered_to_end(run[s]),
+                           EXTEND_STEP_SECONDS):
+            break
+        if _covered_to_end(last):
+            return run, emitted
+    raise _failure(
+        "select_unverified: the keyboard extension did not reach the end of "
+        "to_ref; part of the text may now be selected.",
+        code="effect_unknown", emitted=emitted, phase="readback")
+
+
+def _run_summary(run):
+    """Describe the selection read back from every sibling of the run."""
+    parent = safe(run[0].get_parent)
+    count = int(safe(lambda: parent.get_child_count(), 0) or 0) if parent is not None else 0
+    covered = []
+    total = 0
+    outside = 0
+    for index in range(count):
+        child = safe(lambda i=index: parent.get_child_at_index(i))
+        if child is None:
+            continue
+        spans = text_selections(child) or []
+        if not spans:
+            continue
+        if not any(_same(child, node) for node in run):
+            outside += 1
+            continue
+        for start, end in spans:
+            total += end - start
+            covered.append(text_between(child, start, end))
+    summary = "selected {} chars in {} elements, from {} to {}".format(
+        total, len(run), _quote(covered[0][:30] if covered else ""),
+        _quote(covered[-1][-30:] if covered else ""))
+    if outside:
+        summary += "; the selection also covers {} element(s) after to_ref".format(
+            outside)
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Cells and items
+
+
+def _table_cell_index(table, node):
+    index = safe(lambda: node.get_index_in_parent())
+    if index is None:
+        return None, None, None
+    row = safe(lambda: Atspi.Table.get_row_at_index(table, index))
+    col = safe(lambda: Atspi.Table.get_column_at_index(table, index))
+    return index, row, col
+
+
+def select_cells(first, last):
+    """Select the rectangle between two cells of one table; return names."""
+    container = safe(lambda: first.get_parent())
+    table = safe(lambda: container.get_table_iface()) if container is not None else None
+    selection = safe(lambda: container.get_selection_iface()) if container is not None else None
+    if table is None or selection is None:
+        raise _failure(
+            "select_unavailable: the cells' table has no table selection "
+            "interface; no input was emitted.")
+    _, row0, col0 = _table_cell_index(table, first)
+    _, row1, col1 = _table_cell_index(table, last)
+    if None in (row0, col0, row1, col1):
+        raise _failure(
+            "select_unavailable: the cell coordinates could not be read; no "
+            "input was emitted.")
+    top, bottom = sorted((int(row0), int(row1)))
+    left, right = sorted((int(col0), int(col1)))
+    if (bottom - top + 1) * (right - left + 1) > MAX_SELECTED_CELLS:
+        raise _failure(
+            "select_invalid_range: the range has more than {} cells; use the "
+            "Name Box or keys for larger ranges.".format(MAX_SELECTED_CELLS),
+            code="invalid_argument")
+    safe(lambda: Atspi.Selection.clear_selection(container))
+    emitted = False
+    for row in range(top, bottom + 1):
+        for col in range(left, right + 1):
+            index = safe(lambda r=row, c=col: Atspi.Table.get_index_at(table, r, c))
+            if index is None or not safe(
+                    lambda i=index: Atspi.Selection.select_child(container, i), False):
+                raise _failure(
+                    "select_unverified: the table refused cell ({}, {}); part "
+                    "of the range may be selected.".format(row, col),
+                    code="effect_unknown", emitted=emitted, phase="readback")
+            emitted = True
+    expected = (bottom - top + 1) * (right - left + 1)
+    count = [0]
+    _wait_until(lambda: _store_count(count, container) >= expected, 0.6)
+    if count[0] != expected:
+        raise _failure(
+            "select_unverified: the table reports {} selected cells, expected "
+            "{}.".format(count[0], expected),
+            code="effect_unknown", emitted=emitted, phase="readback")
+    first_name = node_name(safe(lambda: Atspi.Table.get_accessible_at(table, top, left)))
+    last_name = node_name(safe(lambda: Atspi.Table.get_accessible_at(table, bottom, right)))
+    return first_name, last_name, expected
+
+
+def _store_count(bucket, container):
+    bucket[0] = int(safe(lambda: Atspi.Selection.get_n_selected_children(container), 0) or 0)
+    return bucket[0]
+
+
+def select_item(node):
+    """Select one child of a Selection container; return True when read back."""
+    container = _selection_container(node)
+    if container is None:
+        raise _failure(
+            "select_unavailable: the element's container does not support "
+            "selection; no input was emitted.")
+    index = safe(lambda: node.get_index_in_parent())
+    if index is None or not safe(
+            lambda: Atspi.Selection.select_child(container, int(index)), False):
+        raise _failure(
+            "select_unavailable: the container refused to select the item; "
+            "no input was emitted.")
+    if not _wait_until(lambda: state_contains(node, Atspi.StateType.SELECTED)
+                       or bool(safe(lambda: Atspi.Selection.is_child_selected(
+                           container, int(index)), False)), 0.6):
+        raise _failure(
+            "select_unverified: the item did not report itself selected.",
+            code="effect_unknown", emitted=True, phase="readback")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+
+
+def perform_select(action_input, window, element, element_record, to_element,
+                   notes, action_evidence):
+    """Run one select action and describe the read-back selection in notes."""
+    if element is None:
+        raise RuntimeError("select requires a target ref")
+    role = node_role(element)
+    text = action_input.get("text")
+    if to_element is not None:
+        if role in ("table cell", "cell"):
+            first, last, count = select_cells(element, to_element)
+            summary = "selected {} cells {}:{}".format(count, first, last)
+            action_evidence["route"] = "selection_api"
+        else:
+            run, emitted = select_text_run(window, element, to_element)
+            summary = _run_summary(run)
+            action_evidence["route"] = "keyboard_synthesis"
+            action_evidence["window_focus_verified"] = True
+            action_evidence["input_emitted"] = emitted
+    elif text is not None or _text_iface(element) is not None and role not in (
+            "list item", "table cell", "cell", "tree item", "icon"):
+        content = text_between(element, 0, -1)
+        if text is None:
+            start, end = 0, len(content)
+            if not content:
+                raise _failure(
+                    "select_invalid_range: the element has no text to select; "
+                    "no input was emitted.", code="invalid_argument")
+        else:
+            start = content.find(text)
+            if start < 0:
+                raise _failure(
+                    "select_text_not_found: {} is not in the element's text; "
+                    "no input was emitted.".format(_quote(text)),
+                    code="invalid_argument")
+            if content.find(text, start + 1) >= 0:
+                raise _failure(
+                    "select_text_ambiguous: {} occurs more than once in the "
+                    "element; no input was emitted.".format(_quote(text)),
+                    code="invalid_argument")
+            end = start + len(text)
+        spans = select_text_range(element, start, end)
+        if not spans:
+            raise _failure(
+                "select_unverified: the element reports no selection after "
+                "the request.", code="effect_unknown", emitted=True,
+                phase="readback")
+        got_start, got_end = spans[0]
+        summary = "selected {}..{} {}".format(
+            got_start, got_end, _quote(text_between(element, got_start, got_end)))
+        if (got_start, got_end) != (start, end):
+            summary += " (asked {}..{})".format(start, end)
+        action_evidence["route"] = "semantic_action"
+    else:
+        select_item(element)
+        summary = "selected {} {}".format(role or "item", _quote(node_name(element)))
+        action_evidence["route"] = "selection_api"
+    action_evidence["input_emitted"] = True
+    action_evidence["readback_sampled"] = True
+    action_evidence["readback_verified"] = True
+    notes.append("[select] " + summary)

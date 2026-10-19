@@ -211,10 +211,14 @@ func axInputSchema() map[string]any {
 							"type": "string", "pattern": "^[rw][1-9][0-9]*$",
 							"description": "rN element; wN for activate/close. Omit for keys/text to the focused window.",
 						},
+						"to_ref": map[string]any{
+							"type": "string", "pattern": "^r[1-9][0-9]*$",
+							"description": "select: range end; ref..to_ref spans text or cells.",
+						},
 						"title": nonBlankString("activate/close: unique window-title substring, instead of wN."),
 						"text": map[string]any{
 							"type": "string", "minLength": 1, "maxLength": maxActionText,
-							"description": "wait: text in the ref element, or anywhere in the window.",
+							"description": "wait: text in the ref element, or anywhere in the window. select: substring of ref to select.",
 						},
 						"keys": map[string]any{
 							"type": "array", "minItems": 1, "maxItems": guiMaxKeys,
@@ -399,7 +403,8 @@ const axToolDescription = "Accessibility for application windows. Modes: " +
 	"rN refs. find returns matching rN. act runs ordered steps, checks them before input, " +
 	"stops at the first failed step, and reports each target's change, windows " +
 	"opened/closed/focused, and a diff. Copy rN/wN exactly; stale refs fail. keypress/type " +
-	"without ref go to the focused window. activate/close take a title substring or wN. " +
+	"without ref go to the focused window. select marks ref, its text substring, or ref..to_ref " +
+	"(paragraphs, cells) and reports the selection read back. activate/close take a title substring or wN. " +
 	"A wait step sends no input and fails the batch on timeout: window (title, any app), " +
 	"query (as find), ref with value/state/text, or text; gone inverts. After a window " +
 	"wait, keys go to that window. Skip waits the report answers. Errors return code and " +

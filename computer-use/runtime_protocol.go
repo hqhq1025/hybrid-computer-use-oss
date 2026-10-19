@@ -168,6 +168,35 @@ func (command axSetValueCommand) appendTraceFields(fields map[string]any) {
 	fields["value"] = command.Value
 }
 
+// axSelectCommand selects text, a cell range or an item. To is the range
+// end (to_ref) as a semantic target; Text names a substring of the target.
+type axSelectCommand struct {
+	Text string
+	To   *semanticTarget
+}
+
+func (axSelectCommand) Intent() AccessibilityOperation {
+	return AccessibilitySelect
+}
+
+func (command axSelectCommand) applyProviderAction(
+	request *ProviderActionRequest,
+) {
+	request.Select = &ProviderSelectInput{
+		Text:     command.Text,
+		ToTarget: providerTargetFromOperation(command.To),
+	}
+}
+
+func (command axSelectCommand) appendTraceFields(fields map[string]any) {
+	if command.Text != "" {
+		fields["text"] = command.Text
+	}
+	if command.To != nil {
+		fields["to_selector"] = command.To.Selector
+	}
+}
+
 func (request axServiceRequest) operationName() string {
 	if request.Action != nil {
 		return string(request.Action.Intent())

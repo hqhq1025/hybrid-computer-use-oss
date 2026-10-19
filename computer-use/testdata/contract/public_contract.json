@@ -46,7 +46,7 @@
             "openWorldHint": false,
             "title": "Accessibility"
           },
-          "description": "Accessibility for application windows. Modes: apps lists windows (wN, title, app, active). observe returns the window tree with rN refs. find returns matching rN. act runs ordered steps, checks them before input, stops at the first failed step, and reports each target's change, windows opened/closed/focused, and a diff. Copy rN/wN exactly; stale refs fail. keypress/type without ref go to the focused window. activate/close take a title substring or wN. A wait step sends no input and fails the batch on timeout: window (title, any app), query (as find), ref with value/state/text, or text; gone inverts. After a window wait, keys go to that window. Skip waits the report answers. Errors return code and hint. Examples:\n{\"mode\":\"act\",\"actions\":[{\"type\":\"click\",\"ref\":\"r12\"},{\"type\":\"wait\",\"window\":\"Export\"},{\"type\":\"type\",\"text\":\"q3.csv\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}\n{\"mode\":\"find\",\"window_ref\":\"w2\",\"query\":{\"role\":\"button\",\"name_contains\":\"Save\"}}",
+          "description": "Accessibility for application windows. Modes: apps lists windows (wN, title, app, active). observe returns the window tree with rN refs. find returns matching rN. act runs ordered steps, checks them before input, stops at the first failed step, and reports each target's change, windows opened/closed/focused, and a diff. Copy rN/wN exactly; stale refs fail. keypress/type without ref go to the focused window. select marks ref, its text substring, or ref..to_ref (paragraphs, cells) and reports the selection read back. activate/close take a title substring or wN. A wait step sends no input and fails the batch on timeout: window (title, any app), query (as find), ref with value/state/text, or text; gone inverts. After a window wait, keys go to that window. Skip waits the report answers. Errors return code and hint. Examples:\n{\"mode\":\"act\",\"actions\":[{\"type\":\"click\",\"ref\":\"r12\"},{\"type\":\"wait\",\"window\":\"Export\"},{\"type\":\"type\",\"text\":\"q3.csv\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}\n{\"mode\":\"find\",\"window_ref\":\"w2\",\"query\":{\"role\":\"button\",\"name_contains\":\"Save\"}}",
           "inputSchema": {
             "$defs": {
               "query": {
@@ -137,7 +137,7 @@
                       "type": "string"
                     },
                     "text": {
-                      "description": "wait: text in the ref element, or anywhere in the window.",
+                      "description": "wait: text in the ref element, or anywhere in the window. select: substring of ref to select.",
                       "maxLength": 10000,
                       "minLength": 1,
                       "type": "string"
@@ -153,12 +153,18 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "to_ref": {
+                      "description": "select: range end; ref..to_ref spans text or cells.",
+                      "pattern": "^r[1-9][0-9]*$",
+                      "type": "string"
+                    },
                     "type": {
                       "enum": [
                         "click",
                         "type",
                         "keypress",
                         "set_value",
+                        "select",
                         "scroll",
                         "activate",
                         "close",
@@ -949,7 +955,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].type\",\"message\":\"type must be one of click, type, keypress, set_value, scroll, activate, close, wait; got \\\"bogus\\\"\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].type\",\"message\":\"type must be one of click, type, keypress, set_value, select, scroll, activate, close, wait; got \\\"bogus\\\"\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],

@@ -26,6 +26,7 @@ const (
 	AccessibilityType          AccessibilityOperation = "type"
 	AccessibilityKeypress      AccessibilityOperation = "keypress"
 	AccessibilitySetValue      AccessibilityOperation = "set_value"
+	AccessibilitySelect        AccessibilityOperation = "select"
 )
 
 type WindowOperation string

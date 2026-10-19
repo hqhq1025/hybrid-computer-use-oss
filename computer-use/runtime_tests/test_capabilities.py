@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provider tests for new AX capabilities on LibreOffice."""
+"""Provider tests for LibreOffice combo projection, transient items and select."""
 
 from runtime_test_support import *  # noqa: F401,F403
 
@@ -101,6 +101,198 @@ class ComboProjectionTests(AtspiPatchedTestCase):
             window, {"x": 0, "y": 0, "width": 200, "height": 200}, [0])
         combos = [r for r in records if r["controlType"] == "combo box"]
         self.assertEqual([r["name"] for r in combos], ["Line Spacing"])
+
+
+
+
+class _Span:
+    def __init__(self, start, end):
+        self.start_offset, self.end_offset = start, end
+
+
+class _Text:
+    """Text interface state of one paragraph."""
+
+    def __init__(self, text):
+        self.text = text
+        self.selection = None
+        self.caret = -1
+
+
+class _TextApi:
+    @staticmethod
+    def get_character_count(iface):
+        return len(iface.text)
+
+    @staticmethod
+    def get_text(iface, start, end):
+        return iface.text[start:] if end == -1 else iface.text[start:end]
+
+    @staticmethod
+    def get_n_selections(iface):
+        return 1 if iface.selection else 0
+
+    @staticmethod
+    def get_selection(iface, index):
+        return _Span(*iface.selection)
+
+    @staticmethod
+    def add_selection(iface, start, end):
+        iface.selection = (start, end)
+        return True
+
+    @staticmethod
+    def set_selection(iface, index, start, end):
+        iface.selection = (start, end)
+        return True
+
+    @staticmethod
+    def set_caret_offset(iface, offset):
+        iface.caret = offset
+        return True
+
+
+class SelectTests(AtspiPatchedTestCase):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(runtime.Atspi, "Text", _TextApi, create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.notes = []
+        self.evidence = {}
+
+    def _paragraphs(self, *texts):
+        doc = _Node(role="document text")
+        paragraphs = []
+        for text in texts:
+            node = _Node(role="paragraph")
+            node.text_iface = _Text(text)
+            paragraphs.append(node)
+        doc.add(*paragraphs)
+        return doc, paragraphs
+
+    def test_substring_select_reports_the_read_back_span(self):
+        _doc, (para,) = self._paragraphs("Alpha beta gamma")
+        runtime.perform_select({"text": "beta"}, None, para, {}, None,
+                               self.notes, self.evidence)
+        self.assertEqual(para.text_iface.selection, (6, 10))
+        self.assertEqual(self.notes, ['[select] selected 6..10 "beta"'])
+        self.assertTrue(self.evidence["readback_verified"])
+
+    def test_shifted_selection_is_reported_as_read_back(self):
+        """Impress moved a 0..5 selection to 1..5; the note must say so."""
+        _doc, (para,) = self._paragraphs("First bullet line")
+
+        class ShiftingApi(_TextApi):
+            @staticmethod
+            def add_selection(iface, start, end):
+                iface.selection = (max(start, 1), end)
+                return True
+
+        with mock.patch.object(runtime.Atspi, "Text", ShiftingApi):
+            runtime.perform_select({"text": "First"}, None, para, {}, None,
+                                   self.notes, self.evidence)
+        self.assertEqual(self.notes,
+                         ['[select] selected 1..5 "irst" (asked 0..5)'])
+
+    def test_ambiguous_substring_is_rejected_before_input(self):
+        _doc, (para,) = self._paragraphs("a b a")
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "a"}, None, para, {}, None,
+                                   self.notes, self.evidence)
+        self.assertEqual(caught.exception.failure_code, "invalid_argument")
+        self.assertIsNone(para.text_iface.selection)
+
+    def test_paragraph_range_extends_with_keys_until_read_back(self):
+        """AT-SPI cannot select across paragraphs; Writer extends by keys."""
+        _doc, paragraphs = self._paragraphs("one", "two", "three")
+        presses = []
+
+        def fake_key(key):
+            presses.append(key)
+            covered = paragraphs[len(presses) - 1]
+            covered.text_iface.selection = (0, len(covered.text_iface.text))
+
+        with mock.patch.object(runtime, "send_key", fake_key), \
+                mock.patch.object(runtime, "require_window_focus", lambda *a: None):
+            runtime.perform_select({}, object(), paragraphs[0], {}, paragraphs[1],
+                                   self.notes, self.evidence)
+        self.assertEqual(presses, ["ctrl+shift+Down", "ctrl+shift+Down"])
+        self.assertEqual(paragraphs[0].text_iface.caret, 0)
+        self.assertIn("selected 6 chars in 2 elements", self.notes[0])
+        self.assertEqual(self.evidence["route"], "keyboard_synthesis")
+
+    def test_paragraph_range_that_never_reaches_the_end_fails(self):
+        _doc, paragraphs = self._paragraphs("one", "two")
+        clock = _FakeClock()
+        with mock.patch.object(runtime, "send_key", lambda key: None), \
+                mock.patch.object(runtime, "require_window_focus", lambda *a: None), \
+                mock.patch.object(runtime, "time", clock):
+            with self.assertRaises(runtime.OperationFailure) as caught:
+                runtime.perform_select({}, object(), paragraphs[0], {},
+                                       paragraphs[1], self.notes, self.evidence)
+        self.assertEqual(caught.exception.failure_code, "effect_unknown")
+        self.assertTrue(caught.exception.input_events_emitted)
+
+    def test_range_end_outside_the_container_is_rejected(self):
+        _doc, (first,) = self._paragraphs("one")
+        _other, (second,) = self._paragraphs("two")
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({}, object(), first, {}, second,
+                                   self.notes, self.evidence)
+        self.assertEqual(caught.exception.failure_code, "invalid_argument")
+        self.assertFalse(caught.exception.input_events_emitted)
+
+    def test_cell_range_selects_the_rectangle_and_reads_it_back(self):
+        cells = {}
+        table = _Node(role="table", states=(STATE.MANAGES_DESCENDANTS,))
+        for row in range(3):
+            for col in range(3):
+                cell = _Node(role="table cell", name="{}{}".format("ABC"[col], row + 1))
+                cells[(row, col)] = cell
+                table.add(cell)
+        table.table_iface = table
+        table.selection_iface = table
+        selected = []
+
+        class TableApi:
+            @staticmethod
+            def get_row_at_index(t, index):
+                return index // 3
+
+            @staticmethod
+            def get_column_at_index(t, index):
+                return index % 3
+
+            @staticmethod
+            def get_index_at(t, row, col):
+                return row * 3 + col
+
+            @staticmethod
+            def get_accessible_at(t, row, col):
+                return cells[(row, col)]
+
+        class SelectionApi:
+            @staticmethod
+            def clear_selection(container):
+                selected.clear()
+                return True
+
+            @staticmethod
+            def select_child(container, index):
+                selected.append(index)
+                return True
+
+            @staticmethod
+            def get_n_selected_children(container):
+                return len(selected)
+
+        with mock.patch.object(runtime.Atspi, "Table", TableApi, create=True), \
+                mock.patch.object(runtime.Atspi, "Selection", SelectionApi, create=True):
+            runtime.perform_select({}, None, cells[(1, 0)], {}, cells[(2, 1)],
+                                   self.notes, self.evidence)
+        self.assertEqual(sorted(selected), [3, 4, 6, 7])
+        self.assertEqual(self.notes, ["[select] selected 4 cells A2:B3"])
 
 
 if __name__ == "__main__":

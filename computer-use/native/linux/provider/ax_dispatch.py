@@ -31,6 +31,7 @@ from .ax_actions import (
     set_element_value_outcome,
 )
 
+from .ax_select import perform_select
 from .gui_input import send_mouse_click
 from .input_primitives import require_window_focus
 
@@ -419,6 +420,12 @@ def _perform_ax_action(
         _perform_set_value(
             action_input, window, element, element_record, notes, action_evidence
         )
+    elif action_intent == "select":
+        to_element = _resolve_select_end(app, operation, action_input, window, bounds)
+        perform_select(
+            action_input, window, element, element_record, to_element,
+            notes, action_evidence,
+        )
     else:
         raise RuntimeError(
             'unsupportedProviderAction("{}")'.format(action_intent)
@@ -513,6 +520,41 @@ def _resolve_action_target(app, operation, operation_kind, action_input):
                 input_events_emitted=False,
             )
     return element, element_record, semantic_note, window, bounds
+
+
+def _resolve_select_end(app, operation, action_input, window, bounds):
+    """Resolve the select range end (to_ref) in the target's window, or None."""
+    to_target = action_input.get("to_target")
+    if to_target is None:
+        return None
+    window_path = provider_object_path(window)
+    window_index = None
+    for index in range(int(safe(app.get_child_count, 0) or 0)):
+        child = safe(lambda i=index: app.get_child_at_index(i))
+        if child is not None and provider_object_path(child) == window_path:
+            window_index = index
+            break
+    if window_index is None:
+        raise OperationFailure(
+            "stale_element_ref reason=select_window_disappeared; no input was "
+            "emitted.",
+            failure_code="stale_element_ref",
+            failure_phase="precondition",
+            input_events_emitted=False,
+        )
+    to_element, _record, _note, to_window, _bounds = resolve_semantic_target(
+        app, window_index, window, bounds, to_target,
+        operation.get("known_refs"), operation,
+    )
+    if provider_object_path(to_window) != window_path:
+        raise OperationFailure(
+            "select_invalid_range: to_ref is in a different window than ref; "
+            "no input was emitted.",
+            failure_code="invalid_argument",
+            failure_phase="precondition",
+            input_events_emitted=False,
+        )
+    return to_element
 
 
 def _new_action_evidence():

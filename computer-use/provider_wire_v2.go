@@ -449,7 +449,8 @@ func validAccessibilityOperation(operation AccessibilityOperation) bool {
 		AccessibilityScroll,
 		AccessibilityType,
 		AccessibilityKeypress,
-		AccessibilitySetValue:
+		AccessibilitySetValue,
+		AccessibilitySelect:
 		return true
 	default:
 		return false
@@ -483,6 +484,7 @@ func validateProviderActionRequest(request ProviderActionRequest) error {
 		request.Type != nil,
 		request.Keypress != nil,
 		request.SetValue != nil,
+		request.Select != nil,
 	} {
 		if present {
 			inputCount++
@@ -555,6 +557,16 @@ func validateProviderActionRequest(request ProviderActionRequest) error {
 		}
 		if request.SetValue.Value == nil {
 			return errors.New("provider set_value value is required")
+		}
+	case AccessibilitySelect:
+		if !hasTarget {
+			return errors.New("provider select requires an exact target")
+		}
+		if request.Select == nil || inputCount != 1 {
+			return errors.New("provider select requires select input only")
+		}
+		if request.Select.Text != "" && request.Select.ToTarget != nil {
+			return errors.New("provider select accepts text or to_target, not both")
 		}
 	}
 	return nil

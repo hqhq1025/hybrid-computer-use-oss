@@ -151,6 +151,11 @@ type ProviderSetValueInput struct {
 	Value *string `json:"value"`
 }
 
+type ProviderSelectInput struct {
+	Text     string                  `json:"text,omitempty"`
+	ToTarget *ProviderSemanticTarget `json:"to_target,omitempty"`
+}
+
 type ProviderObserveAppsRequest struct {
 	ProtocolVersion int `json:"protocol_version"`
 }
@@ -178,6 +183,7 @@ type ProviderActionRequest struct {
 	Type            *ProviderTypeInput            `json:"-"`
 	Keypress        *ProviderKeypressInput        `json:"-"`
 	SetValue        *ProviderSetValueInput        `json:"-"`
+	Select          *ProviderSelectInput          `json:"-"`
 	WindowBounds    *ProviderFrame                `json:"window_bounds,omitempty"`
 	Observation     ProviderObservationOptions    `json:"observation,omitempty"`
 	Diagnostics     *ProviderDiagnosticContext    `json:"diagnostics,omitempty"`
@@ -212,6 +218,8 @@ func (request ProviderActionRequest) MarshalJSON() ([]byte, error) {
 		input = request.Keypress
 	case AccessibilitySetValue:
 		input = request.SetValue
+	case AccessibilitySelect:
+		input = request.Select
 	}
 	var raw json.RawMessage
 	if input != nil {
@@ -281,6 +289,9 @@ func (request *ProviderActionRequest) UnmarshalJSON(data []byte) error {
 	case AccessibilitySetValue:
 		request.SetValue = &ProviderSetValueInput{}
 		return decodeInput(request.SetValue)
+	case AccessibilitySelect:
+		request.Select = &ProviderSelectInput{}
+		return decodeInput(request.Select)
 	default:
 		// Validate reports the unsupported intent with the stable public error.
 	}
