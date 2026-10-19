@@ -41,7 +41,8 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 	// AT-SPI accessible_id would be a stronger tier, but it is unset in practice, so that tier is unavailable on the desktop.
 	var byName, byDescription []elementRecord
 	for _, record := range snapshot.Elements {
-		if !selectorRoleMatches(&record, role) {
+		if !selectorRoleMatches(&record, role) &&
+			!(roleKey(role) == "dialog" && modalWindowRoot(snapshot, &record)) {
 			continue
 		}
 		if len(preds) > 0 && !recordMatchesPredicates(&record, preds) {
@@ -149,16 +150,48 @@ func lookupBySelectorFor(snapshot *appSnapshot, selector, declared, tool string)
 }
 
 func selectorRoleMatches(record *elementRecord, requested string) bool {
-	requested = strings.ToLower(strings.TrimSpace(requested))
+	requested = roleKey(requested)
 	if requested == "" {
 		return true
 	}
 	provider := canonicalRole(record)
-	return strings.EqualFold(provider, requested) ||
-		strings.EqualFold(
-			string(canonicalRoleDescriptor(provider, nil).ModelRole),
-			requested,
-		)
+	return roleKey(provider) == requested ||
+		roleKey(string(canonicalRoleDescriptor(provider, nil).ModelRole)) == requested
+}
+
+// modalWindowRoot reports whether record is the root of a top-level window
+// that the provider reports as modal. Toolkits expose some modal dialogs as
+// a plain frame or window (Thunderbird's "New Folder", full-e a10b69e1), so
+// the role alone does not show that a dialog is open; a selector for role
+// dialog also matches such a window.
+func modalWindowRoot(snapshot *appSnapshot, record *elementRecord) bool {
+	if snapshot == nil || record == nil ||
+		strings.TrimSpace(record.ProviderObjectPath) == "" {
+		return false
+	}
+	for _, window := range snapshot.Windows {
+		if window.Modal &&
+			window.ProviderObjectPath == record.ProviderObjectPath &&
+			window.ProviderBusName == record.ProviderBusName {
+			return true
+		}
+	}
+	return false
+}
+
+// roleKey folds a role for comparison: case, spaces, underscores and
+// hyphens are ignored, so "menu item", "menuitem", "menu_item" and
+// "Menu-Item" name the same role.
+func roleKey(role string) string {
+	var out strings.Builder
+	for _, char := range strings.ToLower(role) {
+		switch char {
+		case ' ', '_', '-', '\t':
+			continue
+		}
+		out.WriteRune(char)
+	}
+	return out.String()
 }
 
 // parseSelector splits a selector into role, name, whether a name was quoted,

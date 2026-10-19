@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +50,9 @@ type axArgError struct {
 	message string
 	hint    string
 	rule    string
+	// fix corrects the rejected value; axDerivedHint turns it into a hint
+	// when the site writes none.
+	fix []axEdit
 }
 
 // Cross-field rules that the flat AX schema cannot express. The consistency
@@ -76,7 +80,15 @@ func (e *axArgError) withRule(rule string) *axArgError {
 
 func (e *axArgError) Error() string { return e.message }
 
+// axInvalidHook, when set by a test, receives the source line of each
+// axInvalid call, so the test can prove it reached every rejection site.
+var axInvalidHook func(file string, line int)
+
 func axInvalid(path, message, hint string) *axArgError {
+	if axInvalidHook != nil {
+		_, file, line, _ := runtime.Caller(1)
+		axInvalidHook(file, line)
+	}
 	return &axArgError{
 		code: axCodeInvalidArgument, path: path, message: message, hint: hint,
 	}
@@ -138,7 +150,23 @@ var axRenamedFields = map[string]string{
 	"app_ref":       "app",
 }
 
+// axDecodeHook, when set by a test, is called once per decodeAXRequest.
+var axDecodeHook func()
+
+// decodeAXRequest decodes one public AX call. Every rejection carries a
+// hint that decodes (ax_argument_hint.go).
 func decodeAXRequest(args map[string]any) (*axRequest, *axArgError) {
+	if axDecodeHook != nil {
+		axDecodeHook()
+	}
+	request, err := decodeAXCall(args)
+	if err != nil && err.hint == "" {
+		err.hint = axDerivedHint(args, err)
+	}
+	return request, err
+}
+
+func decodeAXCall(args map[string]any) (*axRequest, *axArgError) {
 	rawMode, present := args["mode"]
 	if !present {
 		return nil, axInvalid("mode", "mode is required: apps, observe, find, or act",
@@ -151,8 +179,12 @@ func decodeAXRequest(args map[string]any) (*axRequest, *axArgError) {
 				`mode "assert_ax" was removed; use observe with until`,
 				`{"mode":"observe","window_ref":"w1","until":{"type":"exists","ref":"r1"}}`)
 		}
-		return nil, axInvalid("mode", "mode must be apps, observe, find, or act; got "+
+		err := axInvalid("mode", "mode must be apps, observe, find, or act; got "+
 			compactJSON(rawMode), `{"mode":"apps"}`)
+		if lower := strings.ToLower(mode); lower != mode && axModeFields[lower] != nil {
+			err.hint, err.fix = "", []axEdit{axSet("mode", lower)}
+		}
+		return nil, err
 	}
 	if err := axCheckFields(args, axModeFields[mode], "", "mode "+strconv.Quote(mode)); err != nil {
 		return nil, err.withRule(axRuleFieldForMode)
@@ -176,6 +208,13 @@ func decodeAXRequest(args map[string]any) (*axRequest, *axArgError) {
 		return nil, err
 	}
 	if request.root, err = axOptionalPattern(args, "root", "", axRootPattern, `"focused" or rN`); err != nil {
+		if root, _ := args["root"].(string); axWindowRefPattern.MatchString(root) {
+			// A wN root names the window to read: read it whole.
+			err.message += "; " + root + " is a window: use window_ref"
+			if request.windowRef == "" {
+				err.fix = []axEdit{axRemove("root"), axRemove("app"), axSet("window_ref", root)}
+			}
+		}
 		return nil, err
 	}
 	if raw, present := args["until"]; present {
@@ -187,12 +226,12 @@ func decodeAXRequest(args map[string]any) (*axRequest, *axArgError) {
 	case a11yModeObserve:
 		if request.observe == observeNone && request.until == nil {
 			return nil, axInvalid("observe", `observe "none" returns nothing without until`,
-				`{"mode":"observe","window_ref":"w1"}`).withRule(axRuleObserveNone)
+				"").withRule(axRuleObserveNone).withFix(axRemove("observe"))
 		}
 		if request.app == "" && request.windowRef == "" &&
 			(request.until == nil || !isShortAXRef(optionalString(axUntilTarget(request.until), "ref"))) {
 			return nil, axInvalid("app", "observe needs app or window_ref",
-				`{"mode":"observe","app":"a1"}`).withRule(axRuleRequiredForMode)
+				"").withRule(axRuleRequiredForMode).withFix(axSet("window_ref", "w1"))
 		}
 	case a11yModeFind:
 		if err := decodeAXFind(args, request); err != nil {
@@ -202,7 +241,8 @@ func decodeAXRequest(args map[string]any) (*axRequest, *axArgError) {
 		raw, present := args["actions"]
 		if !present {
 			return nil, axInvalid("actions", "act requires actions",
-				`{"mode":"act","actions":[{"type":"click","ref":"r1"}]}`).withRule(axRuleRequiredForMode)
+				"").withRule(axRuleRequiredForMode).withFix(
+				axSet("actions", []any{map[string]any{"type": "click", "ref": "r1"}}))
 		}
 		if request.actions, err = decodeAXActions(raw); err != nil {
 			return nil, err
@@ -220,7 +260,8 @@ func decodeAXFind(args map[string]any, request *axRequest) *axArgError {
 	if raw, present := args["limit"]; present {
 		limit, ok := axInteger(raw)
 		if !ok || limit < 1 || limit > maxAXFindPageSize {
-			return axInvalid("limit", fmt.Sprintf("limit must be an integer from 1 to %d", maxAXFindPageSize), "")
+			return axInvalid("limit", fmt.Sprintf("limit must be an integer from 1 to %d", maxAXFindPageSize), "").
+				withFix(axNumberEdit("limit", raw, 1, maxAXFindPageSize, true))
 		}
 		request.limit = limit
 	}
@@ -228,19 +269,19 @@ func decodeAXFind(args map[string]any, request *axRequest) *axArgError {
 		for _, field := range []string{"app", "window_ref", "scope", "query"} {
 			if _, present := args[field]; present {
 				return axInvalid(field, "a cursor continues an earlier find; send only mode, cursor, and limit",
-					`{"mode":"find","cursor":"`+request.cursor+`"}`).withRule(axRuleFieldForMode)
+					"").withRule(axRuleFieldForMode).withFix(axRemove(field))
 			}
 		}
 		return nil
 	}
 	if request.app == "" && request.windowRef == "" {
 		return axInvalid("app", "find needs app or window_ref, or a cursor from a truncated result",
-			`{"mode":"find","window_ref":"w1","query":{"role":"button"}}`).withRule(axRuleRequiredForMode)
+			"").withRule(axRuleRequiredForMode).withFix(axSet("window_ref", "w1"))
 	}
 	raw, present := args["query"]
 	if !present {
 		return axInvalid("query", "find requires query",
-			`{"mode":"find","window_ref":"w1","query":{"name_contains":"Save"}}`).withRule(axRuleRequiredForMode)
+			"").withRule(axRuleRequiredForMode).withFix(axSet("query", map[string]any{"name_contains": "Save"}))
 	}
 	query, ok := raw.(map[string]any)
 	if !ok {
@@ -248,6 +289,11 @@ func decodeAXFind(args map[string]any, request *axRequest) *axArgError {
 	}
 	filters := []string{"role", "name_equals", "name_contains", "text_equals", "text_contains", "state"}
 	if err := axCheckFields(query, filters, "query", "query"); err != nil {
+		for _, field := range []string{"name", "text"} {
+			if err.path == "query."+field {
+				err.fix = []axEdit{axSet("query."+field+"_contains", query[field]), axRemove(err.path)}
+			}
+		}
 		return err
 	}
 	if len(query) == 0 {
@@ -262,7 +308,8 @@ func decodeAXFind(args map[string]any, request *axRequest) *axArgError {
 	for _, pair := range [][2]string{{"name_equals", "name_contains"}, {"text_equals", "text_contains"}} {
 		if _, first := query[pair[0]]; first {
 			if _, second := query[pair[1]]; second {
-				return axInvalid("query."+pair[1], "use "+pair[0]+" or "+pair[1]+", not both", "").withRule(axRuleFindFilterPair)
+				return axInvalid("query."+pair[1], "use "+pair[0]+" or "+pair[1]+", not both", "").
+					withRule(axRuleFindFilterPair).withFix(axRemove("query." + pair[1]))
 			}
 		}
 	}
@@ -281,7 +328,8 @@ func decodeAXActions(raw any) ([]a11yBatchAction, *axArgError) {
 			`[{"type":"click","ref":"r1"}]`)
 	}
 	if len(items) > a11yBatchMaxActions {
-		return nil, axInvalid("actions", fmt.Sprintf("act accepts at most %d actions", a11yBatchMaxActions), "")
+		return nil, axInvalid("actions", fmt.Sprintf("act accepts at most %d actions", a11yBatchMaxActions), "").
+			withFix(axSet("actions", items[:a11yBatchMaxActions]))
 	}
 	actions := make([]a11yBatchAction, 0, len(items))
 	totalText := 0
@@ -296,7 +344,8 @@ func decodeAXActions(raw any) ([]a11yBatchAction, *axArgError) {
 			return nil, err
 		}
 		if action.actionType == "close" && index != len(items)-1 {
-			return nil, axInvalid(path, "close must be the last action; a closed window cannot take later input", "").withRule(argumentRuleCloseNotLast)
+			return nil, axInvalid(path, "close must be the last action; a closed window cannot take later input", "").
+				withRule(argumentRuleCloseNotLast).withFix(axSet("actions", items[:index+1]))
 		}
 		totalText += len([]rune(action.text)) + len([]rune(action.value))
 		if totalText > a11yBatchMaxText {
@@ -332,7 +381,14 @@ func decodeAXAction(object map[string]any, path string) (a11yBatchAction, *axArg
 	action.actionType = actionType
 	allowed := append([]string{"type", "until"}, axActionFields[actionType]...)
 	if err := axCheckFields(object, allowed, path, actionType); err != nil {
-		if renamed, known := axRenamedFields[strings.TrimPrefix(err.path, path+".")]; known && renamed != "" {
+		_, hasRef := object["ref"]
+		if err.path == path+".window_ref" && !hasRef && (actionType == "activate" || actionType == "close") {
+			// The action names its window with ref; window_ref is the call's.
+			err.fix = []axEdit{axSet(path+".ref", object["window_ref"]), axRemove(err.path)}
+		}
+		// A renamed type or ref changes the action's shape; a renamed until
+		// keeps its predicate, which the attached fix moves.
+		if renamed, known := axRenamedFields[strings.TrimPrefix(err.path, path+".")]; known && renamed != "until" {
 			err.hint = axActionShapeHint(object)
 		}
 		return action, err.withRule(axRuleFieldForType)
@@ -399,7 +455,8 @@ func decodeAXAction(object map[string]any, path string) (a11yBatchAction, *axArg
 		if raw, present := object["pages"]; present {
 			pages, ok := axNumber(raw)
 			if !ok || pages <= 0 || pages > maxScrollPages {
-				return action, axInvalid(path+".pages", fmt.Sprintf("pages must be a number greater than 0 and at most %d", maxScrollPages), "")
+				return action, axInvalid(path+".pages", fmt.Sprintf("pages must be a number greater than 0 and at most %d", maxScrollPages), "").
+					withFix(axNumberEdit(path+".pages", raw, math.SmallestNonzeroFloat64, maxScrollPages, false))
 			}
 			action.pages = pages
 		}
@@ -482,7 +539,7 @@ func decodeAXPredicate(raw any, path string) (map[string]any, *axArgError) {
 	if rawNegate, present := object["negate"]; present {
 		value, ok := rawNegate.(bool)
 		if !ok {
-			return nil, axInvalid(path+".negate", "negate must be true or false", "")
+			return nil, axInvalid(path+".negate", "negate must be true or false", "").withFix(axRemove(path + ".negate"))
 		}
 		negate = value
 	}
@@ -490,14 +547,16 @@ func decodeAXPredicate(raw any, path string) (map[string]any, *axArgError) {
 	if rawTimeout, present := object["timeout_ms"]; present {
 		timeout, ok := axInteger(rawTimeout)
 		if !ok || timeout < 1 || timeout > maxVerifyTimeout {
-			return nil, axInvalid(path+".timeout_ms", fmt.Sprintf("timeout_ms must be an integer from 1 to %d", maxVerifyTimeout), "")
+			return nil, axInvalid(path+".timeout_ms", fmt.Sprintf("timeout_ms must be an integer from 1 to %d", maxVerifyTimeout), "").
+				withFix(axNumberEdit(path+".timeout_ms", rawTimeout, 1, maxVerifyTimeout, true))
 		}
 		assertion["timeout_ms"] = timeout
 	}
 	if rawStable, present := object["stable_ms"]; present {
 		stable, ok := axInteger(rawStable)
 		if !ok || stable < 0 || stable > axMaxUntilStableMS {
-			return nil, axInvalid(path+".stable_ms", fmt.Sprintf("stable_ms must be an integer from 0 to %d", axMaxUntilStableMS), "")
+			return nil, axInvalid(path+".stable_ms", fmt.Sprintf("stable_ms must be an integer from 0 to %d", axMaxUntilStableMS), "").
+				withFix(axNumberEdit(path+".stable_ms", rawStable, 0, axMaxUntilStableMS, true))
 		}
 		assertion["stable_ms"] = stable
 	}
@@ -553,10 +612,11 @@ func decodeAXPredicate(raw any, path string) (map[string]any, *axArgError) {
 		if rawMatch, present := object["match"]; present {
 			match, ok := rawMatch.(string)
 			if !ok || (match != "equals" && match != "contains") {
-				return nil, axInvalid(path+".match", `match must be "equals" or "contains"`, "")
+				return nil, axInvalid(path+".match", `match must be "equals" or "contains"`, "").withFix(axRemove(path + ".match"))
 			}
 			if _, isString := value.(string); match == "contains" && !isString {
-				return nil, axInvalid(path+".match", `match "contains" needs a string value`, "").withRule(axRuleValueMatch)
+				return nil, axInvalid(path+".match", `match "contains" needs a string value`, "").
+					withRule(axRuleValueMatch).withFix(axRemove(path + ".match"))
 			}
 			assertion["match"] = match
 		}
@@ -581,8 +641,12 @@ func decodeAXPredicateTarget(object map[string]any, path, kind string) (map[stri
 	ref, hasRef := object["ref"]
 	selector, hasSelector := object["selector"]
 	if hasRef == hasSelector {
+		fix := axSet(path+".ref", "r1")
+		if hasRef {
+			fix = axRemove(path + ".selector")
+		}
 		return nil, axInvalid(path, "until type "+strconv.Quote(kind)+" needs exactly one of ref (rN) or selector",
-			`{"type":"`+kind+`","ref":"r1"}`).withRule(axRuleOneOf)
+			"").withRule(axRuleOneOf).withFix(fix)
 	}
 	if hasRef {
 		text, ok := ref.(string)
@@ -591,7 +655,7 @@ func decodeAXPredicateTarget(object map[string]any, path, kind string) (map[stri
 			if ok && axWindowRefPattern.MatchString(text) {
 				message = `ref must be an element rN; for a window use {"type":"title","text":"..."}`
 			}
-			return nil, axInvalid(path+".ref", message, "")
+			return nil, axInvalid(path+".ref", message, "").withFix(axRemove(path + ".ref"))
 		}
 		return map[string]any{"ref": text}, nil
 	}
@@ -611,10 +675,12 @@ func decodeAXPredicateTarget(object map[string]any, path, kind string) (map[stri
 		}
 		text, ok := value.(string)
 		if !ok || strings.TrimSpace(text) == "" {
-			return nil, axInvalid(path+".selector."+field, field+" must be a non-blank string", "")
+			return nil, axInvalid(path+".selector."+field, field+" must be a non-blank string", "").
+				withFix(axRemove(path + ".selector." + field))
 		}
 		if field == "state" && !publicSelectorStateWords[text] {
-			return nil, axInvalid(path+".selector.state", "selector state must be checked, expanded, selected, or focused", "")
+			return nil, axInvalid(path+".selector.state", "selector state must be checked, expanded, selected, or focused", "").
+				withFix(axRemove(path + ".selector.state"))
 		}
 	}
 	if _, err := a11ySelectorAddress(fields); err != nil {
@@ -713,13 +779,17 @@ func axCheckFields(object map[string]any, allowed []string, path, owner string) 
 		fieldPath = path + "." + field
 	}
 	if replacement, renamed := axRenamedFields[field]; renamed && containsString(allowed, replacement) {
-		return axInvalid(fieldPath, strconv.Quote(field)+" is not a field here; use "+strconv.Quote(replacement), "")
+		err := axInvalid(fieldPath, strconv.Quote(field)+" is not a field here; use "+strconv.Quote(replacement), "")
+		if _, taken := object[replacement]; taken {
+			return err.withFix(axRemove(fieldPath))
+		}
+		return err.withFix(axSet(axJoinPath(path, replacement), object[field]), axRemove(fieldPath))
 	}
 	if field == "observation_target" {
 		return axInvalid(fieldPath, `observation_target was removed; list windows with mode "apps"`, `{"mode":"apps"}`)
 	}
 	return axInvalid(fieldPath, owner+" does not accept "+strconv.Quote(field)+
-		"; accepted: "+strings.Join(allowed, ", "), "")
+		"; accepted: "+strings.Join(allowed, ", "), "").withFix(axRemove(fieldPath))
 }
 
 func axOptionalString(object map[string]any, field, path string, nonBlank bool) (string, *axArgError) {
@@ -729,7 +799,13 @@ func axOptionalString(object map[string]any, field, path string, nonBlank bool) 
 	}
 	text, ok := raw.(string)
 	if !ok || (nonBlank && strings.TrimSpace(text) == "") {
-		return "", axInvalid(axJoinPath(path, field), field+" must be a non-blank string", "")
+		fieldPath := axJoinPath(path, field)
+		fix := axRemove(fieldPath)
+		if number, isNumber := axNumber(raw); isNumber {
+			// A PID sent as a number.
+			fix = axSet(fieldPath, strconv.FormatFloat(number, 'f', -1, 64))
+		}
+		return "", axInvalid(fieldPath, field+" must be a non-blank string", "").withFix(fix)
 	}
 	return text, nil
 }
@@ -753,8 +829,12 @@ func axOptionalPattern(object map[string]any, field, path string, pattern *regex
 	}
 	text, ok := raw.(string)
 	if !ok || !pattern.MatchString(text) {
+		fix := axRemove(axJoinPath(path, field))
+		if lower := strings.ToLower(strings.TrimSpace(text)); pattern.MatchString(lower) {
+			fix = axSet(axJoinPath(path, field), lower)
+		}
 		return "", axInvalid(axJoinPath(path, field), field+" must be "+shape+
-			", copied exactly from an earlier result; got "+compactJSON(raw), "")
+			", copied exactly from an earlier result; got "+compactJSON(raw), "").withFix(fix)
 	}
 	return text, nil
 }
@@ -766,8 +846,12 @@ func axOptionalEnum(object map[string]any, field, path string, values []string) 
 	}
 	text, ok := raw.(string)
 	if !ok || !containsString(values, text) {
+		fix := axRemove(axJoinPath(path, field))
+		if containsString(values, strings.ToLower(text)) {
+			fix = axSet(axJoinPath(path, field), strings.ToLower(text))
+		}
 		return "", axInvalid(axJoinPath(path, field), field+" must be one of "+strings.Join(values, ", ")+
-			"; got "+compactJSON(raw), "")
+			"; got "+compactJSON(raw), "").withFix(fix)
 	}
 	return text, nil
 }

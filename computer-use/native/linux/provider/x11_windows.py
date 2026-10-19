@@ -22,6 +22,7 @@ from .foundation import (
     node_pid,
     node_role,
     process_generation,
+    provider_bus_name,
     safe,
     state_contains,
 )
@@ -166,6 +167,19 @@ def x11_root_window_state(timeout=0.25):
     return {"windowIds": set(window_ids), "activeWindow": active_id}
 
 
+def correlation_root_window_state():
+    """Root state for matching AX windows to native windows.
+
+    Shared by every correlation in one operation and dropped with the native
+    listing (operation start and after input). Before/after comparisons and
+    polls call x11_root_window_state() directly because they need a fresh
+    sample.
+    """
+    if "root" not in _x11_window_inventory_cache:
+        _x11_window_inventory_cache["root"] = x11_root_window_state()
+    return _x11_window_inventory_cache["root"]
+
+
 def frame_intersects(first, second):
     if first is None or second is None:
         return False
@@ -282,18 +296,15 @@ def desktop_layout_frame_id(layout):
     return "layout-v1-" + hashlib.sha256(encoded).hexdigest()
 
 
+# One parsed `wmctrl -lpG` listing per operation. The listing covers every
+# managed window, so one sample answers every pid; dispatch clears it at the
+# start of an operation and again once input is emitted. A failed sample is
+# not kept, so the next read retries.
 _x11_window_inventory_cache = {}
 
 
-def x11_window_inventory_for_pid(pid):
-    """Return bounded native windows with explicit enumeration completeness."""
-    pid = int(pid or 0)
-    if pid <= 0:
-        return InventoryResult(
-            complete=False,
-            errors=["application process identity is unavailable"],
-        )
-    cached = _x11_window_inventory_cache.get(pid)
+def _x11_managed_windows():
+    cached = _x11_window_inventory_cache.get("all")
     if cached is not None:
         return cached
     try:
@@ -325,26 +336,39 @@ def x11_window_inventory_for_pid(pid):
             x, y, width, height = map(int, parts[3:7])
         except (TypeError, ValueError):
             continue
-        if window_pid != pid:
+        window_id = normalize_x11_window_id(parts[0])
+        if not window_id:
             continue
         windows.append({
-            "id": normalize_x11_window_id(parts[0]),
+            "pid": window_pid,
+            "id": window_id,
             "x": x,
             "y": y,
             "width": width,
             "height": height,
             "title": parts[8] if len(parts) > 8 else "",
         })
-    inventory = InventoryResult([
-        window for window in windows if window.get("id")
-    ], complete=True)
-    _x11_window_inventory_cache[pid] = inventory
+    inventory = InventoryResult(windows, complete=True)
+    _x11_window_inventory_cache["all"] = inventory
     return inventory
 
 
-def x11_windows_for_pid(pid):
-    """Return the native-window inventory for ``pid`` as a plain list."""
-    return list(x11_window_inventory_for_pid(pid))
+def x11_window_inventory_for_pid(pid):
+    """Return bounded native windows with explicit enumeration completeness."""
+    pid = int(pid or 0)
+    if pid <= 0:
+        return InventoryResult(
+            complete=False,
+            errors=["application process identity is unavailable"],
+        )
+    managed = _x11_managed_windows()
+    if not managed.complete:
+        return InventoryResult(complete=False, errors=managed.errors)
+    return InventoryResult([
+        {key: value for key, value in window.items() if key != "pid"}
+        for window in managed
+        if window["pid"] == pid
+    ], complete=True)
 
 
 def frame_distance(first, second):
@@ -360,7 +384,7 @@ def frame_distance(first, second):
 
 def x11_window_id_for_accessible(app, window):
     """Uniquely correlate one AX top-level window with one managed X11 window."""
-    candidates = x11_windows_for_pid(node_pid(app))
+    candidates = list(x11_window_inventory_for_pid(node_pid(app)))
     if not candidates:
         return None
     title_key = semantic_text_key(node_name(window))
@@ -373,7 +397,7 @@ def x11_window_id_for_accessible(app, window):
             return title_matches[0]["id"]
         if title_matches:
             candidates = title_matches
-    root_state = x11_root_window_state()
+    root_state = correlation_root_window_state()
     active_id = root_state.get("activeWindow") if root_state else None
     if (
         state_contains(window, Atspi.StateType.ACTIVE)
@@ -468,9 +492,30 @@ def strong_window_instance_handles(app, windows=None):
 
 
 def window_instance_handle(app, window_index, window, strong_handles=None):
-    """Return a stable native handle, or a scoped weak inventory identity."""
+    """Return a stable native handle, or a scoped weak inventory identity.
+
+    Without strong_handles, the app's handles are computed once per operation
+    and shared (dropped with the native listing). An incomplete native or AX
+    inventory raises observation_incomplete: callers compare the result with
+    a stored w2: handle, and a weak fallback would read as "window gone".
+    """
     if strong_handles is None:
-        strong_handles = strong_window_instance_handles(app)
+        key = ("handles", provider_bus_name(app), node_pid(app))
+        inventory = _x11_window_inventory_cache.get(key)
+        if inventory is None:
+            inventory = strong_window_instance_handle_inventory(app)
+            if inventory.complete:
+                _x11_window_inventory_cache[key] = inventory
+        if not inventory.complete:
+            raise OperationFailure(
+                "observation_incomplete: the native window inventory could "
+                "not be read completely; no input was emitted.",
+                failure_code="observation_incomplete",
+                failure_phase="precondition",
+                input_events_emitted=False,
+                failure_subject="window",
+            )
+        strong_handles = dict(inventory)
     strong = strong_handles.get(window_index)
     if strong:
         return strong
@@ -521,8 +566,11 @@ def app_windows(app):
     complete = children.complete
     errors = list(children.errors)
     for index, child in children:
+        # Read the role directly rather than through node_role(), which turns
+        # a provider failure into an empty role; a failed read must mark the
+        # inventory incomplete.
         try:
-            direct_role = str(child.get_role_name() or "").lower()
+            role = str(child.get_role_name() or "").lower()
         except Exception as error:
             complete = False
             errors.append(
@@ -531,10 +579,6 @@ def app_windows(app):
                 )
             )
             continue
-        # Tests and alternate providers may supply a normalized role adapter.
-        # The direct read above is still required so provider failures remain
-        # distinguishable from an actual empty role.
-        role = str(node_role(child) or direct_role).lower()
         bounds = extents(child)
         if role in {"frame", "window", "dialog", "alert"} or bounds is not None:
             windows.append((index, child))
@@ -757,17 +801,3 @@ def window_identity_set(app):
     for index, window in app_windows(app):
         identity.add((index, node_role(window), node_name(window)))
     return identity
-
-
-def window_identity_inventory(app, windows=None):
-    if windows is None:
-        windows = app_windows(app)
-    identities = {
-        (index, node_role(window), node_name(window))
-        for index, window in windows
-    }
-    return InventoryResult(
-        identities,
-        complete=inventory_complete(windows),
-        errors=inventory_errors(windows),
-    )

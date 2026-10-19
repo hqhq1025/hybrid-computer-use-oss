@@ -52,6 +52,9 @@ func (b *appWideBackend) snapshotFor(selected untilFakeWindow) *ProviderSnapshot
 		element.ProviderWindowName = selected.title
 	}
 	snapshot.Elements[3].ProviderObjectPath = selected.path + "/save"
+	// The root element is the window itself.
+	snapshot.Elements[0].ProviderBusName = ":1.84"
+	snapshot.Elements[0].ProviderObjectPath = selected.path
 	if selected.role == "dialog" {
 		snapshot.Elements[0].ControlType = "dialog"
 		snapshot.Elements[0].Name = selected.title
@@ -142,6 +145,36 @@ func TestSelectorUntilSeesDialogInAnotherWindowOfTheApp(t *testing.T) {
 	}
 	for _, request := range backend.actionRequests {
 		t.Fatalf("until sent input: %#v", request)
+	}
+}
+
+// Full-e a10b69e1 #19: Thunderbird exposes its modal "New Folder" dialog
+// as a top-level frame, so {"role":"dialog"} never matched although the
+// next observe showed blocking=modal_dialog. A modal top-level window
+// counts as a dialog; a non-modal one does not.
+func TestDialogSelectorMatchesAModalTopLevelWindow(t *testing.T) {
+	newFolder := untilFakeWindow{handle: untilDialogHandle, role: "frame", title: "New Folder", path: "/window/2", modal: true}
+	exists := func(value bool) map[string]any {
+		return map[string]any{"type": "exists", "value": value, "timeout_ms": 1,
+			"target": map[string]any{"selector": map[string]any{"role": "dialog"}}}
+	}
+	s, _, context := untilScopeService(t, untilMainWindow(), newFolder)
+	if result := s.runA11yPostcondition(context, exists(true)); result.IsError || untilStatus(result) != "pass" {
+		t.Fatalf("modal frame must satisfy role dialog: %s", resultText(result))
+	}
+	context.windowHandle = untilDialogHandle
+	if result := s.runA11yPostcondition(context, exists(true)); result.IsError || untilStatus(result) != "pass" {
+		t.Fatalf("modal frame bound as the batch window must satisfy role dialog: %s", resultText(result))
+	}
+	plain := newFolder
+	plain.modal = false
+	s, _, context = untilScopeService(t, untilMainWindow(), plain)
+	if result := s.runA11yPostcondition(context, exists(true)); untilStatus(result) == "pass" {
+		t.Fatalf("a non-modal frame is not a dialog: %s", resultText(result))
+	}
+	s, _, context = untilScopeService(t, untilMainWindow())
+	if result := s.runA11yPostcondition(context, exists(false)); result.IsError || untilStatus(result) != "pass" {
+		t.Fatalf("no modal window left: %s", resultText(result))
 	}
 }
 
@@ -263,9 +296,15 @@ func TestNegatedTitleUntilAfterTheAppExited(t *testing.T) {
 	if _, err := s.resolveShortAXAppRef(context.appRef); err == nil {
 		t.Fatal("the absence check revived the retired app ref")
 	}
-	if len(backend.listRequests) == 0 || backend.listRequests[0].AppIdentity == nil ||
-		backend.listRequests[0].AppIdentity.ProcessGeneration != "pid:10:start:100" {
-		t.Fatalf("the read must name the exact retired process: %#v", backend.listRequests)
+	// The name read fails here (a provider that cannot list a missing app
+	// by name), so the poll reads the exact retired process.
+	exact := false
+	for _, request := range backend.listRequests {
+		exact = exact || (request.AppIdentity != nil &&
+			request.AppIdentity.ProcessGeneration == "pid:10:start:100")
+	}
+	if !exact {
+		t.Fatalf("the fallback read must name the exact retired process: %#v", backend.listRequests)
 	}
 
 	backend.appGoneFacts = false
@@ -305,6 +344,117 @@ func TestActCloseLastWindowWithNegatedTitleUntil(t *testing.T) {
 	})
 	if line := publicLine(t, result); !strings.HasPrefix(line, `{"ok":true,"until":"true"`) {
 		t.Fatalf("evidence line %s\n%s", line, resultText(result))
+	}
+}
+
+// relaunchBackend models an application that was closed and launched
+// again: the old process is gone, and a name lookup sees the new process
+// once its window appears.
+type relaunchBackend struct {
+	appWideBackend
+	newTitles []string
+	shownFrom int
+}
+
+func (b *relaunchBackend) ListWindows(request ProviderWindowListRequest) (ProviderWindowResult, error) {
+	b.listRequests = append(b.listRequests, request)
+	if request.AppIdentity != nil {
+		return ProviderWindowResult{OK: false, Error: "stale_app_ref: gone",
+			Failure: &ProviderFailure{Code: "stale_app_ref", Phase: "precondition", Subject: "app", FactsComplete: true}}, nil
+	}
+	if len(b.listRequests) < b.shownFrom {
+		// The complete desktop inventory has no such application yet.
+		return ProviderWindowResult{OK: true}, nil
+	}
+	return ProviderWindowResult{OK: true, AppName: "LibreOffice", AppPID: 11, WindowTitles: b.newTitles}, nil
+}
+
+// Tasks 7ae48c60 #34 and 7767eef2 #15 (full-e), 0b17a146 #16 (full-d): the
+// app was closed and launched again. A title until bound to the old
+// process never saw the new window; it must follow the app name.
+func TestTitleUntilFollowsTheAppNameAcrossARelaunch(t *testing.T) {
+	s, _, context := untilScopeService(t)
+	s.markAppIdentityLifecycle(context.appRef, AXRefStale, "stale_app_ref")
+	backend := &relaunchBackend{newTitles: []string{"30_1.pptx - LibreOffice Impress"}, shownFrom: 3}
+	s.backend = backend
+	result := s.runA11yPostcondition(context, map[string]any{
+		"type": "window_title_contains", "text": "30_1.pptx", "exists": true, "timeout_ms": 2000,
+	})
+	if result.IsError || untilStatus(result) != "pass" {
+		t.Fatalf("the relaunched window was not seen: %s", resultText(result))
+	}
+	for _, request := range backend.listRequests {
+		if request.App != "LibreOffice" || request.AppIdentity != nil {
+			t.Fatalf("a poll was bound to the old process: %#v", backend.listRequests)
+		}
+	}
+}
+
+// A complete inventory in which the title never appears answers the until:
+// false, not unknown.
+func TestTitleUntilNeverShownInACompleteInventoryIsFalse(t *testing.T) {
+	s, _, context := untilScopeService(t)
+	backend := &relaunchBackend{shownFrom: 1 << 30}
+	s.backend = backend
+	result := s.runA11yPostcondition(context, map[string]any{
+		"type": "window_title_contains", "text": "30_1.pptx", "exists": true, "timeout_ms": 1,
+	})
+	if result.IsError || untilStatus(result) != "window_title_timeout" {
+		t.Fatalf("a complete inventory without the title must be until false: %s", resultText(result))
+	}
+	negated := s.runA11yPostcondition(context, map[string]any{
+		"type": "window_title_contains", "text": "30_1.pptx", "exists": false, "timeout_ms": 1,
+	})
+	if negated.IsError || untilStatus(negated) != "pass" {
+		t.Fatalf("the negated title must be true: %s", resultText(negated))
+	}
+}
+
+// dialogOKBackend closes the dialog when the batch presses its OK button.
+type dialogOKBackend struct {
+	appWideBackend
+}
+
+func (b *dialogOKBackend) ResolveAndAct(request ProviderActionRequest) (ProviderAccessibilityResult, error) {
+	b.actionRequests = append(b.actionRequests, request)
+	b.open = []untilFakeWindow{untilMainWindow()}
+	return ProviderAccessibilityResult{OK: true, Snapshot: b.snapshotFor(untilMainWindow()),
+		Mutation:       &ProviderMutationFacts{InputEventsEmitted: true},
+		ActionEvidence: &ProviderActionEvidence{InputEmitted: true, Route: "keyboard_synthesis"}}, nil
+}
+
+// Full-d a434992a #10/#20 and 04d9aeaf #9: the batch acts in a dialog and
+// presses OK, then waits on the main window title (or on the dialog title
+// to go). The title read was bound to the batch window, the dialog that the
+// action closed, so every poll hit stale_window_ref and the until ended
+// unknown although the main window title was there.
+func TestTitleUntilAfterTheBatchClosedItsDialog(t *testing.T) {
+	for _, until := range []map[string]any{
+		{"type": "title", "text": "Sheet", "timeout_ms": 1.0},
+		{"type": "title", "text": "Insert Sheet", "negate": true, "timeout_ms": 1.0},
+	} {
+		s, _, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
+		backend := &dialogOKBackend{appWideBackend{open: []untilFakeWindow{untilMainWindow(), untilDialogWindow()}}}
+		s.backend = backend
+		dialog := s.windowRefRegistry.Acquire("libreoffice", untilDialogHandle, `dialog "Insert Sheet"`, "c1",
+			":1.84", "/window/2", "pid:10:start:100", "dialog", "Insert Sheet", context.appRef)
+		for _, form := range []map[string]any{
+			{"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"}}}, "until": until},
+			{"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"}, "until": until}}},
+		} {
+			backend.open = []untilFakeWindow{untilMainWindow(), untilDialogWindow()}
+			form["mode"], form["window_ref"], form["observe"] = "act", dialog, "none"
+			result := s.callTool(publicToolAX, form)
+			if line := publicLine(t, result); !strings.HasPrefix(line, `{"ok":true`) ||
+				!strings.Contains(line, `"until_verified":true`) && !strings.Contains(line, `"until":"true"`) {
+				t.Fatalf("until %v after the dialog closed: %s\n%s", until, line, resultText(result))
+			}
+			for _, request := range backend.listRequests {
+				if request.WindowHandle != "" {
+					t.Fatalf("the title read was bound to one window: %#v", request)
+				}
+			}
+		}
 	}
 }
 

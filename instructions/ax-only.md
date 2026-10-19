@@ -25,8 +25,9 @@ option. Follow the current tool schema for argument shapes and actions.
 
 - List windows with `apps`, then observe or find in one window. Use content
   scope for one identifiable page or document root, and window scope for
-  chrome, menus, dialogs, and settings. `app` accepts a name, PID, or `aN`;
-  after the first read, use the returned `wN` as `window_ref`.
+  chrome, menus, dialogs, and settings. `app` accepts a name or PID;
+  after the first read, pass the returned `wN` as `window_ref` to observe and
+  find. `act` takes its window from the `rN` refs and needs no `window_ref`.
 - Find a known role, name, text, value, or state directly. Find searches canonical
   records even when the compact tree omits containers. Partial coverage does not
   invalidate returned targets, and projection summaries are not action targets.
@@ -40,8 +41,12 @@ option. Follow the current tool schema for argument shapes and actions.
 - Semantic click may activate a selectable item, not merely select it. Put
   `until` on the earlier action when a later action depends on its result.
   `until` cannot undo an action already sent.
-- Keep the default post-action diff and continue from it. Use `observe:"none"`
-  only when readback is unnecessary. A window screenshot is visual evidence,
+- Every `act` result starts with an `effect` line per targeted element (the
+  fields that changed, `no visible change`, or `unknown` with the reason) and a
+  `windows` line (windows opened, closed, or focused, with their `wN`). When
+  these lines show the result, do not read or wait again. Keep the default
+  post-action diff and continue from it. Use `observe:"none"` only when readback
+  is unnecessary; then the report says `unknown`. A window screenshot is visual evidence,
   not full-desktop control.
 - Put a known final predicate in the batch `until`. To wait without acting,
   use `observe` with `until`; a false predicate is a result, not an error.

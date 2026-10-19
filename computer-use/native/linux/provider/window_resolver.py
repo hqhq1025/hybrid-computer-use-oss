@@ -22,7 +22,6 @@ from .x11_windows import (
     app_windows,
     relative_frame,
     strong_window_instance_handle_inventory,
-    window_identity_inventory,
     x11_root_window_state,
     x11_window_id_for_accessible,
     x11_window_inventory_for_pid,
@@ -83,7 +82,7 @@ def perform_ax_window_action(tool, app, window, element_record):
             failure_subject="window",
         )
     window_id = x11_window_id_for_accessible(app, window)
-    if not window_id or strong_handles.get(int(path[0])) != handle:
+    if not window_id:
         raise OperationFailure(
             "stale_window_ref reason=native_window_instance_changed; "
             "no window command was emitted.",
@@ -112,16 +111,6 @@ def perform_ax_window_action(tool, app, window, element_record):
         )
     app_name = str(node_name(app) or "").strip()
     app_pid = node_pid(app)
-    before_windows = window_identity_inventory(app, windows=windows)
-    if not before_windows.complete:
-        raise OperationFailure(
-            "observation_incomplete: the target window inventory could not be "
-            "read completely before the native window command; no command was emitted.",
-            failure_code="observation_incomplete",
-            failure_phase="precondition",
-            input_events_emitted=False,
-            failure_subject="window",
-        )
     try:
         result = subprocess.run(
             ["wmctrl", "-ia" if tool == "activate" else "-ic", window_id],
@@ -155,7 +144,7 @@ def perform_ax_window_action(tool, app, window, element_record):
         route="native_window_command",
         input_emitted=True,
     )
-    _x11_window_inventory_cache.pop(int(app_pid or 0), None)
+    _x11_window_inventory_cache.clear()
     deadline = time.monotonic() + AX_WINDOW_ACTION_TIMEOUT_SECONDS
     observed = False
     windowless = False
@@ -219,14 +208,6 @@ def resolve_window_action_target(app, target):
     truth must not depend on reading the window's descendant accessibility
     tree, which can be incomplete for unrelated content.
     """
-    if not isinstance(target, dict):
-        raise OperationFailure(
-            "invalid_target: the window target is malformed; no input was emitted.",
-            failure_code="invalid_target",
-            failure_phase="precondition",
-            input_events_emitted=False,
-            failure_subject="window",
-        )
     target_handle = str(target.get("windowHandle") or "").strip()
     if not target_handle:
         raise OperationFailure(

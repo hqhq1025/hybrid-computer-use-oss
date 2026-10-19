@@ -245,8 +245,10 @@ func guiValidationErrorText(response ProviderDesktopResult) string {
 
 func (s *service) invalidateAccessibilitySnapshots() {
 	s.snapshots = map[string]*appSnapshot{}
+	s.accessibilityEpoch++
 	s.exposedHiddenRefs = map[string]map[int]elementRecord{}
 	s.findCursorRegistry.Reset()
+	s.seenAccessibilityEpoch = s.accessibilityEpoch
 }
 
 func (s *service) guiResponse(response ProviderDesktopResult) toolCallResult {

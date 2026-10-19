@@ -174,33 +174,6 @@ func providerOrderedInputRequestsFromPlan(
 	return requests, nil
 }
 
-func DecodeProviderOrderedInputRequest(
-	data []byte,
-) (ProviderOrderedInputRequest, error) {
-	var request ProviderOrderedInputRequest
-	if err := decodeProviderWireJSON(data, &request); err != nil {
-		return ProviderOrderedInputRequest{}, err
-	}
-	if err := request.Validate(); err != nil {
-		return ProviderOrderedInputRequest{}, err
-	}
-	return request, nil
-}
-
-func DecodeProviderOrderedInputResult(
-	data []byte,
-	request ProviderOrderedInputRequest,
-) (ProviderOrderedInputResult, error) {
-	var result ProviderOrderedInputResult
-	if err := decodeProviderWireJSON(data, &result); err != nil {
-		return ProviderOrderedInputResult{}, err
-	}
-	if err := result.ValidateFor(request); err != nil {
-		return ProviderOrderedInputResult{}, err
-	}
-	return result, nil
-}
-
 func (request ProviderOrderedInputRequest) Validate() error {
 	if request.ContractVersion != providerOrderedInputContractV1 {
 		return fmt.Errorf(

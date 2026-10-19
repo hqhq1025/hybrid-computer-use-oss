@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -58,14 +59,9 @@ func (s *service) getAppState(
 	} else {
 		request.IncludeScreenshot = includeScreenshot
 	}
-	snapshot, notes, result := s.refreshSnapshot(app, request)
+	snapshot, notes, followsFailedAction, result := s.observeAppSnapshot(app, request)
 	if result.IsError {
 		return result
-	}
-	followsFailedAction := false
-	if note := s.consumeFailedObservation(app, snapshot); note != "" {
-		notes = append([]string{note}, notes...)
-		followsFailedAction = true
 	}
 	// Observations carry diagnostics too: an app can be alive while exposing
 	// an empty accessibility tree, and without a note the agent would read
@@ -75,6 +71,24 @@ func (s *service) getAppState(
 		notes,
 		forceFull != nil && *forceFull,
 	), followsFailedAction)
+}
+
+// observeAppSnapshot refreshes the action snapshot of an app and settles a
+// pending observation owed after a stale-ref failure. It is the read step of
+// observe; text and records rendering differ only after it.
+func (s *service) observeAppSnapshot(
+	app string, request axServiceRequest,
+) (*appSnapshot, []string, bool, toolCallResult) {
+	snapshot, notes, result := s.refreshSnapshot(app, request)
+	if result.IsError {
+		return nil, nil, false, result
+	}
+	followsFailedAction := false
+	if note := s.consumeFailedObservation(app, snapshot); note != "" {
+		notes = append([]string{note}, notes...)
+		followsFailedAction = true
+	}
+	return snapshot, notes, followsFailedAction, toolCallResult{}
 }
 
 func deliveredTreeKey(snapshot *appSnapshot) string {
@@ -100,12 +114,21 @@ func repeatedTreeReferenceLines(snapshot *appSnapshot) []string {
 	if snapshot == nil {
 		return nil
 	}
-	return []string{
-		"Tree unchanged: this window/view was already delivered " +
-			"in full during this MCP session. The identical tree is referenced rather " +
-			"than repeated. Request a fresh rooted observation when you need local " +
-			"context; an identical full replay adds no new evidence.",
-	}
+	return treeUnchangedReferenceLines(len(snapshot.TreeLines))
+}
+
+// treeUnchangedReferenceLines replaces a tree the model already holds. The
+// model's copy is the last full tree plus every diff delivered after it, so
+// the reference says where the state came from and how to get it again.
+func treeUnchangedReferenceLines(lineCount int) []string {
+	return []string{fmt.Sprintf(
+		"Tree unchanged: identical to the state of this window already "+
+			"delivered by an earlier result (last full tree plus later diffs), "+
+			"so its %d lines are not repeated; the rN refs shown there still "+
+			"apply. Call {\"mode\":\"observe\",\"observe\":\"full\"} "+
+			"to get the whole tree again.",
+		lineCount,
+	)}
 }
 
 func deliveredSnapshotKey(snapshot *appSnapshot) string {
@@ -158,6 +181,23 @@ func (s *service) deliveredSnapshotFor(snapshot *appSnapshot) *appSnapshot {
 		return nil
 	}
 	return s.observations.lastComplete[key]
+}
+
+// deliveredStateMatches reports whether the model already holds snapshot:
+// the last state delivered for this window and projection, whether as a full
+// tree or as a diff against an earlier delivered state, has the same provider
+// snapshot ID and renders to the same tree lines. An action that returned a
+// diff advances this baseline but not the full-tree ledger, so a following
+// observe of an unchanged window would otherwise resend the whole tree.
+func (s *service) deliveredStateMatches(snapshot *appSnapshot) bool {
+	if snapshot == nil || snapshot.SnapshotID == "" {
+		return false
+	}
+	delivered := s.deliveredSnapshotFor(snapshot)
+	return delivered != nil &&
+		delivered.SnapshotID == snapshot.SnapshotID &&
+		delivered.contentRevision == snapshot.contentRevision &&
+		slices.Equal(delivered.TreeLines, snapshot.TreeLines)
 }
 
 func snapshotLogicalWindowRef(snapshot *appSnapshot) string {
@@ -224,17 +264,13 @@ func (s *service) getAppStateResult(
 
 	acquisitionComplete :=
 		providerCoverageSummary(snapshot.Annotations).AcquisitionIncomplete == 0
-	if acquisitionComplete &&
-		snapshot.identicalToPrevious && delivered && !forceFull {
-		result := snapshot.resultWithTreeOverride(notes, []string{
-			fmt.Sprintf(
-				"Tree unchanged: all %d rendered lines are byte-identical to the "+
-					"tree already delivered in this MCP session, so the full "+
-					"tree is referenced rather than repeated. A fresh rooted observation "+
-					"can return local context without replaying identical whole-window bytes.",
-				len(snapshot.TreeLines),
-			),
-		})
+	if acquisitionComplete && !forceFull &&
+		((snapshot.identicalToPrevious && delivered) ||
+			s.deliveredStateMatches(snapshot)) {
+		result := snapshot.resultWithTreeOverride(
+			notes,
+			treeUnchangedReferenceLines(len(snapshot.TreeLines)),
+		)
 		result.StructuredContent = map[string]any{
 			"snapshot_id":         snapshot.SnapshotID,
 			"full_tree_returned":  false,

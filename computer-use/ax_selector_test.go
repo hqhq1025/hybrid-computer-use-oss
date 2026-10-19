@@ -44,6 +44,58 @@ func TestStructuredSelectorAcceptsStandardOrProviderRole(t *testing.T) {
 // is its real match rather than the last quote in the selector, including when
 // the name contains quotes or backslashes. Taking the last quote only works
 // without a suffix; a trailing [desc="..."] would be swallowed into the name.
+// Full-e 0810415c #6 wrote role "menu item"; the model sees "menuitem" in
+// the tree and models also write "menu_item". Every spelling must name the
+// same role, in an until selector and in find, without widening to other
+// roles.
+func TestSelectorAndFindRoleSpellingsNameTheSameRole(t *testing.T) {
+	item := &elementRecord{Index: 1, ControlType: "menu item", LocalizedControlType: "menu item", Name: "Paragraph..."}
+	button := &elementRecord{Index: 2, ControlType: "push button", Name: "Paragraph..."}
+	snapshot := &appSnapshot{Elements: []elementRecord{*item, *button}}
+	for _, role := range []string{"menu item", "menuitem", "menu_item", "Menu-Item", "MenuItem"} {
+		if !selectorRoleMatches(item, role) || selectorRoleMatches(button, role) {
+			t.Fatalf("selector role %q", role)
+		}
+		if !recordMatchesFind(item, role, "", "", "", false, false) ||
+			recordMatchesFind(button, role, "", "", "", false, false) {
+			t.Fatalf("find role %q", role)
+		}
+		address, err := a11ySelectorAddress(map[string]any{"role": role, "name": "Paragraph..."})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record, err := lookupBySelectorFor(snapshot, address, "", "until"); err != nil || record.Index != 1 {
+			t.Fatalf("until selector role %q: %v", role, err)
+		}
+	}
+	for _, role := range []string{"push_button", "push-button", "pushbutton", "button"} {
+		if !selectorRoleMatches(button, role) || selectorRoleMatches(item, role) {
+			t.Fatalf("selector role %q", role)
+		}
+	}
+}
+
+// An exists until whose name is not exact fails, and its first line names
+// the closest element so the next call can use the right name.
+func TestFailedExistsUntilNamesTheClosestCandidate(t *testing.T) {
+	s, _, context := untilScopeService(t, untilMainWindow())
+	result := s.runA11yPostcondition(context, map[string]any{
+		"type": "exists", "value": true, "timeout_ms": 1,
+		"target": map[string]any{"selector": map[string]any{"role": "push_button", "name": "Sav"}},
+	})
+	line := firstLine(resultText(result))
+	if untilStatus(result) != "predicate_false" || !strings.Contains(line, `closest: button "Save"`) {
+		t.Fatalf("first line must name the closest candidate: %s", line)
+	}
+	if got := closestSelectorCandidates(`menuitem "Paragraph"`, 3, []elementRecord{
+		{ControlType: "push button", Name: "Paragraph"},
+		{ControlType: "menu item", Name: "Paragraph..."},
+		{ControlType: "menu item", Name: "Character..."},
+	}); strings.Join(got, "|") != `menuitem "Paragraph..."|button "Paragraph"` {
+		t.Fatalf("candidates %q", got)
+	}
+}
+
 func TestSelectorFindsTheRealClosingQuote(t *testing.T) {
 	role, name, hasName, rest := parseSelector(`toggle button "Menu" [desc="View options"]`)
 	if role != "toggle button" || name != "Menu" || !hasName {

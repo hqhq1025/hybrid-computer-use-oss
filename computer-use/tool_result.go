@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +16,9 @@ type contentItem struct {
 	Text     string `json:"text,omitempty"`
 	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mimeType,omitempty"`
+	// Path replaces Data for command-line and socket clients; MCP results
+	// never set it.
+	Path string `json:"path,omitempty"`
 }
 
 type toolCallResult struct {
@@ -260,4 +264,94 @@ func compactTriState(value any) any {
 	default:
 		return value
 	}
+}
+
+// finalizeForModel is the last step before a result reaches a model, and
+// every entry point that shows text to a model calls it, so that the MCP
+// server and the command line return the same bytes.
+func finalizeForModel(name string, result toolCallResult, structured bool) toolCallResult {
+	return placeModelEvidence(name, prepareModelEvidence(name, result), structured)
+}
+
+// prepareModelEvidence applies the AX text budget and compacts the AX
+// evidence into its public form. The budget runs first: its metadata
+// (response size, truncation reason) must exist before the evidence line is
+// serialized, or fields that live only in the structured channel disappear
+// when that channel is removed.
+func prepareModelEvidence(name string, result toolCallResult) toolCallResult {
+	if name == publicToolAX {
+		result = enforceAXResponseBudget(result)
+		result = prepareAXEvidence(result)
+	}
+	return result
+}
+
+// placeModelEvidence keeps structuredContent for clients that negotiated it
+// and opted in. Otherwise the evidence moves to the first text item and the
+// structured field is dropped: some clients prefer structuredContent and
+// hide sibling text from the model, which can make desktop state appear
+// unavailable.
+func placeModelEvidence(name string, result toolCallResult, structured bool) toolCallResult {
+	if structured {
+		return result
+	}
+	if name == publicToolAX {
+		result = withAXTextEvidence(result)
+	} else {
+		result = withTextEvidence(result)
+	}
+	result.StructuredContent = nil
+	return result
+}
+
+// callForModel runs one public tool call and returns the model-facing
+// result. It is the MCP tools/call result and the computer-use call output.
+func (s *service) callForModel(name string, args map[string]any, structured bool) toolCallResult {
+	return finalizeForModel(name, s.callTool(name, args), structured)
+}
+
+// writeImagesToFiles replaces inline image data with files in the output
+// directory. Command-line and socket clients get paths, never base64 on
+// stdout.
+func writeImagesToFiles(result toolCallResult) (toolCallResult, error) {
+	content := make([]contentItem, 0, len(result.Content))
+	for _, item := range result.Content {
+		if item.Type != "image" || item.Data == "" {
+			content = append(content, item)
+			continue
+		}
+		path, err := writeImageFile(item.Data, item.MimeType)
+		if err != nil {
+			return result, err
+		}
+		content = append(content, contentItem{Type: "image", MimeType: item.MimeType, Path: path})
+	}
+	result.Content = content
+	return result, nil
+}
+
+// writeImageFile decodes base64 image data into a new file in the output
+// directory and returns its path.
+func writeImageFile(data, mimeType string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return "", fmt.Errorf("decode image: %w", err)
+	}
+	dir := outputDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	extension := ".png"
+	if mimeType == "image/jpeg" {
+		extension = ".jpg"
+	}
+	file, err := os.CreateTemp(dir, "screenshot-*"+extension)
+	if err != nil {
+		return "", err
+	}
+	if _, err := file.Write(raw); err != nil {
+		file.Close()
+		return "", err
+	}
+	return file.Name(), file.Close()
 }

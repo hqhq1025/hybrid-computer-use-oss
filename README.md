@@ -124,6 +124,7 @@ gateways, setup canaries, single tasks, panels and result files.
 
 - [Architecture](docs/ARCHITECTURE.md): process model, AX and GUI state, evidence.
 - [Computer Use MCP](docs/MCP.md): build, run, client setup, contract, troubleshooting.
+- [Code entry points](docs/CODE.md): daemon, command line, Python SDK, programmatic tool calling.
 - [Platform support](docs/PLATFORMS.md): native packages and permissions.
 - [Running OSWorld](docs/OSWORLD.md): the evaluation runbook.
 - [Agent profiles](docs/AGENT_PROFILES.md): how the four task agents are configured.

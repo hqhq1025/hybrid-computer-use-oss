@@ -46,7 +46,7 @@
             "openWorldHint": false,
             "title": "Accessibility"
           },
-          "description": "Accessibility for application windows; peer of GUI. Modes: apps lists windows (wN, title, app, active). observe returns the window tree with rN refs. find returns matching rN; a truncated result shows the cursor call for the next page. act runs ordered actions in one window, checks them before any input, and returns a diff. Copy rN/wN exactly from the latest result; stale refs fail and never rebind. keypress/type without ref go to the focused window. activate/close take a title substring or wN. Put close, and any action that opens or replaces a window, last. until waits for a predicate; false is a result, not an error. Errors return code and hint. Examples:\n{\"mode\":\"act\",\"actions\":[{\"type\":\"activate\",\"title\":\"Quarterly report\"},{\"type\":\"keypress\",\"keys\":[\"CTRL\",\"S\"]}]}\n{\"mode\":\"find\",\"window_ref\":\"w2\",\"query\":{\"role\":\"button\",\"name_contains\":\"Save\"}}\n{\"mode\":\"act\",\"actions\":[{\"type\":\"click\",\"ref\":\"r12\"}],\"until\":{\"type\":\"title\",\"text\":\"Export\"}}",
+          "description": "Accessibility for application windows. Modes: apps lists windows (wN, title, app, active). observe returns the window tree with rN refs. find returns matching rN; a truncated result shows the cursor call for the next page. act runs ordered actions in one window, checks them before input, and reports each target's change, windows opened/closed/focused, and a diff. Copy rN/wN exactly from the latest result; stale refs fail and never rebind. keypress/type without ref go to the focused window. activate/close take a title substring or wN. Put close, and any action that opens or replaces a window, last. until waits for a predicate; false is a result, not an error. Errors return code and hint. Examples:\n{\"mode\":\"act\",\"actions\":[{\"type\":\"activate\",\"title\":\"Quarterly report\"},{\"type\":\"keypress\",\"keys\":[\"CTRL\",\"S\"]}]}\n{\"mode\":\"find\",\"window_ref\":\"w2\",\"query\":{\"role\":\"button\",\"name_contains\":\"Save\"}}\n{\"mode\":\"act\",\"actions\":[{\"type\":\"click\",\"ref\":\"r12\"}],\"until\":{\"type\":\"title\",\"text\":\"Export\"}}",
           "inputSchema": {
             "$defs": {
               "predicate": {
@@ -233,7 +233,7 @@
                 "type": "array"
               },
               "app": {
-                "description": "App name, app id, PID, or aN; use once, then window_ref.",
+                "description": "App name, app id, or PID; use once, then window_ref.",
                 "pattern": "\\S",
                 "type": "string"
               },
@@ -317,7 +317,7 @@
                 "$ref": "#/$defs/predicate"
               },
               "window_ref": {
-                "description": "Read identity. act: optional; binds ref-less keys/text to wN instead of the focused window; must match any refs.",
+                "description": "observe/find: window to read. act: omit when actions have refs, which name the window; it only sends ref-less keys/text to wN instead of the focused window.",
                 "pattern": "^w[1-9][0-9]*$",
                 "type": "string"
               }
@@ -815,7 +815,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"bogus\",\"message\":\"mode \\\"observe\\\" does not accept \\\"bogus\\\"; accepted: mode, app, window_ref, scope, observe, root, until\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"bogus\",\"message\":\"mode \\\"observe\\\" does not accept \\\"bogus\\\"; accepted: mode, app, window_ref, scope, observe, root, until\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"w1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -859,7 +859,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app_ref\",\"message\":\"\\\"app_ref\\\" is not a field here; use \\\"app\\\"\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app_ref\",\"message\":\"\\\"app_ref\\\" is not a field here; use \\\"app\\\"\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"app\\\":\\\"a1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -880,7 +880,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"observe needs app or window_ref\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"app\\\":\\\"a1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"observe needs app or window_ref\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"w1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1000,7 +1000,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"mode \\\"act\\\" does not accept \\\"app\\\"; accepted: mode, window_ref, actions, observe, until\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"mode \\\"act\\\" does not accept \\\"app\\\"; accepted: mode, window_ref, actions, observe, until\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1141,7 +1141,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"close must be the last action; a closed window cannot take later input\",\"input_emitted\":false,\"completed\":0,\"requested\":2,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"close must be the last action; a closed window cannot take later input\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"close\\\",\\\"ref\\\":\\\"w1\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":2,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1306,7 +1306,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"find needs app or window_ref, or a cursor from a truncated result\",\"hint\":\"{\\\"mode\\\":\\\"find\\\",\\\"window_ref\\\":\\\"w1\\\",\\\"query\\\":{\\\"role\\\":\\\"button\\\"}}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"find needs app or window_ref, or a cursor from a truncated result\",\"hint\":\"{\\\"mode\\\":\\\"find\\\",\\\"window_ref\\\":\\\"w1\\\",\\\"query\\\":{\\\"name_contains\\\":\\\"Save\\\"}}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1354,7 +1354,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"query.name\",\"message\":\"query does not accept \\\"name\\\"; accepted: role, name_equals, name_contains, text_equals, text_contains, state\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"query.name\",\"message\":\"query does not accept \\\"name\\\"; accepted: role, name_equals, name_contains, text_equals, text_contains, state\",\"hint\":\"{\\\"name_contains\\\":\\\"Save\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1380,7 +1380,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"limit\",\"message\":\"limit must be an integer from 1 to 50\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"limit\",\"message\":\"limit must be an integer from 1 to 50\",\"hint\":\"{\\\"mode\\\":\\\"find\\\",\\\"app\\\":\\\"gedit\\\",\\\"query\\\":{\\\"role\\\":\\\"button\\\"}}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],

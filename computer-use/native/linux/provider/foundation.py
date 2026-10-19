@@ -479,9 +479,8 @@ MAX_CHILD_FANOUT = 512
 # reports about 2.1 billion children) are stopped by HARD_CHILD_CAP instead.
 MANAGED_ENUMERATE_CAP = 256
 
-# Node budget for find_first(), which focused_summary() and selected_text()
-# use to locate focus; without it, a predicate that never matches walks the
-# whole tree.
+# Node budget for find_first(), which focus_and_selection() uses to locate
+# focus; without it, a predicate that never matches walks the whole tree.
 FIND_FIRST_BUDGET = 4000
 
 # Semantic action names that the click tool invokes. preferred_action_index()

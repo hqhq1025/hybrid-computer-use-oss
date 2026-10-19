@@ -946,18 +946,12 @@ func incrementalAXSnapshot(before, after *appSnapshot) ([]string, bool) {
 		after.axSnapshot,
 		acquisitionComplete,
 	)
+	// The diff replaces the current tree only when it is shorter, whatever
+	// its absolute size: a long diff on a longer tree still saves output and
+	// keeps the changed nodes marked. A no-change diff is always returned.
 	diffChars := len(strings.Join(lines, "\n"))
 	currentChars := len(strings.Join(after.TreeLines, "\n"))
-	hasOrderChange := false
-	for _, change := range changes {
-		if change.Kind == AXDiffMoved {
-			hasOrderChange = true
-			break
-		}
-	}
-	const maxAXChangedChunkChars = 6000
-	if diffChars > maxAXChangedChunkChars ||
-		(!hasOrderChange && currentChars > 0 && diffChars >= currentChars) {
+	if len(changes) > 0 && currentChars > 0 && diffChars >= currentChars {
 		return nil, false
 	}
 	return lines, true

@@ -77,7 +77,7 @@ type darwinProviderWorker struct {
 	cmd         *exec.Cmd
 	connection  io.ReadWriteCloser
 	stdout      *bufio.Reader
-	stderr      *boundedDarwinProviderBuffer
+	stderr      *boundedProviderBuffer
 	done        chan struct{}
 	stderrDone  chan struct{}
 	providerPID int
@@ -94,41 +94,6 @@ type darwinProviderReadResult struct {
 type darwinProviderWriteResult struct {
 	written int
 	err     error
-}
-
-type boundedDarwinProviderBuffer struct {
-	mu        sync.Mutex
-	data      []byte
-	limit     int
-	truncated bool
-}
-
-func (buffer *boundedDarwinProviderBuffer) Write(data []byte) (int, error) {
-	buffer.mu.Lock()
-	defer buffer.mu.Unlock()
-	originalLength := len(data)
-	if buffer.limit <= 0 {
-		buffer.truncated = buffer.truncated || originalLength > 0
-		return originalLength, nil
-	}
-	if len(data) >= buffer.limit {
-		buffer.data = append(buffer.data[:0], data[len(data)-buffer.limit:]...)
-		buffer.truncated = true
-		return originalLength, nil
-	}
-	if excess := len(buffer.data) + len(data) - buffer.limit; excess > 0 {
-		copy(buffer.data, buffer.data[excess:])
-		buffer.data = buffer.data[:len(buffer.data)-excess]
-		buffer.truncated = true
-	}
-	buffer.data = append(buffer.data, data...)
-	return originalLength, nil
-}
-
-func (buffer *boundedDarwinProviderBuffer) snapshot() ([]byte, bool) {
-	buffer.mu.Lock()
-	defer buffer.mu.Unlock()
-	return append([]byte(nil), buffer.data...), buffer.truncated
 }
 
 func nextDarwinProviderRequestID() string {
@@ -424,22 +389,13 @@ func (manager *darwinProviderProcessManager) recordStderrLocked(
 		"[computer-use macos-provider request=%s operation=%s "+
 			"stderr_bytes=%d stderr_truncated=%t "+
 			"transport_error=%q]\n%s\n",
-		boundedDarwinProviderLabel(request.RequestID),
-		boundedDarwinProviderLabel(string(request.Operation)),
+		boundedProviderLabel(request.RequestID),
+		boundedProviderLabel(string(request.Operation)),
 		len(data),
 		truncated,
 		callErr.Error(),
 		data,
 	)
-}
-
-func boundedDarwinProviderLabel(value string) string {
-	const limit = 256
-	value = strings.TrimSpace(value)
-	if len(value) > limit {
-		return value[:limit]
-	}
-	return value
 }
 
 func (manager *darwinProviderProcessManager) stopLocked() {
@@ -506,7 +462,7 @@ func startDarwinProviderWorker(
 	}
 	worker := &darwinProviderWorker{
 		cmd:        cmd,
-		stderr:     &boundedDarwinProviderBuffer{limit: maxDarwinProviderStderrBytes},
+		stderr:     &boundedProviderBuffer{limit: maxDarwinProviderStderrBytes},
 		done:       make(chan struct{}),
 		stderrDone: make(chan struct{}),
 		runtimeDir: runtimeDir,
@@ -752,14 +708,14 @@ func (worker *darwinProviderWorker) call(
 	if response.RequestID != request.RequestID {
 		cause := fmt.Errorf(
 			"provider returned request_id %q for a different request",
-			boundedDarwinProviderLabel(response.RequestID),
+			boundedProviderLabel(response.RequestID),
 		)
 		if response.RequestID == "invalid" &&
 			response.Accessibility != nil &&
 			strings.TrimSpace(response.Accessibility.Error) != "" {
 			cause = fmt.Errorf(
 				"provider rejected the request envelope: %s",
-				boundedDarwinProviderLabel(
+				boundedProviderLabel(
 					response.Accessibility.Error,
 				),
 			)

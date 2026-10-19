@@ -63,6 +63,47 @@ func TestUntilOnBatchThatStaysFalseIsAResult(t *testing.T) {
 	}
 }
 
+// Full-e 8ba5ae7a #8: click r58 with an until on its checked state passed,
+// yet the call still said effect_unknown and mutation_unknown. A verified
+// until is the effect evidence. The public line follows the act report rule:
+// a verified effect is not also unknown or unattributed.
+func TestVerifiedUntilClearsEffectUnknown(t *testing.T) {
+	for _, call := range []map[string]any{
+		{"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"},
+			"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0}}}},
+		{"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"}}},
+			"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0}},
+	} {
+		s, backend, window := untilTitleService(t, "Saved - Sheet")
+		// The action's own readback saw no AX change, which marks the
+		// effect unknown before the until runs.
+		backend.accessibilityResponse.Mutation.MutationUnknown = true
+		call["mode"], call["window_ref"], call["observe"] = "act", window, "none"
+		result := s.callTool(publicToolAX, call)
+		line := publicLine(t, result)
+		if result.IsError || !strings.HasPrefix(line, `{"ok":true,`) ||
+			!strings.Contains(line, `"until_verified":true`) ||
+			strings.Contains(line, `"effect_unknown"`) || strings.Contains(line, `"mutation_unknown"`) ||
+			strings.Contains(line, `"cause_unattributed"`) {
+			t.Fatalf("verified until must clear effect_unknown, mutation_unknown and cause_unattributed: %s", line)
+		}
+	}
+	// One action without an until leaves the call's effect unknown.
+	s, backend, window := untilTitleService(t, "Saved - Sheet")
+	backend.accessibilityResponse.Mutation.MutationUnknown = true
+	result := s.callTool(publicToolAX, map[string]any{
+		"mode": "act", "window_ref": window, "observe": "none",
+		"actions": []any{
+			map[string]any{"type": "keypress", "keys": []any{"ENTER"},
+				"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0}},
+			map[string]any{"type": "keypress", "keys": []any{"TAB"}},
+		},
+	})
+	if line := publicLine(t, result); !strings.Contains(line, `"mutation_unknown":true`) {
+		t.Fatalf("an unchecked action must keep the call's mutation unknown: %s", line)
+	}
+}
+
 func TestUntilOnActionGatesTheNextAction(t *testing.T) {
 	s, backend, window := untilTitleService(t, "Sheet")
 	result := s.callTool(publicToolAX, map[string]any{

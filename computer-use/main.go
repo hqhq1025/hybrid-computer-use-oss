@@ -24,8 +24,11 @@ func main() {
 	err := runCLI(os.Args[1:], os.Stdout)
 	shutdownPlatformRuntime()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		var exit *exitError
+		if !errors.As(err, &exit) {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		os.Exit(exitStatusOf(err))
 	}
 }
 
@@ -47,7 +50,18 @@ func runCLI(args []string, stdout io.Writer) error {
 		fmt.Fprintln(stdout, version)
 		return nil
 	case "mcp":
-		return runMCP(os.Stdin, stdout)
+		return runMCPCommand(args[1:], os.Stdin, stdout)
+	case "serve":
+		return runServe(args[1:], os.Stderr)
+	case "daemon":
+		return runDaemonCommand(args[1:], stdout)
+	case "schema":
+		return runSchema(args[1:], stdout)
+	case "batch":
+		if status := runBatch(args[1:], os.Stdin, stdout, os.Stderr); status != 0 {
+			return &exitError{status: status}
+		}
+		return nil
 	case "doctor":
 		fmt.Fprintln(stdout, runtimeNotes(defaultRuntimeBackend().HostInfo().Platform))
 		return nil
@@ -66,6 +80,12 @@ func runCLI(args []string, stdout io.Writer) error {
 		}
 		return nil
 	default:
+		if _, shorthand := cliShorthands[args[0]]; shorthand {
+			if status := runShorthand(args[0], args[1:], stdout, os.Stderr); status != 0 {
+				return &exitError{status: status}
+			}
+			return nil
+		}
 		return fmt.Errorf("unknown command: %s\n\n%s", args[0], helpText(""))
 	}
 }
@@ -130,7 +150,10 @@ func runCallCommand(args []string, svc *service) (any, bool, error) {
 				return nil, false, fmt.Errorf(
 					"unsupported public tool %q; use AX or GUI", call.Tool)
 			}
-			result := svc.callTool(publicName, call.Args)
+			result, err := svc.callForCommandLine(publicName, call.Args)
+			if err != nil {
+				return nil, false, err
+			}
 			outputs = append(outputs, map[string]any{"tool": publicName, "result": result})
 			if result.IsError {
 				hasError = true
@@ -152,8 +175,31 @@ func runCallCommand(args []string, svc *service) (any, bool, error) {
 		return nil, false, fmt.Errorf(
 			"unsupported public tool %q; use AX or GUI", toolName)
 	}
-	result := svc.callTool(publicName, arguments)
+	result, err := svc.callForCommandLine(publicName, arguments)
+	if err != nil {
+		return nil, false, err
+	}
 	return result, result.IsError, nil
+}
+
+// callForCommandLine returns exactly what an MCP client without structured
+// content receives, except that images are files: their paths replace the
+// base64 data.
+func (s *service) callForCommandLine(name string, args map[string]any) (toolCallResult, error) {
+	result, _, err := s.callForText(name, args)
+	return result, err
+}
+
+// callForText is callForCommandLine plus the public error code of the
+// result ("" on success), for entry points that map it to an exit status.
+func (s *service) callForText(name string, args map[string]any) (toolCallResult, string, error) {
+	result := prepareModelEvidence(name, s.callTool(name, args))
+	code := ""
+	if result.IsError {
+		code = recordFromEvidence(name, result).Code
+	}
+	result, err := writeImagesToFiles(placeModelEvidence(name, result, false))
+	return result, code, err
 }
 
 type callSpec struct {
@@ -239,6 +285,8 @@ func helpText(command string) string {
 		return "Usage:\n  computer-use mcp\n\nStart the stdio MCP server.\n"
 	case "call":
 		return "Usage:\n  computer-use call <AX|GUI> [--args '<json-object>']\n  computer-use call --calls '<json-array>'\n\nOnly the public AX and GUI tools are accepted.\n"
+	case "cli":
+		return cliHelpText()
 	default:
 		return `Computer Use
 

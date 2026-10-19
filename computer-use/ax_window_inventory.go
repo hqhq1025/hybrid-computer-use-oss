@@ -16,6 +16,9 @@ type axDesktopWindow struct {
 	title   string
 	active  bool
 	handle  string
+	// appProcess is the provider identity of the owning application
+	// process: its bus name and process generation.
+	appProcess [2]string
 }
 
 // axWindowInventory is one complete listing of top-level windows.
@@ -74,20 +77,22 @@ func (s *service) listDesktopWindows() (*axWindowInventory, toolCallResult) {
 			if ref == "" {
 				// No strong native handle: the window cannot be verified
 				// before input, so it gets no ref.
-				lines = append(lines, fmt.Sprintf("-  %s  app=%s %s  (not addressable)",
-					strconv.Quote(window.Title), app.Name, appRef))
+				lines = append(lines, fmt.Sprintf("-  %s  app=%s  (not addressable)",
+					strconv.Quote(window.Title), app.Name))
 				continue
 			}
 			listed++
 			entry := axDesktopWindow{
 				ref: ref, appRef: appRef, appName: app.Name,
 				title: window.Title, active: window.Active, handle: window.Handle,
+				appProcess: [2]string{app.ProviderBusName, app.ProcessGeneration},
 			}
 			inventory.windows = append(inventory.windows, entry)
 			lines = append(lines, entry.line())
 		}
 		if listed == 0 && len(app.Windows) == 0 {
-			// A provider without a window listing still reports the app.
+			// A provider without a window listing still reports the app. It
+			// has no wN, so the line keeps the aN as its only exact handle.
 			line := strings.TrimSpace(app.DisplayText)
 			if line == "" {
 				line = app.Name
@@ -99,6 +104,9 @@ func (s *service) listDesktopWindows() (*axWindowInventory, toolCallResult) {
 		sort.Strings(inventory.infrastructure)
 		lines = append(lines, "(not input targets: "+strings.Join(inventory.infrastructure, ", ")+")")
 	}
+	// The provider says when the listing is incomplete, for example when an
+	// application does not answer; a missing window is not proof of absence.
+	lines = append(lines, response.Notes...)
 	if len(lines) == 0 {
 		lines = append(lines, "No top-level windows are visible to the accessibility provider.")
 	}
@@ -106,8 +114,10 @@ func (s *service) listDesktopWindows() (*axWindowInventory, toolCallResult) {
 	return inventory, toolCallResult{}
 }
 
+// line shows the app by name only: the wN already names the window and its
+// app, and models never passed the aN (0 of 517 recorded AX calls).
 func (window axDesktopWindow) line() string {
-	line := fmt.Sprintf("%s %s  app=%s %s", window.ref, strconv.Quote(window.title), window.appName, window.appRef)
+	line := fmt.Sprintf("%s %s  app=%s", window.ref, strconv.Quote(window.title), window.appName)
 	if window.active {
 		line += "  active"
 	}
@@ -119,9 +129,49 @@ func (s *service) listApps() toolCallResult {
 	if inventory == nil {
 		return failure
 	}
+	s.lastInventory = inventory
 	result := textResult(inventory.text, false)
 	result.StructuredContent = map[string]any{"window_count": len(inventory.windows)}
 	return result
+}
+
+// describeAmbiguousApp completes an app-name ambiguity failure. The
+// provider names each matching application process; this lists their
+// windows with the wN that apps issues, so the next call can pick one window
+// instead of guessing another name. Nothing was sent.
+func (s *service) describeAmbiguousApp(result *toolCallResult, candidates []ProviderTargetCandidate) {
+	result.StructuredContent[axPublicErrorPathKey] = "app"
+	result.StructuredContent[axPublicErrorHintKey] = `{"mode":"apps"}`
+	processes := map[[2]string]bool{}
+	for _, candidate := range candidates {
+		if candidate.ProviderBusName != "" && candidate.ProcessGeneration != "" {
+			processes[[2]string{candidate.ProviderBusName, candidate.ProcessGeneration}] = true
+		}
+	}
+	if len(processes) == 0 {
+		return
+	}
+	inventory, _ := s.listDesktopWindows()
+	if inventory == nil {
+		return
+	}
+	lines := []string{}
+	first := ""
+	for _, window := range inventory.windows {
+		if !processes[window.appProcess] {
+			continue
+		}
+		if first == "" {
+			first = window.ref
+		}
+		lines = append(lines, window.line())
+	}
+	if first == "" {
+		return
+	}
+	result.Content[0].Text += "\nWindows of the matching applications; pass one wN as window_ref:\n" +
+		strings.Join(lines, "\n")
+	result.StructuredContent[axPublicErrorHintKey] = `{"mode":"observe","window_ref":"` + first + `"}`
 }
 
 // resolveWindowTitle finds the one visible top-level window whose title

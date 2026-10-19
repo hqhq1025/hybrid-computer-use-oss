@@ -176,7 +176,7 @@ func (windowsRuntimeBackend) ProcessState(pid int) string {
 		"CSV",
 		"/NH",
 	)
-	output := &boundedWindowsProviderBuffer{limit: maxWindowsTasklistOutputBytes}
+	output := &boundedProviderBuffer{limit: maxWindowsTasklistOutputBytes}
 	cmd.Stdout = output
 	cmd.WaitDelay = 100 * time.Millisecond
 	err := cmd.Run()

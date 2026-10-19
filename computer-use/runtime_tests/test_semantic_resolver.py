@@ -38,6 +38,14 @@ class SemanticRuntimeResolutionTests(AtspiPatchedTestCase):
         )
         self._extents.start()
         self.addCleanup(self._extents.stop)
+        # No native window matches these fake windows: every handle is weak.
+        self._native = mock.patch.object(
+            runtime,
+            "strong_window_instance_handle_inventory",
+            return_value=runtime.InventoryResult([], complete=True),
+        )
+        self._native.start()
+        self.addCleanup(self._native.stop)
 
     @staticmethod
     def _record_for(node, index, path):
@@ -80,7 +88,7 @@ class SemanticRuntimeResolutionTests(AtspiPatchedTestCase):
                 visit(child, path + [child_index])
 
         visit(root, list(root_path))
-        return records, []
+        return records, [], []
 
     @staticmethod
     def _node(
@@ -145,7 +153,7 @@ class SemanticRuntimeResolutionTests(AtspiPatchedTestCase):
             self.assertFalse(kwargs.get("prune"))
             record = self._record_for(save, 7, list(root_path) + [0])
             self.nodes_by_path[tuple(record["runtimeId"])] = save
-            return [record], []
+            return [record], [], []
 
         with mock.patch.object(
             runtime, "render_tree", side_effect=canonical_only
@@ -1718,6 +1726,63 @@ class SemanticRuntimeResolutionTests(AtspiPatchedTestCase):
         self.assertIn("window_scope=verified", note)
         self.assertNotIn("pid0/win1/dialog", note)
         self.assertIn("1 visible app-owned window(s)", note)
+
+    def test_unreadable_native_inventory_is_not_a_vanished_window(self):
+        # A wmctrl failure used to give an empty handle map, so the stored w2:
+        # handle matched no window and the target was reported stale.
+        self._native.stop()
+        app = FakeNode()
+        app.get_process_id = lambda: 0
+        main = self._node(
+            "Editor", "frame", atspi_states=(STATE.SHOWING,))
+        self.windows = [(0, main)]
+        with mock.patch.object(
+            runtime,
+            "strong_window_instance_handle_inventory",
+            return_value=runtime.InventoryResult(
+                complete=False, errors=["wmctrl timed out"]
+            ),
+        ), self.assertRaises(runtime.OperationFailure) as raised:
+            runtime.resolve_semantic_target(
+                app,
+                0,
+                main,
+                runtime.frame(0, 0, 100, 100),
+                {
+                    "selector": 'push button "Save"',
+                    "windowHandle": "w2:" + "0" * 32,
+                    "role": "push button",
+                    "name": "Save",
+                    "hasName": True,
+                },
+                None,
+                {},
+            )
+        self._native.start()
+
+        self.assertEqual(raised.exception.failure_code, "observation_incomplete")
+        self.assertFalse(raised.exception.input_events_emitted)
+
+    def test_window_handles_are_computed_once_per_operation(self):
+        app = FakeNode()
+        app.get_process_id = lambda: 0
+        window = self._node("Editor", "frame")
+        with mock.patch.object(
+            runtime,
+            "strong_window_instance_handle_inventory",
+            return_value=runtime.InventoryResult(
+                [(0, "w2:" + "a" * 32)], complete=True
+            ),
+        ) as handles:
+            first = runtime.window_instance_handle(app, 0, window)
+            second = runtime.window_instance_handle(app, 0, window)
+            runtime._x11_window_inventory_cache.clear()
+            third = runtime.window_instance_handle(app, 0, window)
+
+        self.assertEqual(first, "w2:" + "a" * 32)
+        self.assertEqual(second, first)
+        self.assertEqual(third, first)
+        self.assertEqual(handles.call_count, 2)
 
     def test_window_scoped_target_fails_if_origin_window_disappeared(self):
         app = FakeNode()

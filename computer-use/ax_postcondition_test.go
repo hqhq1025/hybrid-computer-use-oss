@@ -5,7 +5,9 @@ import (
 	"testing"
 )
 
-func TestPostconditionPassPreservesUnattributedMutationUncertainty(t *testing.T) {
+// A passing until read the awaited state live, so the effect is known;
+// which action caused it is not.
+func TestPostconditionPassClearsEffectUncertaintyButNotCause(t *testing.T) {
 	action := toolCallResult{
 		StructuredContent: map[string]any{
 			"input_events_emitted": true,
@@ -23,27 +25,56 @@ func TestPostconditionPassPreservesUnattributedMutationUncertainty(t *testing.T)
 		t.Fatalf("passing postcondition was not recorded: %#v",
 			merged.StructuredContent)
 	}
-	if merged.StructuredContent["effect_unknown"] != true ||
-		merged.StructuredContent["mutation_unknown"] != true ||
-		merged.StructuredContent["cause_unattributed"] != true {
-		t.Fatalf("passing postcondition overclaimed action causality: %#v",
+	if _, present := merged.StructuredContent["effect_unknown"]; present {
+		t.Fatalf("verified until left the effect unknown: %#v", merged.StructuredContent)
+	}
+	if _, present := merged.StructuredContent["mutation_unknown"]; present {
+		t.Fatalf("verified until left the mutation unknown: %#v", merged.StructuredContent)
+	}
+	if merged.StructuredContent["cause_unattributed"] != true {
+		t.Fatalf("passing until overclaimed action causality: %#v",
 			merged.StructuredContent)
 	}
 }
 
-func TestPassingPostconditionPreservesNestedActionUncertainty(t *testing.T) {
+func TestPassingPostconditionClearsNestedActionUncertainty(t *testing.T) {
 	structured := map[string]any{
 		"input_events_emitted": true,
+		"effect_unknown":       true,
+		"mutation_unknown":     true,
 	}
-	action := map[string]any{}
-	preserveUnattributedPostconditionEvidence(structured, action)
-	if action["mutation_unknown"] != true ||
+	action := map[string]any{"mutation_unknown": true}
+	markVerifiedPostconditionEffect(structured, action)
+	_, actionUnknown := action["mutation_unknown"]
+	_, effectUnknown := structured["effect_unknown"]
+	if actionUnknown || effectUnknown ||
 		action["cause_unattributed"] != true ||
-		structured["effect_unknown"] != true ||
-		structured["mutation_unknown"] != true ||
 		structured["cause_unattributed"] != true {
-		t.Fatalf("postcondition erased nested uncertainty: structured=%#v action=%#v",
-			structured, action)
+		t.Fatalf("verified until: structured=%#v action=%#v", structured, action)
+	}
+}
+
+// The call-level effect is verified only when an until covers every action
+// that sent input.
+func TestBatchEffectVerifiedNeedsAnUntilForEveryInputAction(t *testing.T) {
+	verified := map[string]any{"input_events_emitted": true,
+		"postcondition": map[string]any{"status": "pass", "verified": true}}
+	unchecked := map[string]any{"input_events_emitted": true}
+	readOnly := map[string]any{"input_events_emitted": false}
+	for _, test := range []struct {
+		name    string
+		batch   bool
+		actions []map[string]any
+		want    bool
+	}{
+		{"batch until", true, []map[string]any{unchecked}, true},
+		{"every input action verified", false, []map[string]any{verified, readOnly, verified}, true},
+		{"one input action unchecked", false, []map[string]any{verified, unchecked}, false},
+		{"no until", false, []map[string]any{readOnly}, false},
+	} {
+		if got := a11yBatchEffectVerified(test.batch, test.actions); got != test.want {
+			t.Fatalf("%s: got %v", test.name, got)
+		}
 	}
 }
 
@@ -53,7 +84,7 @@ func TestPassingPostconditionKeepsIndependentTaskEffectProof(t *testing.T) {
 		"task_effect_verified": true,
 	}
 	action := map[string]any{}
-	preserveUnattributedPostconditionEvidence(structured, action)
+	markVerifiedPostconditionEffect(structured, action)
 	if _, present := structured["effect_unknown"]; present {
 		t.Fatalf("independently verified effect became uncertain: %#v", structured)
 	}

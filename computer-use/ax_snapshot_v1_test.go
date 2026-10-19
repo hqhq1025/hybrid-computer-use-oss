@@ -92,6 +92,7 @@ func TestDistillationPipelineReportsEveryStageAndPreservesTargets(t *testing.T) 
 		"remove_relation_proven_duplicate_labels",
 		"suppress_redundant_cohort_properties",
 		"summarize_homogeneous_collections",
+		"shorten_named_descriptions",
 		"apply_output_budget",
 	}
 	if len(typed.Distillation) != len(want) {
@@ -1617,12 +1618,12 @@ func TestSiblingReorderProducesChangedChunk(t *testing.T) {
 	}
 	after := &appSnapshot{
 		WindowHandle: "window-1",
-		TreeLines: []string{
+		TreeLines: withUnchangedWindowContext([]string{
 			"ax:",
 			` - list "Results" [ref=r1]:`,
 			`  - listitem "Second" [ref=r3]`,
 			`  - listitem "First" [ref=r2]`,
-		},
+		}),
 		axSnapshot: &AXSnapshotV1{
 			CanonicalRoots: []*AXNode{&parentAfter},
 			Roots:          []*AXNode{&parentAfter},
@@ -1678,13 +1679,13 @@ func TestSiblingReorderPreservesChangedChildProperties(t *testing.T) {
 	after := &appSnapshot{
 		WindowHandle:    "window-1",
 		publicWindowRef: "w1",
-		TreeLines: []string{
+		TreeLines: withUnchangedWindowContext([]string{
 			"ax:",
 			` - list "Results" [ref=r1]:`,
 			`  - button "Save" [ref=r3]`,
 			`  - textbox "Query" [ref=r2]:`,
 			`   - /value: new`,
-		},
+		}),
 		axSnapshot: &AXSnapshotV1{
 			WindowRef:      "w1",
 			CanonicalRoots: []*AXNode{&parentAfter},
@@ -1734,7 +1735,7 @@ func TestInsertionDoesNotHideSurvivorReorder(t *testing.T) {
 	}
 	after := &appSnapshot{
 		publicWindowRef: "w1",
-		TreeLines:       []string{"ax:", ` - list "Results" [ref=r1]`},
+		TreeLines:       withUnchangedWindowContext([]string{"ax:", ` - list "Results" [ref=r1]`}),
 		axSnapshot: &AXSnapshotV1{
 			WindowRef: "w1", CanonicalRoots: []*AXNode{&afterParent},
 			Roots: []*AXNode{&afterParent},
@@ -1780,7 +1781,7 @@ func TestLargeSiblingReorderUsesBoundedSummary(t *testing.T) {
 	}
 	after := &appSnapshot{
 		publicWindowRef: "w1",
-		TreeLines:       []string{"ax:", ` - list "Results" [ref=r1]`},
+		TreeLines:       withUnchangedWindowContext([]string{"ax:", ` - list "Results" [ref=r1]`}),
 		axSnapshot: &AXSnapshotV1{
 			WindowRef: "w1", CanonicalRoots: []*AXNode{&afterParent},
 			Roots: []*AXNode{&afterParent},
@@ -1831,7 +1832,7 @@ func TestLargeSiblingReorderWithManyPropertyChangesStaysBounded(t *testing.T) {
 	}
 	after := &appSnapshot{
 		publicWindowRef: "w1",
-		TreeLines:       []string{"ax:", ` - list "Results" [ref=r1]`},
+		TreeLines:       withUnchangedWindowContext([]string{"ax:", ` - list "Results" [ref=r1]`}),
 		axSnapshot: &AXSnapshotV1{
 			WindowRef: "w1", CanonicalRoots: []*AXNode{&afterParent},
 			Roots: []*AXNode{&afterParent},
@@ -1884,7 +1885,7 @@ func TestLargeSiblingReorderPrioritizesMiddlePropertyChange(t *testing.T) {
 	}
 	after := &appSnapshot{
 		publicWindowRef: "w1",
-		TreeLines:       []string{"ax:", ` - list "Results" [ref=r1]`},
+		TreeLines:       withUnchangedWindowContext([]string{"ax:", ` - list "Results" [ref=r1]`}),
 		axSnapshot: &AXSnapshotV1{
 			WindowRef: "w1", CanonicalRoots: []*AXNode{&afterParent},
 			Roots: []*AXNode{&afterParent},
@@ -1922,11 +1923,11 @@ func TestCanonicalRootReorderProducesChangedChunk(t *testing.T) {
 	}
 	after := &appSnapshot{
 		publicWindowRef: "w1",
-		TreeLines: []string{
+		TreeLines: withUnchangedWindowContext([]string{
 			"ax:",
 			` - document "Second" [ref=r2]`,
 			` - document "First" [ref=r1]`,
-		},
+		}),
 		axSnapshot: &AXSnapshotV1{
 			WindowRef:      "w1",
 			CanonicalRoots: []*AXNode{&secondAfter, &firstAfter},
@@ -1968,12 +1969,12 @@ func TestRootReorderDoesNotDuplicateChangedDescendant(t *testing.T) {
 	}
 	after := &appSnapshot{
 		publicWindowRef: "w1",
-		TreeLines: []string{
+		TreeLines: withUnchangedWindowContext([]string{
 			"ax:",
 			` - button "Second" [ref=r2]`,
 			` - textbox "First" [ref=r1]:`,
 			`  - /value: new`,
-		},
+		}),
 		axSnapshot: &AXSnapshotV1{
 			WindowRef:      "w1",
 			CanonicalRoots: []*AXNode{&secondAfter, &firstAfter},
@@ -2638,5 +2639,50 @@ func TestProjectedSubtreePreservesOwnerRefsForAddressability(t *testing.T) {
 	text := strings.Join(lines, "\n")
 	if !strings.Contains(text, `button "Save" [addressable=false]`) {
 		t.Fatalf("subtree lost owner-scoped addressability:\n%s", text)
+	}
+}
+
+// withUnchangedWindowContext appends the unchanged rest of a window to a
+// fixture tree. A diff replaces the current tree only when it is shorter, and
+// real windows carry far more unchanged nodes than these focused fixtures.
+func withUnchangedWindowContext(lines []string) []string {
+	out := append([]string(nil), lines...)
+	for index := 0; index < 300; index++ {
+		out = append(out, fmt.Sprintf(` - text "Unchanged context line %03d"`, index))
+	}
+	return out
+}
+
+func TestReorderDiffLargerThanTreeFallsBackToTree(t *testing.T) {
+	beforeParent := &AXNode{
+		ID: "list", Role: "list", Name: "Results",
+		Ref: "r1", SemanticFingerprint: "f1:list",
+	}
+	first := &AXNode{ID: "a", Role: "listitem", Name: "A", Ref: "r2",
+		SemanticFingerprint: "f1:a", Parent: beforeParent}
+	second := &AXNode{ID: "b", Role: "listitem", Name: "B", Ref: "r3",
+		SemanticFingerprint: "f1:b", Parent: beforeParent}
+	beforeParent.Children = []*AXNode{first, second}
+	afterParent := *beforeParent
+	firstAfter, secondAfter := *first, *second
+	firstAfter.Parent, secondAfter.Parent = &afterParent, &afterParent
+	afterParent.Children = []*AXNode{&secondAfter, &firstAfter}
+	before := &appSnapshot{axSnapshot: &AXSnapshotV1{
+		CanonicalRoots: []*AXNode{beforeParent}, Roots: []*AXNode{beforeParent},
+	}}
+	after := &appSnapshot{
+		TreeLines: []string{
+			"ax:",
+			` - list "Results" [ref=r1]:`,
+			`  - listitem "B" [ref=r3]`,
+			`  - listitem "A" [ref=r2]`,
+		},
+		axSnapshot: &AXSnapshotV1{
+			CanonicalRoots: []*AXNode{&afterParent}, Roots: []*AXNode{&afterParent},
+		},
+	}
+	if diff, ok := testIncrementalAXSnapshot(before, after); ok {
+		t.Fatalf("a reorder diff longer than the tree must fall back to the tree:\n%s",
+			strings.Join(diff, "\n"))
 	}
 }

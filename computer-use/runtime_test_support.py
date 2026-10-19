@@ -477,6 +477,10 @@ class AtspiPatchedTestCase(unittest.TestCase):
         self._real_atspi = runtime.Atspi
         runtime.Atspi = FakeAtspi
         self.addCleanup(self._restore)
+        # The provider clears its per-operation native cache at the start of
+        # each operation; tests that call helpers directly start clean too.
+        runtime._x11_window_inventory_cache.clear()
+        self.addCleanup(runtime._x11_window_inventory_cache.clear)
 
     def _restore(self):
         runtime.Atspi = self._real_atspi

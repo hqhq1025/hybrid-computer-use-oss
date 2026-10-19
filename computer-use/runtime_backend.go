@@ -50,6 +50,22 @@ func accessibilityOperationCanMutate(request axServiceRequest) bool {
 		(request.Action != nil && request.Action.Intent() != AccessibilityResolveTarget)
 }
 
+// countProviderTime adds the time since started to this desktop's provider
+// total; records report it as timing_ms.provider.
+func (s *service) countProviderTime(started time.Time) {
+	if s.desktopState != nil {
+		s.providerElapsed += time.Since(started)
+	}
+}
+
+// providerTime reports the provider time this desktop has spent so far.
+func (s *service) providerTime() time.Duration {
+	if s.desktopState == nil {
+		return 0
+	}
+	return s.providerElapsed
+}
+
 func (s *service) platformBackend() PlatformBackend {
 	if s.backend != nil {
 		return s.backend
@@ -60,6 +76,7 @@ func (s *service) platformBackend() PlatformBackend {
 func (s *service) callProviderObserveApps(
 	request ProviderObserveAppsRequest,
 ) (*ProviderAccessibilityResult, error) {
+	defer s.countProviderTime(time.Now())
 	result, err := s.platformBackend().ObserveApps(request)
 	result.prepareForService()
 	return &result, err
@@ -68,6 +85,7 @@ func (s *service) callProviderObserveApps(
 func (s *service) callProviderObserve(
 	request ProviderObserveRequest,
 ) (*ProviderAccessibilityResult, error) {
+	defer s.countProviderTime(time.Now())
 	result, err := s.platformBackend().Observe(request)
 	result.prepareForService()
 	return &result, err
@@ -76,6 +94,7 @@ func (s *service) callProviderObserve(
 func (s *service) callProviderAction(
 	request ProviderActionRequest,
 ) (*ProviderAccessibilityResult, error) {
+	defer s.countProviderTime(time.Now())
 	result, err := s.platformBackend().ResolveAndAct(request)
 	result.prepareForService()
 	return &result, err
@@ -84,6 +103,7 @@ func (s *service) callProviderAction(
 func (s *service) callProviderDesktop(
 	request ProviderDesktopRequest,
 ) (*ProviderDesktopResult, error) {
+	defer s.countProviderTime(time.Now())
 	result, err := s.platformBackend().ExecuteBatch(request)
 	return &result, err
 }
@@ -91,6 +111,7 @@ func (s *service) callProviderDesktop(
 func (s *service) callProviderWindowList(
 	request ProviderWindowListRequest,
 ) (*ProviderWindowResult, error) {
+	defer s.countProviderTime(time.Now())
 	result, err := s.platformBackend().ListWindows(request)
 	return &result, err
 }
@@ -98,6 +119,7 @@ func (s *service) callProviderWindowList(
 func (s *service) callProviderWindowAction(
 	request ProviderWindowActionRequest,
 ) (*ProviderWindowResult, error) {
+	defer s.countProviderTime(time.Now())
 	result, err := s.platformBackend().ActOnWindow(request)
 	return &result, err
 }

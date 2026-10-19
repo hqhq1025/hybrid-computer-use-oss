@@ -90,8 +90,9 @@ var observeValues = []string{observeDiff, observeTree, observeFull, observeScree
 
 // appArgumentHelp describes the app argument. Accessibility app names mix
 // display names, binary names and app ids, and no rule derives one from
-// another, so the argument accepts any of these, a PID, or an aN from apps.
-const appArgumentHelp = "App name, app id, PID, or aN; use once, then window_ref."
+// another, so the argument accepts any of these or a PID. An aN is also
+// accepted but not advertised: apps names windows by wN.
+const appArgumentHelp = "App name, app id, or PID; use once, then window_ref."
 
 // toolChannel maps each public tool to the channel that enables it. Tools
 // outside the map belong to no channel and are always enabled.
@@ -99,16 +100,6 @@ var toolChannel = map[string]string{
 	publicToolAX:  "a11y",
 	publicToolGUI: "gui",
 }
-
-// actionTools are the tools that change the UI and therefore produce an
-// observation as a by-product. The observe parameter applies only to them; for
-// read-only tools the observation is the return value itself.
-var actionTools = map[string]bool{
-	publicToolAX:  true,
-	publicToolGUI: true,
-}
-
-func isActionTool(name string) bool { return actionTools[name] }
 
 func sortedChannels() []string {
 	enabled := enabledChannels()
@@ -232,7 +223,7 @@ func a11yInputSchema() map[string]any {
 			"app": nonBlankString(appArgumentHelp),
 			"window_ref": map[string]any{
 				"type": "string", "pattern": "^w[1-9][0-9]*$",
-				"description": "Read identity. act: optional; binds ref-less keys/text to wN instead of the focused window; must match any refs.",
+				"description": "observe/find: window to read. act: omit when actions have refs, which name the window; it only sends ref-less keys/text to wN instead of the focused window.",
 			},
 			"scope": map[string]any{"type": "string", "enum": a11yScopeValues, "description": "observe/find; default window."},
 			"observe": map[string]any{
@@ -437,11 +428,12 @@ func guiInputSchema() map[string]any {
 
 // axToolDescription is model-visible on every client, including ones that
 // compact the input schema. Clients may truncate descriptions at 1,000 bytes.
-const axToolDescription = "Accessibility for application windows; peer of GUI. Modes: " +
+const axToolDescription = "Accessibility for application windows. Modes: " +
 	"apps lists windows (wN, title, app, active). observe returns the window tree with " +
 	"rN refs. find returns matching rN; a truncated result shows the cursor call for the " +
-	"next page. act runs ordered actions in one window, checks them before any input, and " +
-	"returns a diff. Copy rN/wN exactly from the latest result; stale refs fail and never " +
+	"next page. act runs ordered actions in one window, checks them before input, and " +
+	"reports each target's change, windows opened/closed/focused, and a diff. " +
+	"Copy rN/wN exactly from the latest result; stale refs fail and never " +
 	"rebind. keypress/type without ref go to the focused window. activate/close take a " +
 	"title substring or wN. Put close, and any action that opens or replaces a window, " +
 	"last. until waits for a predicate; false is a result, not an error. Errors return " +
@@ -504,32 +496,6 @@ func stringProperty(description string) map[string]any {
 // nothing.
 const nonBlankPattern = `\S`
 
-// selectorRolePattern is a non-blank role without [, ] or ". The role is the
-// unquoted head of the internal selector grammar, so those characters would
-// be read as predicates or a name.
-const selectorRolePattern = `^[^\["\]]*[^\s\["\]][^\["\]]*$`
-
-func nonBlankStringProperty(description string) map[string]any {
-	property := stringProperty(description)
-	property["pattern"] = nonBlankPattern
-	return property
-}
-
-// nonEmptyFilter is one anyOf alternative of a find query: the filter is
-// present and not empty.
-func nonEmptyFilter(field string) map[string]any {
-	return map[string]any{
-		"required":   []string{field},
-		"properties": map[string]any{field: map[string]any{"minLength": 1}},
-	}
-}
-
-func boundedStringProperty(description string, maxLength int) map[string]any {
-	property := stringProperty(description)
-	property["maxLength"] = maxLength
-	return property
-}
-
 func enumStringProperty(description string, values []string) map[string]any {
 	property := stringProperty(description)
 	property["enum"] = values
@@ -538,13 +504,6 @@ func enumStringProperty(description string, values []string) map[string]any {
 
 func numberProperty(description string) map[string]any {
 	return map[string]any{"type": "number", "description": description}
-}
-
-func numberRangeProperty(description string, minimum, maximum any) map[string]any {
-	property := numberProperty(description)
-	property["exclusiveMinimum"] = minimum
-	property["maximum"] = maximum
-	return property
 }
 
 func integerProperty(description string) map[string]any {
@@ -556,10 +515,6 @@ func integerRangeProperty(description string, minimum, maximum int) map[string]a
 	property["minimum"] = minimum
 	property["maximum"] = maximum
 	return property
-}
-
-func booleanProperty(description string) map[string]any {
-	return map[string]any{"type": "boolean", "description": description}
 }
 
 func constStringProperty(value, description string) map[string]any {

@@ -28,17 +28,38 @@ const (
 	AXRefSuperseded        AXRefLifecycle = "superseded"
 )
 
+// refLifecycleState is the identity key and lifecycle that app and window
+// refs share.
+type refLifecycleState struct {
+	IdentityKey     string
+	Lifecycle       AXRefLifecycle
+	LifecycleReason string
+}
+
+// setLifecycle records a lifecycle. A ref that is neither active nor awaiting
+// revalidation releases its identity key, so the next Acquire of that
+// identity issues a new ref.
+func (state *refLifecycleState) setLifecycle(
+	byIdentity map[string]string,
+	lifecycle AXRefLifecycle,
+	reason string,
+) {
+	state.Lifecycle = lifecycle
+	state.LifecycleReason = strings.TrimSpace(reason)
+	if lifecycle != AXRefActive && lifecycle != AXRefNeedsRevalidation {
+		delete(byIdentity, state.IdentityKey)
+	}
+}
+
 type AXAppRefEntry struct {
+	refLifecycleState
 	Ref               string
-	IdentityKey       string
 	DisplayName       string
 	ProviderBusName   string
 	ProcessGeneration string
 	CreatedRevision   string
 	LastSeenRevision  string
 	LastUsedTick      uint64
-	Lifecycle         AXRefLifecycle
-	LifecycleReason   string
 }
 
 type AppRefRegistry struct {
@@ -243,8 +264,8 @@ func (registry *RefRegistry) clone() *RefRegistry {
 }
 
 type AXWindowRefEntry struct {
+	refLifecycleState
 	Ref                             string
-	IdentityKey                     string
 	AppRef                          string
 	AppIdentity                     string
 	WindowHandle                    string
@@ -257,8 +278,6 @@ type AXWindowRefEntry struct {
 	CreatedRevision                 string
 	LastSeenRevision                string
 	LastUsedTick                    uint64
-	Lifecycle                       AXRefLifecycle
-	LifecycleReason                 string
 }
 
 type axRefLifecycleError struct {
@@ -336,15 +355,14 @@ func (registry *AppRefRegistry) Acquire(
 	ref := "a" + strconv.FormatUint(registry.next, 10)
 	registry.next++
 	registry.entries[ref] = &AXAppRefEntry{
+		refLifecycleState: refLifecycleState{IdentityKey: key, Lifecycle: AXRefActive},
 		Ref:               ref,
-		IdentityKey:       key,
 		DisplayName:       strings.TrimSpace(displayName),
 		ProviderBusName:   strings.TrimSpace(providerBusName),
 		ProcessGeneration: strings.TrimSpace(processGeneration),
 		CreatedRevision:   revision,
 		LastSeenRevision:  revision,
 		LastUsedTick:      registry.tick,
-		Lifecycle:         AXRefActive,
 	}
 	registry.byIdentity[key] = ref
 	registry.evict()
@@ -410,6 +428,18 @@ func (registry *AppRefRegistry) Resolve(ref string) (*AXAppRefEntry, error) {
 	return &copy, nil
 }
 
+// DisplayName returns the application name an issued aN was listed under,
+// whatever its lifecycle, or "" when the ref is unknown.
+func (registry *AppRefRegistry) DisplayName(ref string) string {
+	if registry == nil {
+		return ""
+	}
+	if entry := registry.entries[strings.TrimSpace(ref)]; entry != nil {
+		return entry.DisplayName
+	}
+	return ""
+}
+
 // ProviderIdentity returns the exact process identity an issued aN named,
 // whatever its lifecycle. It is for read-only absence checks of that same
 // process; it never revives the ref or binds input.
@@ -435,14 +465,8 @@ func (registry *AppRefRegistry) MarkLifecycle(
 	if registry == nil {
 		return
 	}
-	entry := registry.entries[strings.TrimSpace(ref)]
-	if entry == nil {
-		return
-	}
-	entry.Lifecycle = lifecycle
-	entry.LifecycleReason = strings.TrimSpace(reason)
-	if lifecycle != AXRefActive && lifecycle != AXRefNeedsRevalidation {
-		delete(registry.byIdentity, entry.IdentityKey)
+	if entry := registry.entries[strings.TrimSpace(ref)]; entry != nil {
+		entry.setLifecycle(registry.byIdentity, lifecycle, reason)
 	}
 }
 
@@ -661,8 +685,8 @@ func (registry *WindowRefRegistry) Acquire(
 	ref := "w" + strconv.FormatUint(registry.next, 10)
 	registry.next++
 	entry := &AXWindowRefEntry{
+		refLifecycleState:               refLifecycleState{IdentityKey: key, Lifecycle: AXRefActive},
 		Ref:                             ref,
-		IdentityKey:                     key,
 		AppRef:                          strings.TrimSpace(appRef),
 		AppIdentity:                     appIdentity,
 		WindowHandle:                    windowHandle,
@@ -675,7 +699,6 @@ func (registry *WindowRefRegistry) Acquire(
 		CreatedRevision:                 revision,
 		LastSeenRevision:                revision,
 		LastUsedTick:                    registry.tick,
-		Lifecycle:                       AXRefActive,
 	}
 	registry.entries[ref] = entry
 	registry.byIdentity[key] = ref
@@ -766,14 +789,8 @@ func (registry *WindowRefRegistry) MarkLifecycle(
 	if registry == nil {
 		return
 	}
-	entry := registry.entries[strings.TrimSpace(ref)]
-	if entry == nil {
-		return
-	}
-	entry.Lifecycle = lifecycle
-	entry.LifecycleReason = strings.TrimSpace(reason)
-	if lifecycle != AXRefActive && lifecycle != AXRefNeedsRevalidation {
-		delete(registry.byIdentity, entry.IdentityKey)
+	if entry := registry.entries[strings.TrimSpace(ref)]; entry != nil {
+		entry.setLifecycle(registry.byIdentity, lifecycle, reason)
 	}
 }
 
@@ -785,9 +802,22 @@ func (registry *WindowRefRegistry) MarkByApp(
 	if registry == nil {
 		return
 	}
-	for ref, entry := range registry.entries {
-		if entry != nil && entry.AppRef == strings.TrimSpace(appRef) {
-			registry.MarkLifecycle(ref, lifecycle, reason)
+	forEachOwnedRef(registry.entries, appRef,
+		func(entry *AXWindowRefEntry) string { return entry.AppRef },
+		func(ref string) { registry.MarkLifecycle(ref, lifecycle, reason) })
+}
+
+// forEachOwnedRef visits every ref whose owner app or window ref is ownerRef.
+func forEachOwnedRef[E any](
+	entries map[string]*E,
+	ownerRef string,
+	ownerOf func(*E) string,
+	visit func(ref string),
+) {
+	ownerRef = strings.TrimSpace(ownerRef)
+	for ref, entry := range entries {
+		if entry != nil && ownerOf(entry) == ownerRef {
+			visit(ref)
 		}
 	}
 }
@@ -1369,11 +1399,9 @@ func (registry *RefRegistry) MarkByApp(
 	if registry == nil {
 		return
 	}
-	for ref, entry := range registry.entries {
-		if entry != nil && entry.AppRef == strings.TrimSpace(appRef) {
-			registry.MarkLifecycle(ref, lifecycle, reason)
-		}
-	}
+	forEachOwnedRef(registry.entries, appRef,
+		func(entry *AXRefEntry) string { return entry.AppRef },
+		func(ref string) { registry.MarkLifecycle(ref, lifecycle, reason) })
 }
 
 func (registry *RefRegistry) MarkByWindow(
@@ -1384,12 +1412,9 @@ func (registry *RefRegistry) MarkByWindow(
 	if registry == nil {
 		return
 	}
-	for ref, entry := range registry.entries {
-		if entry != nil &&
-			entry.LogicalWindowRef == strings.TrimSpace(windowRef) {
-			registry.MarkLifecycle(ref, lifecycle, reason)
-		}
-	}
+	forEachOwnedRef(registry.entries, windowRef,
+		func(entry *AXRefEntry) string { return entry.LogicalWindowRef },
+		func(ref string) { registry.MarkLifecycle(ref, lifecycle, reason) })
 }
 
 func (registry *RefRegistry) evict() {

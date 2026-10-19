@@ -8,6 +8,7 @@ from typing import Any
 from . import phase_timing
 from . import ui_events
 from .ax_dispatch import perform_provider_request
+from .ax_transition_evidence import public_element_record
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
     GUI_MAX_SETTLE_MS,
@@ -21,6 +22,9 @@ from .response_builder import (
 
 
 PROTOCOL = "computer-use-provider-v2"
+# Upper bound for one AT-SPI call; also libatspi's default method timeout.
+# An application that does not answer within it is reported as unreadable.
+ATSPI_CALL_TIMEOUT_MS = 800
 SCHEMA_VERSION = 2
 _provider_initialized = False
 
@@ -773,6 +777,13 @@ def _accessibility_result(response):
         value = response.get(source)
         if value not in (None, "", [], False, 0):
             result[destination] = value
+    if "resolved_element" in result:
+        # Resolver records carry private bookkeeping such as
+        # _providerIdentityConflict. The host decodes the wire strictly, so
+        # one private key fails the whole response.
+        result["resolved_element"] = public_element_record(
+            result["resolved_element"]
+        )
     return result
 
 
@@ -976,6 +987,12 @@ def _initialize_provider(request):
     try:
         require_desktop_session()
         Atspi.init()
+        # libatspi waits up to app_startup_time (15 s by default) instead of
+        # the method timeout for any application it first saw less than that
+        # long ago. The clock starts when this process first sees the
+        # application, not when the application started, so after every
+        # provider restart one call to a busy application blocked for 15 s.
+        Atspi.set_timeout(ATSPI_CALL_TIMEOUT_MS, ATSPI_CALL_TIMEOUT_MS)
     except Exception:
         _write_operator_exception(request, "startup")
         raise
@@ -986,18 +1003,19 @@ def _initialize_provider(request):
 
 
 def execute(request):
+    validate_request(request)
+    return _execute_validated(request)
+
+
+def _execute_validated(request):
     phase_timing.start()
     try:
         return _execute(request)
     finally:
-        phase_timing.finish(
-            request.get("operation") if isinstance(request, dict) else None,
-            request.get("request_id") if isinstance(request, dict) else None,
-        )
+        phase_timing.finish(request["operation"], request["request_id"])
 
 
 def _execute(request):
-    validate_request(request)
     operation = request["operation"]
     payload_key = {
         "observe_apps": "observe_apps",
@@ -1073,7 +1091,7 @@ def _execute_serialized_request(raw):
             provider_reset_required=True,
         )
     try:
-        return execute(request)
+        return _execute_validated(request)
     except Exception:
         _write_operator_exception(request, "dispatch")
         return provider_boundary_failure(

@@ -169,22 +169,6 @@ func integerElementIndexFloat(value float64) string {
 	return strconv.FormatInt(int64(value), 10)
 }
 
-func optionalFloat(args map[string]any, key string) *float64 {
-	switch value := args[key].(type) {
-	case float64:
-		return &value
-	case int:
-		float := float64(value)
-		return &float
-	case json.Number:
-		float, err := value.Float64()
-		if err == nil {
-			return &float
-		}
-	}
-	return nil
-}
-
 func optionalPositiveInt(args map[string]any, key string) (*int, error) {
 	value, ok := args[key]
 	if !ok {
@@ -287,13 +271,6 @@ func isWholeNumber(value float64) bool {
 
 func maxInt() int {
 	return int(^uint(0) >> 1)
-}
-
-func floatValue(value *float64, fallback float64) float64 {
-	if value == nil {
-		return fallback
-	}
-	return *value
 }
 
 func defaultString(value, fallback string) string {

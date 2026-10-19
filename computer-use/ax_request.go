@@ -120,6 +120,12 @@ func (s *service) a11yRequest(
 		}
 		return axArgErrorResult(argErr, requested)
 	}
+	return s.a11yDecodedRequest(request)
+}
+
+// a11yDecodedRequest runs an AX call whose arguments are already decoded.
+// dispatch decodes each call once and passes the request here.
+func (s *service) a11yDecodedRequest(request *axRequest) toolCallResult {
 	obs := observation{mode: request.observe}
 	switch request.mode {
 	case a11yModeApps:
@@ -167,11 +173,14 @@ func (s *service) a11yObserve(
 			a11yModeObserve,
 		)
 	}
+	// observe "full" always returns the whole tree, even when an earlier
+	// result already delivered the identical state.
+	forceFull := obs.resolvedMode() == observeFull
 	result := s.getAppState(
 		readContext.appToken,
 		nil, nil, nil, nil,
 		includeScreenshot,
-		nil,
+		&forceFull,
 		treeViewWorking,
 		request.scope,
 		root,
@@ -217,11 +226,12 @@ func (s *service) a11yObserveUntil(
 	if obs.resolvedMode() == observeDiff || obs.resolvedMode() == "" {
 		current = s.a11yDiffObservation(readContext, request.scope)
 	} else {
+		forceFull := obs.resolvedMode() == observeFull
 		current = s.getAppState(
 			readContext.appToken,
 			nil, nil, nil, nil,
 			includeScreenshot,
-			nil,
+			&forceFull,
 			treeViewWorking,
 			request.scope,
 			nil,

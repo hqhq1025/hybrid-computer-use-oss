@@ -174,14 +174,6 @@ def focus_and_selection(
     return summary, selected
 
 
-def focused_summary(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
-    return focus_and_selection(app_pid, text_limit=text_limit)[0]
-
-
-def selected_text(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
-    return focus_and_selection(app_pid, text_limit=text_limit)[1]
-
-
 def top_level_window_inventory(app, selected_index=None):
     windows = app_windows(app)
     strong_handles = strong_window_instance_handles(app, windows)
@@ -374,7 +366,6 @@ def build_snapshot(
             prune=prune,
             boxes=boxes,
             indexer=indexer,
-            include_annotations=True,
             focus_probe=focus_probe,
         )
         if walk is not None and walk_is_reusable(annotations):

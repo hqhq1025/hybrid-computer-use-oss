@@ -71,10 +71,6 @@ func refineGUIArgumentError(args map[string]any, found *explanation) {
 	}
 }
 
-func quoteValue(value string) string {
-	return compactJSON(value)
-}
-
 // Cross-field rules that no schema keyword expresses. The runtime enforces
 // them after the schema gate, before any input, and marks the rejection with
 // its rule code so the consistency test can tell a declared rule from drift.

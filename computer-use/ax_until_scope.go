@@ -112,7 +112,8 @@ func soleFocusedOtherWindowRef(snapshot *appSnapshot) string {
 func (s *service) readOtherWindows(
 	read *untilApplicationRead,
 ) (*appSnapshot, bool) {
-	others := &appSnapshot{App: read.primary.App, capturedAt: read.primary.capturedAt}
+	others := &appSnapshot{App: read.primary.App, capturedAt: read.primary.capturedAt,
+		Windows: read.primary.Windows}
 	complete := true
 	for _, window := range read.otherWindows() {
 		elements, ok := s.readUntilWindow(read.request, window.Handle)

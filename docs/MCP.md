@@ -115,8 +115,10 @@ computer-use version           print the version
 computer-use help [command]
 ```
 
-`call` uses the same schemas and the same stateful service as an MCP client,
-which makes it useful for diagnostics:
+`call` runs the same core as an MCP client in its own process and prints the
+same model-facing result, with images written to files; it is useful for
+diagnostics. Refs do not survive between `call` processes; the daemon
+commands in [Code entry points](CODE.md) keep them.
 
 ```bash
 computer-use call AX --args '{"mode":"apps"}'
@@ -280,11 +282,15 @@ application aN -> top-level window wN -> element rN
 ```
 
 - `apps` lists every top-level window as `wN` with its title, application and
-  whether it has focus.
+  whether it has focus. Output names applications but shows no `aN`; `app`
+  still accepts an `aN`, a name, an app id or a PID.
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
 - `act` runs flat actions in one window:
-  `{type, ref|title, text|keys|value|direction|pages, until}`. `activate` and
+  `{type, ref|title, text|keys|value|direction|pages, until}`. The `rN` or
+  `wN` refs name that window, so an `act` call with refs needs no
+  `window_ref`; `window_ref` only sends ref-less `keypress` and `type` to a
+  window other than the focused one. `activate` and
   `close` accept a window title substring, resolved to one `wN` before any
   input. `keypress` and `type` without `ref` go to the window that had focus
   when the call started.
@@ -300,6 +306,24 @@ application aN -> top-level window wN -> element rN
   `until` never sends input and never changes which window receives input.
   When `until_failed` or `until_unknown` knows the window that appeared or
   took focus, the hint observes that `wN`.
+
+Every `act` result that sent input starts, after the evidence line, with a
+report built from the reads the call makes anyway:
+
+```text
+effect: r58 checkbox "Interface" checked=false→true
+windows: opened w5 "Insert Sheet" (dialog, focused); closed w3 "Print"; focus w2
+```
+
+There is one `effect` line per action with an element `ref`. It compares the
+element in the read before that action with the next read after it and names
+the role, the name, and the state or value fields that changed. It says
+`no visible change` when none did, `gone` when a complete read no longer has
+it, and `unknown (reason)` when no read after the action covers it. The
+`windows` line compares the application's top-level windows before the first
+action with those after the last; new windows get a `wN` at once. When the
+report shows every targeted element changed, or an `until` held, the evidence
+line does not also say `effect_unknown`.
 
 References describe current state; they are not durable selectors. Every
 mutation resolves its reference against the live accessibility tree again and

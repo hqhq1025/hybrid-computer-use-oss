@@ -76,18 +76,46 @@ func TestAppsListsEveryWindowWithRefTitleAppAndActive(t *testing.T) {
 	))
 	text := resultText(service.listApps())
 	for _, want := range []string{
-		`w1 "Quarterly report - Editor"  app=editor a1  active`,
-		`w2 "Notes - Editor"  app=editor a1`,
-		`w3 "Inbox - Mail"  app=mail a2`,
+		`w1 "Quarterly report - Editor"  app=editor  active`,
+		`w2 "Notes - Editor"  app=editor`,
+		`w3 "Inbox - Mail"  app=mail`,
 		"(not input targets: panel)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("apps output lacks %q:\n%s", want, text)
 		}
 	}
+	// Windows are addressed by wN; the aN is not offered as an argument.
+	if strings.Contains(text, " a1") || strings.Contains(text, " a2") {
+		t.Fatalf("apps output presents an aN:\n%s", text)
+	}
 	// The same window keeps its ref on the next listing.
 	if again := resultText(service.listApps()); !strings.Contains(again, `w1 "Quarterly report - Editor"`) {
 		t.Fatalf("window ref changed between listings:\n%s", again)
+	}
+}
+
+type notedWindowBackend struct {
+	*windowScriptBackend
+	notes []string
+}
+
+func (b *notedWindowBackend) ObserveApps(request ProviderObserveAppsRequest) (ProviderAccessibilityResult, error) {
+	result, err := b.windowScriptBackend.ObserveApps(request)
+	result.Notes = b.notes
+	return result, err
+}
+
+func TestAppsSaysWhenTheProviderListingIsIncomplete(t *testing.T) {
+	_, script := windowScriptService(editorApps(
+		testWindow{testHandleReport, "Quarterly report - Editor", true},
+	))
+	note := "Incomplete: 1 application(s) did not answer the accessibility bus; their windows may be missing above."
+	service := newServiceWithBackend(&notedWindowBackend{script, []string{note}})
+	text := resultText(service.listApps())
+	if !strings.HasSuffix(strings.TrimSpace(text), note) ||
+		!strings.Contains(text, `w1 "Quarterly report - Editor"`) {
+		t.Fatalf("apps output lacks the incompleteness note after the windows:\n%s", text)
 	}
 }
 
@@ -96,7 +124,7 @@ func TestAppsSkipsWindowsWithoutStrongHandle(t *testing.T) {
 		testWindow{"", "Untracked - Editor", true},
 	))
 	text := resultText(service.listApps())
-	if !strings.Contains(text, `"Untracked - Editor"  app=editor a1  (not addressable)`) ||
+	if !strings.Contains(text, `"Untracked - Editor"  app=editor  (not addressable)`) ||
 		strings.Contains(text, "w1 ") {
 		t.Fatalf("unaddressable window got a ref:\n%s", text)
 	}

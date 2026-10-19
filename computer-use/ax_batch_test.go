@@ -563,3 +563,23 @@ func TestBatchStopsWhenLogicalWindowChangesOnSameNativeHandle(t *testing.T) {
 		t.Fatalf("same-handle logical replacement was reported as %s", got)
 	}
 }
+
+// a11yBatch decodes public action objects and runs them, so tests can drive
+// a batch from raw JSON-shaped actions. The public act path decodes in
+// decodeAXRequest and calls a11yBatchDecoded directly.
+func (s *service) a11yBatch(
+	rawActions any,
+	obs observation,
+	postcondition map[string]any,
+	windowRef string,
+) toolCallResult {
+	actions, argErr := decodeAXActions(rawActions)
+	if argErr != nil {
+		requested := 0
+		if items, ok := rawActions.([]any); ok {
+			requested = len(items)
+		}
+		return axArgErrorResult(argErr, requested)
+	}
+	return s.a11yBatchDecoded(actions, obs, postcondition, windowRef)
+}

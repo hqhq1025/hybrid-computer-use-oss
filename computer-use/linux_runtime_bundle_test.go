@@ -105,19 +105,3 @@ func TestLinuxBackendUsesProviderV2WireWithoutLegacyPlatformRoundTrip(
 		}
 	}
 }
-
-// linuxRuntimeScript is the concatenated provider source that source-contract
-// tests search.
-var linuxRuntimeScript = linuxProviderSource()
-
-func linuxProviderSource() string {
-	var source strings.Builder
-	for _, path := range linuxProviderPaths {
-		data, err := linuxRuntimeFS.ReadFile(path)
-		if err != nil {
-			panic(err)
-		}
-		source.Write(data)
-	}
-	return source.String()
-}

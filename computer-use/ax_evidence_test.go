@@ -604,7 +604,10 @@ func TestPrepareAXEvidenceKeepsFinalWindowTransition(t *testing.T) {
 	}
 }
 
-func TestCompactBatchKeepsReconciledPassingActionGuard(t *testing.T) {
+// A passing action until is reported once, as until:"true"; its internal
+// reconciliation details do not repeat it per action with "cause
+// unattributed" next to a verified result.
+func TestCompactBatchOmitsPassingActionGuard(t *testing.T) {
 	result := compactAXBatchResult(map[string]any{
 		"actions": []map[string]any{{
 			"action_index": 0,
@@ -617,13 +620,8 @@ func TestCompactBatchKeepsReconciledPassingActionGuard(t *testing.T) {
 			},
 		}},
 	})
-	actions, ok := result["actions"].([]map[string]any)
-	if !ok || len(actions) != 1 {
-		t.Fatalf("reconciled passing guard was hidden: %#v", result)
-	}
-	postcondition, _ := actions[0]["postcondition"].(map[string]any)
-	if postcondition["reconciled_by_canonical_observation"] != true {
-		t.Fatalf("reconciliation evidence was lost: %#v", actions[0])
+	if _, present := result["actions"]; present {
+		t.Fatalf("a passing guard was repeated per action: %#v", result)
 	}
 }
 

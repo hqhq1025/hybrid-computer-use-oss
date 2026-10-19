@@ -419,11 +419,15 @@ func TestActionBoundsRejectUnboundedInput(t *testing.T) {
 func TestAppArgumentHelpDefinesStrictBootstrapIdentity(t *testing.T) {
 	// Accessibility app names come in three styles that no rule can
 	// predict (display name, binary name, app id), so the help text states
-	// the accepted forms, including the aN ref that apps returns.
-	for _, fragment := range []string{"App name", "app id", "PID", "aN"} {
+	// the accepted forms. apps names windows by wN, so the help does not
+	// offer the aN, which models never passed.
+	for _, fragment := range []string{"App name", "app id", "PID", "window_ref"} {
 		if !strings.Contains(appArgumentHelp, fragment) {
 			t.Fatalf("app argument help is missing %q", fragment)
 		}
+	}
+	if strings.Contains(appArgumentHelp, "aN") {
+		t.Fatalf("app argument help offers the aN: %q", appArgumentHelp)
 	}
 	properties := findToolDefinition(t, "AX").InputSchema["properties"].(map[string]any)
 	if properties["app"].(map[string]any)["description"] != appArgumentHelp {

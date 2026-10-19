@@ -633,18 +633,3 @@ func TestCloseObserveNoneDoesNotLeakReplacementWindowObservation(t *testing.T) {
 		t.Fatalf("close lifecycle probes=%d, want 2", len(backend.observeRequests))
 	}
 }
-
-func TestAssertionRendererUsesPublicRef(t *testing.T) {
-	result := toolCallResult{
-		Content: []contentItem{{
-			Type: "text",
-			Text: `PASS: s2:internal value to contain "Etsy".`,
-		}},
-	}
-	result = replaceToolResultText(result, "s2:internal", "r36")
-	text := resultText(result)
-	if !strings.Contains(text, "PASS: r36") ||
-		strings.Contains(text, "s2:") {
-		t.Fatalf("assertion text leaked internal ref: %q", text)
-	}
-}

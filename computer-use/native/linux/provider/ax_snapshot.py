@@ -38,8 +38,8 @@ from .ax_virtual_table import (
 class FocusProbe:
     """Find the focused node during the snapshot walk instead of a second walk.
 
-    focused_summary() and selected_text() need the node that
-    find_first(window, FOCUSED) returns. render_tree() visits nodes in the
+    focus_and_selection() needs the node that find_first(window, FOCUSED)
+    returns. render_tree() visits nodes in the
     same preorder and reads every node's state set anyway, so it can note the
     first FOCUSED node at no extra cost, as long as it has visited exactly the
     nodes find_first() would visit up to that point.
@@ -94,8 +94,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, prune=True,
                 max_rendered_chars=MAX_RENDERED_CHARS,
                 deadline_seconds=TREE_DEADLINE_SECONDS,
-                include_annotations=False, focus_probe=None):
-    """Render one window subtree.
+                focus_probe=None):
+    """Render one window subtree; return ``(records, lines, annotations)``.
 
     ``focus_probe``, when given, is a FocusProbe that records the first
     FOCUSED node in the order find_first() would visit, from state sets this
@@ -694,6 +694,4 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         record["providerWindowRole"] = window_role
         record["providerWindowName"] = window_name
 
-    if include_annotations:
-        return records, lines, annotations
-    return records, lines
+    return records, lines, annotations

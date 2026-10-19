@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 type DistillationContext struct {
@@ -629,8 +630,83 @@ func defaultDistillationPlugins() []DistillationPlugin {
 		relationDuplicatePlugin(),
 		suppressCohortPropertiesPlugin(),
 		summarizeCollectionsPlugin(),
+		shortenNamedDescriptionsPlugin(),
 		outputBudgetAuditPlugin(),
 	}
+}
+
+// maxNamedDescriptionRunes bounds help text on nodes that already have a
+// name. Measured on recorded panels: no description the model quoted in its
+// reasoning or arguments was longer than 80 runes, while longer ones (checkbox
+// and spin-button help, toolbar usage hints) were about 1% of AX output.
+const maxNamedDescriptionRunes = 80
+
+// boilerplateDescriptions carry no information about the node. LibreOffice
+// puts the first one on every toolbar group.
+var boilerplateDescriptions = map[string]bool{
+	"Please press enter to go into child control for more operations": true,
+}
+
+// shortenNamedDescriptionsPlugin shortens help text on named nodes. The name
+// already identifies such a node, and the description repeats generic help.
+// The full description is kept when it may be the only label (unnamed node),
+// when it carries document content (content and item roles such as paragraph,
+// heading and cell), on links (whose description is often the URL), on find
+// matches, and on the node the current action targeted.
+func shortenNamedDescriptionsPlugin() DistillationPlugin {
+	return distillationPlugin{name: "shorten_named_descriptions", fn: func(
+		context *DistillationContext, roots []*AXNode,
+	) ([]*AXNode, int, int, error) {
+		actedRef := ""
+		if context != nil && context.Snapshot != nil {
+			actedRef = context.Snapshot.ActedRef
+		}
+		var visit func([]*AXNode)
+		visit = func(nodes []*AXNode) {
+			for _, node := range nodes {
+				visit(node.Children)
+				description := node.Properties.Description
+				if description == "" || node.FindMatch ||
+					(actedRef != "" && node.Ref == actedRef) {
+					continue
+				}
+				if boilerplateDescriptions[description] {
+					node.Properties.Description = ""
+					context.StageSuppressedProperties++
+					continue
+				}
+				if node.Name == "" ||
+					node.SemanticClass == "content" ||
+					node.SemanticClass == "item" ||
+					node.Role == "link" {
+					continue
+				}
+				if shortened, cut := shortenAtWord(
+					description, maxNamedDescriptionRunes,
+				); cut {
+					node.Properties.Description = shortened
+					context.StageSuppressedProperties++
+				}
+			}
+		}
+		visit(roots)
+		return roots, 0, 0, nil
+	}}
+}
+
+// shortenAtWord cuts text to at most limit runes, preferring the last word
+// boundary in the second half, and marks the cut with an ellipsis.
+func shortenAtWord(text string, limit int) (string, bool) {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text, false
+	}
+	head := string(runes[:limit])
+	if space := strings.LastIndex(head, " "); space >= 0 &&
+		utf8.RuneCountInString(head[:space]) >= limit/2 {
+		head = head[:space]
+	}
+	return strings.TrimRight(head, " ,;:.-") + "…", true
 }
 
 func distillAXSnapshot(snapshot *AXSnapshotV1) error {

@@ -15,8 +15,33 @@ const (
 	mcpProtocolStructured = "2025-06-18"
 )
 
+// mcpTransportState is what the MCP adapter negotiates with its client. It
+// rides on the service only so that one value carries a session to the
+// adapter; core code does not read it.
+type mcpTransportState struct {
+	protocolVersion string
+}
+
 func runMCP(stdin io.Reader, stdout io.Writer) error {
 	svc := newService()
+	guard := newDaemonInputGuard(defaultDaemonSocket())
+	return serveMCP(stdin, stdout, func(request map[string]any) map[string]any {
+		if refusal := guard.refuse(request); refusal != nil {
+			return refusal
+		}
+		return handleMCPRequest(request, svc)
+	})
+}
+
+// mcpRequestHandler answers one well-formed JSON-RPC request object. The
+// in-process server runs it against its own service; an attached server
+// forwards it to the daemon.
+type mcpRequestHandler func(request map[string]any) map[string]any
+
+// serveMCP reads newline-delimited JSON-RPC from stdin and writes responses
+// to stdout. Framing, batches and malformed-message handling are the same
+// for every handler.
+func serveMCP(stdin io.Reader, stdout io.Writer, handle mcpRequestHandler) error {
 	encoder := json.NewEncoder(stdout)
 	reader := bufio.NewReaderSize(stdin, 64*1024)
 	for {
@@ -27,7 +52,7 @@ func runMCP(stdin io.Reader, stdout io.Writer) error {
 				response = jsonRPCError(nil, -32600, fmt.Sprintf(
 					"Invalid Request: message exceeds %d bytes", maxMCPMessageBytes))
 			} else {
-				response = handleMCPLine(bytes.TrimSpace(line), svc)
+				response = handleMCPLine(bytes.TrimSpace(line), handle)
 			}
 			if response != nil {
 				if encodeErr := encoder.Encode(response); encodeErr != nil {
@@ -70,14 +95,14 @@ func readMCPLine(reader *bufio.Reader) ([]byte, bool, error) {
 // handleMCPLine decodes one JSON-RPC message or batch and returns the value to
 // write, or nil when nothing must be written (notifications and client
 // responses).
-func handleMCPLine(line []byte, svc *service) any {
+func handleMCPLine(line []byte, handle mcpRequestHandler) any {
 	message, err := decodeMCPMessage(line)
 	if err != nil {
 		return jsonRPCError(nil, -32700, "Parse error: invalid JSON")
 	}
 	batch, isBatch := message.([]any)
 	if !isBatch {
-		if response := handleMCPMessage(message, svc); response != nil {
+		if response := handleMCPMessage(message, handle); response != nil {
 			return response
 		}
 		return nil
@@ -87,7 +112,7 @@ func handleMCPLine(line []byte, svc *service) any {
 	}
 	var responses []any
 	for _, item := range batch {
-		if response := handleMCPMessage(item, svc); response != nil {
+		if response := handleMCPMessage(item, handle); response != nil {
 			responses = append(responses, response)
 		}
 	}
@@ -97,7 +122,7 @@ func handleMCPLine(line []byte, svc *service) any {
 	return responses
 }
 
-func handleMCPMessage(message any, svc *service) map[string]any {
+func handleMCPMessage(message any, handle mcpRequestHandler) map[string]any {
 	request, ok := message.(map[string]any)
 	if !ok {
 		return jsonRPCError(nil, -32600, "Invalid Request: message must be a JSON object")
@@ -126,7 +151,11 @@ func handleMCPMessage(message any, svc *service) map[string]any {
 			return requestError(hasID, id, -32602, "Invalid params: params must be an object")
 		}
 	}
-	return handleMCPRequest(request, svc)
+	if _, hasID := request["id"]; !hasID {
+		// Notifications never receive a response.
+		return nil
+	}
+	return handle(request)
 }
 
 // requestError answers a malformed request; malformed notifications get no reply.
@@ -217,30 +246,8 @@ func handleMCPRequest(request map[string]any, svc *service) map[string]any {
 				return jsonRPCError(id, -32602, "Invalid params: arguments must be an object")
 			}
 		}
-		result := svc.callTool(publicName, arguments)
-		isAX := publicName == publicToolAX
-		if isAX {
-			// Final budget metadata must exist before fallback text evidence is
-			// serialized. Otherwise structured-only fields such as structural
-			// omission counts disappear when the structured channel is removed.
-			result = enforceAXResponseBudget(result)
-			result = prepareAXEvidence(result)
-		}
-		if svc.protocolVersion == mcpProtocolLegacy || !structuredContentEnabled() {
-			// structuredContent was added after MCP revision 2025-03-26 and
-			// remains optional. Keep the richer internal result, but put the
-			// evidence on the model-visible text channel before omitting the
-			// structured field. Some clients prioritize structuredContent and
-			// hide sibling text from the model, which can make computer-use
-			// state appear unavailable.
-			if isAX {
-				result = withAXTextEvidence(result)
-			} else {
-				result = withTextEvidence(result)
-			}
-			result.StructuredContent = nil
-		}
-		return jsonRPCResult(id, result)
+		structured := svc.protocolVersion != mcpProtocolLegacy && structuredContentEnabled()
+		return jsonRPCResult(id, svc.callForModel(publicName, arguments, structured))
 	default:
 		return jsonRPCError(id, -32601, "Method not found: "+method)
 	}

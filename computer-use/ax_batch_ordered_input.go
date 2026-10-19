@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 func wholeBatchOrderedInputRequest(
@@ -380,7 +381,9 @@ func (s *service) executePlannedOrderedInputRun(
 		}
 	}
 	request.FinalObservation.IncludeScreenshot = &includeScreenshot
+	providerStarted := time.Now()
 	nativeResult, err := backend.ExecuteOrderedInput(request)
+	s.countProviderTime(providerStarted)
 	if err != nil {
 		if result, rejected := runtimeRequestRejectionResult(err); rejected {
 			return orderedInputRunExecution{result: result}

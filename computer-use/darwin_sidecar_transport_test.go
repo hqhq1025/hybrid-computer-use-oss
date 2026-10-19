@@ -214,7 +214,7 @@ func TestDarwinProviderManagerRetriesReadOnlyResetAtMostOnce(t *testing.T) {
 		return &darwinProviderWorker{
 			connection: connection,
 			stdout:     bufio.NewReader(connection),
-			stderr: &boundedDarwinProviderBuffer{
+			stderr: &boundedProviderBuffer{
 				limit: maxDarwinProviderStderrBytes,
 			},
 			done:       done,
@@ -297,7 +297,7 @@ func TestDarwinProviderManagerNeverReplaysMutationReset(t *testing.T) {
 		return &darwinProviderWorker{
 			connection: connection,
 			stdout:     bufio.NewReader(connection),
-			stderr: &boundedDarwinProviderBuffer{
+			stderr: &boundedProviderBuffer{
 				limit: maxDarwinProviderStderrBytes,
 			},
 			done:       done,
@@ -368,7 +368,7 @@ func TestDarwinProviderManagerRetriesStartupBeforeSendingRequest(t *testing.T) {
 		return &darwinProviderWorker{
 			connection: connection,
 			stdout:     bufio.NewReader(connection),
-			stderr: &boundedDarwinProviderBuffer{
+			stderr: &boundedProviderBuffer{
 				limit: maxDarwinProviderStderrBytes,
 			},
 			done:       done,

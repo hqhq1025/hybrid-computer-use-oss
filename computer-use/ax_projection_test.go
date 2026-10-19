@@ -201,7 +201,9 @@ func TestObservationRootAcceptsExpandedShortRefInternally(t *testing.T) {
 		`push button "Save"`,
 		snapshot.WindowHandle,
 	)
-	if _, err := parseObservationRoot(map[string]any{"ref": internalRef}); err == nil {
+	if _, err := decodeAXRequest(map[string]any{
+		"mode": "observe", "window_ref": "w1", "root": internalRef,
+	}); err == nil {
 		t.Fatal("public observation root accepted an internal semantic ref")
 	}
 	if err := applyObservationRoot(
@@ -328,10 +330,16 @@ func TestObserveRootSchemaMatchesRuntimeRefRule(t *testing.T) {
 	if strings.Contains(text, "action 1 only") {
 		t.Fatalf("observe root index still claims to be act-only: %s", text)
 	}
-	if _, err := parseObservationRoot(map[string]any{"ref": "w1"}); err == nil {
+	observe := func(root string) *axArgError {
+		_, err := decodeAXRequest(map[string]any{
+			"mode": "observe", "window_ref": "w1", "root": root,
+		})
+		return err
+	}
+	if err := observe("w1"); err == nil {
 		t.Fatal("runtime accepted a wN observe root")
 	}
-	if _, err := parseObservationRoot(map[string]any{"ref": "r1"}); err != nil {
-		t.Fatalf("runtime rejected an rN observe root: %v", err)
+	if err := observe("r1"); err != nil {
+		t.Fatalf("runtime rejected an rN observe root: %#v", err)
 	}
 }

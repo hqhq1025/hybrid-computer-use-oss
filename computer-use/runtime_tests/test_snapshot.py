@@ -124,7 +124,7 @@ class SingleReadPerNodeTests(AtspiPatchedTestCase):
 
     def test_every_field_is_read_at_most_once(self):
         reads = {}
-        records, _lines = runtime.render_tree(
+        records, _lines, _annotations = runtime.render_tree(
             self._tree(reads), None, [0], prune=True,
             indexer=runtime.StableIndexer({}))
 
@@ -280,7 +280,7 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
 
         root.get_child_at_index = counted
 
-        records, _lines = runtime.render_tree(
+        records, _lines, _annotations = runtime.render_tree(
             root,
             None,
             [0],
@@ -326,7 +326,6 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
                     [0],
                     prune=True,
                     indexer=runtime.StableIndexer({}),
-                    include_annotations=True,
                 )
 
                 names = [record["name"] for record in records]
@@ -355,7 +354,6 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
             [0],
             prune=False,
             indexer=runtime.StableIndexer({}),
-            include_annotations=True,
         )
 
         self.assertEqual(
@@ -386,7 +384,7 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
             return original(node, *args, **kwargs)
 
         with mock.patch.object(runtime, "record_for", side_effect=record):
-            records, lines = runtime.render_tree(
+            records, lines, _annotations = runtime.render_tree(
                 root, None, [0], prune=False,
                 indexer=runtime.StableIndexer({}))
 
@@ -421,7 +419,7 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
                     runtime, "should_enumerate_children",
                     side_effect=lambda node, count=None, facts=None: (
                         node is not broken)):
-            records, lines = runtime.render_tree(
+            records, lines, _annotations = runtime.render_tree(
                 root, None, [0], prune=False,
                 indexer=runtime.StableIndexer({}))
 
@@ -442,7 +440,7 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
             return original(node, *args, **kwargs)
 
         with mock.patch.object(runtime, "record_for", side_effect=record):
-            records, lines = runtime.render_tree(
+            records, lines, _annotations = runtime.render_tree(
                 root, None, [0], prune=False,
                 indexer=runtime.StableIndexer({}))
 
@@ -464,7 +462,7 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
             return original(node, *args, **kwargs)
 
         with mock.patch.object(runtime, "record_for", side_effect=record):
-            records, lines = runtime.render_tree(
+            records, lines, _annotations = runtime.render_tree(
                 root, None, [0], prune=False,
                 max_tree_nodes=2,
                 indexer=runtime.StableIndexer({}))
@@ -484,7 +482,7 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
         root = _TreeNode(
             role="frame", name="Window", w=100, h=100, kids=children)
 
-        records, lines = runtime.render_tree(
+        records, lines, _annotations = runtime.render_tree(
             root, None, [0], prune=False,
             max_tree_nodes=runtime.MAX_ELEMENTS,
             indexer=runtime.StableIndexer({}))
@@ -506,7 +504,7 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
             return original(node, *args, **kwargs)
 
         with mock.patch.object(runtime, "record_for", side_effect=record):
-            _records, lines = runtime.render_tree(
+            _records, lines, _annotations = runtime.render_tree(
                 root, None, [0], prune=False,
                 max_rendered_chars=180,
                 indexer=runtime.StableIndexer({}))
@@ -541,7 +539,7 @@ class RenderIndentationTests(AtspiPatchedTestCase):
         middle = _TreeNode(role="filler", x=0, y=0, w=8, h=8, kids=(leaf,))
         root = _TreeNode(role="frame", name="Doc", w=100, h=100, kids=(middle,))
 
-        _, lines = runtime.render_tree(root, None, [0], prune=True)
+        _, lines, _ = runtime.render_tree(root, None, [0], prune=True)
 
         rendered = self._nodes(lines)
         self.assertEqual(len(rendered), 2, "the intermediate filler must be pruned: {}".format(rendered))
@@ -558,7 +556,7 @@ class RenderIndentationTests(AtspiPatchedTestCase):
         middle = _TreeNode(role="filler", x=0, y=0, w=8, h=8, kids=(leaf,))
         root = _TreeNode(role="frame", name="Doc", w=100, h=100, kids=(middle,))
 
-        _, lines = runtime.render_tree(root, None, [0], prune=False)
+        _, lines, _ = runtime.render_tree(root, None, [0], prune=False)
 
         rendered = self._nodes(lines)
         self.assertEqual(len(rendered), 3)
@@ -576,7 +574,7 @@ class TreeOmissionTests(AtspiPatchedTestCase):
         root = _TreeNode(
             role="frame", name="Doc", w=100, h=100, kids=(middle,))
 
-        records, lines = runtime.render_tree(
+        records, lines, _annotations = runtime.render_tree(
             root,
             None,
             [0],
@@ -607,7 +605,7 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
         back = _TreeNode(role="push button", description="Go back", x=1, y=1, w=5, h=5)
         root = _TreeNode(role="frame", name="Files", w=100, h=100, kids=(back,))
 
-        _, lines = runtime.render_tree(root, None, [0], prune=True)
+        _, lines, _ = runtime.render_tree(root, None, [0], prune=True)
 
         self.assertIn('[desc="Go back"]', "\n".join(lines))
 
@@ -619,7 +617,7 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
                          description="View options", x=7, y=1, w=5, h=5)
         root = _TreeNode(role="frame", name="Files", w=100, h=100, kids=(ops, view))
 
-        _, lines = runtime.render_tree(root, None, [0], prune=True)
+        _, lines, _ = runtime.render_tree(root, None, [0], prune=True)
 
         rendered = self._nodes(lines)
         self.assertIn("Show operations", rendered[1])
@@ -631,7 +629,7 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
                          x=1, y=1, w=5, h=5)
         root = _TreeNode(role="frame", name="Files", w=100, h=100, kids=(node,))
 
-        _, lines = runtime.render_tree(root, None, [0], prune=True)
+        _, lines, _ = runtime.render_tree(root, None, [0], prune=True)
 
         self.assertNotIn("Description:", "\n".join(lines))
 
@@ -644,7 +642,7 @@ class NodeDescriptionTests(AtspiPatchedTestCase):
         back = _TreeNode(role="push button", description="Go back", x=1, y=1, w=5, h=5)
         root = _TreeNode(role="frame", name="Files", w=100, h=100, kids=(back,))
 
-        records, _ = runtime.render_tree(root, None, [0], prune=True)
+        records, _, _ = runtime.render_tree(root, None, [0], prune=True)
 
         self.assertEqual(records[1]["name"], "")
         self.assertEqual(records[1]["description"], "Go back")
@@ -952,11 +950,6 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         first = _TreeNode(role="application", name="Editor")
         second = _TreeNode(role="application", name="Editor")
         self.patch_iter_apps([[first, second]])
-        original_accepts = runtime.accepts_user_input
-        runtime.accepts_user_input = lambda _app: True
-        self.addCleanup(
-            setattr, runtime, "accepts_user_input", original_accepts
-        )
 
         with self.assertRaises(runtime.OperationFailure) as caught:
             runtime.resolve_app("Editor")
@@ -966,6 +959,20 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         # The recovery names the current call, not the removed app_ref.
         self.assertIn('{"mode":"apps"}', str(caught.exception))
         self.assertNotIn("app_ref", str(caught.exception))
+        # The model picks a window, not an aN.
+        self.assertIn("wN", str(caught.exception))
+        self.assertNotIn("aN", str(caught.exception))
+        # Each matching process is named so the server can list its windows.
+        self.assertEqual(caught.exception.candidate_count, 2)
+        self.assertEqual(
+            [candidate["name"] for candidate in caught.exception.candidates],
+            ["Editor", "Editor"],
+        )
+        for candidate in caught.exception.candidates:
+            self.assertEqual(
+                set(candidate),
+                {"name", "providerBusName", "processGeneration"},
+            )
 
     def test_exact_app_identity_does_not_fall_back_to_name(self):
         current = _TreeNode(role="application", name="LibreOffice")
@@ -973,15 +980,12 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         self.patch_iter_apps([[current, restarted]])
         original_bus = runtime.provider_bus_name
         original_generation = runtime.process_generation
-        original_accepts = runtime.accepts_user_input
         runtime.provider_bus_name = lambda app: (
             ":1.84" if app is current else ":1.91"
         )
         runtime.process_generation = lambda pid, proc_root="/proc": "gen-current"
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "provider_bus_name", original_bus)
         self.addCleanup(setattr, runtime, "process_generation", original_generation)
-        self.addCleanup(setattr, runtime, "accepts_user_input", original_accepts)
 
         resolved = runtime.resolve_app_identity({
             "providerBusName": ":1.84",
@@ -1032,13 +1036,10 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         ])
         original_bus = runtime.provider_bus_name
         original_generation = runtime.process_generation
-        original_accepts = runtime.accepts_user_input
         runtime.provider_bus_name = lambda _app: ":1.84"
         runtime.process_generation = lambda _pid, proc_root="/proc": "gen-current"
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "provider_bus_name", original_bus)
         self.addCleanup(setattr, runtime, "process_generation", original_generation)
-        self.addCleanup(setattr, runtime, "accepts_user_input", original_accepts)
 
         resolved = runtime.resolve_app_identity({
             "providerBusName": ":1.84",
@@ -1057,13 +1058,10 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         ])
         original_bus = runtime.provider_bus_name
         original_generation = runtime.process_generation
-        original_accepts = runtime.accepts_user_input
         runtime.provider_bus_name = lambda _app: ":1.84"
         runtime.process_generation = lambda _pid, proc_root="/proc": "gen-current"
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "provider_bus_name", original_bus)
         self.addCleanup(setattr, runtime, "process_generation", original_generation)
-        self.addCleanup(setattr, runtime, "accepts_user_input", original_accepts)
 
         resolved = runtime.resolve_app_identity({
             "providerBusName": ":1.84",
@@ -1082,13 +1080,10 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
         ])
         original_bus = runtime.provider_bus_name
         original_generation = runtime.process_generation
-        original_accepts = runtime.accepts_user_input
         runtime.provider_bus_name = lambda _app: ":1.84"
         runtime.process_generation = lambda _pid, proc_root="/proc": "gen-current"
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "provider_bus_name", original_bus)
         self.addCleanup(setattr, runtime, "process_generation", original_generation)
-        self.addCleanup(setattr, runtime, "accepts_user_input", original_accepts)
 
         resolved = runtime.resolve_app_identity({
             "providerBusName": ":1.84",
@@ -1112,11 +1107,6 @@ class ResolveAppRetryTests(AtspiPatchedTestCase):
             role="application", name="vlc", kids=(main, preferences)
         )
         self.patch_iter_apps([[app]])
-        original_accepts = runtime.accepts_user_input
-        runtime.accepts_user_input = lambda _app: True
-        self.addCleanup(
-            setattr, runtime, "accepts_user_input", original_accepts
-        )
 
         with self.assertRaises(runtime.OperationFailure) as caught:
             runtime.resolve_app("Simple Preferences")
@@ -1135,13 +1125,8 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
             role="application", name="vlc", kids=(main, preferences)
         )
         original_apps = runtime.iter_apps
-        original_accepts = runtime.accepts_user_input
         runtime.iter_apps = lambda: [app]
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "iter_apps", original_apps)
-        self.addCleanup(
-            setattr, runtime, "accepts_user_input", original_accepts
-        )
 
         text = runtime.list_apps_inventory()["text"]
 
@@ -1161,13 +1146,8 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
         first.get_process_id = lambda: 101
         second.get_process_id = lambda: 202
         original_apps = runtime.iter_apps
-        original_accepts = runtime.accepts_user_input
         runtime.iter_apps = lambda: [first, second]
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "iter_apps", original_apps)
-        self.addCleanup(
-            setattr, runtime, "accepts_user_input", original_accepts
-        )
 
         text = runtime.list_apps_inventory()["text"]
 
@@ -1186,13 +1166,8 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
         first.get_process_id = lambda: 101
         second.get_process_id = lambda: 101
         original_apps = runtime.iter_apps
-        original_accepts = runtime.accepts_user_input
         runtime.iter_apps = lambda: [first, second]
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "iter_apps", original_apps)
-        self.addCleanup(
-            setattr, runtime, "accepts_user_input", original_accepts
-        )
 
         with (
             mock.patch.object(runtime, "provider_bus_name", return_value=":1.42"),
@@ -1209,18 +1184,13 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
         app.get_process_id = lambda: 101
         calls = {"count": 0}
         original_apps = runtime.iter_apps
-        original_accepts = runtime.accepts_user_input
 
         def one_inventory():
             calls["count"] += 1
             return [app]
 
         runtime.iter_apps = one_inventory
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "iter_apps", original_apps)
-        self.addCleanup(
-            setattr, runtime, "accepts_user_input", original_accepts
-        )
 
         result = perform_provider_operation({"intent": "observe_apps"})
 
@@ -1234,15 +1204,12 @@ class ListAppsWindowInventoryTests(AtspiPatchedTestCase):
 class ListAppsTopLevelWindowTests(AtspiPatchedTestCase):
     def _patch_inventory(self, apps, handles, root_state, infrastructure=()):
         original_apps = runtime.iter_apps
-        original_accepts = runtime.accepts_user_input
         runtime.iter_apps = lambda: apps
-        runtime.accepts_user_input = lambda _app: True
         self.addCleanup(setattr, runtime, "iter_apps", original_apps)
-        self.addCleanup(setattr, runtime, "accepts_user_input", original_accepts)
         for patcher in (
             mock.patch.object(runtime, "strong_window_instance_handles",
                               side_effect=lambda app, windows: handles.get(id(app), {})),
-            mock.patch.object(runtime, "x11_root_window_state", return_value=root_state),
+            mock.patch.object(runtime, "correlation_root_window_state", return_value=root_state),
             mock.patch.object(runtime, "opaque_window_instance_handle_for_id",
                               side_effect=lambda app, window_id: "w2:" + str(window_id)),
             mock.patch.object(runtime, "is_infrastructure_window",
@@ -1295,6 +1262,65 @@ class ListAppsTopLevelWindowTests(AtspiPatchedTestCase):
 
         self.assertFalse(windows[0]["inputTarget"])
 
+    def test_app_is_input_capable_iff_a_listed_window_is_an_input_target(self):
+        panel = _TreeNode(role="frame", name="")
+        dock = _TreeNode(role="frame", name="")
+        infra = _TreeNode(role="application", name="panel", kids=(panel, dock))
+        infra.get_process_id = lambda: 7
+        doc = _TreeNode(role="frame", name="Doc")
+        editor = _TreeNode(role="application", name="editor", kids=(panel, doc))
+        editor.get_process_id = lambda: 8
+        self._patch_inventory(
+            [infra, editor], {}, {"windowIds": set(), "activeWindow": None},
+            infrastructure=(panel, dock),
+        )
+        with mock.patch.object(
+            runtime, "process_generation", side_effect=lambda pid: str(pid)
+        ):
+            apps = {
+                a["name"]: a for a in runtime.list_apps_inventory()["apps"]
+            }
+
+        self.assertFalse(apps["panel"]["inputCapable"])
+        self.assertIn("NOT an input target", apps["panel"]["displayText"])
+        self.assertTrue(apps["editor"]["inputCapable"])
+        self.assertEqual(
+            [w["inputTarget"] for w in apps["editor"]["windows"]],
+            [False, True],
+        )
+
+    def test_unanswered_application_marks_the_listing_incomplete(self):
+        doc = _TreeNode(role="frame", name="Doc")
+        editor = _TreeNode(role="application", name="editor", kids=(doc,))
+        editor.get_process_id = lambda: 8
+        hung = _TreeNode(role="application", name="")
+        hung.get_process_id = lambda: 9
+
+        def no_answer():
+            raise RuntimeError("Timeout was reached")
+
+        hung.get_child_count = no_answer
+        self._patch_inventory(
+            [editor, hung], {}, {"windowIds": set(), "activeWindow": None},
+        )
+        with mock.patch.object(
+            runtime, "process_generation", side_effect=lambda pid: str(pid)
+        ):
+            result = runtime.list_apps_inventory()
+
+        self.assertEqual([a["name"] for a in result["apps"]], ["editor"])
+        self.assertEqual(len(result["notes"]), 1)
+        self.assertIn("1 application(s) did not answer", result["notes"][0])
+
+    def test_complete_listing_has_no_notes(self):
+        doc = _TreeNode(role="frame", name="Doc")
+        editor = _TreeNode(role="application", name="editor", kids=(doc,))
+        editor.get_process_id = lambda: 8
+        self._patch_inventory(
+            [editor], {}, {"windowIds": set(), "activeWindow": None},
+        )
+        self.assertEqual(runtime.list_apps_inventory()["notes"], [])
+
     def test_unreadable_window_manager_falls_back_to_atspi_active(self):
         window = _TreeNode(role="frame", name="Doc")
         window.states.add(STATE.ACTIVE)
@@ -1341,6 +1367,22 @@ class ProviderInventoryCompletenessTests(AtspiPatchedTestCase):
 
         self.assertEqual(list(inventory), [])
         self.assertFalse(inventory.complete)
+
+    def test_unreadable_window_role_is_incomplete_not_windowless(self):
+        """A failed role read is not an empty role: the inventory is incomplete."""
+        window = _TreeNode(role="frame", name="Editor")
+
+        def broken_role():
+            raise RuntimeError("AT-SPI call timed out")
+
+        window.get_role_name = broken_role
+        app = _TreeNode(role="application", name="Editor", kids=(window,))
+
+        inventory = runtime.app_windows(app)
+
+        self.assertEqual(list(inventory), [])
+        self.assertFalse(inventory.complete)
+        self.assertIn("role failed: RuntimeError", inventory.errors[0])
 
 
 class AXWindowCloseEvidenceTests(AtspiPatchedTestCase):
@@ -1668,6 +1710,49 @@ class AXDirectTargetResolutionTests(AtspiPatchedTestCase):
         self.assertFalse(first.complete)
         self.assertTrue(second.complete)
         self.assertEqual(second[0]["id"], "0x1000001")
+
+    def test_native_inventory_is_listed_once_per_operation(self):
+        listing = subprocess.CompletedProcess(
+            [],
+            0,
+            "0x01000001 0 4242 10 20 800 600 host Document\n"
+            "0x02000001 0 5151 0 0 300 200 host Panel\n",
+            "",
+        )
+        with mock.patch.object(
+            runtime.subprocess, "run", return_value=listing
+        ) as command:
+            first = runtime.x11_window_inventory_for_pid(4242)
+            second = runtime.x11_window_inventory_for_pid(5151)
+            missing = runtime.x11_window_inventory_for_pid(9999)
+
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual([w["id"] for w in first], ["0x1000001"])
+        self.assertEqual(first[0]["title"], "Document")
+        self.assertNotIn("pid", first[0])
+        self.assertEqual([w["id"] for w in second], ["0x2000001"])
+        self.assertTrue(missing.complete)
+        self.assertEqual(list(missing), [])
+
+    def test_window_correlation_reads_root_state_once_per_operation(self):
+        root = subprocess.CompletedProcess(
+            [],
+            0,
+            "_NET_CLIENT_LIST_STACKING(WINDOW): window id # 0x1000001\n"
+            "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x1000001\n",
+            "",
+        )
+        with mock.patch.object(
+            runtime.subprocess, "run", return_value=root
+        ) as command:
+            first = runtime.correlation_root_window_state()
+            second = runtime.correlation_root_window_state()
+            runtime._x11_window_inventory_cache.clear()
+            third = runtime.correlation_root_window_state()
+
+        self.assertEqual(command.call_count, 2)
+        self.assertEqual(first, second)
+        self.assertEqual(third["activeWindow"], "0x1000001")
 
     def test_internal_resolve_target_uses_action_resolver_without_input(self):
         app = _TreeNode(role="application", name="editor")
@@ -2014,7 +2099,7 @@ class PruneCostTests(AtspiPatchedTestCase):
         runtime.record_for = counted
         self.addCleanup(setattr, runtime, "record_for", original)
 
-        records, _ = runtime.render_tree(window, {"x": 0, "y": 0, "width": 100, "height": 100}, [0])
+        records, _, _ = runtime.render_tree(window, {"x": 0, "y": 0, "width": 100, "height": 100}, [0])
 
         # Only the window and the surviving button pay for a full record.
         self.assertEqual(len(records), 2, [r["name"] for r in records])
@@ -2033,7 +2118,7 @@ class PruneCostTests(AtspiPatchedTestCase):
                                 kids=(inner,))
         window = _TreeNode(role="frame", name="W", x=0, y=0, w=100, h=100,
                            kids=(named_panel,))
-        records, _ = runtime.render_tree(
+        records, _, _ = runtime.render_tree(
             window, {"x": 0, "y": 0, "width": 100, "height": 100}, [0])
         self.assertIn("Line Spacing", [r["name"] for r in records])
 
@@ -2045,7 +2130,7 @@ class PruneCostTests(AtspiPatchedTestCase):
         window = _TreeNode(
             role="frame", name="W", w=100, h=100, kids=fillers)
 
-        records, _ = runtime.render_tree(
+        records, _, _ = runtime.render_tree(
             window,
             {"x": 0, "y": 0, "width": 100, "height": 100},
             [0],
@@ -2077,7 +2162,7 @@ class PruneCostTests(AtspiPatchedTestCase):
             role="frame", name="W", w=100, h=100,
             kids=prefix + (unnamed,))
 
-        records, _ = runtime.render_tree(
+        records, _, _ = runtime.render_tree(
             window,
             {"x": 0, "y": 0, "width": 100, "height": 100},
             [0],
@@ -2199,7 +2284,7 @@ class DenseIndexTests(AtspiPatchedTestCase):
 
         # Pass an indexer: without one the index falls back to len(records),
         # which is dense by construction and would prove nothing.
-        records, _lines = runtime.render_tree(
+        records, _lines, _annotations = runtime.render_tree(
             window, None, [0], indexer=runtime.StableIndexer({}), prune=True)
         indices = sorted(r["index"] for r in records)
         self.assertEqual(indices, list(range(len(records))),
@@ -2366,7 +2451,7 @@ class ElementReferenceTests(unittest.TestCase):
             runtime.element_reference("entry", 'say "hi"'), r'entry "say \"hi\""'
         )
 
-    def test_focused_summary_uses_the_shared_renderer(self):
+    def test_focus_summary_uses_the_shared_renderer(self):
         """Focus evidence uses the shared renderer so it reads back as a target."""
         node = object()
         with mock.patch.object(runtime, "iter_apps", return_value=[node]), \
@@ -2377,6 +2462,5 @@ class ElementReferenceTests(unittest.TestCase):
                 mock.patch.object(runtime, "node_name",
                                   return_value="Address and search bar"), \
                 mock.patch.object(runtime, "desktop", return_value=None):
-            self.assertEqual(
-                runtime.focused_summary(42), 'entry "Address and search bar"'
-            )
+            summary, _selected = runtime.focus_and_selection(42)
+            self.assertEqual(summary, 'entry "Address and search bar"')

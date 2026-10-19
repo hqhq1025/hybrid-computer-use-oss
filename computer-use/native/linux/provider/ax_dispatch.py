@@ -146,23 +146,11 @@ from .ax_snapshot_diagnostics import (
 )
 from .ax_transition_evidence import (
     external_desktop_transition_after_ax_mutation,
-    public_element_record,
 )
 
 
 def perform_provider_request(operation_kind, payload):
-    """Dispatch one validated Provider V2 operation."""
-    if operation_kind not in {
-        "observe_apps",
-        "observe",
-        "resolve_and_act",
-        "desktop_execute_batch",
-        "window_list",
-        "window_action",
-    }:
-        raise ValueError(
-            "unsupported provider operation {!r}".format(operation_kind)
-        )
+    """Dispatch one Provider V2 operation that validate_request() accepted."""
     action_intent = None
     if operation_kind == "resolve_and_act":
         action_intent = payload.get("intent")
@@ -188,12 +176,16 @@ def dispatch_provider_operation(
     # window, so each operation starts with a fresh bounded inventory while
     # sharing that sample across its internal resolution steps.
     _x11_window_inventory_cache.clear()
+    # A pid can be reused by a new process between operations; its start
+    # time is what tells the two apart, so it is read again per operation.
+    process_generation.cache_clear()
     if operation_kind == "observe_apps":
         inventory = list_apps_inventory()
         return {
             "ok": True,
             "text": inventory["text"],
             "apps": inventory["apps"],
+            "notes": inventory["notes"],
         }
     if operation_kind == "window_list":
         return app_window_inventory(
@@ -866,6 +858,10 @@ def dispatch_provider_operation(
         )
 
     lap("action")
+    # The input may have opened or closed native windows. Reads after this
+    # point (settle, post-action snapshot, recovery) must not bind windows
+    # against the native inventory sampled before the input.
+    _x11_window_inventory_cache.clear()
     if observation.get("capture_snapshot") is False:
         response = {
             "ok": True,
@@ -876,7 +872,7 @@ def dispatch_provider_operation(
             "observationSkipped": True,
         }
         if element_record is not None:
-            response["resolvedElement"] = public_element_record(element_record)
+            response["resolvedElement"] = element_record
         if notes:
             response["notes"] = notes
         return response
@@ -940,7 +936,7 @@ def dispatch_provider_operation(
             "mutation_unknown": False,
         })
     if element_record is not None:
-        response["resolvedElement"] = public_element_record(element_record)
+        response["resolvedElement"] = element_record
     # Take the second post-action capture after building the snapshot. That
     # work spaces the two captures far enough apart for a 1 Hz caret blink to
     # toggle, so the blink is not reported as a persistent change.

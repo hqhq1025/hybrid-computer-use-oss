@@ -509,12 +509,3 @@ func describeRecord(record *elementRecord) string {
 	}
 	return renderElementReference(record.ControlType, record.Name)
 }
-
-// renderElementAddress identifies one read-only target using the public field
-// name. Mutation callers use rN refs instead of replaying this text.
-func renderElementAddress(record *elementRecord) string {
-	if record == nil {
-		return "(no element)"
-	}
-	return fmt.Sprintf("index=%d, %s", record.Index, describeRecord(record))
-}

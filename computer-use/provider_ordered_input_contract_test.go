@@ -88,8 +88,12 @@ func TestProviderOrderedInputContractAcceptsCompleteSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := DecodeProviderOrderedInputResult(encoded, request); err != nil {
+	var decoded ProviderOrderedInputResult
+	if err := decodeProviderWireJSON(encoded, &decoded); err != nil {
 		t.Fatalf("strict result round trip failed: %v", err)
+	}
+	if err := decoded.ValidateFor(request); err != nil {
+		t.Fatalf("round-tripped result failed validation: %v", err)
 	}
 }
 
@@ -533,7 +537,8 @@ func TestProviderOrderedInputStrictDecodeRejectsUnknownFields(t *testing.T) {
 		`"contract_version":1,"fast":true`,
 		1,
 	))
-	if _, err := DecodeProviderOrderedInputRequest(encoded); err == nil ||
+	var decoded ProviderOrderedInputRequest
+	if err := decodeProviderWireJSON(encoded, &decoded); err == nil ||
 		!strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("strict decoder error=%v, want unknown field", err)
 	}

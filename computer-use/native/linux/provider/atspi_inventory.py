@@ -1,8 +1,6 @@
 """Linux provider module: atspi inventory."""
 
 import os
-import re
-import subprocess
 import time
 from .foundation import (
     Atspi,
@@ -304,35 +302,6 @@ def matches_app_bootstrap_query(app, query):
     )
 
 
-def foreground_app():
-    """Return the accessibility application that owns the X11 active window.
-
-    Return None when it cannot be determined. This answers an empty
-    application query ("what is in front of me") in a single call.
-
-    The X11 active window is used instead of the AT-SPI ACTIVE state, which a
-    large class of windows, including portal dialogs and LibreOffice, never
-    sets; relying on it would often find no foreground application.
-    """
-    try:
-        active = subprocess.run(["xdotool", "getactivewindow"],
-                                capture_output=True, text=True, timeout=3)
-        if active.returncode != 0 or not active.stdout.strip():
-            return None
-        prop = subprocess.run(["xprop", "-id", active.stdout.strip(), "_NET_WM_PID"],
-                              capture_output=True, text=True, timeout=3).stdout
-    except Exception:
-        return None
-    digits = [int(n) for n in re.findall(r"\d+", prop)]
-    if not digits:
-        return None
-    target_pid = digits[-1]
-    for app in iter_apps():
-        if node_pid(app) == target_pid:
-            return app
-    return None
-
-
 def input_capable_app_labels():
     """Return one label per application that can take user input.
 
@@ -431,21 +400,6 @@ def resolve_app(query):
     """
     from .ax_actions import RESOLVE_APP_ATTEMPTS, RESOLVE_APP_RETRY_SECONDS
 
-    # An empty query asks which application is in the foreground, so it can
-    # be answered in one call.
-    if not str(query or "").strip():
-        app = foreground_app()
-        if app is not None:
-            # With no application focused, the X11 active window is the
-            # desktop or a panel. Returning it would present "nothing is in
-            # front of you" as an application.
-            if not accepts_user_input(app):
-                raise infrastructure_app_error(app, "(foreground)")
-            return app
-        raise RuntimeError(
-            "No app was given and the foreground window could not be attributed to "
-            "any application on the accessibility bus. Pass an app name, or call "
-            "list_apps to see what is running.")
     last_error = None
     # An application that matched but has only infrastructure windows is
     # neither a match nor a miss: keep looking at other candidates, and if
@@ -479,14 +433,26 @@ def resolve_app(query):
                     node_name(app) or "(unnamed application)"
                     for app in matches
                 })
+                # The server turns these process identities into the wN
+                # of each matching window; the provider cannot issue refs.
                 raise OperationFailure(
                     'appTargetAmbiguous("{}"): {} input-capable accessibility '
                     'applications match this bootstrap query: {}. No action was '
-                    'attempted. List windows with AX {{"mode":"apps"}} and use the aN or wN.'.format(
+                    'attempted. Pass the wN of one window as window_ref; AX '
+                    '{{"mode":"apps"}} lists the windows.'.format(
                         query, len(matches), ", ".join(labels[:10])),
                     failure_code="ax_app_ambiguous",
                     failure_phase="precondition",
                     input_events_emitted=False,
+                    candidates=[
+                        {
+                            "name": node_name(app) or "",
+                            "providerBusName": provider_bus_name(app),
+                            "processGeneration": process_generation(node_pid(app)),
+                        }
+                        for app in matches
+                    ],
+                    candidate_count=len(matches),
                 )
             last_error = None
         except Exception as error:  # A failed enumeration counts as a miss.

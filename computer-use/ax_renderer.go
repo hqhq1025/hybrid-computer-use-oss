@@ -324,6 +324,7 @@ func (s *service) buildAndRenderAXSnapshotV1(
 		return err
 	}
 	axSnapshot.AppRef = snapshot.publicAppRef
+	axSnapshot.ActedRef = snapshot.actedRef
 	// Addressability is an identity property of the canonical snapshot.
 	// Evaluate it before deriving the working projection so distillation can
 	// remove or unwrap controls that the ref-only action surface cannot target.

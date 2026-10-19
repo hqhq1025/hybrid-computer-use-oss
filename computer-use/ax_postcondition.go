@@ -647,7 +647,7 @@ func mergeA11yPostconditionResult(
 	actionResult.StructuredContent["postcondition_verified"] =
 		!assertionResult.IsError && status == "pass"
 	if !assertionResult.IsError && status == "pass" {
-		preserveUnattributedPostconditionEvidence(
+		markVerifiedPostconditionEffect(
 			actionResult.StructuredContent,
 			nil,
 		)
@@ -694,24 +694,52 @@ func mergeA11yPostconditionResult(
 	return actionResult
 }
 
-func preserveUnattributedPostconditionEvidence(
+// markVerifiedPostconditionEffect records a passing until after input: the
+// awaited state was read live, so the effect is no longer unknown. The
+// until does not prove that this action caused the state (another action,
+// the app, or the user may have), so the cause stays unattributed.
+func markVerifiedPostconditionEffect(
 	structuredContent map[string]any,
 	actionEvidence map[string]any,
 ) {
-	if structuredContent == nil {
-		return
-	}
-	if structuredContent["task_effect_verified"] == true ||
+	if structuredContent == nil ||
+		structuredContent["task_effect_verified"] == true ||
 		!axEvidenceReportsInputEmission(structuredContent) {
 		return
 	}
-	structuredContent["effect_unknown"] = true
-	structuredContent["mutation_unknown"] = true
+	delete(structuredContent, "effect_unknown")
+	delete(structuredContent, "mutation_unknown")
 	structuredContent["cause_unattributed"] = true
 	if actionEvidence != nil {
-		actionEvidence["mutation_unknown"] = true
+		delete(actionEvidence, "mutation_unknown")
 		actionEvidence["cause_unattributed"] = true
 	}
+}
+
+// a11yBatchEffectVerified reports whether an until verified the outcome of
+// the whole call: the batch until passed, or every action that sent input
+// has an until of its own that passed.
+func a11yBatchEffectVerified(
+	batchUntilPassed bool,
+	actions []map[string]any,
+) bool {
+	if batchUntilPassed {
+		return true
+	}
+	verified := false
+	for _, action := range actions {
+		evidence, _ := action["postcondition"].(map[string]any)
+		if evidence != nil && evidence["verified"] == true {
+			verified = true
+			continue
+		}
+		if axEvidenceReportsInputEmission(action) ||
+			action["partial_input_possible"] == true ||
+			action["mutation_unknown"] == true {
+			return false
+		}
+	}
+	return verified
 }
 
 func classifyA11yPostconditionFailure(

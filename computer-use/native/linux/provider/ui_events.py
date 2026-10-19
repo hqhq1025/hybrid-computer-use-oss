@@ -42,10 +42,6 @@ PUMP_BUDGET_SECONDS = 0.25
 # lost. Snapshots whose walk started in this window are never reused.
 REGISTRATION_GRACE_SECONDS = 1.0
 
-# Object path of an application's root accessible. Children-changed events
-# on it mean that a top-level window was added or removed.
-APPLICATION_ROOT_PATH = "/org/a11y/atspi/accessible/root"
-
 # Sleep between pumps while waiting for events.
 WAIT_STEP_SECONDS = 0.004
 
@@ -61,7 +57,6 @@ class EventMonitor:
         self._listener = None
         self._generations = {}
         self._last_event_at = {}
-        self._last_window_event_at = {}
         # Bumped by events whose application cannot be identified and by
         # undrained backlogs: it invalidates every application at once.
         self._global_generation = 0
@@ -87,21 +82,15 @@ class EventMonitor:
 
     def _on_event(self, event):
         # Keep this callback cheap: a dialog can emit thousands of events.
-        # app.bus_name and path are fields of objects libatspi already
-        # holds; reading them makes no D-Bus call.
+        # app.bus_name is a field of an object libatspi already holds;
+        # reading it makes no D-Bus call.
         try:
-            source = event.source
-            bus = source.app.bus_name
-            window_level = (
-                str(event.type).startswith("window:")
-                or source.path == APPLICATION_ROOT_PATH
-            )
+            bus = event.source.app.bus_name
         except Exception:
             bus = None
-            window_level = True
-        self.record(bus, window_level=window_level)
+        self.record(bus)
 
-    def record(self, bus, window_level=False):
+    def record(self, bus):
         """Count one event from ``bus``; None means the source is unknown."""
         now = self.clock()
         if not bus:
@@ -109,8 +98,6 @@ class EventMonitor:
             return
         self._generations[bus] = self._generations.get(bus, 0) + 1
         self._last_event_at[bus] = now
-        if window_level:
-            self._last_window_event_at[bus] = now
 
     def pump(self, budget_seconds=PUMP_BUDGET_SECONDS):
         """Dispatch queued events; return False if the backlog was not drained."""
@@ -134,9 +121,6 @@ class EventMonitor:
 
     def last_event_at(self, bus):
         return self._last_event_at.get(bus)
-
-    def last_window_event_at(self, bus):
-        return self._last_window_event_at.get(bus)
 
     def trusted_after(self, started_at):
         """Return whether a walk started at ``started_at`` saw every event."""

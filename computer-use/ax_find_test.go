@@ -87,7 +87,7 @@ func TestFindFiltersAreAnded(t *testing.T) {
 	for _, c := range cases {
 		got := []int{}
 		for i := range snapshot.Elements {
-			if recordMatches(&snapshot.Elements[i], c.role, c.name, c.text, c.state) {
+			if recordMatchesFind(&snapshot.Elements[i], c.role, c.name, c.text, c.state, false, false) {
 				got = append(got, snapshot.Elements[i].Index)
 			}
 		}

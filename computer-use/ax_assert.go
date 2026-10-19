@@ -248,6 +248,11 @@ func assertionEvidenceScope(result toolCallResult) string {
 // application shows such a window, so it is never narrowed to the window a
 // batch acted in; that window is often the one the action closed or the one a
 // new dialog covers.
+//
+// Each poll names the application by name, never by process: an aN is read
+// through the name it was listed under. The application may have been closed
+// and launched again during the wait, or run as several processes with one
+// name; a process-bound read would never see the new window.
 func (s *service) verifyWindowTitle(
 	app,
 	titleSubstring string,
@@ -288,20 +293,39 @@ func (s *service) verifyWindowTitleWithProbe(
 			Operation: axServiceWindowList,
 			App:       app,
 		}
-		// Closing an application's last window can retire its aN before this
-		// poll; the read then names the same exact process.
-		if err := s.bindPredicateAppIdentity(&operation); err != nil {
-			return a11yAssertionResult(
-				"until: application target: "+err.Error(),
-				true,
-				"invalid_target",
-				attempts,
-				stableMS,
+		name := ""
+		if isShortAXAppRef(app) {
+			name = s.appRefRegistry.DisplayName(app)
+		}
+		var response *ProviderWindowResult
+		var err error
+		if name != "" {
+			byName := operation
+			byName.App = name
+			response, err = probe(
+				providerWindowListRequestFromOperation(byName),
 			)
 		}
-		response, err := probe(
-			providerWindowListRequestFromOperation(operation),
-		)
+		if name == "" || (err == nil && !response.OK) {
+			// Without a recorded name, or when the name no longer resolves,
+			// read the exact process the aN named. Closing an application's
+			// last window can retire its aN before this poll; a complete
+			// inventory without that process then proves absence. Providers
+			// whose name lookup fails for a missing app (macOS, Windows) rely
+			// on this read.
+			if bindErr := s.bindPredicateAppIdentity(&operation); bindErr != nil {
+				return a11yAssertionResult(
+					"until: application target: "+bindErr.Error(),
+					true,
+					"invalid_target",
+					attempts,
+					stableMS,
+				)
+			}
+			response, err = probe(
+				providerWindowListRequestFromOperation(operation),
+			)
+		}
 		matched := []string{}
 		if err != nil {
 			lastError = err.Error()
@@ -841,6 +865,50 @@ func (s *service) verifyResolvedAXRefWithProbes(
 	}
 }
 
+// closestSelectorCandidates lists, as the tree renders them, the elements
+// nearest to a selector that matched nothing: same role with a name that
+// contains or is contained in the requested name, then any role with such a
+// name. A selector name matches exactly, so `menuitem "Paragraph"` misses
+// `menuitem "Paragraph..."`; naming the candidate lets the caller fix the
+// selector without reading the tree again.
+func closestSelectorCandidates(selector string, limit int, groups ...[]elementRecord) []string {
+	role, name, hasName, _ := parseSelector(selector)
+	want := strings.ToLower(normalizedSemanticWhitespace(name))
+	if !hasName || len([]rune(want)) < 2 {
+		return nil
+	}
+	sameRole, otherRole := []string{}, []string{}
+	seen := map[string]bool{}
+	for _, records := range groups {
+		for index := range records {
+			record := &records[index]
+			have := strings.ToLower(normalizedSemanticWhitespace(record.Name))
+			if have == "" || !(strings.Contains(have, want) || strings.Contains(want, have)) {
+				continue
+			}
+			shown := string(canonicalRoleDescriptor(ontologyProviderRole(record), nil).ModelRole)
+			if shown == "" || shown == string(RoleGeneric) {
+				shown = canonicalRole(record)
+			}
+			line := renderElementReference(shown, record.Name)
+			if seen[line] {
+				continue
+			}
+			seen[line] = true
+			if selectorRoleMatches(record, role) {
+				sameRole = append(sameRole, line)
+			} else {
+				otherRole = append(otherRole, line)
+			}
+		}
+	}
+	out := append(sameRole, otherRole...)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
 func (g verifyGoal) isNegativeExistenceOnly() bool {
 	return g.exists != nil && !*g.exists &&
 		g.state == "" &&
@@ -923,6 +991,7 @@ func (s *service) verify(
 	var firstCount int
 	var trueSince time.Time
 	stableObserved := ""
+	closest := []string{}
 	for attempt := 1; ; attempt++ {
 		request := axServiceRequest{
 			Operation:         axServiceObserve,
@@ -994,6 +1063,10 @@ func (s *service) verify(
 				record, lookupErr = otherRecord, otherErr
 			}
 			incomplete = !complete && record == nil
+			if record == nil {
+				closest = closestSelectorCandidates(selector, 3,
+					read.lookup.Elements, others.Elements)
+			}
 		}
 		ok, observed := goal.check(record, lookupErr)
 		if incomplete {
@@ -1062,6 +1135,11 @@ func (s *service) verify(
 			e := &toolError{tool: "until", summary: fmt.Sprintf(
 				"expected %s %s, and it did not become true within %dms.",
 				displaySelector, goal.describe(), timeoutMS)}
+			if record == nil && len(closest) > 0 {
+				// The first line is what the model sees of a failed until,
+				// so a near miss in role or name spelling goes there.
+				e.summary += " closest: " + strings.Join(closest, ", ")
+			}
 			e.add("Selector", strconv.Quote(displaySelector))
 			e.add("Snapshot", snapshotAge(snapshot))
 			// Report whether the UI changed during the wait. This separates

@@ -233,6 +233,9 @@ func (s *service) prepareProviderSnapshot(
 		[]string(nil),
 		response.Snapshot.TreeLines...,
 	)
+	if accessibilityOperationCanMutate(request) && isShortAXRef(request.SourceRef) {
+		response.Snapshot.actedRef = request.SourceRef
+	}
 	if err := applyA11yScope(response.Snapshot, request.Scope); err != nil {
 		return nil, textResult(err.Error(), true).
 			withEvidenceScope("error_only")
@@ -576,6 +579,11 @@ func (s *service) renderRuntimeReportedFailure(
 	if response.ActionEvidence != nil {
 		result.StructuredContent["runtime_action_evidence"] =
 			*response.ActionEvidence
+	}
+	if s != nil && response.FailureCode == "ax_app_ambiguous" {
+		// Its candidates are application processes, not elements.
+		s.describeAmbiguousApp(&result, response.Candidates)
+		return result
 	}
 	if s != nil && len(response.Candidates) > 0 {
 		snapshot := s.currentSnapshot(app)

@@ -65,3 +65,31 @@ func TestRemovedCLICompatibilityCommandsStayRemoved(t *testing.T) {
 		}
 	}
 }
+
+// computer-use call prints the model-facing result: no structuredContent,
+// and images as file paths rather than base64.
+func TestCallPrintsModelFacingResultWithImageFiles(t *testing.T) {
+	t.Setenv("COMPUTER_USE_OUTPUT_DIR", t.TempDir())
+	dispatched := 1
+	svc := newServiceWithBackend(&recordingPlatformBackend{desktopResponse: &ProviderDesktopResult{
+		OK:        true,
+		GUIResult: ProviderGUIResult{Dispatched: &dispatched},
+		Snapshot: &appSnapshot{
+			ScreenshotPNGBase64: testPNGBase64(t, 40, 30), CoordinateSpace: "screen_image_px",
+			FrameID: "f", Width: 40, Height: 30,
+		},
+	}})
+	output, _, err := runCallCommand([]string{"GUI", "--args", `{"actions":[{"type":"screenshot"}]}`}, svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "structuredContent") ||
+		strings.Contains(string(encoded), `"data"`) ||
+		!strings.Contains(string(encoded), `"path"`) {
+		t.Fatalf("call output is not the model-facing result with image files: %s", encoded)
+	}
+}

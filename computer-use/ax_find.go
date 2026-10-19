@@ -10,41 +10,6 @@ func containsFold(haystack, needle string) bool {
 	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }
 
-// recordMatches reports whether a record satisfies the query; conditions
-// combine with AND.
-func recordMatches(record *elementRecord, role, name, text, state string) bool {
-	if role != "" {
-		modelRole := canonicalRoleDescriptor(
-			ontologyProviderRole(record), nil,
-		).ModelRole
-		if !containsFold(record.ControlType, role) &&
-			!containsFold(record.LocalizedControlType, role) &&
-			!containsFold(string(modelRole), role) {
-			return false
-		}
-	}
-	if name != "" && !containsFold(record.Name, name) {
-		return false
-	}
-	if state != "" && !containsFold(record.States, state) {
-		return false
-	}
-	if text != "" {
-		// text is the fallback when the caller does not know which field
-		// holds the string, so it scans name, description, value and
-		// placeholder. Toolkits disagree on the field: the same search box
-		// exposes its hint as a placeholder in GTK and as the name in
-		// Electron.
-		if !containsFold(record.Name, text) &&
-			!containsFold(record.Description, text) &&
-			!containsFold(record.Value, text) &&
-			!containsFold(record.Placeholder, text) {
-			return false
-		}
-	}
-	return true
-}
-
 func recordMatchesFind(
 	record *elementRecord,
 	role, name, text, state string,
@@ -53,15 +18,8 @@ func recordMatchesFind(
 	if record == nil {
 		return false
 	}
-	if role != "" {
-		modelRole := canonicalRoleDescriptor(
-			ontologyProviderRole(record), nil,
-		).ModelRole
-		if !containsFold(record.ControlType, role) &&
-			!containsFold(record.LocalizedControlType, role) &&
-			!containsFold(string(modelRole), role) {
-			return false
-		}
+	if role != "" && !findRoleMatches(record, role) {
+		return false
 	}
 	if name != "" {
 		if nameExact {
@@ -104,6 +62,20 @@ func recordMatchesFind(
 		}
 	}
 	return true
+}
+
+// findRoleMatches reports whether the record's provider or model role
+// contains role. Roles compare by roleKey, so "menu_item" finds a
+// "menu item" just as "menuitem" does.
+func findRoleMatches(record *elementRecord, role string) bool {
+	want := roleKey(role)
+	modelRole := canonicalRoleDescriptor(ontologyProviderRole(record), nil).ModelRole
+	for _, have := range []string{record.ControlType, record.LocalizedControlType, string(modelRole)} {
+		if strings.Contains(roleKey(have), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchedFindTextField(
@@ -162,21 +134,27 @@ func describeQuery(
 	return strings.Join(parts, " ")
 }
 
-func (s *service) find(
+// findMatch is the read step of find: the refreshed snapshot and the
+// records that match the query, in canonical order.
+type findMatch struct {
+	snapshot            *appSnapshot
+	matched             []elementRecord
+	query               string
+	notes               []string
+	followsFailedAction bool
+}
+
+func (s *service) findMatches(
 	app, role, name, text, state string,
-	limit int,
 	nameExact, textExact bool,
 	scope string,
 	targetWindowHandle ...string,
-) toolCallResult {
+) (*findMatch, toolCallResult) {
 	if app == "" {
-		return textResult("Missing required argument: app", true)
+		return nil, textResult("Missing required argument: app", true)
 	}
 	if role == "" && name == "" && text == "" && state == "" {
-		return textResult("find needs at least one of role, name, text, or state. For a fresh tree, call AX mode=observe.", true)
-	}
-	if limit <= 0 {
-		limit = 20
+		return nil, textResult("find needs at least one of role, name, text, or state. For a fresh tree, call AX mode=observe.", true)
 	}
 	noScreenshot := false
 	request := axServiceRequest{
@@ -190,16 +168,15 @@ func (s *service) find(
 	}
 	snapshot, notes, result := s.refreshProjectedSnapshot(app, request)
 	if result.IsError {
-		return result
+		return nil, result
 	}
-	followsFailedAction := false
+	found := &findMatch{snapshot: snapshot, matched: []elementRecord{}}
 	if note := s.consumeFailedObservation(app, snapshot); note != "" {
 		notes = append([]string{note}, notes...)
-		followsFailedAction = true
+		found.followsFailedAction = true
 	}
-	notes = compactFindNotes(notes)
+	found.notes = compactFindNotes(notes)
 
-	matched := []elementRecord{}
 	for _, record := range snapshot.Elements {
 		if !recordInA11yScope(snapshot, &record) {
 			continue
@@ -218,11 +195,30 @@ func (s *service) find(
 				record.FindMatchedField = field
 				record.FindMatchedText = value
 			}
-			matched = append(matched, record)
+			found.matched = append(found.matched, record)
 		}
 	}
+	found.query = describeQuery(role, name, text, state, nameExact, textExact)
+	return found, toolCallResult{}
+}
 
-	query := describeQuery(role, name, text, state, nameExact, textExact)
+func (s *service) find(
+	app, role, name, text, state string,
+	limit int,
+	nameExact, textExact bool,
+	scope string,
+	targetWindowHandle ...string,
+) toolCallResult {
+	if limit <= 0 {
+		limit = 20
+	}
+	found, failure := s.findMatches(app, role, name, text, state,
+		nameExact, textExact, scope, targetWindowHandle...)
+	if found == nil {
+		return failure
+	}
+	snapshot, matched, query := found.snapshot, found.matched, found.query
+	notes, followsFailedAction := found.notes, found.followsFailedAction
 	var out strings.Builder
 	if len(matched) == 0 {
 		fmt.Fprintf(
@@ -315,30 +311,36 @@ func (s *service) renderFindPage(
 	if len(resultSetID) > 0 {
 		setID = strings.TrimSpace(resultSetID[0])
 	}
-	frozenRefs := setID != ""
 	projected := axProjectedIndices(snapshot.axSnapshot.Roots)
-	if !frozenRefs {
-		allFindNodes := buildAXFindContext(snapshot, matched, projected)
-		allFindSnapshot := newAXFindSnapshot(
-			snapshot.axSnapshot, allFindNodes,
-		)
-		s.refRegistry.AssignSnapshotRefs(allFindSnapshot)
-		s.stabilizeFindRefs(snapshot, allFindSnapshot)
-		cursorSnapshot := *snapshot
-		cursorSnapshot.axSnapshot = allFindSnapshot
-		cursorSnapshot.Elements = append([]elementRecord(nil), matched...)
-		// Ref assignment freezes identity; only delivered content proves exposure.
-		cursorSnapshot.findHiddenRecords = map[int]elementRecord{}
-		for _, record := range snapshot.Elements {
-			if !projected[record.Index] && allFindSnapshot.ByIndex[record.Index] != nil {
-				cursorSnapshot.findHiddenRecords[record.Index] = cloneFindRecord(record)
-			}
-		}
-		snapshot = &cursorSnapshot
-		projected = axProjectedIndices(allFindSnapshot.Roots)
+	if setID == "" {
+		snapshot = s.freezeFindRefs(snapshot, matched)
+		projected = axProjectedIndices(snapshot.axSnapshot.Roots)
 	}
 	return s.deliverFindPage(snapshot, matched, offset, limit, query, notes,
 		followsFailedAction, projected, setID)
+}
+
+// freezeFindRefs assigns refs to every match and its context once, before
+// the first page, and returns the snapshot that later pages read from.
+func (s *service) freezeFindRefs(snapshot *appSnapshot, matched []elementRecord) *appSnapshot {
+	projected := axProjectedIndices(snapshot.axSnapshot.Roots)
+	allFindNodes := buildAXFindContext(snapshot, matched, projected)
+	allFindSnapshot := newAXFindSnapshot(
+		snapshot.axSnapshot, allFindNodes,
+	)
+	s.refRegistry.AssignSnapshotRefs(allFindSnapshot)
+	s.stabilizeFindRefs(snapshot, allFindSnapshot)
+	cursorSnapshot := *snapshot
+	cursorSnapshot.axSnapshot = allFindSnapshot
+	cursorSnapshot.Elements = append([]elementRecord(nil), matched...)
+	// Ref assignment freezes identity; only delivered content proves exposure.
+	cursorSnapshot.findHiddenRecords = map[int]elementRecord{}
+	for _, record := range snapshot.Elements {
+		if !projected[record.Index] && allFindSnapshot.ByIndex[record.Index] != nil {
+			cursorSnapshot.findHiddenRecords[record.Index] = cloneFindRecord(record)
+		}
+	}
+	return &cursorSnapshot
 }
 
 func (s *service) stabilizeFindRefs(

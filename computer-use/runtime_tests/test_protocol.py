@@ -2,6 +2,7 @@
 """Linux provider wire protocol, action evidence, and failure boundary tests."""
 
 import io
+import json
 
 from runtime_test_support import *  # noqa: F401,F403
 
@@ -226,6 +227,8 @@ class ProviderWireV2Tests(unittest.TestCase):
         ) as require_session, mock.patch.object(
             wire_v2.Atspi, "init"
         ) as atspi_init, mock.patch.object(
+            wire_v2.Atspi, "set_timeout"
+        ) as set_timeout, mock.patch.object(
             wire_v2.ui_events, "start"
         ) as monitor_start, mock.patch.object(
             wire_v2,
@@ -243,6 +246,10 @@ class ProviderWireV2Tests(unittest.TestCase):
         )
         require_session.assert_called_once_with()
         atspi_init.assert_called_once_with()
+        # No startup grace: a new application gets the same bound per call.
+        set_timeout.assert_called_once_with(
+            wire_v2.ATSPI_CALL_TIMEOUT_MS, wire_v2.ATSPI_CALL_TIMEOUT_MS
+        )
         monitor_start.assert_called_once_with()
 
     def test_shared_invalid_request_corpus_is_rejected(self):
@@ -267,6 +274,49 @@ class ProviderWireV2Tests(unittest.TestCase):
         }
         public = runtime.public_element_record(record)
         self.assertEqual(public, {"index": 0, "runtimeId": [0, 1]})
+
+    def test_resolve_target_response_carries_no_private_fields(self):
+        # The host decodes the wire with unknown fields disallowed. A private
+        # resolver key in resolved_element failed every until poll on a ref,
+        # so each poll became observation_incomplete until the timeout.
+        request = {
+            "protocol": "computer-use-provider-v2",
+            "schema_version": 2,
+            "request_id": "req-resolve",
+            "operation": "resolve_and_act",
+            "action": {
+                "protocol_version": 2,
+                "intent": "resolve_target",
+                "app": "Editor",
+                "target": {
+                    "selector": 'spin button "Width"',
+                    "role": "spin button",
+                    "name": "Width",
+                    "hasName": True,
+                },
+            },
+        }
+        record = {
+            "index": 3,
+            "runtimeId": [0, 1],
+            "runtimeAliases": [[0, 1]],
+            "controlType": "spin button",
+            "value": "2 cm",
+            "_providerIdentityConflict": False,
+            "_resolvedNode": object(),
+        }
+        with mock.patch.object(
+            runtime,
+            "perform_provider_request",
+            return_value={"ok": True, "resolvedElement": record},
+        ):
+            response = runtime.execute(request)
+        resolved = response["accessibility"]["resolved_element"]
+        self.assertEqual(
+            sorted(key for key in resolved if key.startswith("_")), []
+        )
+        self.assertEqual(resolved["value"], "2 cm")
+        json.dumps(response)
 
     def test_provider_dispatch_keeps_v2_operation_identity(self):
         payload = {

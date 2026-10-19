@@ -17,8 +17,6 @@ const (
 	a11yScopeContent = "content"
 )
 
-var treeViewValues = []string{treeViewWorking, treeViewFull}
-
 var a11yScopeValues = []string{a11yScopeWindow, a11yScopeContent}
 
 func normalizedTreeView(value string) string {
@@ -30,29 +28,6 @@ func normalizedTreeView(value string) string {
 	}
 }
 
-func parseTreeView(args map[string]any) (string, error) {
-	return exactEnumArgument(args, "view", treeViewValues, treeViewWorking)
-}
-
-// exactEnumArgument reads an optional string argument that must equal one of
-// values; an absent argument yields fallback.
-func exactEnumArgument(args map[string]any, key string, values []string, fallback string) (string, error) {
-	raw, present := args[key]
-	if !present {
-		return fallback, nil
-	}
-	value, _ := raw.(string)
-	for _, allowed := range values {
-		if value == allowed {
-			return value, nil
-		}
-	}
-	return "", fmt.Errorf(
-		"invalid %s %s. Valid values are %s; omit it for %q",
-		key, compactJSON(raw), strings.Join(values, ", "), fallback,
-	)
-}
-
 func normalizedA11yScope(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case a11yScopeContent:
@@ -60,51 +35,6 @@ func normalizedA11yScope(value string) string {
 	default:
 		return a11yScopeWindow
 	}
-}
-
-func parseA11yScope(args map[string]any) (string, error) {
-	return exactEnumArgument(args, "scope", a11yScopeValues, a11yScopeWindow)
-}
-
-func parseObservationRoot(raw any) (map[string]any, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	root, ok := raw.(map[string]any)
-	if !ok {
-		return nil, errors.New(
-			`must be {"focused":true}, {"index":N}, {"ref":"rN"}, or {"selector":{...}}`,
-		)
-	}
-	if focused, present := root["focused"]; present {
-		if len(root) != 1 {
-			return nil, errors.New(
-				`focused root must contain only {"focused":true}`,
-			)
-		}
-		value, ok := focused.(bool)
-		if !ok || !value {
-			return nil, errors.New("focused must be true")
-		}
-		return map[string]any{"focused": true}, nil
-	}
-	if rawRef, present := root["ref"]; present {
-		if ref, ok := rawRef.(string); ok && isShortAXWindowRef(ref) {
-			return nil, errors.New(
-				"root.ref must identify an element with rN; wN is only for window activate/close",
-			)
-		}
-	}
-	if _, _, err := a11yTargetAddress(
-		map[string]any{"target": root},
-	); err != nil {
-		return nil, err
-	}
-	copy := make(map[string]any, len(root))
-	for key, value := range root {
-		copy[key] = value
-	}
-	return copy, nil
 }
 
 func observationRootKey(root map[string]any) string {
@@ -748,6 +678,7 @@ func projectedSubtreeLines(
 		WindowRef:      snapshot.axSnapshot.WindowRef,
 		WindowHandle:   snapshot.axSnapshot.WindowHandle,
 		Revision:       snapshot.axSnapshot.Revision,
+		ActedRef:       snapshot.axSnapshot.ActedRef,
 		CanonicalRoots: canonicalRoots,
 		Roots:          cloneAXForest(canonicalRoots, nil),
 		ByID:           snapshot.axSnapshot.ByID,

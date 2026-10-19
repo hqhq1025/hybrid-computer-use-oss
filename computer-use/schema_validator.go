@@ -127,7 +127,11 @@ func argumentErrorResult(tool string, args map[string]any, argErr *argumentError
 			requested = len(actions)
 		}
 		path := strings.ReplaceAll(strings.TrimPrefix(argErr.Path, "/"), "/", ".")
-		result := axArgErrorResult(axInvalid(path, argErr.Message, ""), requested)
+		rejected := axInvalid(path, argErr.Message, "")
+		// The AX decoder runs first and rejects what the schema rejects, so
+		// this is a backstop; its hint is the minimal call for the mode.
+		rejected.hint = axDerivedHint(args, rejected)
+		result := axArgErrorResult(rejected, requested)
 		result.StructuredContent["argument_error_code"] = argErr.Code
 		result.StructuredContent["argument_error_path"] = argErr.Path
 		return result

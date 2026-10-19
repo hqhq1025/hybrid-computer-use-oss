@@ -147,10 +147,7 @@ func compactAXBatchResult(value any) map[string]any {
 		}
 		if postcondition, ok := action["postcondition"].(map[string]any); ok {
 			status := strings.TrimSpace(fmt.Sprint(postcondition["status"]))
-			reconciled, _ :=
-				postcondition["reconciled_by_canonical_observation"].(bool)
-			if status != "" && status != "<nil>" &&
-				(status != "pass" || reconciled) {
+			if status != "" && status != "<nil>" && status != "pass" {
 				entry["type"] = action["action_type"]
 				entry["postcondition"] = postcondition
 			}
@@ -430,6 +427,13 @@ func prepareAXEvidence(
 			delete(compact, "batch")
 		}
 	}
+	if !result.IsError && axEffectVerified(full) {
+		// A verified effect is not also unknown: the until held, the target
+		// visibly changed, or the closed window is gone.
+		for _, key := range []string{"effect_unknown", "mutation_unknown", "cause_unattributed"} {
+			delete(compact, key)
+		}
+	}
 	compact, _ = renameAXUntilEvidence(compact).(map[string]any)
 	for key, value := range axPublicEvidence(full, result.IsError, result.Content) {
 		compact[key] = value
@@ -442,6 +446,13 @@ func prepareAXEvidence(
 	}
 	result.StructuredContent = compact
 	return result
+}
+
+// axEffectVerified reports whether the call's own reads verified its effect.
+func axEffectVerified(full map[string]any) bool {
+	return full["postcondition_verified"] == true ||
+		full["target_effect_observed"] == true ||
+		full["close_effect_verified"] == true
 }
 
 func normalizeAXEvidenceInvariants(
@@ -598,7 +609,7 @@ func axPublicEvidence(full map[string]any, isError bool, content []contentItem) 
 				text := strings.TrimSpace(item.Text)
 				// Window-resolution notes say where input went; they are
 				// not the error.
-				if item.Type != "text" || text == "" ||
+				if item.Type != "text" || text == "" || isActReportText(text) ||
 					strings.HasPrefix(text, "title ") || strings.HasPrefix(text, "bound_window: ") {
 					continue
 				}

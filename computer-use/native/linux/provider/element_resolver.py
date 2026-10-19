@@ -195,13 +195,6 @@ def resolve_semantic_target(
 ):
     """Resolve one live semantic target across visible app-owned windows."""
     observation = operation.get("observation") or {}
-    if not isinstance(target, dict):
-        raise OperationFailure(
-            "semantic_target_invalid reason=not_an_object; no input was emitted.",
-            failure_code="semantic_target_invalid",
-            failure_phase="precondition",
-            input_events_emitted=False,
-        )
     selector = str(target.get("selector") or "")
     role = str(target.get("role") or "").strip()
     name = str(target.get("name") or "")
@@ -753,7 +746,7 @@ def resolve_semantic_target(
         if candidate_bounds is None:
             scan_incomplete = True
             continue
-        rendered = render_tree(
+        records, _lines, annotations = render_tree(
             candidate_window,
             candidate_bounds,
             [candidate_index],
@@ -767,13 +760,7 @@ def resolve_semantic_target(
             prune=False,
             boxes=False,
             indexer=indexer,
-            include_annotations=True,
         )
-        if len(rendered) == 3:
-            records, _lines, annotations = rendered
-        else:
-            records, _lines = rendered
-            annotations = []
         # Any provider omission means the canonical scan did not prove the
         # target absent. The reason taxonomy is diagnostic-only and must not
         # decide action truth.

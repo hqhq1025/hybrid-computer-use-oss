@@ -1684,3 +1684,57 @@ func TestIncompleteReadMarksRefForRevalidationNotTombstone(t *testing.T) {
 		t.Fatalf("complete rediscovery did not reactivate %s", elementRef)
 	}
 }
+
+// App and window refs share one lifecycle rule: only active and
+// needs_revalidation keep the identity, so a later Acquire of a released
+// identity issues a new ref.
+func TestAppAndWindowRefLifecycleReleasesIdentity(t *testing.T) {
+	const handle = "w2:0123456789abcdef0123456789abcdef"
+	for _, test := range []struct {
+		lifecycle AXRefLifecycle
+		released  bool
+	}{
+		{AXRefActive, false},
+		{AXRefNeedsRevalidation, false},
+		{AXRefStale, true},
+		{AXRefExpired, true},
+		{AXRefSuperseded, true},
+	} {
+		t.Run(string(test.lifecycle), func(t *testing.T) {
+			apps := NewAppRefRegistry(0)
+			app := apps.Acquire("Editor", ":1.84", "pid:10:start:100", "c1")
+			apps.MarkLifecycle(" "+app+" ", test.lifecycle, " reason ")
+			appEntry := apps.entries[app]
+			reacquiredApp := apps.Acquire("Editor", ":1.84", "pid:10:start:100", "c2")
+
+			windows := NewWindowRefRegistry(0)
+			window := windows.Acquire("editor", handle, `frame "Doc"`, "c1")
+			windows.MarkLifecycle(" "+window+" ", test.lifecycle, " reason ")
+			windowEntry := windows.entries[window]
+			reacquiredWindow := windows.Acquire("editor", handle, `frame "Doc"`, "c2")
+
+			if test.released {
+				if appEntry.Lifecycle != test.lifecycle || appEntry.LifecycleReason != "reason" ||
+					windowEntry.Lifecycle != test.lifecycle || windowEntry.LifecycleReason != "reason" {
+					t.Fatalf("app=%+v window=%+v", *appEntry, *windowEntry)
+				}
+				if reacquiredApp == app || reacquiredWindow == window {
+					t.Fatalf("released identity kept its ref: app %s->%s window %s->%s",
+						app, reacquiredApp, window, reacquiredWindow)
+				}
+				return
+			}
+			// Acquire reactivates a kept identity under the same ref.
+			if reacquiredApp != app || reacquiredWindow != window ||
+				appEntry.Lifecycle != AXRefActive || windowEntry.Lifecycle != AXRefActive {
+				t.Fatalf("kept identity changed: app %s->%s (%s) window %s->%s (%s)",
+					app, reacquiredApp, appEntry.Lifecycle, window, reacquiredWindow, windowEntry.Lifecycle)
+			}
+		})
+	}
+	// Unknown refs and nil registries are ignored.
+	NewAppRefRegistry(0).MarkLifecycle("a9", AXRefStale, "")
+	NewWindowRefRegistry(0).MarkLifecycle("w9", AXRefStale, "")
+	(*AppRefRegistry)(nil).MarkLifecycle("a1", AXRefStale, "")
+	(*WindowRefRegistry)(nil).MarkLifecycle("w1", AXRefStale, "")
+}

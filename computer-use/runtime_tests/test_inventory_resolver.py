@@ -348,7 +348,7 @@ class HiddenMenuItemsTests(AtspiPatchedTestCase):
         menu = _TreeNode(role="menu", name="File", w=40, h=20, kids=(item,))
         root = _TreeNode(role="frame", name="GIMP", w=100, h=100, kids=(menu,))
 
-        _records, lines = runtime.render_tree(root, None, [0], prune=True)
+        _records, lines, _annotations = runtime.render_tree(root, None, [0], prune=True)
         text = "\n".join(lines)
 
         self.assertIn('menu "File"', text)
@@ -360,7 +360,6 @@ class HiddenMenuItemsTests(AtspiPatchedTestCase):
             None,
             [0],
             prune=True,
-            include_annotations=True,
         )
         self.assertTrue(
             any(
@@ -377,7 +376,7 @@ class HiddenMenuItemsTests(AtspiPatchedTestCase):
         menu = _TreeNode(role="menu", name="File", w=40, h=20, kids=(item,))
         root = _TreeNode(role="frame", name="GIMP", w=100, h=100, kids=(menu,))
 
-        _records, lines = runtime.render_tree(root, None, [0], prune=True)
+        _records, lines, _annotations = runtime.render_tree(root, None, [0], prune=True)
         text = "\n".join(lines)
 
         self.assertIn("Export As...", text)
@@ -460,7 +459,7 @@ class AppNotFoundListsWindowsTests(AtspiPatchedTestCase):
             children=[first, second],
         )
         app.get_process_id = lambda: 42
-        with mock.patch.object(runtime, "resolve_app", return_value=app), \
+        with mock.patch.object(runtime, "resolve_app_identity", return_value=app), \
              mock.patch.object(
                  runtime,
                  "app_windows",
@@ -468,7 +467,10 @@ class AppNotFoundListsWindowsTests(AtspiPatchedTestCase):
                      [(0, first), (1, second)], complete=True
                  ),
              ):
-            result = runtime.app_window_inventory("libreoffice")
+            result = runtime.app_window_inventory(
+                "libreoffice",
+                app_identity={"providerBusName": ":1.2", "processGeneration": "g"},
+            )
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["appName"], "soffice")
@@ -477,6 +479,83 @@ class AppNotFoundListsWindowsTests(AtspiPatchedTestCase):
             result["windowTitles"],
             ["Tip of the Day", "Quarterly Review - LibreOffice Impress"],
         )
+
+
+class AppNameWindowInventoryTests(AtspiPatchedTestCase):
+    """A title wait by app name reads every process of that name.
+
+    Full-e tasks 7ae48c60 and 7767eef2 closed the application and launched it
+    again; the wait must see whichever process now owns the window, and a
+    complete inventory without the application is an answer, not an error.
+    """
+
+    def _app(self, name, pid, titles):
+        windows = [_NamedNode(name=title, role="frame") for title in titles]
+        app = _NamedNode(name=name, role="application", children=windows)
+        app.get_process_id = lambda: pid
+        return app, runtime.InventoryResult(
+            list(enumerate(windows)), complete=True
+        )
+
+    def _inventory(self, apps, complete=True):
+        by_app = {id(app): windows for app, windows in apps}
+        return (
+            mock.patch.object(
+                runtime,
+                "iter_apps",
+                return_value=runtime.InventoryResult(
+                    [app for app, _ in apps], complete=complete
+                ),
+            ),
+            mock.patch.object(
+                runtime,
+                "app_windows",
+                side_effect=lambda app: by_app[id(app)],
+            ),
+            mock.patch.object(runtime, "process_names", return_value=set()),
+        )
+
+    def _read(self, apps, complete=True):
+        first, second, third = self._inventory(apps, complete)
+        with first, second, third:
+            return runtime.app_window_inventory("soffice")
+
+    def test_same_name_in_two_processes_lists_both(self):
+        result = self._read([
+            self._app("soffice", 41, ["Old.odt - LibreOffice Writer"]),
+            self._app("soffice", 42, ["30_1.pptx - LibreOffice Impress"]),
+        ])
+        self.assertEqual(
+            result["windowTitles"],
+            ["Old.odt - LibreOffice Writer", "30_1.pptx - LibreOffice Impress"],
+        )
+
+    def test_one_process_with_main_window_and_dialog_lists_both(self):
+        result = self._read([
+            self._app("soffice", 42, ["16_2.pptx - LibreOffice Impress", "Character"]),
+        ])
+        self.assertEqual(
+            result["windowTitles"],
+            ["16_2.pptx - LibreOffice Impress", "Character"],
+        )
+
+    def test_complete_inventory_without_the_app_lists_no_titles(self):
+        result = self._read([self._app("gjs", 7, ["@!0,0;BDHF"])])
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["windowTitles"], [])
+
+    def test_incomplete_inventory_is_not_absence(self):
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            self._read([], complete=False)
+        self.assertEqual(caught.exception.failure_code, "observation_incomplete")
+        self.assertFalse(caught.exception.failure_facts_complete)
+
+    def test_incomplete_window_list_of_a_matching_app_is_not_absence(self):
+        app, _ = self._app("soffice", 42, [])
+        partial = runtime.InventoryResult([], complete=False)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            self._read([(app, partial)])
+        self.assertEqual(caught.exception.failure_code, "observation_incomplete")
 
 
 class ExactLogicalWindowReadTests(AtspiPatchedTestCase):

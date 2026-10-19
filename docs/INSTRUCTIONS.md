@@ -11,6 +11,7 @@ text through its existing context route.
 | `instructions/hybrid.md` | default interaction guide | Bash, files, browser/CDP, AX, GUI |
 | `instructions/ax-only.md` | accessibility interaction guide | Bash, files, browser/CDP, AX |
 | `instructions/gui-only.md` | pixel-control interaction guide | Bash, files, browser/CDP, GUI |
+| `instructions/hybrid-code.md` | draft add-on for driving AX and GUI from code (CLI, SDK); not selected by any config yet | Bash, AX and GUI through `computer-use` |
 
 The base policy covers honesty, safety and verifying the requested outcome.
 The selected profile guides channel choice and interaction. Neither contains

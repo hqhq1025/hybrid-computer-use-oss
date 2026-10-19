@@ -18,6 +18,26 @@ class ProviderIdentityPrimitiveTests(unittest.TestCase):
                 "22",
             )
 
+    def test_process_generation_is_reread_for_each_operation(self):
+        # The provider process outlives many operations. A cached start time
+        # let a new process that reused a pid pass as the old one.
+        with tempfile.TemporaryDirectory() as root:
+            stat = os.path.join(root, "321", "stat")
+            os.makedirs(os.path.dirname(stat))
+
+            def start(value):
+                suffix = ["S"] + [str(index) for index in range(4, 22)]
+                with open(stat, "w", encoding="utf-8") as f:
+                    f.write("321 (app) " + " ".join(suffix + [value]))
+
+            start("1000")
+            self.assertEqual(runtime.process_generation(321, proc_root=root), "1000")
+            start("2000")
+            with mock.patch.object(runtime, "list_apps_inventory",
+                                   return_value={"text": "", "apps": [], "notes": []}):
+                perform_provider_operation({"intent": "observe_apps"})
+            self.assertEqual(runtime.process_generation(321, proc_root=root), "2000")
+
     def test_state_value_preserves_unknown(self):
         class MissingStateNode:
             def get_state_set(self):
@@ -123,6 +143,14 @@ class FindEditableTextTests(AtspiPatchedTestCase):
         self.assertIs(runtime.find_editable_text(window), editor)
 
 
+def _write_into_window(window, text):
+    """Write the way an untargeted type action does: into the focused editor."""
+    outcome, _before, _after, _emitted = runtime.insert_text_outcome_on_node(
+        runtime.find_editable_text(window), text
+    )
+    return outcome
+
+
 class InsertTextTests(AtspiPatchedTestCase):
     def _window_with(self, iface):
         return FakeNode(
@@ -138,40 +166,40 @@ class InsertTextTests(AtspiPatchedTestCase):
         liar = FakeTextIface(honest=False)
         window = self._window_with(liar)
 
-        self.assertFalse(runtime.insert_text(window, "hello"))
+        self.assertEqual(_write_into_window(window, "hello"), "no_change")
         self.assertEqual(liar.inserts, [(0, "hello")], "the write must actually be attempted")
 
     def test_accepts_buffer_that_actually_grows(self):
         iface = FakeTextIface()
         window = self._window_with(iface)
 
-        self.assertTrue(runtime.insert_text(window, "hello"))
+        self.assertEqual(_write_into_window(window, "hello"), "verified")
         self.assertEqual(iface.text, "hello")
 
     def test_appends_at_end_of_existing_content(self):
         iface = FakeTextIface(text="abc")
         window = self._window_with(iface)
 
-        self.assertTrue(runtime.insert_text(window, "def"))
+        self.assertEqual(_write_into_window(window, "def"), "verified")
         self.assertEqual(iface.text, "abcdef")
 
-    def test_returns_false_when_insert_itself_fails(self):
+    def test_reports_no_change_when_insert_itself_fails(self):
         iface = FakeTextIface(accept=False)
         window = self._window_with(iface)
 
-        self.assertFalse(runtime.insert_text(window, "hello"))
+        self.assertEqual(_write_into_window(window, "hello"), "no_change")
 
     def test_empty_payload_is_a_successful_noop(self):
         iface = FakeTextIface(text="abc")
         window = self._window_with(iface)
 
-        self.assertTrue(runtime.insert_text(window, ""))
+        self.assertEqual(_write_into_window(window, ""), "verified")
         self.assertEqual(iface.inserts, [], "empty text must not produce a write call")
 
-    def test_returns_false_when_no_editable_target_exists(self):
+    def test_reports_no_change_when_no_editable_target_exists(self):
         window = FakeNode(children=(FakeNode(states=(STATE.VISIBLE,)),))
 
-        self.assertFalse(runtime.insert_text(window, "hello"))
+        self.assertEqual(_write_into_window(window, "hello"), "no_change")
 
     def test_accepted_write_without_readback_is_unknown_not_fallback_safe(self):
         iface = FakeTextIface(text="abc", caret=3)
@@ -299,49 +327,60 @@ class CaretInsertionTests(AtspiPatchedTestCase):
         """Appending at the end would ignore the caret the user or agent just placed."""
         iface = FakeTextIface(text="hello world", caret=5)
 
-        self.assertTrue(runtime.insert_text(self._window_with(iface), " there"))
+        self.assertEqual(
+            _write_into_window(self._window_with(iface), " there"), "verified"
+        )
         self.assertEqual(iface.text, "hello there world")
 
     def test_replaces_a_selection_the_way_typing_does(self):
         iface = FakeTextIface(text="hello world", caret=0, selection=(0, 5))
 
-        self.assertTrue(runtime.insert_text(self._window_with(iface), "goodbye"))
+        self.assertEqual(
+            _write_into_window(self._window_with(iface), "goodbye"), "verified"
+        )
         self.assertEqual(iface.deletes, [(0, 5)])
         self.assertEqual(iface.text, "goodbye world")
 
-    def test_does_not_keyboard_fallback_after_deleting_a_selection(self):
+    def test_failed_insert_after_deleting_a_selection_is_unknown(self):
         iface = FakeTextIface(
             text="hello world", caret=0, selection=(0, 5), accept=False)
 
-        with self.assertRaises(RuntimeError) as caught:
-            runtime.insert_text_detail(self._window_with(iface), "goodbye")
+        outcome, _before, _after, emitted = runtime.insert_text_outcome_on_node(
+            runtime.find_editable_text(self._window_with(iface)), "goodbye"
+        )
 
-        self.assertIn("deleted the selected text", str(caught.exception))
+        self.assertEqual(outcome, "effect_unknown")
+        self.assertTrue(emitted)
         self.assertEqual(iface.text, " world")
 
     def test_appends_when_the_control_has_no_caret(self):
         iface = FakeTextIface(text="abc", caret=None)
 
-        self.assertTrue(runtime.insert_text(self._window_with(iface), "def"))
+        self.assertEqual(
+            _write_into_window(self._window_with(iface), "def"), "verified"
+        )
         self.assertEqual(iface.text, "abcdef")
 
-    def test_detail_reports_character_counts(self):
+    def test_reports_character_counts(self):
         iface = FakeTextIface(text="abc", caret=3)
 
         self.assertEqual(
-            runtime.insert_text_detail(self._window_with(iface), "de"), (True, 3, 5)
+            runtime.insert_text_outcome_on_node(
+                runtime.find_editable_text(self._window_with(iface)), "de"
+            ),
+            ("verified", 3, 5, True),
         )
 
-    def test_detail_reports_failure_without_growth(self):
+    def test_reports_no_change_without_growth(self):
         iface = FakeTextIface(text="abc", caret=3, honest=False)
 
-        written, before, after = runtime.insert_text_detail(
-            self._window_with(iface), "de"
+        outcome, before, after, _emitted = runtime.insert_text_outcome_on_node(
+            runtime.find_editable_text(self._window_with(iface)), "de"
         )
-        self.assertFalse(written)
+        self.assertEqual(outcome, "no_change")
         self.assertEqual((before, after), (3, 3))
 
-    def test_detail_rejects_wrong_text_even_when_length_matches(self):
+    def test_wrong_text_of_matching_length_is_unknown(self):
         iface = FakeTextIface(text="abc", caret=3)
 
         def corrupt(offset, payload):
@@ -350,10 +389,11 @@ class CaretInsertionTests(AtspiPatchedTestCase):
             return True
 
         iface.insert = corrupt
-        with self.assertRaises(RuntimeError) as caught:
-            runtime.insert_text_detail(self._window_with(iface), "de")
+        outcome, _before, _after, _emitted = runtime.insert_text_outcome_on_node(
+            runtime.find_editable_text(self._window_with(iface)), "de"
+        )
 
-        self.assertIn("unexpected content", str(caught.exception))
+        self.assertEqual(outcome, "effect_unknown")
         self.assertEqual(iface.text, "abcZZ")
 
 
@@ -939,9 +979,13 @@ class MainWindowSelectionTests(AtspiPatchedTestCase):
             runtime.main_window(FakeNode(children=()))
 
     def _patch_roles(self, mapping):
-        original = runtime.node_role
-        self.addCleanup(setattr, runtime, "node_role", original)
-        runtime.node_role = lambda node: mapping.get(id(node), "frame")
+        patcher = mock.patch.object(
+            FakeNode,
+            "get_role_name",
+            lambda node: mapping.get(id(node), "frame"),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         # The fakes have no component for the real extents() to query;
         # app_windows can classify them by role alone.
         original_ext = runtime.extents
@@ -1202,6 +1246,51 @@ class KeySyntaxTests(unittest.TestCase):
         self.assertEqual(runtime.KEY_ALIASES["forward_slash"], "slash")
 
 
+class KeyResolutionTests(unittest.TestCase):
+    """Keys resolve to hardware keycodes before any input is sent."""
+
+    def setUp(self):
+        if runtime.Gdk is None:
+            self.skipTest("Gdk is unavailable")
+
+    def test_punctuation_main_key_with_modifier(self):
+        # Gdk.keyval_from_name(",") returns VoidSymbol, which is truthy, so
+        # CTRL+, (VS Code settings) failed with "No hardware keycode".
+        for key, keysym_name in (
+            ("CTRL+,", "comma"),
+            ("ctrl+.", "period"),
+            ("ctrl+/", "slash"),
+        ):
+            with self.subTest(key=key):
+                self.assertEqual(
+                    runtime.keysym(key.split("+")[-1]),
+                    runtime.Gdk.keyval_from_name(keysym_name),
+                )
+
+    def test_named_keys_in_any_case(self):
+        for key, expected in (
+            ("INSERT", "Insert"),
+            ("caps_lock", "Caps_Lock"),
+            ("MENU", "Menu"),
+            ("f4", "F4"),
+        ):
+            with self.subTest(key=key):
+                self.assertEqual(
+                    runtime.keysym(key), runtime.Gdk.keyval_from_name(expected)
+                )
+
+    def test_bare_modifier_is_a_key(self):
+        # keycode needs a display keymap; the name it receives is the point.
+        with mock.patch.object(runtime, "keycode", side_effect=lambda name: 1):
+            _codes, normalized = runtime.parse_key("SHIFT")
+        self.assertEqual(normalized, "Shift_L")
+
+    def test_unknown_key_still_fails(self):
+        self.assertEqual(runtime.keysym("NoSuchKeyName"), 0)
+        with self.assertRaises(RuntimeError):
+            runtime.keycode("NoSuchKeyName")
+
+
 class PerformOperationGuardTests(AtspiPatchedTestCase):
     """The focus guard stays wired into the dispatch path."""
 
@@ -1222,7 +1311,6 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
         self._patch("find_element_at_snapshot_path", lambda app, record: None)
         self._patch("build_snapshot", lambda *a, **k: {"text": ""})
         self._patch("require_window_focus", fake_require)
-        self._patch("insert_text_detail", lambda root, text: (False, 0, 0))
         self._patch("send_text", lambda text: self.sent_text.append(text))
         self._patch("parse_key", lambda key: ([], key))
         self._patch("send_key", lambda key: self.sent_keys.append(key))
@@ -1242,6 +1330,28 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
 
         self.assertEqual(self.focus_calls, ["keypress"])
         self.assertEqual(self.sent_keys, ["ctrl+a"])
+
+    def test_post_action_reads_do_not_reuse_pre_action_native_inventory(self):
+        # The native window list was cached per operation, so a dialog that
+        # the input opened had no native window in the post-action snapshot
+        # and no strong handle; the host then needed a second read.
+        def pre_action_read(key):
+            runtime._x11_window_inventory_cache[4242] = "before-input"
+            self.sent_keys.append(key)
+
+        seen = []
+        self._patch("send_key", pre_action_read)
+        self._patch(
+            "build_snapshot",
+            lambda *a, **k: seen.append(
+                dict(runtime._x11_window_inventory_cache)
+            ) or {"text": ""},
+        )
+        perform_provider_operation(
+            {"intent": "keypress", "app": "x", "key": "ctrl+o"}
+        )
+        self.assertEqual(self.sent_keys, ["ctrl+o"])
+        self.assertEqual(seen, [{}])
 
     def test_invalid_key_is_rejected_before_stealing_focus(self):
         """Stealing focus disrupts the user, so a misspelled key fails first."""

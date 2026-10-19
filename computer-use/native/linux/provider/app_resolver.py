@@ -3,6 +3,7 @@
 from .foundation import (
     Atspi,
     OperationFailure,
+    inventory_complete,
     node_name,
     node_pid,
     node_role,
@@ -11,7 +12,11 @@ from .foundation import (
     provider_object_path,
     state_contains,
 )
-from .atspi_inventory import resolve_app, resolve_app_identity
+from .atspi_inventory import (
+    matches_app_bootstrap_query,
+    resolve_app,
+    resolve_app_identity,
+)
 from .snapshot import snapshot_digest, utc_timestamp
 from .x11_windows import (
     app_windows,
@@ -19,9 +24,9 @@ from .x11_windows import (
     opaque_window_instance_handle_for_id,
     strong_window_instance_handles,
     window_instance_handle,
-    x11_root_window_state,
+    correlation_root_window_state,
 )
-from .window_diagnostics import accepts_user_input, is_infrastructure_window
+from .window_diagnostics import is_infrastructure_window
 
 
 def app_top_level_windows(app, windows, active_handle):
@@ -57,10 +62,12 @@ def app_top_level_windows(app, windows, active_handle):
 def list_apps_inventory():
     entries = []
     seen_identities = set()
-    root_state = x11_root_window_state()
+    unreadable = 0
+    root_state = correlation_root_window_state()
     active_window_id = root_state.get("activeWindow") if root_state else None
+    apps = iter_apps()
     for app in sorted(
-        iter_apps(),
+        apps,
         key=lambda item: (node_name(item).lower(), node_pid(item)),
     ):
         pid = node_pid(app)
@@ -72,20 +79,16 @@ def list_apps_inventory():
         if all(identity):
             seen_identities.add(identity)
         windows = app_windows(app)
+        if not inventory_complete(windows):
+            # A busy or hung application does not answer within the AT-SPI
+            # call timeout. Its windows cannot be listed, but the listing
+            # must not read as complete.
+            unreadable += 1
         if not windows:
             continue
         titles = [node_name(window) or "untitled" for _, window in windows]
         title = titles[0]
         name = node_name(app)
-        # Flag entries that cannot receive input directly in the listing:
-        # desktop, panel and window-manager entries otherwise look like real
-        # applications, and resolve_app rejects actions against them (see
-        # infrastructure_app_error).
-        input_capable = accepts_user_input(app)
-        suffix = "" if input_capable else (
-            ", NOT an input target: every window is untitled and has no "
-            "interactive content — desktop infrastructure, action tools will "
-            "refuse it")
         # None means the window manager did not report an active window, so
         # app_top_level_windows falls back to AT-SPI state.
         active_handle = (
@@ -93,6 +96,17 @@ def list_apps_inventory():
             if root_state is not None
             else None
         )
+        listed_windows = app_top_level_windows(app, windows, active_handle)
+        # Flag entries that cannot receive input directly in the listing:
+        # desktop, panel and window-manager entries otherwise look like real
+        # applications, and resolve_app rejects actions against them (see
+        # infrastructure_app_error). This is accepts_user_input() over the
+        # windows already probed for the listing.
+        input_capable = any(window["inputTarget"] for window in listed_windows)
+        suffix = "" if input_capable else (
+            ", NOT an input target: every window is untitled and has no "
+            "interactive content — desktop infrastructure, action tools will "
+            "refuse it")
         entries.append({
             "name": name,
             "pid": pid,
@@ -102,7 +116,7 @@ def list_apps_inventory():
             "input_capable": input_capable,
             "provider_bus_name": bus,
             "process_generation": generation,
-            "windows": app_top_level_windows(app, windows, active_handle),
+            "windows": listed_windows,
         })
     name_counts = {}
     for entry in entries:
@@ -130,8 +144,19 @@ def list_apps_inventory():
         )
         entry["display_text"] = display_text
         lines.append(display_text)
+    notes = []
+    if not inventory_complete(apps):
+        notes.append(
+            "Incomplete: the accessibility bus did not list every application."
+        )
+    if unreadable:
+        notes.append(
+            "Incomplete: {} application(s) did not answer the accessibility "
+            "bus; their windows may be missing above.".format(unreadable)
+        )
     return {
         "text": "\n".join(lines),
+        "notes": notes,
         "apps": [
             {
                 "name": entry["name"],
@@ -149,7 +174,13 @@ def list_apps_inventory():
 
 
 def app_window_inventory(query, app_identity=None, target_window_handle=None):
-    """Return every current top-level window title for one resolved AX app."""
+    """Return every current top-level window title for one resolved AX app.
+
+    A request by name alone lists the windows of every application that
+    matches the name; see app_name_window_inventory.
+    """
+    if app_identity is None and not str(target_window_handle or "").strip():
+        return app_name_window_inventory(query)
     app = (
         resolve_app_identity(app_identity)
         if app_identity is not None
@@ -186,6 +217,55 @@ def app_window_inventory(query, app_identity=None, target_window_handle=None):
         "ok": True,
         "appName": str(node_name(app) or "").strip(),
         "appPid": node_pid(app),
+        "windowTitles": titles,
+    }
+
+
+def _incomplete_inventory(subject):
+    return OperationFailure(
+        "observation_incomplete: the application window inventory could not "
+        "be read completely.",
+        failure_code="observation_incomplete",
+        failure_phase="observation",
+        input_events_emitted=False,
+        failure_subject=subject,
+    )
+
+
+def app_name_window_inventory(query):
+    """Return the window titles of every application that matches query.
+
+    A title wait asks whether an application of that name shows such a
+    window, so it is not bound to one process: the application may have been
+    closed and launched again, or run as several processes with one name.
+    When the desktop inventory was read completely and no application
+    matches, the result lists no titles; that answers the wait (the title is
+    absent) instead of failing the lookup. An unreadable inventory or window
+    list fails as observation_incomplete, because a missed window would turn
+    into a false absence.
+    """
+    inventory = iter_apps()
+    if not inventory_complete(inventory):
+        raise _incomplete_inventory("app")
+    titles = []
+    names = []
+    pids = []
+    for app in inventory:
+        if not matches_app_bootstrap_query(app, query):
+            continue
+        windows = app_windows(app)
+        if not windows.complete:
+            raise _incomplete_inventory("window")
+        names.append(str(node_name(app) or "").strip())
+        pids.append(node_pid(app))
+        for _, window in windows:
+            title = str(node_name(window) or "").strip()
+            if title:
+                titles.append(title)
+    return {
+        "ok": True,
+        "appName": names[0] if len(set(names)) == 1 else "",
+        "appPid": pids[0] if len(pids) == 1 else 0,
         "windowTitles": titles,
     }
 

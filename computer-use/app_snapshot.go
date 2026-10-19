@@ -196,6 +196,8 @@ type appSnapshot struct {
 	publicAppRef              string
 	publicWindowRef           string
 	externalDesktopTransition bool
+	// actedRef is the rN targeted by the action that produced this snapshot.
+	actedRef string
 }
 
 type topLevelWindow struct {
@@ -245,10 +247,9 @@ func (s *appSnapshot) renderedText() string {
 	}
 	lines := []string{}
 	if s.publicAppRef != "" {
-		appLine := fmt.Sprintf(
-			"app: %q [ref=%s]", s.App.Name, s.publicAppRef,
-		)
-		lines = append(lines, appLine)
+		// The app is named, not offered as an aN: the window ref already
+		// identifies it, and models never passed the aN.
+		lines = append(lines, fmt.Sprintf("app: %q", s.App.Name))
 	}
 	lines = append(lines, windowLine)
 	if len(s.Windows) > 1 {

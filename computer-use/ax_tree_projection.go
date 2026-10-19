@@ -605,13 +605,6 @@ func equalSemanticIdentity(left, right string) bool {
 		normalizedSemanticWhitespace(right)
 }
 
-func equalFoldedSemanticIdentity(left, right string) bool {
-	return strings.EqualFold(
-		normalizedSemanticWhitespace(left),
-		normalizedSemanticWhitespace(right),
-	)
-}
-
 func stripWorkingTableCoordinates(line string, record *elementRecord) string {
 	if record == nil ||
 		!strings.Contains(canonicalRole(record), "table cell") {

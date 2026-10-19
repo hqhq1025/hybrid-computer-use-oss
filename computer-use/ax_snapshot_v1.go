@@ -163,6 +163,9 @@ type AXSnapshotV1 struct {
 	AcquisitionIncomplete      bool                      `json:"-"`
 	IdentityCoverageIncomplete bool                      `json:"-"`
 	RefInventoryComplete       bool                      `json:"-"`
+	// ActedRef is the rN the action that produced this snapshot targeted.
+	// Projection keeps that node's full text.
+	ActedRef string `json:"-"`
 
 	CanonicalRoots []*AXNode          `json:"-"`
 	ByID           map[string]*AXNode `json:"-"`

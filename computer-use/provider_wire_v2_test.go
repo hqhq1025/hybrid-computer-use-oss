@@ -939,3 +939,17 @@ func TestProviderDesktopSettleBound(t *testing.T) {
 		t.Fatalf("provider settle_ms above limit error = %v", err)
 	}
 }
+
+// DecodeProviderWireRequest strictly decodes and validates a request the
+// way the native providers do. The Go runtime only encodes requests, so this
+// decoder exists for contract tests.
+func DecodeProviderWireRequest(data []byte) (ProviderWireRequest, error) {
+	var request ProviderWireRequest
+	if err := decodeProviderWireJSON(data, &request); err != nil {
+		return ProviderWireRequest{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return ProviderWireRequest{}, err
+	}
+	return request, nil
+}

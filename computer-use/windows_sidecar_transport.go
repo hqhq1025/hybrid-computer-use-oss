@@ -53,7 +53,7 @@ type windowsProviderWorker struct {
 	cmd                *exec.Cmd
 	stdin              io.WriteCloser
 	stdout             *bufio.Reader
-	stderr             *boundedWindowsProviderBuffer
+	stderr             *boundedProviderBuffer
 	done               chan struct{}
 	stderrDone         chan struct{}
 	parentDeathBinding io.Closer
@@ -75,41 +75,6 @@ type windowsProviderWriteResult struct {
 type windowsProviderStartResult struct {
 	worker *windowsProviderWorker
 	err    error
-}
-
-type boundedWindowsProviderBuffer struct {
-	mu        sync.Mutex
-	data      []byte
-	limit     int
-	truncated bool
-}
-
-func (buffer *boundedWindowsProviderBuffer) Write(data []byte) (int, error) {
-	buffer.mu.Lock()
-	defer buffer.mu.Unlock()
-	originalLength := len(data)
-	if buffer.limit <= 0 {
-		buffer.truncated = buffer.truncated || originalLength > 0
-		return originalLength, nil
-	}
-	if len(data) >= buffer.limit {
-		buffer.data = append(buffer.data[:0], data[len(data)-buffer.limit:]...)
-		buffer.truncated = true
-		return originalLength, nil
-	}
-	if excess := len(buffer.data) + len(data) - buffer.limit; excess > 0 {
-		copy(buffer.data, buffer.data[excess:])
-		buffer.data = buffer.data[:len(buffer.data)-excess]
-		buffer.truncated = true
-	}
-	buffer.data = append(buffer.data, data...)
-	return originalLength, nil
-}
-
-func (buffer *boundedWindowsProviderBuffer) snapshot() ([]byte, bool) {
-	buffer.mu.Lock()
-	defer buffer.mu.Unlock()
-	return append([]byte(nil), buffer.data...), buffer.truncated
 }
 
 func nextWindowsProviderRequestID() string {
@@ -403,22 +368,13 @@ func (manager *windowsProviderProcessManager) recordStderrLocked(
 		"[computer-use windows-provider request=%s operation=%s "+
 			"stderr_bytes=%d stderr_truncated=%t "+
 			"transport_error=%q]\n%s\n",
-		boundedWindowsProviderLabel(request.RequestID),
-		boundedWindowsProviderLabel(string(request.Operation)),
+		boundedProviderLabel(request.RequestID),
+		boundedProviderLabel(string(request.Operation)),
 		len(data),
 		truncated,
 		callErr.Error(),
 		data,
 	)
-}
-
-func boundedWindowsProviderLabel(value string) string {
-	const limit = 256
-	value = strings.TrimSpace(value)
-	if len(value) > limit {
-		return value[:limit]
-	}
-	return value
 }
 
 func (manager *windowsProviderProcessManager) stopLocked() {
@@ -473,7 +429,7 @@ func startWindowsProviderWorker(
 		cmd:                cmd,
 		stdin:              stdin,
 		stdout:             bufio.NewReader(stdout),
-		stderr:             &boundedWindowsProviderBuffer{limit: maxWindowsProviderStderrBytes},
+		stderr:             &boundedProviderBuffer{limit: maxWindowsProviderStderrBytes},
 		done:               make(chan struct{}),
 		stderrDone:         make(chan struct{}),
 		parentDeathBinding: parentDeathBinding,
@@ -488,7 +444,7 @@ func (worker *windowsProviderWorker) forwardStderr(stderr io.Reader) {
 	reader := bufio.NewReaderSize(io.TeeReader(stderr, worker.stderr), 4*1024)
 	for {
 		line, originalBytes, truncated, err :=
-			readWindowsProviderDiagnosticLine(
+			readProviderDiagnosticLine(
 				reader,
 				maxWindowsProviderStderrLineBytes,
 			)
@@ -508,42 +464,6 @@ func (worker *windowsProviderWorker) forwardStderr(stderr io.Reader) {
 				)
 			}
 			return
-		}
-	}
-}
-
-func readWindowsProviderDiagnosticLine(
-	reader *bufio.Reader,
-	limit int,
-) (line []byte, originalBytes int, truncated bool, err error) {
-	if limit <= 0 {
-		limit = 1
-	}
-	for {
-		fragment, readErr := reader.ReadSlice('\n')
-		content := fragment
-		if readErr == nil && len(content) > 0 &&
-			content[len(content)-1] == '\n' {
-			content = content[:len(content)-1]
-		}
-		originalBytes += len(content)
-		if remaining := limit - len(line); remaining > 0 {
-			if len(content) > remaining {
-				line = append(line, content[:remaining]...)
-				truncated = true
-			} else {
-				line = append(line, content...)
-			}
-		} else if len(content) > 0 {
-			truncated = true
-		}
-		switch {
-		case readErr == nil:
-			return line, originalBytes, truncated, nil
-		case errors.Is(readErr, bufio.ErrBufferFull):
-			continue
-		default:
-			return line, originalBytes, truncated, readErr
 		}
 	}
 }

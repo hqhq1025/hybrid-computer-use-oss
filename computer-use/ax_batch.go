@@ -28,6 +28,9 @@ type a11yBatchContext struct {
 	// boundByFocus marks a batch bound to the window that held keyboard
 	// focus before input; its keys and text must still reach that window.
 	boundByFocus bool
+	// report records the snapshots the batch passes through for the act
+	// report; nil outside act.
+	report *actReportTrace
 }
 
 type a11yWindowContinuity string
@@ -399,25 +402,6 @@ func withAXLifecycleFailure(result toolCallResult, err error) toolCallResult {
 	return result
 }
 
-// a11yBatch decodes public action objects and runs them. Tests and the
-// public act path share it.
-func (s *service) a11yBatch(
-	rawActions any,
-	obs observation,
-	postcondition map[string]any,
-	windowRef string,
-) toolCallResult {
-	actions, argErr := decodeAXActions(rawActions)
-	if argErr != nil {
-		requested := 0
-		if items, ok := rawActions.([]any); ok {
-			requested = len(items)
-		}
-		return axArgErrorResult(argErr, requested)
-	}
-	return s.a11yBatchDecoded(actions, obs, postcondition, windowRef)
-}
-
 // a11yBatchDecoded runs decoded actions in one window. Window titles and
 // the focused window are resolved here, once, before any input; after that
 // the batch uses only the resolved wN.
@@ -456,10 +440,13 @@ func (s *service) a11yBatchDecoded(
 	}
 	result := s.a11yBatchBound(actions, obs, postcondition, windowRef, focus, requested)
 	if len(bindingNotes) > 0 {
-		result.Content = append(
-			[]contentItem{{Type: "text", Text: strings.Join(bindingNotes, "\n")}},
-			result.Content...,
-		)
+		at := 0
+		if len(result.Content) > 0 && isActReportText(result.Content[0].Text) {
+			at = 1
+		}
+		notes := contentItem{Type: "text", Text: strings.Join(bindingNotes, "\n")}
+		result.Content = append(result.Content[:at:at],
+			append([]contentItem{notes}, result.Content[at:]...)...)
 	}
 	return result
 }
@@ -473,6 +460,7 @@ func a11yBatchHasRef(actions []a11yBatchAction) bool {
 	return false
 }
 
+// a11yBatchBound runs the batch and puts the act report first.
 func (s *service) a11yBatchBound(
 	actions []a11yBatchAction,
 	obs observation,
@@ -480,6 +468,20 @@ func (s *service) a11yBatchBound(
 	windowRef string,
 	focus *axDesktopWindow,
 	requested int,
+) toolCallResult {
+	trace := newActReportTrace(obs)
+	result := s.a11yBatchRun(actions, obs, postcondition, windowRef, focus, requested, trace)
+	return s.withActReport(result, actions, trace)
+}
+
+func (s *service) a11yBatchRun(
+	actions []a11yBatchAction,
+	obs observation,
+	postcondition map[string]any,
+	windowRef string,
+	focus *axDesktopWindow,
+	requested int,
+	trace *actReportTrace,
 ) toolCallResult {
 	if err := s.preflightPlatformAXKeys(actions); err != nil {
 		return a11yBatchPreflightError(err, requested)
@@ -493,6 +495,8 @@ func (s *service) a11yBatchBound(
 	if err != nil {
 		return a11yBatchPreflightError(err, requested)
 	}
+	context.report = trace
+	trace.bind(s, context)
 	if postcondition != nil {
 		if err := s.preflightA11yPostcondition(context, postcondition); err != nil {
 			return a11yBatchPreflightError(
@@ -561,6 +565,7 @@ func (s *service) a11yBatchBound(
 				return s.recoverA11yBatchObservation(context, stopped, obs)
 			}
 		}
+		trace.recordBefore(s, index)
 		result := toolCallResult{}
 		actionEntry := map[string]any{}
 		request, orderedRun := orderedRuns[index]
@@ -706,7 +711,7 @@ func (s *service) a11yBatchBound(
 				)
 			}
 			result.StructuredContent["postcondition_verified"] = true
-			preserveUnattributedPostconditionEvidence(
+			markVerifiedPostconditionEffect(
 				result.StructuredContent,
 				actionEntry,
 			)
@@ -822,12 +827,14 @@ func (s *service) a11yBatchBound(
 					postconditionResult,
 					finalObservation,
 				)
-				if a11yPostconditionPassed(postconditionResult) &&
-					len(actionEvidence) > 0 {
-					preserveUnattributedPostconditionEvidence(
-						result.StructuredContent,
-						actionEvidence[len(actionEvidence)-1],
-					)
+				if a11yPostconditionPassed(postconditionResult) {
+					// The batch until verifies the state after every action.
+					for _, entry := range actionEvidence {
+						markVerifiedPostconditionEffect(
+							result.StructuredContent,
+							entry,
+						)
+					}
 				}
 			}
 			if captureFinalAfterPostcondition {
@@ -853,6 +860,15 @@ func (s *service) a11yBatchBound(
 						obs,
 					)
 				}
+			}
+			// A missing final observation leaves the effect unknown only
+			// when no until read it.
+			if a11yBatchEffectVerified(
+				postcondition != nil &&
+					a11yPostconditionPassed(postconditionResult),
+				actionEvidence,
+			) {
+				markVerifiedPostconditionEffect(result.StructuredContent, nil)
 			}
 			finalObservationReturned := obs.resolvedMode() != observeNone
 			if value, ok := result.StructuredContent["final_observation_returned"].(bool); ok {

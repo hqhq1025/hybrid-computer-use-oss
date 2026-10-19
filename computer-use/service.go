@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,19 +23,67 @@ type observationLedger struct {
 	lastFullTree map[string]bool
 }
 
-type service struct {
-	backend                   PlatformBackend
-	snapshots                 map[string]*appSnapshot
+// desktopState is shared by every caller of one desktop: the provider, the
+// latest canonical snapshot per app (the address space that refs resolve
+// in), and the aN/wN/rN registries. A ref names the same element for every
+// caller, so the registries cannot be per caller. The GUI layout lease is
+// desktop state too, but the provider holds it, not this struct.
+type desktopState struct {
+	backend           PlatformBackend
+	snapshots         map[string]*appSnapshot
+	refRegistry       *RefRegistry
+	windowRefRegistry *WindowRefRegistry
+	appRefRegistry    *AppRefRegistry
+	// accessibilityEpoch counts invalidations caused by GUI input. A
+	// session that saw an older epoch drops its own caches before its next
+	// call, because input from another caller made them stale as well.
+	accessibilityEpoch uint64
+	// providerElapsed is the total time spent in provider calls.
+	providerElapsed time.Duration
+	// shared holds what concurrent daemon sessions coordinate on. It is a
+	// pointer so that probe copies of the desktop share it.
+	shared *desktopShared
+}
+
+// desktopShared is the coordination state of one desktop.
+type desktopShared struct {
+	// mu serializes calls from concurrent sessions of a daemon. It is the
+	// input lock: one call, reads included, runs at a time, because the
+	// core state is not safe for concurrent use and the provider already
+	// serializes its own calls.
+	mu sync.Mutex
+	// requestResults holds the responses of recent calls that carried a
+	// request_id; see replayOnce.
+	requestMu      sync.Mutex
+	requestResults map[string]storedRequest
+}
+
+// sessionState belongs to one caller: what that caller was shown (diff
+// baselines and delivered trees), its find cursors, the observation it
+// still owes after a stale-ref failure, and the GUI frame its coordinates
+// refer to. Two callers on one desktop must not move each other's
+// baselines or cursors.
+type sessionState struct {
 	guiSnapshot               *appSnapshot
 	lastDiagnostics           map[string]map[string]string
 	observations              observationLedger
 	exposedHiddenRefs         map[string]map[int]elementRecord
-	refRegistry               *RefRegistry
-	windowRefRegistry         *WindowRefRegistry
-	appRefRegistry            *AppRefRegistry
 	findCursorRegistry        *FindCursorRegistry
 	pendingFailedObservations []failedObservationEntry
-	protocolVersion           string
+	seenAccessibilityEpoch    uint64
+	// lastInventory is the latest apps listing, for its records form.
+	lastInventory *axWindowInventory
+	// recordSnapshots are recent records observations, for since.
+	recordSnapshots    []recordSnapshotEntry
+	nextRecordSnapshot uint64
+}
+
+// service is one session's handle on a desktop. The embedded transport
+// state belongs to the MCP adapter; core code never reads it.
+type service struct {
+	*desktopState
+	*sessionState
+	mcpTransportState
 }
 
 func newService() *service {
@@ -42,25 +91,66 @@ func newService() *service {
 }
 
 func newServiceWithBackend(backend PlatformBackend) *service {
+	return newSessionService(newDesktopState(backend))
+}
+
+func newDesktopState(backend PlatformBackend) *desktopState {
 	if backend == nil {
 		backend = defaultRuntimeBackend()
 	}
-	return &service{
-		backend:         backend,
-		snapshots:       map[string]*appSnapshot{},
-		lastDiagnostics: map[string]map[string]string{},
-		observations: observationLedger{
-			lastComplete: map[string]*appSnapshot{},
-			lastFullTree: map[string]bool{},
-		},
-		exposedHiddenRefs:         map[string]map[int]elementRecord{},
-		refRegistry:               NewRefRegistry(defaultAXRefRegistryLimit),
-		windowRefRegistry:         NewWindowRefRegistry(defaultAXWindowRefRegistryLimit),
-		appRefRegistry:            NewAppRefRegistry(defaultAXAppRefRegistryLimit),
-		findCursorRegistry:        NewFindCursorRegistry(defaultAXFindCursorLimit),
-		pendingFailedObservations: []failedObservationEntry{},
-		protocolVersion:           mcpProtocolLegacy,
+	return &desktopState{
+		backend:           backend,
+		snapshots:         map[string]*appSnapshot{},
+		refRegistry:       NewRefRegistry(defaultAXRefRegistryLimit),
+		windowRefRegistry: NewWindowRefRegistry(defaultAXWindowRefRegistryLimit),
+		appRefRegistry:    NewAppRefRegistry(defaultAXAppRefRegistryLimit),
+		shared:            &desktopShared{requestResults: map[string]storedRequest{}},
 	}
+}
+
+// newSessionService returns a new session on an existing desktop.
+func newSessionService(desktop *desktopState) *service {
+	return &service{
+		desktopState: desktop,
+		sessionState: &sessionState{
+			lastDiagnostics: map[string]map[string]string{},
+			observations: observationLedger{
+				lastComplete: map[string]*appSnapshot{},
+				lastFullTree: map[string]bool{},
+			},
+			exposedHiddenRefs:         map[string]map[int]elementRecord{},
+			findCursorRegistry:        NewFindCursorRegistry(defaultAXFindCursorLimit),
+			pendingFailedObservations: []failedObservationEntry{},
+			seenAccessibilityEpoch:    desktop.accessibilityEpoch,
+		},
+		mcpTransportState: mcpTransportState{protocolVersion: mcpProtocolLegacy},
+	}
+}
+
+// isolatedProbe returns a copy whose registries can be changed without
+// touching live state. The struct copies keep the semantics of the former
+// shallow copy of a flat service: maps stay shared, field assignments do not.
+func (s *service) isolatedProbe() *service {
+	probe := *s
+	desktop := *s.desktopState
+	desktop.refRegistry = s.refRegistry.clone()
+	desktop.windowRefRegistry = s.windowRefRegistry.clone()
+	desktop.appRefRegistry = s.appRefRegistry.clone()
+	session := *s.sessionState
+	probe.desktopState = &desktop
+	probe.sessionState = &session
+	return &probe
+}
+
+// syncSessionWithDesktop drops this session's caches when another session's
+// GUI input invalidated the desktop since this session's last call.
+func (s *service) syncSessionWithDesktop() {
+	if s.seenAccessibilityEpoch == s.accessibilityEpoch {
+		return
+	}
+	s.exposedHiddenRefs = map[string]map[int]elementRecord{}
+	s.findCursorRegistry.Reset()
+	s.seenAccessibilityEpoch = s.accessibilityEpoch
 }
 
 // errorContextEnabled reports whether failures write an error-context file.
@@ -173,6 +263,7 @@ func (s *service) callTool(
 		result = enforceAXImageOutputPolicy(name, args, result)
 	}()
 
+	s.syncSessionWithDesktop()
 	result = s.dispatch(name, args)
 	if name != publicToolGUI {
 		result = result.withDefaultEvidenceScope(
@@ -307,33 +398,54 @@ func toolEvidenceScope(name string, args map[string]any) string {
 }
 
 func (s *service) dispatch(name string, args map[string]any) toolCallResult {
+	axCall, rejected, ok := s.rejectInvalidCall(name, args)
+	if ok {
+		return rejected
+	}
+	if axCall != nil {
+		// Run the request decoded above; dispatchValidated would decode it
+		// a second time.
+		return s.a11yDecodedRequest(axCall)
+	}
+	return s.dispatchValidated(name, args)
+}
+
+// rejectInvalidCall returns the error result for a call that must not run:
+// a disabled channel, AX arguments the decoder rejects, or arguments the
+// published schema rejects. Nothing is sent to the provider for them. For an
+// AX call that passes, it returns the decoded request so that callers do not
+// decode it again.
+func (s *service) rejectInvalidCall(name string, args map[string]any) (*axRequest, toolCallResult, bool) {
 	if !toolIsEnabled(name) {
 		// The tool is already absent from tools/list, but a direct call must
 		// still be rejected, and the error must say that the channel is
 		// disabled rather than that the tool does not exist. An ambiguous
 		// error makes the agent suspect a misspelled name.
-		return textResult(fmt.Sprintf(
+		return nil, textResult(fmt.Sprintf(
 			"tool %q belongs to the %s channel, which is disabled by COMPUTER_USE_CHANNELS. Enabled channels: %s.",
-			name, toolChannel[name], strings.Join(sortedChannels(), ", ")), true)
+			name, toolChannel[name], strings.Join(sortedChannels(), ", ")), true), true
 	}
 	// AX decodes its arguments first: the flat AX schema cannot say which
 	// fields belong to which mode or action type, and the decoder's errors
 	// name the field and show a corrected call.
+	var axCall *axRequest
 	if name == publicToolAX {
-		if _, argErr := decodeAXRequest(args); argErr != nil {
+		request, argErr := decodeAXRequest(args)
+		if argErr != nil {
 			requested := 0
 			if actions, ok := args["actions"].([]any); ok {
 				requested = len(actions)
 			}
-			return axArgErrorResult(argErr, requested)
+			return nil, axArgErrorResult(argErr, requested), true
 		}
+		axCall = request
 	}
 	// The published input schema is the static contract. Nothing below runs,
 	// and no input is emitted, for arguments it rejects.
 	if argErr := validateToolArguments(name, args); argErr != nil {
-		return argumentErrorResult(name, args, argErr)
+		return nil, argumentErrorResult(name, args, argErr), true
 	}
-	return s.dispatchValidated(name, args)
+	return axCall, toolCallResult{}, false
 }
 
 // dispatchValidated runs a call whose arguments already passed the published

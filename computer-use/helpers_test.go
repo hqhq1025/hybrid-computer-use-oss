@@ -243,43 +243,6 @@ func findToolDefinition(t *testing.T, name string) toolDefinition {
 	return toolDefinition{}
 }
 
-func findA11ySchemaBranch(
-	t *testing.T,
-	mode string,
-	observationTarget string,
-) map[string]any {
-	t.Helper()
-	schema := findToolDefinition(t, "AX").InputSchema
-	branches, ok := schema["oneOf"].([]any)
-	if !ok {
-		t.Fatalf("a11y schema must publish oneOf: %#v", schema)
-	}
-	for _, raw := range branches {
-		branch, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		properties, ok := branch["properties"].(map[string]any)
-		if !ok {
-			continue
-		}
-		modeProperty, ok := properties["mode"].(map[string]any)
-		if !ok || modeProperty["const"] != mode {
-			continue
-		}
-		targetProperty, hasTarget := properties["observation_target"].(map[string]any)
-		if observationTarget == "" && !hasTarget {
-			return branch
-		}
-		if hasTarget && targetProperty["const"] == observationTarget {
-			return branch
-		}
-	}
-	t.Fatalf("a11y schema branch mode=%q target=%q not found",
-		mode, observationTarget)
-	return nil
-}
-
 func mainGoSource(t *testing.T) string {
 	t.Helper()
 	entries, err := os.ReadDir(".")

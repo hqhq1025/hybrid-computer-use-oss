@@ -523,7 +523,7 @@ func TestWindowsProviderResponseIsBounded(t *testing.T) {
 }
 
 func TestWindowsProviderStderrBufferIsBounded(t *testing.T) {
-	buffer := &boundedWindowsProviderBuffer{limit: 32}
+	buffer := &boundedProviderBuffer{limit: 32}
 	raw := strings.Repeat("stderr-", 20)
 	if _, err := buffer.Write([]byte(raw)); err != nil {
 		t.Fatal(err)
@@ -540,7 +540,7 @@ func TestWindowsProviderStderrBufferIsBounded(t *testing.T) {
 func TestWindowsProviderDiagnosticLineIsBounded(t *testing.T) {
 	raw := strings.Repeat("diagnostic-", 20)
 	line, originalBytes, truncated, err :=
-		readWindowsProviderDiagnosticLine(
+		readProviderDiagnosticLine(
 			bufio.NewReader(strings.NewReader(raw+"\n")),
 			32,
 		)
@@ -568,7 +568,7 @@ func TestWindowsProviderStderrIsForwardedForOperatorDiagnostics(t *testing.T) {
 	}()
 
 	worker := &windowsProviderWorker{
-		stderr:     &boundedWindowsProviderBuffer{limit: 64},
+		stderr:     &boundedProviderBuffer{limit: 64},
 		stderrDone: make(chan struct{}),
 	}
 	worker.forwardStderr(strings.NewReader(

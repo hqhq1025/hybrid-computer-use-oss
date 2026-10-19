@@ -83,6 +83,29 @@ def normalize_key_expression(key):
     return "+".join(modifiers + [text])
 
 
+# Gdk.keyval_from_name returns VoidSymbol, not 0, for an unknown name.
+GDK_VOID_SYMBOL = 0xFFFFFF
+
+
+def keysym(name):
+    """Resolve a key name to an X11 keysym, or 0 when it has none.
+
+    Punctuation is accepted as the character itself (",", ".", "/"), and
+    named keys in any case ("INSERT", "caps_lock"), because callers write
+    keys the way they appear on the keyboard.
+    """
+    candidates = [name]
+    if len(name) > 1:
+        candidates.append("_".join(part.capitalize() for part in name.split("_")))
+    for candidate in candidates:
+        sym = Gdk.keyval_from_name(candidate)
+        if sym and sym != GDK_VOID_SYMBOL:
+            return sym
+    if len(name) == 1:
+        return Gdk.unicode_to_keyval(ord(name))
+    return 0
+
+
 def keycode(name):
     """Resolve a key name to an X11 hardware keycode.
 
@@ -103,9 +126,7 @@ def keycode(name):
     """
     if Gdk is None:
         raise RuntimeError("Gdk unavailable; cannot resolve keycode for: " + name)
-    sym = Gdk.keyval_from_name(name)
-    if not sym and len(name) == 1:
-        sym = ord(name)
+    sym = keysym(name)
     if not sym:
         raise RuntimeError("Unsupported key: " + name)
     keymap = Gdk.Keymap.get_default()
@@ -139,7 +160,10 @@ def parse_key(key):
                 "Control_L/Ctrl_L and GTK forms such as <Control>s are also accepted."
                 .format(modifier))
         codes.append(keycode(name))
-    normalized = KEY_ALIASES.get(main.lower(), main)
+    # A bare modifier ("SHIFT") is a key of its own.
+    normalized = KEY_ALIASES.get(main.lower()) or MODIFIER_KEYS.get(
+        main.lower(), main
+    )
     # A single-character key may use STRING only without modifiers. STRING
     # means "insert this text" and bypasses modifiers already pressed, so
     # ctrl+a would degrade into typing a literal 'a'.
@@ -287,23 +311,6 @@ def text_insertion_point(text_iface):
     return count, None
 
 
-def insert_text_detail(root, text):
-    """Write text through AT-SPI; return (verified, count_before, count_after).
-
-    Callers need all three values to report a write that landed and was
-    verified, rather than a bare success.
-    """
-    node = find_editable_text(root)
-    status, before, after, _emitted = insert_text_outcome_on_node(node, text)
-    if status == "effect_unknown":
-        raise RuntimeError(
-            "AT-SPI text write may have deleted the selected text, changed the "
-            "control to unexpected content, or lost readback; refusing automatic "
-            "keyboard fallback"
-        )
-    return status == "verified", before, after
-
-
 def insert_text_outcome_on_node(node, text):
     """Write text and distinguish verified, confirmed-no-change, and unknown."""
     if node is None:
@@ -381,11 +388,6 @@ def insert_text_outcome_on_node(node, text):
     if after_text != before_text:
         return "effect_unknown", before, len(after_text), True
     return "no_change", before, len(after_text), True
-
-
-def insert_text(root, text):
-    written, _, _ = insert_text_detail(root, text)
-    return written
 
 
 def focus_target_element(window, element, element_record, what, timeout=1.0):

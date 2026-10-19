@@ -177,13 +177,10 @@ func (s *service) stabilizePostActionTransientCommit(
 			TreeView:           treeViewWorking,
 		}
 		applyProjection(&sourceProbeRequest, after.projection)
-		probe := *s
-		probe.refRegistry = s.refRegistry.clone()
-		probe.windowRefRegistry = s.windowRefRegistry.clone()
-		probe.appRefRegistry = s.appRefRegistry.clone()
+		probe := s.isolatedProbe()
 		_, _, sourceResult := probe.readSnapshot(app, sourceProbeRequest)
 		replacement, proven :=
-			provenGoneSourceReplacement(&probe, sourceResult)
+			provenGoneSourceReplacement(probe, sourceResult)
 		if !proven {
 			continue
 		}
@@ -290,10 +287,7 @@ func (s *service) stabilizePostActionWindowIdentity(
 		TreeView:           treeViewWorking,
 	}
 	applyProjection(&refresh, after.projection)
-	probe := *s
-	probe.refRegistry = s.refRegistry.clone()
-	probe.windowRefRegistry = s.windowRefRegistry.clone()
-	probe.appRefRegistry = s.appRefRegistry.clone()
+	probe := s.isolatedProbe()
 	if trigger == "provider_window_change" &&
 		isShortAXWindowRef(before.publicWindowRef) {
 		probe.refRegistry.MarkByWindow(
@@ -450,10 +444,7 @@ func (s *service) stabilizePostActionContent(
 		TreeView:           treeViewWorking,
 	}
 	applyProjection(&refresh, after.projection)
-	probe := *s
-	probe.refRegistry = s.refRegistry.clone()
-	probe.windowRefRegistry = s.windowRefRegistry.clone()
-	probe.appRefRegistry = s.appRefRegistry.clone()
+	probe := s.isolatedProbe()
 	refreshed, notes, result := probe.readSnapshot(app, refresh)
 	if result.IsError ||
 		refreshed == nil ||
@@ -477,10 +468,28 @@ func (s *service) stabilizePostActionContent(
 	s.appRefRegistry = probe.appRefRegistry
 	s.rememberSnapshot(app, refreshed)
 	notes = append([]string{
-		"[content] The same logical window was refreshed once after a compact " +
-			"post-action snapshot changed; the current working tree is included below.",
+		"[content] The window changed after the first post-action read; " +
+			"the result below is from one re-read 250 ms later.",
 	}, notes...)
 	return refreshed, notes, true, true
+}
+
+// renderAXContentStabilizedObservation returns the re-read window as a diff
+// against the last state the model received for it, and falls back to the
+// working tree only when no diff is available or the diff is not shorter.
+func (s *service) renderAXContentStabilizedObservation(
+	snapshot *appSnapshot,
+	notes []string,
+) (toolCallResult, []string, bool, bool, bool) {
+	if diff, ok := incrementalTree(s.deliveredSnapshotFor(snapshot), snapshot); ok {
+		result := snapshot.resultWithTreeOverride(notes, diff)
+		if result.StructuredContent == nil {
+			result.StructuredContent = map[string]any{}
+		}
+		result.StructuredContent["final_observation_kind"] = "diff"
+		return result, diff, true, false, false
+	}
+	return s.renderAXWorkingObservation(snapshot, notes)
 }
 
 func (s *service) actionResult(app string, request axServiceRequest) toolCallResult {
@@ -671,7 +680,8 @@ func (s *service) actionResult(app string, request axServiceRequest) toolCallRes
 		if providerCoverageSummary(
 			snapshot.Annotations,
 		).AcquisitionIncomplete == 0 &&
-			s.observations.lastFullTree[deliveredTreeKey(snapshot)] {
+			(s.observations.lastFullTree[deliveredTreeKey(snapshot)] ||
+				s.deliveredStateMatches(snapshot)) {
 			deliveredLines = repeatedTreeReferenceLines(snapshot)
 			response = snapshot.withoutScreenshot().resultWithTreeOverride(
 				notes, deliveredLines)
@@ -703,10 +713,14 @@ func (s *service) actionResult(app string, request axServiceRequest) toolCallRes
 		}
 		response.StructuredContent["final_observation_kind"] = "full"
 	default:
-		if identityStabilized || contentStabilized {
+		if identityStabilized {
 			response, deliveredLines, treeWasReturned,
 				compactActionObservation, fullTreeReturned =
 				s.renderAXWorkingObservation(snapshot, notes)
+		} else if contentStabilized {
+			response, deliveredLines, treeWasReturned,
+				compactActionObservation, fullTreeReturned =
+				s.renderAXContentStabilizedObservation(snapshot, notes)
 		} else {
 			response, deliveredLines, treeWasReturned,
 				compactActionObservation, fullTreeReturned =

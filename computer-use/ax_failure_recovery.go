@@ -15,27 +15,6 @@ func resultText(result toolCallResult) string {
 	return text.String()
 }
 
-func replaceToolResultText(
-	result toolCallResult,
-	internal,
-	public string,
-) toolCallResult {
-	if internal == "" || internal == public {
-		return result
-	}
-	for index := range result.Content {
-		if result.Content[index].Type != "text" {
-			continue
-		}
-		result.Content[index].Text = strings.ReplaceAll(
-			result.Content[index].Text,
-			internal,
-			public,
-		)
-	}
-	return result
-}
-
 func isNoInputRecoverablePrecondition(result toolCallResult) bool {
 	if !result.IsError || result.StructuredContent == nil {
 		return false

@@ -392,8 +392,3 @@ func estimateFindResultSet(
 	}
 	return nodes, bytes
 }
-
-func isShortAXFindCursor(value string) bool {
-	_, ok := parseAXFindCursor(value)
-	return ok
-}

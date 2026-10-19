@@ -31,10 +31,20 @@ fits which state, and how to combine them.
   answer a concrete blocker.
 - Plan from one read. After `observe` or `find`, put every action you can
   already determine for that window into one `act`.
-- Continue from the returned diff. It carries the new and changed refs, and an
-  unchanged diff is still current. Read again only when the diff lacks what the
-  next decision needs.
-- Attach the expected result as `until` instead of a separate read:
+- Every `act` result starts with what happened, then a diff:
+
+```text
+effect: r58 checkbox "Interface" checked=false→true
+windows: opened w5 "Insert Sheet" (dialog, focused)
+```
+
+  `effect` gives each target's changed fields, `no visible change`, or
+  `unknown` with the reason. `windows` names windows that opened, closed, or
+  took focus, with a `wN` you can use at once. When these lines already show
+  the result, do not read or wait again. Continue from the diff for other
+  changes; read again only when the next decision needs more.
+- When a later step depends on a state that appears later, attach it as
+  `until` instead of a separate read:
 
 ```json
 {"mode":"act","actions":[{"type":"set_value","ref":"r31","value":"14"}],"until":{"type":"value","ref":"r31","value":"14"}}
