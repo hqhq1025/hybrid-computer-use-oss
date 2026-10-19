@@ -20,6 +20,7 @@ from .foundation import (
     provider_object_path,
     safe,
     should_enumerate_children,
+    showing_state,
     state_contains,
     strict_prune_probe,
 )
@@ -401,10 +402,12 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         # target of a plain click, but do not descend into its items. Role
         # and state were already read for this node, so this check costs no
         # further provider round trip.
+        # GAIL never reports SHOWING on the items of an open GTK2 menu, so
+        # use the corrected value; see menu_children_popped_up().
         if (
             depth > 0
             and role.lower() in MENU_ROLES
-            and not facts.has_state(Atspi.StateType.SHOWING)
+            and record.get("showing") is not True
         ):
             pending = (
                 strict_child_count(node, facts)
@@ -554,7 +557,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             collapsed_menu = (
                 depth > 0
                 and role.lower() in MENU_ROLES
-                and not state_contains(node, Atspi.StateType.SHOWING)
+                and showing_state(node) is not True
             )
             children = []
             children_allowed = False

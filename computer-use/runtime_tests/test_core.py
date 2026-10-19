@@ -2199,3 +2199,223 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
             failure_subject="element",
         )
         self.assertEqual(exc.failure_subject, "element")
+
+
+class _ToggleOnlyNode(FakeNode):
+    """A checkable control whose only AT-SPI action is `toggle`.
+
+    Qt exposes checkable buttons and item-view cells this way. The toolkit is
+    readable only from the application object, as on Qt.
+    """
+
+    def __init__(self, toolkit, role="check box", name="Input / Codecs"):
+        super().__init__(states=(STATE.SHOWING, STATE.VISIBLE))
+        self._toolkit = toolkit
+        self.role = role
+        self.title = name
+        self.actions = []
+
+    def get_application(self):
+        node = FakeNode()
+        node.get_toolkit_name = lambda: self._toolkit
+        return node
+
+    def get_action_iface(self):
+        return object()
+
+    def get_n_actions(self):
+        return 1
+
+    def get_action_name(self, index):
+        return "Toggle"
+
+    def get_action_description(self, index):
+        return ""
+
+    def get_role_name(self):
+        return self.role
+
+    def get_name(self):
+        return self.title
+
+    def do_action(self, index):
+        self.actions.append(index)
+        return True
+
+
+class StateOnlyActionDeliveryTests(AtspiPatchedTestCase):
+    """A click on a control whose action only flips a state flag.
+
+    VLC (Qt 5) Simple Preferences: the category buttons are checkable
+    QToolButtons with the single action `Toggle`. Invoking it turned the
+    button checked while the page stayed on Interface Settings, because Qt
+    calls toggle() rather than click(). A pointer click switched the page.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.window = FakeNode(states=(STATE.ACTIVE,))
+        self.pointer = []
+        self._patch("resolve_app", lambda query: FakeNode())
+        self._patch("main_window", lambda app: (0, self.window))
+        self._patch("extents", lambda node: runtime.frame(0, 0, 400, 300))
+        self._patch("desktop_bounds", lambda: runtime.frame(0, 0, 1920, 1080))
+        self._patch("build_snapshot", lambda *a, **k: {"text": ""})
+        self._patch("coordinate_point_owner", lambda window, x, y: True)
+        self._patch("window_in_foreground", lambda window: True)
+        self._patch("point_hits_element", lambda window, element, x, y: True)
+        self._patch(
+            "current_geometry", lambda element, record, bounds: (record, None))
+        self._patch(
+            "require_stable_coordinate_geometry",
+            lambda element, record, bounds: (record, 2))
+        self._patch(
+            "send_mouse_click",
+            lambda x, y, button, count: self.pointer.append((x, y, button, count)))
+        self._patch("time", _NoSleep())
+
+    def _patch(self, name, value):
+        original = getattr(runtime, name)
+        setattr(runtime, name, value)
+        self.addCleanup(setattr, runtime, name, original)
+
+    def _click(self, element):
+        self._patch("find_element_at_snapshot_path", lambda app, record: element)
+        return perform_provider_operation({
+            "intent": "click",
+            "app": "vlc",
+            "click_method": "auto",
+            "element": {"frame": runtime.frame(100, 10, 110, 76)},
+        })
+
+    def test_qt_toggle_only_control_gets_a_real_pointer_click(self):
+        element = _ToggleOnlyNode("Qt")
+
+        response = self._click(element)
+
+        self.assertEqual(element.actions, [])
+        self.assertEqual(self.pointer, [(155.0, 48.0, "left", 1)])
+        self.assertEqual(response["actionEvidence"]["route"], "coordinate_synthesis")
+        self.assertTrue(response["actionEvidence"]["point_owner_verified"])
+        note = " ".join(response["notes"])
+        self.assertIn("Clicked the element with the pointer", note)
+        self.assertIn("toolkit toggle", note)
+
+    def test_gtk_toggle_stays_semantic(self):
+        # GTK's toggle emits the widget's own signals (a GTK 3 check button
+        # switches through it), so a pointer click would only add risk.
+        element = _ToggleOnlyNode("GTK")
+
+        response = self._click(element)
+
+        self.assertEqual(element.actions, [0])
+        self.assertEqual(self.pointer, [])
+        self.assertEqual(response["actionEvidence"]["route"], "semantic_action")
+
+    def test_qt_toggle_falls_back_to_the_action_when_the_window_is_behind(self):
+        # The pointer route never raises the window to avoid a state-only
+        # action; it keeps the action and says the app may not respond.
+        self._patch("window_in_foreground", lambda window: False)
+        element = _ToggleOnlyNode("Qt")
+
+        response = self._click(element)
+
+        self.assertEqual(element.actions, [0])
+        self.assertEqual(self.pointer, [])
+        self.assertEqual(response["actionEvidence"]["route"], "semantic_action")
+        note = " ".join(response["notes"])
+        self.assertIn("the application may not respond", note)
+        self.assertIn("not in the foreground", note)
+
+    def test_qt_toggle_falls_back_when_another_element_is_under_the_point(self):
+        self._patch("point_hits_element", lambda window, element, x, y: False)
+        element = _ToggleOnlyNode("Qt")
+
+        response = self._click(element)
+
+        self.assertEqual(element.actions, [0])
+        self.assertEqual(self.pointer, [])
+        evidence = response["actionEvidence"]
+        self.assertEqual(evidence["route"], "semantic_action")
+        # A refused pointer route leaves no coordinate evidence behind.
+        self.assertFalse(evidence["geometry_sampled"])
+        self.assertIn("another element is under", " ".join(response["notes"]))
+
+    def test_qt_toggle_falls_back_when_geometry_is_unstable(self):
+        def unstable(element, record, bounds):
+            raise runtime.OperationFailure(
+                "target_unstable: moving", failure_code="target_unstable",
+                failure_phase="precondition", input_events_emitted=False)
+
+        self._patch("require_stable_coordinate_geometry", unstable)
+        element = _ToggleOnlyNode("Qt")
+
+        response = self._click(element)
+
+        self.assertEqual(element.actions, [0])
+        self.assertEqual(self.pointer, [])
+        self.assertIn("target_unstable", " ".join(response["notes"]))
+
+    def test_qt_press_action_stays_semantic(self):
+        # Qt's Press calls click()/animateClick(), which emits clicked().
+        element = _ToggleOnlyNode("Qt", role="push button", name="Save")
+        element.get_action_name = lambda index: "Press"
+
+        response = self._click(element)
+
+        self.assertEqual(element.actions, [0])
+        self.assertEqual(self.pointer, [])
+        self.assertEqual(response["actionEvidence"]["route"], "semantic_action")
+
+
+class PointHitsElementTests(AtspiPatchedTestCase):
+    """The pointer route clicks only when the point reaches the element."""
+
+    def _node(self, role, name, frame, parent=None, path=""):
+        node = _ToggleOnlyNode("Qt", role=role, name=name)
+        node.parent = parent
+        node.path = path
+        node.get_parent = lambda: node.parent
+        node.frame = frame
+        return node
+
+    def setUp(self):
+        super().setUp()
+        self._original_extents = runtime.extents
+        runtime.extents = lambda node: getattr(node, "frame", None)
+        self.addCleanup(setattr, runtime, "extents", self._original_extents)
+        self.window = FakeNode()
+        self.button = self._node(
+            "check box", "Input / Codecs", runtime.frame(952, 213, 110, 76),
+            path="/a/1")
+
+    def _hit(self, hit):
+        original = runtime._deepest_accessible_at
+        runtime._deepest_accessible_at = lambda window, x, y: hit
+        self.addCleanup(setattr, runtime, "_deepest_accessible_at", original)
+        return runtime.point_hits_element(self.window, self.button, 1007, 251)
+
+    def test_the_element_itself(self):
+        same = self._node("check box", "Input / Codecs",
+                          runtime.frame(952, 213, 110, 76), path="/a/1")
+        self.assertTrue(self._hit(same))
+
+    def test_a_descendant_of_the_element(self):
+        label = self._node("label", "Input / Codecs",
+                           runtime.frame(960, 270, 90, 15),
+                           parent=self.button, path="/a/2")
+        self.assertTrue(self._hit(label))
+
+    def test_a_fresh_object_for_the_same_cell(self):
+        # Qt returns a new accessible for an item-view cell on every query.
+        fresh = self._node("check box", "Input / Codecs",
+                           runtime.frame(952, 213, 110, 76), path="/a/99")
+        self.assertTrue(self._hit(fresh))
+
+    def test_another_element_under_the_point(self):
+        popup_item = self._node("list item", "Never",
+                                runtime.frame(950, 240, 300, 25), path="/b/1")
+        self.assertFalse(self._hit(popup_item))
+
+    def test_nothing_under_the_point(self):
+        self.assertFalse(self._hit(None))

@@ -333,9 +333,15 @@ windows: opened w5 "Insert Sheet" (dialog, focused); closed w3 "Print"; focus w2
 
 There is one `effect` line per action with an element `ref`. It compares the
 element in the read before that action with the next read after it and names
-the role, the name, and the state or value fields that changed. It says
-`no visible change` when none did, `gone` when a complete read no longer has
-it, and `unknown (reason)` when no read after the action covers it. The
+the role, the name, and the state or value fields that changed. When both
+reads are of the same window and nothing else in it changed, the line ends
+with `(only state flags changed in this window)`. When the element itself did
+not change but other nodes did, the line counts them, for example
+`itself unchanged; 25 nodes appeared under it, 1 node changed elsewhere`.
+Nodes that appear or disappear under the element count as its effect; changes
+elsewhere do not. The line says `no visible change` when nothing in the window
+changed, `gone` when a complete read no longer has the element, and
+`unknown (reason)` when no read after the action covers it. The
 `windows` line compares the application's top-level windows before the first
 action with those after the last; new windows get a `wN` at once. When the
 report shows every targeted element changed, or a `wait` after the last action

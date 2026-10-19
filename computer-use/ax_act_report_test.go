@@ -33,6 +33,10 @@ type reportBackend struct {
 	skipReadback bool
 	// loseReadback makes the read after an action fail after input.
 	loseReadback bool
+	// page is the title of the settings page the window shows.
+	page string
+	// menuOpen exposes the items of the "Edit" menu.
+	menuOpen bool
 }
 
 func (b *reportBackend) snapshot(selected reportWindow) *ProviderSnapshot {
@@ -58,8 +62,23 @@ func (b *reportBackend) snapshot(selected reportWindow) *ProviderSnapshot {
 			{Index: 2, RuntimeID: []int{0, 1}, ControlType: "entry", Name: "Size", Value: b.value,
 				States: "[editable focusable]", SetValueSupported: &setValue},
 			{Index: 3, RuntimeID: []int{0, 2}, ControlType: "push button", Name: "OK", States: "[has-click-action]"},
+			{Index: 4, RuntimeID: []int{0, 3}, ControlType: "label", Name: firstNonEmpty(b.page, "General")},
+			{Index: 5, RuntimeID: []int{0, 4}, ControlType: "menu item", Name: "Edit", States: "[has-click-action]"},
 		},
 		scope: axScopeWindow,
+	}
+	snapshot.TreeLines = append(snapshot.TreeLines,
+		"\t\t4 label \""+firstNonEmpty(b.page, "General")+"\"",
+		"\t\t5 menu item \"Edit\" [has-click-action]")
+	if b.menuOpen {
+		snapshot.Elements = append(snapshot.Elements,
+			elementRecord{Index: 6, RuntimeID: []int{0, 4, 0}, ControlType: "menu item",
+				Name: "Preferences", States: "[has-click-action]"},
+			elementRecord{Index: 7, RuntimeID: []int{0, 4, 1}, ControlType: "menu item",
+				Name: "Undo", States: "[has-click-action]"})
+		snapshot.TreeLines = append(snapshot.TreeLines,
+			"\t\t\t6 menu item \"Preferences\" [has-click-action]",
+			"\t\t\t7 menu item \"Undo\" [has-click-action]")
 	}
 	for index := range snapshot.Elements {
 		element := &snapshot.Elements[index]
@@ -183,12 +202,61 @@ func TestActReportShowsTheTargetStateChange(t *testing.T) {
 	line, rest := visibleAct(t, s, map[string]any{
 		"mode": "act", "actions": []any{map[string]any{"type": "click", "ref": refs["Interface"]}},
 	})
-	want := "effect: " + refs["Interface"] + ` checkbox "Interface" checked=false→true`
+	want := "effect: " + refs["Interface"] + ` checkbox "Interface" checked=false→true` +
+		" (only state flags changed in this window)"
 	if rest[0] != want || rest[1] != "windows: no change" {
 		t.Fatalf("report:\n%s\nwant first line %q", strings.Join(rest, "\n"), want)
 	}
 	if !strings.HasPrefix(line, `{"ok":true,"input_emitted":true`) || strings.Contains(line, "effect_unknown") {
 		t.Fatalf("evidence line %s", line)
+	}
+}
+
+// A checkbox that switches a settings page reports the page change by not
+// carrying the state-only remark.
+func TestActReportStateChangeWithAPageSwitch(t *testing.T) {
+	s, backend := reportService(t, reportMain())
+	_, refs := reportObserve(t, s, "Interface")
+	backend.onAction = func(b *reportBackend) { b.checked, b.page = true, "Input & Codecs" }
+	_, rest := visibleAct(t, s, map[string]any{
+		"mode": "act", "actions": []any{map[string]any{"type": "click", "ref": refs["Interface"]}},
+	})
+	if want := "effect: " + refs["Interface"] + ` checkbox "Interface" checked=false→true`; rest[0] != want {
+		t.Fatalf("report %q want %q", rest[0], want)
+	}
+}
+
+// A menu whose own states do not change when it opens (GTK2 menus report
+// none) still shows its response: items appeared under it.
+func TestActReportCountsItemsThatAppearUnderAnUnchangedElement(t *testing.T) {
+	s, backend := reportService(t, reportMain())
+	_, refs := reportObserve(t, s, "Edit")
+	backend.onAction = func(b *reportBackend) { b.menuOpen = true }
+	line, rest := visibleAct(t, s, map[string]any{
+		"mode": "act", "actions": []any{map[string]any{"type": "click", "ref": refs["Edit"]}},
+	})
+	if want := "effect: " + refs["Edit"] + ` menuitem "Edit" itself unchanged; 2 nodes appeared under it`; rest[0] != want {
+		t.Fatalf("report %q want %q", rest[0], want)
+	}
+	if strings.Contains(line, `"effect_unknown":true`) {
+		t.Fatalf("items that appeared under the element are its observed effect: %s", line)
+	}
+}
+
+// A change elsewhere in the window is reported but not attributed to the
+// element: the element's own effect stays unconfirmed.
+func TestActReportNamesChangesElsewhereWithoutClaimingThem(t *testing.T) {
+	s, backend := reportService(t, reportMain())
+	_, refs := reportObserve(t, s, "OK")
+	backend.onAction = func(b *reportBackend) { b.page = "Advanced" }
+	result := s.callTool(publicToolAX, map[string]any{
+		"mode": "act", "actions": []any{map[string]any{"type": "click", "ref": refs["OK"]}},
+	})
+	if want := "effect: " + refs["OK"] + ` button "OK" itself unchanged; 1 node changed elsewhere`; !strings.Contains(resultText(result), want) {
+		t.Fatalf("report %q want %q", resultText(result), want)
+	}
+	if result.StructuredContent["target_effect_observed"] == true {
+		t.Fatalf("a change elsewhere must not confirm the element's effect")
 	}
 }
 

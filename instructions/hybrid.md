@@ -41,7 +41,9 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
 ```
 
   `effect` gives each target's changed fields, `no visible change`, or
-  `unknown` with the reason. `windows` names windows that opened, closed, or
+  `unknown` with the reason. `(only state flags changed in this window)` means
+  no page, content, or window changed; if the control should have switched
+  something, the application did not respond. `windows` names windows that opened, closed, or
   took focus, with a `wN` you can use at once. When these lines already show
   the result, do not read or wait again. Continue from the diff for other
   changes; read again only when the next decision needs more.

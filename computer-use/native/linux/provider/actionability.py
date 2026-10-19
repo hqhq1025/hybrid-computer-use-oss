@@ -7,7 +7,10 @@ from .foundation import (
     CLICK_COVERED_ACTIONS,
     NON_SELF_ACTIONS,
     OperationFailure,
+    extents,
     frame,
+    node_name,
+    node_role,
     normalized_action,
     safe,
 )
@@ -59,6 +62,43 @@ def do_action_by_index(node, index):
     if index is None:
         return False
     return bool(safe(lambda: node.do_action(int(index)), False))
+
+
+def application_toolkit(node):
+    """Return the toolkit name of the node's application, lowercased.
+
+    Qt reports its toolkit only on the application object; its windows and
+    controls return an empty toolkit name.
+    """
+    app = safe(getattr(node, "get_application", None))
+    name = safe(getattr(app, "get_toolkit_name", None), "")
+    return str(name or "").strip().lower()
+
+
+def action_only_sets_state(node, index):
+    """Return whether the click entry changes a state flag but not the app.
+
+    Qt's AT-SPI bridge exposes a single `Toggle` action on checkable buttons
+    (check box, radio button, checkable tool button) and on item-view cells.
+    For a button it calls QAbstractButton::toggle(), which flips the checked
+    state and emits toggled() but not clicked(); for a cell it does not
+    select or activate the row. An application that listens for clicked()
+    or for the current row never hears about it: VLC's preferences category
+    buttons turn checked while the page stays put, and its Simple/All radio
+    and its preferences tree do not switch either, although each control
+    reports the action as done. A real pointer click emits every signal the
+    widget emits for a user, so these elements need one.
+
+    Only Qt's `toggle` qualifies. GTK's `click` and `toggle` emit the
+    widget's own activation signals, and GTK2 menu `click` opens the menu or
+    runs the command (both verified on GIMP 2.10), so they stay semantic.
+    """
+    # Check the toolkit first: it needs no action-table read, which the
+    # LibreOffice ATK bridge handles badly (see node_actions()).
+    if index is None or application_toolkit(node) != "qt":
+        return False
+    name = str(safe(lambda: node.get_action_name(int(index)), "") or "")
+    return normalized_action(name) == "toggle"
 
 
 def window_relative(window_bounds, x, y):
@@ -235,6 +275,68 @@ def coordinate_point_owner(window, x, y):
     if not containing:
         return False
     return containing[-1] == target_id
+
+
+def _deepest_accessible_at(window, x, y, max_depth=32):
+    """Return the deepest accessible under a screen point, or None."""
+    node = window
+    hit = None
+    for _ in range(max_depth):
+        component = safe(node.get_component_iface)
+        if component is None:
+            break
+        child = safe(lambda: Atspi.Component.get_accessible_at_point(
+            component, int(round(x)), int(round(y)), Atspi.CoordType.SCREEN))
+        if child is None or _same_object(child, node):
+            break
+        hit = node = child
+    return hit
+
+
+def _same_object(first, second):
+    if first is second:
+        return True
+    first_path = str(safe(lambda: first.path, "") or "")
+    return bool(first_path) and first_path == str(
+        safe(lambda: second.path, "") or "")
+
+
+def _same_frame_on_screen(first, second):
+    first_frame, second_frame = extents(first), extents(second)
+    return (
+        first_frame is not None
+        and second_frame is not None
+        and all(first_frame[key] == second_frame[key]
+                for key in ("x", "y", "width", "height"))
+    )
+
+
+def point_hits_element(window, element, x, y):
+    """Return whether a pointer event at (x, y) would reach ``element``.
+
+    The point owner check covers top-level windows only; this hit test
+    checks the element itself, so an overlapping popup, a scrolled-away row
+    or a stale frame stops the click. The deepest hit may be the element, a
+    descendant (a label inside a button), or an object with the element's
+    role, name and screen frame: Qt creates a new accessible object for an
+    item-view cell on every query, so the cell a hit test returns is never
+    the same object as the one resolved earlier.
+    """
+    hit = _deepest_accessible_at(window, x, y)
+    if hit is None:
+        return False
+    node = hit
+    for _ in range(8):
+        if _same_object(node, element):
+            return True
+        node = safe(node.get_parent)
+        if node is None:
+            break
+    return (
+        node_role(hit) == node_role(element)
+        and node_name(hit) == node_name(element)
+        and _same_frame_on_screen(hit, element)
+    )
 
 
 def require_coordinate_delivery(window, x, y, what):

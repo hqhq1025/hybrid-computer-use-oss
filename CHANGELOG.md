@@ -10,6 +10,21 @@
   property requires direct file editing. The combined changes have not yet
   received a new model evaluation; separate candidate results are not a
   combined performance measurement.
+- On Linux, an AX click on a Qt control whose only accessibility action is
+  `Toggle` (checkable buttons, radio buttons, item-view cells) uses a real
+  pointer click when the window is in front, the geometry is stable, and a
+  hit test reaches the element. Qt's `Toggle` changes the checked state
+  without the `clicked` signal, so VLC's preferences categories, its
+  Simple/All switch and its preferences tree turned checked while the page
+  stayed the same.
+- On Linux, items of an open GTK2 (GAIL) menu count as showing. GAIL never
+  reports SHOWING for them, so after an AX click opened GIMP's Edit menu,
+  `Preferences` was `addressable=false reason=not_currently_showing`. The
+  provider reads the menu shell's selection to tell an open menu from a
+  closed one.
+- The act `effect` line says `(only state flags changed in this window)` when
+  nothing else changed, and counts the nodes that changed when the element
+  itself did not, instead of `no visible change`.
 - AX act results start with an effect line and a windows line, and return a
   diff when it is shorter than the tree. On the paper OSWorld 1.0 harness
   (20-task panel, GPT-5.4, two rounds), the median input per solved task is about 0.6 of

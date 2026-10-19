@@ -167,10 +167,155 @@ func (s *service) actEffectLine(trace *actReportTrace, index int, ref string) (s
 			" (not read before the action)", false
 	}
 	changes := axReportNodeChanges(before, after)
+	window, compared := axReportWindowResponse(trace.before[index], afterSnapshot, ref)
 	if len(changes) == 0 {
+		if compared && window.any() {
+			// Nodes appearing or disappearing under the element (a menu that
+			// opened or closed) are its own response; changes elsewhere
+			// cannot be attributed to it.
+			return head + " " + window.besideUnchangedElement(),
+				window.underAdded+window.underRemoved > 0
+		}
 		return head + " no visible change", false
 	}
-	return head + " " + strings.Join(changes, " "), true
+	line := head + " " + strings.Join(changes, " ")
+	if compared && window.onlyStates() {
+		// A toolkit action can flip a checked or selected flag without the
+		// application doing what a user's click makes it do: a Qt category
+		// button turned checked while its settings page stayed put. For a
+		// plain checkbox this is the whole effect; for a control that should
+		// switch a page or run a command it means the application did not
+		// respond. Stating it lets the caller tell the two apart.
+		line += " (only state flags changed in this window)"
+	}
+	return line, true
+}
+
+// axReportWindowChange counts the nodes that changed in the acted window,
+// split into those under the acted element and those elsewhere.
+type axReportWindowChange struct {
+	underAdded, underRemoved, underChanged int
+	otherAdded, otherRemoved, otherChanged int
+	// nonState counts changes other than a state flag of an existing node.
+	nonState int
+}
+
+func (c axReportWindowChange) any() bool {
+	return c.underAdded+c.underRemoved+c.underChanged+
+		c.otherAdded+c.otherRemoved+c.otherChanged > 0
+}
+
+func (c axReportWindowChange) onlyStates() bool {
+	return c.nonState == 0
+}
+
+func (c axReportWindowChange) besideUnchangedElement() string {
+	parts := []string{}
+	count := func(n int, verb, where string) {
+		if n == 0 {
+			return
+		}
+		noun := "nodes"
+		if n == 1 {
+			noun = "node"
+		}
+		parts = append(parts, strconv.Itoa(n)+" "+noun+" "+verb+where)
+	}
+	count(c.underAdded, "appeared", " under it")
+	count(c.underRemoved, "disappeared", " under it")
+	count(c.underChanged, "changed", " under it")
+	count(c.otherAdded, "appeared", " elsewhere")
+	count(c.otherRemoved, "disappeared", " elsewhere")
+	count(c.otherChanged, "changed", " elsewhere")
+	return "itself unchanged; " + strings.Join(parts, ", ")
+}
+
+// axReportWindowResponse diffs one window between the reads around an
+// action. compared is false when the reads are of different windows or the
+// earlier read was incomplete, so no claim about the rest of the window can
+// be made.
+func axReportWindowResponse(
+	before, after *appSnapshot, ref string,
+) (axReportWindowChange, bool) {
+	change := axReportWindowChange{}
+	if before == nil || after == nil || before.axSnapshot == nil ||
+		after.axSnapshot == nil || before.WindowHandle == "" ||
+		before.WindowHandle != after.WindowHandle ||
+		providerCoverageSummary(before.Annotations).AcquisitionIncomplete > 0 ||
+		providerCoverageSummary(after.Annotations).AcquisitionIncomplete > 0 {
+		return change, false
+	}
+	beforeWindows, afterWindows := axReportWindows(before), axReportWindows(after)
+	if len(beforeWindows) != len(afterWindows) {
+		change.nonState++
+	}
+	for _, diff := range diffAXSnapshots(before.axSnapshot, after.axSnapshot) {
+		node := diff.After
+		if node == nil {
+			node = diff.Before
+		}
+		under := axReportNodeUnderRef(node, ref)
+		switch diff.Kind {
+		case AXDiffAdded:
+			size := axReportSubtreeSize(diff.After)
+			if under {
+				change.underAdded += size
+			} else {
+				change.otherAdded += size
+			}
+			change.nonState++
+		case AXDiffRemoved:
+			size := axReportSubtreeSize(diff.Before)
+			if under {
+				change.underRemoved += size
+			} else {
+				change.otherRemoved += size
+			}
+			change.nonState++
+		default:
+			if node != nil && node.Ref == ref {
+				// The element's own change is on the effect line already.
+				if diff.Kind != AXDiffStateChanged {
+					change.nonState++
+				}
+				continue
+			}
+			if under {
+				change.underChanged++
+			} else {
+				change.otherChanged++
+			}
+			if diff.Kind != AXDiffStateChanged {
+				change.nonState++
+			}
+		}
+	}
+	return change, true
+}
+
+// axReportNodeUnderRef reports whether node is a strict descendant of the
+// element with the given ref.
+func axReportNodeUnderRef(node *AXNode, ref string) bool {
+	if node == nil || ref == "" {
+		return false
+	}
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Ref == ref {
+			return true
+		}
+	}
+	return false
+}
+
+func axReportSubtreeSize(node *AXNode) int {
+	if node == nil {
+		return 0
+	}
+	size := 1
+	for _, child := range node.Children {
+		size += axReportSubtreeSize(child)
+	}
+	return size
 }
 
 func axSnapshotNodeByRef(snapshot *appSnapshot, ref string) *AXNode {

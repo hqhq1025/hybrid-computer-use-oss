@@ -12,6 +12,7 @@ from .foundation import (
     provider_bus_name,
     provider_object_path,
     safe,
+    showing_state,
     state_contains,
     state_value,
 )
@@ -571,7 +572,7 @@ def scan_semantic_target(candidates, target, max_nodes, deadline, text_limit):
                     "providerBusName": provider_bus_name(node),
                     "providerObjectPath": provider_object_path(node),
                     "processGeneration": process_generation(node_pid(node)),
-                    "showing": state_value(node, Atspi.StateType.SHOWING),
+                    "showing": showing_state(node),
                     "visible": state_value(node, Atspi.StateType.VISIBLE),
                     "localizedControlType": probe["controlType"],
                     "className": str(

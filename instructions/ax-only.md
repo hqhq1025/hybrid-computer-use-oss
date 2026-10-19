@@ -43,7 +43,10 @@ option. Follow the current tool schema for argument shapes and actions.
   between them. A `wait` cannot undo an action already sent.
 - Every `act` result starts with an `effect` line per targeted element (the
   fields that changed, `no visible change`, or `unknown` with the reason) and a
-  `windows` line (windows opened, closed, or focused, with their `wN`). When
+  `windows` line (windows opened, closed, or focused, with their `wN`).
+  `(only state flags changed in this window)` means no page, content, or
+  window changed; if the control should have switched something, the
+  application did not respond. When
   these lines show the result, do not read or wait again. Keep the default
   post-action diff and continue from it. Use `observe:"none"` only when readback
   is unnecessary; then the report says `unknown`. A window screenshot is visual evidence,

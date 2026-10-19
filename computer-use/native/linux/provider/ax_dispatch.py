@@ -33,7 +33,7 @@ from .ax_actions import (
 
 from .ax_select import perform_select
 from .gui_input import send_mouse_click
-from .input_primitives import require_window_focus
+from .input_primitives import require_window_focus, window_in_foreground
 
 from .ax_node_properties import (
     parse_text_limit,
@@ -73,8 +73,10 @@ from .phase_timing import lap
 from . import ui_events
 
 from .actionability import (
+    action_only_sets_state,
     current_geometry,
     do_action_by_index,
+    point_hits_element,
     preferred_action_index,
     require_coordinate_delivery,
     require_stable_coordinate_geometry,
@@ -778,13 +780,28 @@ def _auto_click(
 ):
     """Prefer the element's AT-SPI action; fall back to a coordinate click."""
     handled = False
+    state_only_note = ""
     if (
         element is not None
         and action_input.get("mouse_button", "left") == "left"
         and click_count == 1
         and not is_dropdown_item(element, window)
     ):
-        handled = do_action_by_index(element, preferred_action_index(element))
+        action_index = preferred_action_index(element)
+        if action_only_sets_state(element, action_index):
+            pointer_record, refused = _pointer_click_for_state_only_action(
+                window, bounds, element, element_record, notes,
+                action_evidence)
+            if pointer_record is not None:
+                return pointer_record
+            state_only_note = (
+                " This element's only AT-SPI action is a toolkit toggle that "
+                "changes its checked state without the click the application "
+                "listens for, and a real pointer click was not safe ({}), so "
+                "the application may not respond even though the state "
+                "changes.".format(refused)
+            )
+        handled = do_action_by_index(element, action_index)
     if handled:
         action_evidence["route"] = "semantic_action"
         action_evidence["input_emitted"] = True
@@ -793,6 +810,7 @@ def _auto_click(
             + SEMANTIC
             + "Invoked the element's AT-SPI accessibility action. "
             + UNVERIFIED_SEMANTIC
+            + state_only_note
         )
     else:
         if element is not None and node_role(element) == "menu":
@@ -860,6 +878,60 @@ def _auto_click(
             + UNVERIFIED_SYNTHESIS
         )
     return element_record
+
+
+def _pointer_click_for_state_only_action(
+    window, bounds, element, element_record, notes, action_evidence
+):
+    """Click a state-only-action element with the pointer when that is safe.
+
+    Return ``(record, None)`` after the click, or ``(None, reason)`` when a
+    guard refused it before any input; the caller then keeps the semantic
+    action. The guards are those of every coordinate click (stable live
+    geometry, a visible on-screen point, the window in the foreground and
+    owning the point) plus a hit test that the point reaches this element.
+    """
+    # The pointer route never raises the window: a state-only action is the
+    # fallback, and taking focus from the user to avoid it is not worth it.
+    if not window_in_foreground(window):
+        return None, "the window is not in the foreground"
+    evidence_before = dict(action_evidence)
+    try:
+        record, _ = require_stable_coordinate_geometry(
+            element, element_record, bounds)
+        x, y = screen_point(bounds, record, None, None)
+        require_coordinate_delivery(window, x, y, "click")
+        hits = point_hits_element(window, element, x, y)
+    except (OperationFailure, RuntimeError) as refused:
+        action_evidence.clear()
+        action_evidence.update(evidence_before)
+        reason = getattr(refused, "failure_code", None) or str(refused)
+        return None, reason.split(":")[0].strip()
+    if not hits:
+        action_evidence.clear()
+        action_evidence.update(evidence_before)
+        return None, "another element is under its centre"
+    send_mouse_click(x, y, "left", 1)
+    action_evidence.update(
+        route="coordinate_synthesis",
+        geometry_sampled=True,
+        geometry_stable=True,
+        window_focus_verified=True,
+        point_owner_verified=True,
+        focus_verified=True,
+        input_emitted=True,
+    )
+    notes.append(
+        A11Y_CHANNEL
+        + SYNTHESIS
+        + "Clicked the element with the pointer at ({:.0f}, {:.0f}) in "
+        "window-relative pixels after checking that the window is in front "
+        "and the point is on this element. Its only AT-SPI action is a "
+        "toolkit toggle that changes the checked state without the click the "
+        "application listens for, so a real click was needed. {}".format(
+            *window_relative(bounds, x, y), UNVERIFIED_SYNTHESIS)
+    )
+    return record, None
 
 
 def _perform_scroll(

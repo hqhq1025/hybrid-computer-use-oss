@@ -48,6 +48,11 @@ def x11_holds_focus(window):
     return bool(digits) and int(digits[-1]) == int(target_pid)
 
 
+def window_in_foreground(window):
+    """Return whether the window already holds focus, without raising it."""
+    return window_is_active(window) or x11_holds_focus(window)
+
+
 def focus_window(window, timeout=1.0):
     if window is None:
         return False

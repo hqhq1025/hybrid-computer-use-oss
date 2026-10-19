@@ -808,3 +808,121 @@ class SemanticRoleAliasTests(unittest.TestCase):
         self.assertTrue(runtime.semantic_role_matches("push button", "push button"))
         self.assertTrue(runtime.semantic_role_matches("entry", "textbox"))
         self.assertFalse(runtime.semantic_role_matches("check box", "button"))
+
+
+class _MenuNode(_TreeNode):
+    """A GAIL menu node: parent link and the menu shell's Selection."""
+
+    def __init__(self, role, name, states, kids=(), x=0, y=0, w=40, h=20,
+                 path=None):
+        super().__init__(role=role, name=name, x=x, y=y, w=w, h=h, kids=kids)
+        self.states = set(states)
+        self.parent = None
+        self.selected = []
+        self.path = path or "/menu/{}/{}".format(role, name)
+        for kid in kids:
+            kid.parent = self
+
+    def get_parent(self):
+        return self.parent
+
+    def get_selection_iface(self):
+        node = self
+
+        class _Selection:
+            def get_n_selected_children(self):
+                return len(node.selected)
+
+            def get_selected_child(self, index):
+                return node.selected[index]
+
+        return _Selection()
+
+
+class GailPopupMenuShowingTests(AtspiPatchedTestCase):
+    """GAIL items of an open GTK2 menu are on screen without SHOWING.
+
+    GIMP 2.10: after Edit opens, `Preferences` is VISIBLE at (244, 707) but
+    never SHOWING, because gail_menu_item_ref_state_set() removes SHOWING
+    unless the parent menu is SELECTED, which GAIL never sets on a menu-bar
+    menu. find then reported it `addressable=false reason=not_currently_
+    showing` while the screenshot showed the menu open.
+    """
+
+    VISIBLE_ONLY = (STATE.VISIBLE, STATE.ENABLED)
+
+    def _menu(self):
+        item = _MenuNode("menu item", "Preferences", self.VISIBLE_ONLY,
+                         x=244, y=707, w=362, h=25)
+        hidden = _MenuNode("menu item", "Undo", (STATE.ENABLED,),
+                           x=244, y=159, w=362, h=25)
+        sub_item = _MenuNode("menu item", "New Image", self.VISIBLE_ONLY,
+                             x=610, y=300, w=200, h=25)
+        submenu = _MenuNode("menu", "Paste as", self.VISIBLE_ONLY,
+                            kids=(sub_item,), x=244, y=400, w=362, h=25)
+        edit = _MenuNode("menu", "Edit",
+                         (STATE.SHOWING, STATE.VISIBLE, STATE.ENABLED),
+                         kids=(item, hidden, submenu), x=242, y=129, w=39, h=27)
+        bar = _MenuNode("menu bar", "",
+                        (STATE.SHOWING, STATE.VISIBLE),
+                        kids=(edit,), x=200, y=129, w=800, h=27)
+        root = _TreeNode(role="frame", name="GIMP", w=1034, h=802, kids=(bar,))
+        bar.parent = root
+        return root, bar, edit, item, hidden, submenu, sub_item
+
+    def _records(self, root):
+        records, _lines, _ = runtime.render_tree(root, None, [0], prune=True)
+        return {r["name"]: r for r in records}
+
+    def test_items_of_an_open_menu_bar_menu_are_showing(self):
+        # The Go side drops records whose `showing` is false as
+        # not_currently_showing, so this field decides addressability.
+        root, bar, edit, item, hidden, *_ = self._menu()
+        bar.selected = [edit]
+
+        records = self._records(root)
+
+        self.assertIs(records["Preferences"]["showing"], True)
+        # A hidden item of an open menu stays hidden.
+        self.assertIs(records["Undo"]["showing"], False)
+
+    def test_items_of_a_closed_menu_stay_not_showing(self):
+        # GAIL keeps the last allocation after the popup closes, so extents
+        # alone would wrongly show a closed menu's items.
+        root, bar, edit, item, *_ = self._menu()
+
+        records = self._records(root)
+
+        self.assertIs(records["Preferences"]["showing"], False)
+        self.assertFalse(runtime.showing_state(item))
+
+    def test_semantic_scan_records_use_the_corrected_state(self):
+        root, bar, edit, item, *_ = self._menu()
+        bar.selected = [edit]
+
+        self.assertIs(runtime.showing_state(item), True)
+
+    def test_open_submenu_items_are_showing_only_while_selected(self):
+        root, bar, edit, item, hidden, submenu, sub_item = self._menu()
+        bar.selected = [edit]
+        self.assertFalse(runtime.showing_state(sub_item))
+
+        edit.selected = [submenu]
+
+        self.assertTrue(runtime.showing_state(sub_item))
+        self.assertTrue(runtime.showing_state(item))
+
+    def test_menu_bar_selection_of_another_menu_does_not_open_this_one(self):
+        root, bar, edit, item, *_ = self._menu()
+        other = _MenuNode("menu", "File", (STATE.SHOWING, STATE.VISIBLE))
+        bar.selected = [other]
+
+        self.assertFalse(runtime.showing_state(item))
+
+    def test_non_menu_roles_are_not_corrected(self):
+        root, bar, edit, *_ = self._menu()
+        bar.selected = [edit]
+        label = _MenuNode("label", "Shortcut", self.VISIBLE_ONLY)
+        label.parent = edit
+
+        self.assertFalse(runtime.showing_state(label))
