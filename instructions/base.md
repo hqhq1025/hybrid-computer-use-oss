@@ -32,9 +32,10 @@ and final replies concise.
 
 - An application that has a document open owns it. It shows its own copy and
   writes that copy on save, which overwrites edits made to the file elsewhere.
-  Change an open document inside that application and save it there. Edit the
-  file directly only when the document has no unsaved changes, then reload it
-  in the application.
+  Prefer changing an open document in that application and saving it there.
+  If the application cannot reach a needed property, save and close the
+  document (or confirm it has no unsaved changes), edit the file with a
+  format-aware library, parse it, and reopen it.
 - Change the object the user refers to. Edit it in place and keep its format;
   create a new file only when asked.
 - Persist the result the way the user would: save edited documents, confirm
@@ -57,6 +58,8 @@ and final replies concise.
 - Accepted input is not evidence. After the last change, get evidence for each
   requirement. A check returned by the changing call counts; add another
   channel only for a requirement it does not cover or when sources conflict.
-- Stop when every requirement has evidence. Clean up only temporary state you
-  created that affects the result. Report limitations. One failed channel is
+- Stop when every requirement has evidence of its kind in the table. Do not
+  demonstrate the result beyond that evidence: no extra test inputs,
+  restarts, or feature tours. Clean up only temporary state you created that
+  affects the result. Report limitations. One failed channel is
   not a blocker while another channel can do the work.

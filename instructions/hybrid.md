@@ -10,7 +10,7 @@ fits which state, and how to combine them.
 | State to change | Change it through | Reason |
 | --- | --- | --- |
 | Files that no running application holds open: data, code, configuration, structured documents, archives, media | Shell with a format-aware library or CLI; check the real format first | Exact, scriptable, and verifiable by parsing |
-| A document an application holds open | That application: AX for menus, dialogs, and fields; GUI for what AX lacks | Its copy is what gets saved |
+| A document an application holds open | That application: AX for menus, dialogs, and fields; GUI for what AX lacks. For a property neither reaches, save and close it, then edit the file as above | Its copy is what gets saved |
 | Application or system settings | The settings UI through AX; the configuration file or CLI only when the application is closed or rereads it | A running application can write its cached settings back |
 | Web pages, forms, signed-in sites | The open browser session: its endpoint if exposed, otherwise AX or GUI | Login, cookies, and tabs exist only in that session |
 | Canvases, images, drawings, layout | The editor: AX for menus and dialogs, GUI for pixels and dragging | Visual objects have no names to address |
@@ -21,9 +21,11 @@ fits which state, and how to combine them.
   once, early. After one failed probe, use AX or GUI. Do not rebuild a site
   with shell HTTP requests, and do not start another browser or profile:
   neither shares the user's session, so their changes do not appear there.
-- Learn an unfamiliar application from the application itself: its menus,
-  dialogs, `--help`, manuals, and local files. Search the web only for facts
-  the machine cannot supply; web pages often describe another version.
+- When a setting, property, or command name is known, change it directly.
+  Otherwise learn it from the application: its menus and dialogs, or one
+  narrow query of its help or manual. Do not dump whole help texts or scan
+  binaries and system directories. Search the web only for facts the machine
+  cannot supply; web pages often describe another version.
 
 ## Work Efficiently
 
@@ -43,44 +45,29 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
   took focus, with a `wN` you can use at once. When these lines already show
   the result, do not read or wait again. Continue from the diff for other
   changes; read again only when the next decision needs more.
-- One `act` can mix actions and `wait` steps in any order. Steps run in
-  order, and the first step that fails stops the batch. A `wait` sends no
-  input. It holds until its condition is true, or fails with `wait_timeout`
-  after `timeout_ms` (default 5000) and returns the current state:
+- One `act` can mix actions and `wait` steps; the first failed step stops
+  the batch. Add a `wait` only when a later step needs a state that may
+  arrive after the action returns: a slow dialog, a menu item, a value
+  computed later. A checkbox that shows `checked=false→true`, or a dialog
+  listed as `opened`, needs no wait.
 
 ```json
 {"mode":"act","actions":[{"type":"click","ref":"r12"},{"type":"wait","window":"Export"},{"type":"type","text":"q3.csv"},{"type":"keypress","keys":["ENTER"]},{"type":"wait","window":"Export","gone":true}]}
 {"mode":"act","actions":[{"type":"click","ref":"r7"},{"type":"wait","query":{"role":"menu item","name_contains":"Paragraph"}},{"type":"click","ref":"r9"}]}
-{"mode":"act","actions":[{"type":"wait","window":"Untitled"}]}
 ```
 
-  The first opens a dialog, waits for it, types into it, confirms, and waits
-  for it to close. After a `window` wait, keys and text without `ref` go to
-  that window. The second waits for a menu item before the next click; a
-  `query` takes the same fields as `find`. The third waits without input,
-  for example for an application that is starting.
-- Forms of `wait`: `window` (a top-level window whose title contains the
-  text, on the whole desktop), `query` (an element in any window of the
-  batch's application), `ref` with `value`, `state`, or `text` (one
-  element), or `text` alone (text anywhere in the window). `gone:true`
-  waits for absence; a closed or exited application has no windows.
-- Do not add a `wait` for what the report already shows. A checkbox that
-  shows `checked=false→true`, or a dialog listed as `opened`, needs no wait.
-  Wait only when a later step needs a state that may arrive after the
-  action returns: a slow dialog, a menu item, a value computed later.
 - Take a GUI screenshot when the question is visual or AX lacks a visible
   element. Do not alternate screenshots and AX reads of an unchanged state.
 - Combine related read-only shell checks into one command or script.
 - Start or restart a GUI application from the shell with
-  `setsid -f APP ARGS >/tmp/APP.log 2>&1 </dev/null`. Some agent shells,
-  Codex among them, kill the process group of each command when it returns;
-  an application started there with `&`, `nohup`, or `disown` dies without
-  showing a window.
+  `setsid -f APP ARGS >/tmp/APP.log 2>&1 </dev/null`. Some agent shells kill
+  the process group of each command when it returns; an application started
+  there with `&`, `nohup`, or `disown` dies without showing a window.
 
 ## When Something Fails
 
-Every AX error starts with a `code`, a `hint` with a corrected call, and
-whether input was sent. Next step by code:
+Every AX and GUI error starts with a `code`, a `hint` with a corrected call,
+and whether input was sent. Next step by code:
 
 - `invalid_argument`: nothing was sent. Fix the field named in `path` as the
   hint shows. The control is not missing.
@@ -100,12 +87,8 @@ whether input was sent. Next step by code:
   its window with `{"mode":"act","actions":[{"type":"wait","window":"..."}]}`;
   otherwise use GUI for it.
 - `runtime_error`: retry once; if it repeats, use another channel.
-
-GUI errors start with the same line and add one code:
-
-- `gui_frame_stale`: the window under a coordinate changed after the
-  screenshot the coordinates came from, so nothing was sent. Plan again from the returned
-  screenshot.
+- `gui_frame_stale`: the window under a GUI coordinate changed after its
+  screenshot, so nothing was sent. Plan again from the returned screenshot.
 
 A stop response ends desktop automation: report the uncertainty
 and stop.
