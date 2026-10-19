@@ -34,6 +34,7 @@ from .ax_node_properties import (
 from .ax_records import (
     StableIndexer,
     effective_name,
+    effective_role,
 )
 
 from .x11_windows import (
@@ -119,7 +120,7 @@ def record_still_matches(node, record, window_bounds):
     if target_id:
         return accessible_id(node) == target_id
     target_role = str(record.get("controlType") or "")
-    if target_role and node_role(node) != target_role:
+    if target_role and effective_role(node) != target_role:
         return False
     target_name = str(record.get("name") or "")
     if target_name:

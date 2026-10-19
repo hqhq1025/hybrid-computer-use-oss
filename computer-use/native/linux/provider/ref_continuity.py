@@ -24,6 +24,7 @@ from .ax_node_properties import (
 )
 from .ax_records import (
     effective_name,
+    effective_role,
     record_for,
 )
 
@@ -461,6 +462,7 @@ def semantic_probe_record(node, target, path):
         live_role = str(node.get_role_name() or "")
     except Exception as error:
         return None, "role read failed: {}".format(type(error).__name__)
+    live_role = effective_role(node, live_role)
     if not semantic_role_matches(
         live_role,
         target.get("role"),

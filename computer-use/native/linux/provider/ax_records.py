@@ -124,7 +124,89 @@ def effective_name(node):
     own = node_name(node)
     if str(own or "").strip():
         return own
+    combo = gtk_combo_partner(node, node_role(node))
+    if combo is not None:
+        return combo_label(combo, node)[0]
     return labelled_by_name(node)
+
+
+def gtk_combo_partner(node, role):
+    """Return the hidden combo box that a visible toggle button opens, or None.
+
+    LibreOffice's gtk3 backend (7.3) draws a drop-down as three siblings: an
+    editable ``text``, a ``combo box`` and a ``toggle button``. Only the
+    toggle button is drawn. The combo box and the text report neither SHOWING
+    nor a frame (origin INT_MIN), so tree pruning drops them, and the combo's
+    own ``press`` action does not open the list. In the Writer Paragraph
+    dialog, a find for role "combo box" therefore returned nothing and the
+    line-spacing control rendered as an unnamed ``button``.
+
+    The toggle button is what a user clicks, so record_for() projects it as
+    the combo box; clicking it opens the list. Toolbar combos (font name,
+    size) keep their visible text sibling, which carries the current value.
+    """
+    if role != "toggle button" or str(node_name(node) or "").strip():
+        return None
+    parent = safe(lambda: node.get_parent())
+    if parent is None:
+        return None
+    count = int(safe(lambda: parent.get_child_count(), 0) or 0)
+    if count < 2 or count > 3:
+        return None
+    combo = None
+    for index in range(count):
+        sibling = safe(lambda i=index: parent.get_child_at_index(i))
+        if sibling is None or provider_object_path(sibling) == provider_object_path(node):
+            continue
+        sibling_role = node_role(sibling)
+        if sibling_role == "combo box" and combo is None:
+            combo = sibling
+        elif sibling_role != "text":
+            return None
+    return combo
+
+
+def combo_label(combo, toggle):
+    """Name a projected combo box: its own name, its label, or its group.
+
+    Returns ``(name, source)``. LibreOffice names few combos itself, but most
+    dialog combos carry a LABELLED_BY relation ("Alignment:"). The
+    line-spacing combo has neither; its nearest named ancestor is the
+    "Line Spacing" panel, so the combo borrows that name and records the
+    source as ``ancestor``. The walk stops at the first container that is not
+    a layout panel, so a toolbar or window title is never borrowed.
+    """
+    own = str(node_name(combo) or "").strip()
+    if own:
+        return own, "provider"
+    borrowed = labelled_by_name(combo)
+    if borrowed:
+        return borrowed, "labelled_by"
+    ancestor = safe(lambda: toggle.get_parent())
+    for _ in range(6):
+        if ancestor is None or node_role(ancestor) not in ("panel", "filler"):
+            break
+        name = str(node_name(ancestor) or "").strip()
+        if name:
+            return name, "ancestor"
+        ancestor = safe(lambda a=ancestor: a.get_parent())
+    return "", ""
+
+
+def effective_role(node, role=None):
+    """Return the role every record and identity check uses for ``node``.
+
+    It equals the provider role except for the toggle button of a LibreOffice
+    gtk3 combo, which is projected as ``combo box`` (gtk_combo_partner()).
+    Rendering and live resolution must agree, or a ref to the combo would be
+    rejected as a role change before every click.
+    """
+    if role is None:
+        role = node_role(node)
+    role = str(role or "")
+    if gtk_combo_partner(node, role) is not None:
+        return "combo box"
+    return role
 
 
 def semantic_relations(node, text_limit=DEFAULT_TEXT_LIMIT):
@@ -220,7 +302,14 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
         for target in relations.get("labelled-by", [])
         if str(target.get("name") or "").strip()
     ]
-    if str(own_name or "").strip():
+    combo = gtk_combo_partner(node, role)
+    if combo is not None:
+        # See gtk_combo_partner(): the drawn toggle button stands for the
+        # hidden combo box, so it takes the combo's role and label.
+        role = "combo box"
+        full_name, name_source = combo_label(combo, node)
+        borrowed = bool(full_name)
+    elif str(own_name or "").strip():
         full_name = own_name
         name_source = "provider"
         borrowed = False

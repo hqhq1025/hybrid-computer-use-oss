@@ -1,7 +1,6 @@
 """Model-facing action notes: channel tags and target resolution."""
 
-from .foundation import node_role
-from .ax_records import effective_name
+from .ax_records import effective_name, effective_role
 
 A11Y_CHANNEL = "[a11y]"
 GUI_CHANNEL = "[gui]"
@@ -49,7 +48,7 @@ def resolved_note(element, element_record):
     """
     if element is None or not element_record:
         return None
-    live_role = str(node_role(element) or "")
+    live_role = str(effective_role(element) or "")
     live_name = str(effective_name(element) or "")
     if live_name:
         shown = "{} {!r}".format(live_role, live_name)
