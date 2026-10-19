@@ -582,6 +582,7 @@ func (s *service) axBatchRun(
 			obs,
 			index < len(actions)-1 && index == lastInput,
 		)
+		actionObservation.lightReadback = axBatchLightReadback(actions, index, lastInput)
 		windowAction := action.actionType == "activate" ||
 			action.actionType == "close"
 		if context.boundByFocus {

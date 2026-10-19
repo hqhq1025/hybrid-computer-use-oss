@@ -283,6 +283,9 @@ func defaultString(value, fallback string) string {
 type observation struct {
 	mode            string
 	captureSnapshot *bool
+	// lightReadback asks for a post-action read of the window root only;
+	// see axBatchLightReadback.
+	lightReadback bool
 }
 
 func (o observation) resolvedMode() string {

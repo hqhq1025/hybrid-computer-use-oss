@@ -90,9 +90,16 @@ func providerObservationOptionsFromOperation(
 			observeNone
 		captureSnapshot = &capture
 	}
+	maxTreeNodes := operation.MaxTreeNodes
+	if operation.LightReadback {
+		// One record: the selected window root. The provider still selects
+		// the window (a newly opened modal dialog wins), lists every
+		// top-level window and settles before reading.
+		maxTreeNodes = 1
+	}
 	return ProviderObservationOptions{
 		TextLimit:         providerTextLimit(operation.TextLimit),
-		MaxTreeNodes:      operation.MaxTreeNodes,
+		MaxTreeNodes:      maxTreeNodes,
 		MaxTreeDepth:      operation.MaxTreeDepth,
 		Prune:             operation.Prune,
 		Boxes:             operation.Boxes,

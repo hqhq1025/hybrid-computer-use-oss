@@ -25,10 +25,13 @@ type axServiceRequest struct {
 	ScreenshotScope    string                 `json:"screenshotScope,omitempty"`
 	Observe            string                 `json:"observe,omitempty"`
 	CaptureSnapshot    *bool                  `json:"-"`
-	TreeView           string                 `json:"-"`
-	Scope              string                 `json:"-"`
-	ObservationRoot    map[string]any         `json:"-"`
-	KnownRefs          map[string]elementRef  `json:"knownRefs,omitempty"`
+	// LightReadback limits the post-action read to the window root. It is
+	// not part of the projection, so later reads keep their own limits.
+	LightReadback   bool                  `json:"-"`
+	TreeView        string                `json:"-"`
+	Scope           string                `json:"-"`
+	ObservationRoot map[string]any        `json:"-"`
+	KnownRefs       map[string]elementRef `json:"knownRefs,omitempty"`
 }
 
 type axServiceOperation string

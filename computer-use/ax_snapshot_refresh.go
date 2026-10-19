@@ -1105,6 +1105,17 @@ func (s *service) commitPreparedSnapshot(
 			withEvidenceScope("error_only")
 	}
 	snapshot.projection = projectionFromRequest(request)
+	if request.LightReadback {
+		snapshot.lightReadback = true
+		// The root-only read carries one ref. Keep the full ref map of the
+		// same window, so that the next full read assigns the indices it
+		// would have assigned without this read.
+		if previous := s.currentSnapshot(app); previous != nil &&
+			previous.WindowHandle == snapshot.WindowHandle &&
+			len(previous.Refs) > 0 {
+			snapshot.Refs = previous.Refs
+		}
+	}
 	visiblePrevious := s.deliveredSnapshotFor(snapshot)
 	notes = append(continuityNotes(visiblePrevious, snapshot), notes...)
 	notes = s.dedupeDiagnosticNotes(app, notes)

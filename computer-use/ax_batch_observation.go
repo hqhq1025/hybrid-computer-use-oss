@@ -22,6 +22,36 @@ func axBatchActionObservation(
 	}
 }
 
+// axBatchLightReadback reports whether the read after action index may cover
+// the window root only instead of the whole tree.
+//
+// A step between actions needs its read for three things: the window
+// continuity check before the next action (window handle and wN), the
+// before-state of the next action, and the latest read a wait step consults.
+// A root-only read still answers the first: the provider selects the window
+// the same way, so a dialog that opened is still detected, and it still waits
+// for the UI to settle. The other two need the tree, so the read stays full
+// when the next step is a wait, names a ref (its effect line compares the
+// element before and after), or is the last action (its notes compare the
+// trees around it). Only keys, text and scrolls without a ref qualify,
+// because only they need no element from the read before them.
+func axBatchLightReadback(actions []axBatchAction, index, lastInput int) bool {
+	if index < 0 || index+1 >= lastInput {
+		return false
+	}
+	for _, step := range actions[index : index+2] {
+		switch step.actionType {
+		case "keypress", "type", "scroll":
+		default:
+			return false
+		}
+		if step.targetRef != "" {
+			return false
+		}
+	}
+	return true
+}
+
 func closedWindowFinalObservation(
 	context *axBatchContext,
 	obs observation,

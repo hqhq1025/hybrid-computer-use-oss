@@ -614,13 +614,18 @@ func (s *service) actionResult(app string, request axServiceRequest) toolCallRes
 		identityStabilized,
 	)
 	notes = append(notes, contentStabilizationNotes...)
-	if note := s.hiddenCanonicalAddressChangeNote(before, snapshot); note != "" {
-		notes = append(notes, note)
+	// A root-only read cannot say which elements changed; the checks that
+	// compare elements wait for the next full read.
+	rootOnly := snapshot.lightReadback || (before != nil && before.lightReadback)
+	if !rootOnly {
+		if note := s.hiddenCanonicalAddressChangeNote(before, snapshot); note != "" {
+			notes = append(notes, note)
+		}
 	}
 	// Formatting changes come first: they say what changed into what, while
 	// pixels only say that something happened and the tree only that its
 	// structure did not change.
-	if changes := textAttributeChanges(before, snapshot); len(changes) > 0 {
+	if changes := textAttributeChanges(before, snapshot); !rootOnly && len(changes) > 0 {
 		shown := changes
 		if len(shown) > 4 {
 			shown = append(append([]string{}, shown[:4]...),
@@ -631,6 +636,17 @@ func (s *service) actionResult(app string, request axServiceRequest) toolCallRes
 			". The snapshot renders structure, not formatting, so the tree can look unchanged while this does not. Treat this as supporting evidence rather than proof: a page can also restyle itself on its own. Obvious repaint noise (a web font replacing the fallback font, colour shifts too small to see) is already filtered out."}, notes...)
 	}
 	semanticUnchanged := before != nil && !observablyChanged(before, snapshot)
+	if rootOnly {
+		// Without both trees, only the window title, focus, selection and
+		// pixels can show an effect. Treating an action as unchanged when
+		// none of them moved flags at least every action the tree
+		// comparison would flag, so uncertainty is never lost.
+		semanticUnchanged = before != nil &&
+			before.WindowTitle == snapshot.WindowTitle &&
+			before.FocusedSummary == snapshot.FocusedSummary &&
+			before.SelectedText == snapshot.SelectedText &&
+			readPixelVerdict(notes) != pixelsChanged
+	}
 	if semanticUnchanged {
 		// A semantic action can report success while nothing happens: some
 		// toolkits accept actions such as `menu`, `activate` or `Toggle` and

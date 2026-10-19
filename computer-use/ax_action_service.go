@@ -474,7 +474,7 @@ func (s *service) scroll(
 			TargetWindowHandle: targetWindowHandle,
 			ExpectedWindow:     expectedWindow,
 			IncludeScreenshot:  obs.resolvedScreenshot(), Observe: obs.resolvedMode(),
-			CaptureSnapshot: obs.captureSnapshot,
+			CaptureSnapshot: obs.captureSnapshot, LightReadback: obs.lightReadback,
 		})
 	}
 	resolution, result := s.resolveActionElement(
@@ -487,7 +487,7 @@ func (s *service) scroll(
 		Action:             axScrollCommand{Direction: normalized, Pages: pages},
 		TargetWindowHandle: targetWindowHandle,
 		IncludeScreenshot:  obs.resolvedScreenshot(), Observe: obs.resolvedMode(),
-		CaptureSnapshot: obs.captureSnapshot,
+		CaptureSnapshot: obs.captureSnapshot, LightReadback: obs.lightReadback,
 	}
 	applyActionElementResolution(&request, resolution)
 	return s.actionResult(app, request)
@@ -513,7 +513,7 @@ func (s *service) typeText(
 		TargetWindowHandle: targetWindowHandle,
 		ExpectedWindow:     expectedWindow,
 		IncludeScreenshot:  obs.resolvedScreenshot(), Observe: obs.resolvedMode(),
-		CaptureSnapshot: obs.captureSnapshot,
+		CaptureSnapshot: obs.captureSnapshot, LightReadback: obs.lightReadback,
 	}
 	if elementIndex != "" {
 		var result toolCallResult
@@ -548,7 +548,7 @@ func (s *service) pressKey(
 		TargetWindowHandle: targetWindowHandle,
 		ExpectedWindow:     expectedWindow,
 		IncludeScreenshot:  obs.resolvedScreenshot(), Observe: obs.resolvedMode(),
-		CaptureSnapshot: obs.captureSnapshot,
+		CaptureSnapshot: obs.captureSnapshot, LightReadback: obs.lightReadback,
 	}
 	if elementIndex != "" {
 		var result toolCallResult
@@ -609,7 +609,7 @@ func (s *service) setValue(app, elementIndex, declared, value string, obs observ
 	request := axServiceRequest{
 		App: app, Action: axSetValueCommand{Value: value},
 		IncludeScreenshot: obs.resolvedScreenshot(), Observe: obs.resolvedMode(),
-		CaptureSnapshot: obs.captureSnapshot,
+		CaptureSnapshot: obs.captureSnapshot, LightReadback: obs.lightReadback,
 	}
 	applyActionElementResolution(&request, resolution)
 	return s.actionResult(app, request)

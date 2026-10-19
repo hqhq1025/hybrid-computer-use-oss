@@ -170,30 +170,33 @@ type appSnapshot struct {
 	// Relation to the previous snapshot. The provider captures each snapshot
 	// independently in a one-shot process, so only this side, which holds the
 	// history, can tell whether a snapshot matches the previous one.
-	comparedToPrevious        bool
-	identicalToPrevious       bool
-	previousSnapshotID        string
-	previousHandle            string
-	projection                snapshotProjection
-	rawTreeLines              []string
-	baselineProjectionLines   []string
-	serializerOmitted         int
-	serializerBranches        int
-	scope                     string
-	scopeFallback             string
-	scopeRoot                 *elementRecord
-	scopedCanonicalCount      int
-	observationRoot           *elementRecord
-	observationRootMode       string
-	rootedCanonicalCount      int
-	contentRoot               *elementRecord
-	contentCanonicalCount     int
-	contentRevision           string
-	axSnapshot                *AXSnapshotV1
-	findHiddenRecords         map[int]elementRecord
-	shadowAST                 AXShadowStats
-	actionExecution           *RuntimeActionEvidence
-	deliveryOnly              bool
+	comparedToPrevious      bool
+	identicalToPrevious     bool
+	previousSnapshotID      string
+	previousHandle          string
+	projection              snapshotProjection
+	rawTreeLines            []string
+	baselineProjectionLines []string
+	serializerOmitted       int
+	serializerBranches      int
+	scope                   string
+	scopeFallback           string
+	scopeRoot               *elementRecord
+	scopedCanonicalCount    int
+	observationRoot         *elementRecord
+	observationRootMode     string
+	rootedCanonicalCount    int
+	contentRoot             *elementRecord
+	contentCanonicalCount   int
+	contentRevision         string
+	axSnapshot              *AXSnapshotV1
+	findHiddenRecords       map[int]elementRecord
+	shadowAST               AXShadowStats
+	actionExecution         *RuntimeActionEvidence
+	deliveryOnly            bool
+	// lightReadback answers window identity without reading window content.
+	// Tree comparisons must not use this root-only observation.
+	lightReadback             bool
 	publicAppRef              string
 	publicWindowRef           string
 	externalDesktopTransition bool
