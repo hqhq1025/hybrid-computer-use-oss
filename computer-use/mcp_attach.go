@@ -74,6 +74,8 @@ func (g *daemonInputGuard) refuse(request map[string]any) map[string]any {
 			"preflight_only":       true,
 			"evidence_scope":       "error_only",
 		}
+	} else {
+		setGUIPublicError(&result, axCodeRuntimeError, "", message, guiScreenshotCall)
 	}
 	return jsonRPCResult(request["id"], finalizeForModel(name, result, false))
 }

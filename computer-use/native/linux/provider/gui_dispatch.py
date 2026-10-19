@@ -8,9 +8,6 @@ from .foundation import (
     GUI_KEYBOARD_ACTION_INTERVAL_SECONDS,
     GUI_KEYBOARD_ACTION_TYPES,
     GUI_KEYBOARD_MICRO_WAIT_MAX_SECONDS,
-    GUI_MAX_ACTIONS,
-    GUI_MAX_SETTLE_MS,
-    GUI_MAX_TOTAL_WAIT_SECONDS,
     GUI_POINTER_ACTION_TYPES,
     GUI_POINTER_KEYBOARD_BARRIER_SECONDS,
     GUI_QUIESCENT_MIN_SAMPLES,
@@ -48,14 +45,6 @@ def wait_for_gui_settle(bounds, settle_ms, clock=None, sleep=None):
         clock = time.monotonic
     if sleep is None:
         sleep = time.sleep
-    try:
-        settle_ms = int(settle_ms)
-    except (TypeError, ValueError):
-        raise RuntimeError("gui settle_ms must be a whole number of milliseconds")
-    if settle_ms < 0 or settle_ms > GUI_MAX_SETTLE_MS:
-        raise RuntimeError(
-            "gui settle_ms must be between 0 and {}".format(GUI_MAX_SETTLE_MS)
-        )
     if settle_ms == 0:
         return {
             "stable": False,
@@ -240,98 +229,105 @@ def finalize_gui_response(response):
     return response
 
 
+# Layouts of the screenshots this provider returned, by frame id. A
+# coordinate batch names the frame its coordinates came from; its layout
+# says which window was under each point. A restarted provider has none and
+# then rejects any layout change, as before.
+GUI_PUBLISHED_LAYOUT_LIMIT = 32
+_published_layouts = {}
+
+
+def remember_published_layout(snapshot):
+    if not isinstance(snapshot, dict):
+        return
+    frame_id = snapshot.get("frameId")
+    layout = snapshot.get("desktopLayout")
+    if not frame_id or not isinstance(layout, dict):
+        return
+    _published_layouts.pop(frame_id, None)
+    _published_layouts[frame_id] = layout
+    while len(_published_layouts) > GUI_PUBLISHED_LAYOUT_LIMIT:
+        _published_layouts.pop(next(iter(_published_layouts)))
+
+
+def capture_layout(capture):
+    """The layout sampled around a capture, without encoding the image."""
+    metadata = getattr(capture, "_metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    return metadata.get("desktopLayout")
+
+
+def action_points(action):
+    if "path" in action:
+        return list(action["path"])
+    if "x" in action and "y" in action:
+        return [(action["x"], action["y"])]
+    return []
+
+
+def layout_hit(layout, x, y):
+    """The topmost visible managed window containing an X root point.
+
+    Windows are in stacking order, bottom first, with desktop-relative
+    geometry. The result is the window id and geometry, or None when no
+    window contains the point.
+    """
+    desktop = layout.get("desktop") or {}
+    px = x - desktop.get("screenX", 0)
+    py = y - desktop.get("screenY", 0)
+    for window in reversed(layout.get("windows") or []):
+        if (window["x"] <= px < window["x"] + window["width"]
+                and window["y"] <= py < window["y"] + window["height"]):
+            return (window.get("id"), window["x"], window["y"],
+                    window["width"], window["height"])
+    return None
+
+
+def coordinates_still_valid(reference, current, actions):
+    """Whether every coordinate of actions still lands where it did.
+
+    The screenshot's coordinates stay valid when, for each point, the same
+    window with the same geometry is topmost there now. A window moving or
+    stacking elsewhere on the desktop does not change that.
+    """
+    if not isinstance(reference, dict) or not isinstance(current, dict):
+        return False
+    if reference.get("desktop") != current.get("desktop"):
+        return False
+    for action in actions:
+        if action["type"] not in GUI_FRAME_GUARDED_ACTION_TYPES:
+            continue
+        for x, y in action_points(action):
+            if layout_hit(reference, x, y) != layout_hit(current, x, y):
+                return False
+    return True
+
+
 def perform_gui(actions, settle_ms=800, frame_id=None):
-    if actions is None:
-        return {
-            "ok": False,
-            "error": "gui.actions is required; use actions=[] for observation",
-            "preflight_only": True,
-            "dispatched": 0,
-            "input_events_emitted": False,
-            "input_actions_dispatched": 0,
-        }
-    if not isinstance(actions, list):
-        return {
-            "ok": False,
-            "error": "gui.actions must be an array",
-            "preflight_only": True,
-            "dispatched": 0,
-            "input_events_emitted": False,
-            "input_actions_dispatched": 0,
-        }
-    if len(actions) > GUI_MAX_ACTIONS:
-        return {
-            "ok": False,
-            "error": "gui.actions accepts at most {} actions per call".format(
-                GUI_MAX_ACTIONS),
-            "preflight_only": True,
-            "dispatched": 0,
-            "input_events_emitted": False,
-            "input_actions_dispatched": 0,
-        }
-    if len(actions) == 0:
-        return {
-            "ok": False,
-            "error": "gui observation requires actions=[{\"type\":\"screenshot\"}]",
-            "preflight_only": True,
-            "dispatched": 0,
-            "input_events_emitted": False,
-            "input_actions_dispatched": 0,
-        }
-    try:
-        normalized_settle_ms = int(settle_ms)
-    except (TypeError, ValueError):
-        normalized_settle_ms = -1
-    if (
-        isinstance(settle_ms, bool)
-        or normalized_settle_ms != settle_ms
-        or normalized_settle_ms < 0
-        or normalized_settle_ms > GUI_MAX_SETTLE_MS
-    ):
-        return {
-            "ok": False,
-            "error": "gui settle_ms must be a whole number of milliseconds "
-                     "between 0 and {}".format(GUI_MAX_SETTLE_MS),
-            "preflight_only": True,
-            "dispatched": 0,
-            "input_events_emitted": False,
-            "input_actions_dispatched": 0,
-        }
-    settle_ms = normalized_settle_ms
+    """Run one validated GUI batch and remember the layout it returns."""
+    response = _perform_gui(actions, settle_ms, frame_id)
+    if isinstance(response, dict):
+        remember_published_layout(response.get("snapshot"))
+    return response
+
+
+def _perform_gui(actions, settle_ms=800, frame_id=None):
+    """Run one validated GUI batch.
+
+    The wire validator has already checked that actions is a non-empty array
+    and settle_ms an integer in range; the core's published schema bounds the
+    batch size, keeps a screenshot alone, and its wait budget bounds the
+    total wait. validate_gui_actions is the one provider check of each
+    action's values.
+    """
     static_actions, static_errors = validate_gui_actions(actions)
-    if len(actions) > 1 and any(
-            action.get("type") == "screenshot"
-            for action in actions if isinstance(action, dict)):
-        static_errors.append({
-            "index": next(
-                index for index, action in enumerate(actions)
-                if isinstance(action, dict)
-                and action.get("type") == "screenshot"),
-            "type": "screenshot",
-            "error": "gui screenshot must be the only action because GUI returns only one final screenshot",
-        })
     if static_errors:
         return {
             "ok": False,
             "error": "gui batch failed static pre-validation; no actions were "
                      "dispatched and no screenshot was captured",
             "validation_errors": static_errors,
-            "preflight_only": True,
-            "dispatched": 0,
-            "input_events_emitted": False,
-            "input_actions_dispatched": 0,
-        }
-    total_wait = sum(
-        action.get("seconds", 0)
-        for action in static_actions
-        if action["type"] == "wait"
-    )
-    if total_wait > GUI_MAX_TOTAL_WAIT_SECONDS:
-        return {
-            "ok": False,
-            "error": "gui batch cumulative wait is {:.3g}s; maximum is {}s. "
-                     "No actions were dispatched and no screenshot was captured.".format(
-                         total_wait, GUI_MAX_TOTAL_WAIT_SECONDS),
             "preflight_only": True,
             "dispatched": 0,
             "input_events_emitted": False,
@@ -433,13 +429,18 @@ def perform_gui(actions, settle_ms=800, frame_id=None):
             "quiescent": None,
             "snapshot": encode_evidence(current_capture),
         }
+    reference_layout = _published_layouts.get(frame_id) if frame_id else None
     if frame_id and frame_guarded_actions:
-        if current_capture.frame_id != frame_id:
+        if (current_capture.frame_id != frame_id
+                and not coordinates_still_valid(
+                    reference_layout, capture_layout(current_capture), validated)):
             return {
                 "ok": False,
-                "error": "STALE GUI FRAME: the desktop layout changed since the "
-                         "screenshot used for coordinates. No actions were dispatched "
-                         "and no input events were emitted.",
+                "error": "The desktop layout changed since the screenshot used "
+                         "for coordinates. No actions were dispatched and no input "
+                         "events were emitted.",
+                "failureCode": "stale_gui_frame",
+                "failurePhase": "precondition",
                 "text": "GUI rejected the coordinate batch against a fresh desktop layout sample.",
                 "dispatched": 0,
                 "input_events_emitted": False,
@@ -464,19 +465,24 @@ def perform_gui(actions, settle_ms=800, frame_id=None):
         action_type = action["type"]
         try:
             # The initial frame check sampled the layout just before this loop;
-            # re-sample only once an earlier action or wait could have moved it.
+            # re-sample only once an earlier action or wait could have moved it,
+            # and reject only when the window under this action's point moved.
             if (frame_id and dispatched
                     and action_type in GUI_FRAME_GUARDED_ACTION_TYPES):
                 live_bounds = desktop_bounds()
                 live_layout = desktop_layout_state(live_bounds)
                 live_frame_id = desktop_layout_frame_id(live_layout)
-                if live_frame_id != frame_id:
+                if (live_frame_id != frame_id
+                        and not coordinates_still_valid(
+                            reference_layout, live_layout, [action])):
                     error_snapshot, evidence_note = failure_evidence()
                     return {
                         "ok": False,
-                        "error": "STALE GUI FRAME before action {} ({}): desktop layout "
-                                 "changed during the batch, so this coordinate action was "
-                                 "not emitted.".format(index + 1, action_type),
+                        "error": "The desktop layout changed during the batch before "
+                                 "action {} ({}), so this coordinate action was not "
+                                 "emitted.".format(index + 1, action_type),
+                        "failureCode": "stale_gui_frame",
+                        "failurePhase": "precondition",
                         "text": "GUI stopped before emitting the stale coordinate action. "
                                 + evidence_note,
                         "dispatched": dispatched,

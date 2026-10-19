@@ -324,8 +324,17 @@ func TestWaitOnlyActWithoutAWindowNeedsOne(t *testing.T) {
 // facts with a hint (TestEveryPublicErrorCodeHasAHint), and the docs and the
 // instructions name exactly these codes and no removed one.
 func TestPublicErrorCodesAreDocumented(t *testing.T) {
-	if len(axPublicErrorCodes) != 10 {
-		t.Fatalf("public error codes: %v", axPublicErrorCodes)
+	// The table holds the AX codes and the GUI-only codes, nothing else
+	// (TestErrorTableEqualsDocumentedCodes checks the exact set).
+	guiOnly := 0
+	for _, code := range guiPublicErrorCodes {
+		if !containsString(axPublicErrorCodes, code) {
+			guiOnly++
+		}
+	}
+	if len(axPublicErrorCodes)+guiOnly != len(publicErrorCodes) {
+		t.Fatalf("AX codes %v and GUI codes %v do not make up the error table %v",
+			axPublicErrorCodes, guiPublicErrorCodes, sortedErrorCodes())
 	}
 	for _, path := range []string{"../docs/MCP.md", "../instructions/hybrid.md"} {
 		raw, err := os.ReadFile(path)
@@ -333,8 +342,8 @@ func TestPublicErrorCodesAreDocumented(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(raw)
-		for _, code := range axPublicErrorCodes {
-			if path == "../docs/MCP.md" && !strings.Contains(text, "`"+code+"`") {
+		for _, code := range sortedErrorCodes() {
+			if !strings.Contains(text, "`"+code+"`") {
 				t.Fatalf("%s does not name %s", path, code)
 			}
 		}

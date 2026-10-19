@@ -39,6 +39,9 @@ class GUICapturePipelineTests(unittest.TestCase):
     def setUp(self):
         self.bounds = runtime.frame(0, 0, 100, 100)
         self.layout = {"desktop": self.bounds, "activeWindow": "a", "windows": []}
+        published = mock.patch.dict(gui_dispatch._published_layouts, clear=True)
+        published.start()
+        self.addCleanup(published.stop)
         self.frame_id = runtime.desktop_layout_frame_id(self.layout)
         self.events = []
         self.frame = {"data": b"abc", "stride": 3, "channels": 3,
@@ -147,7 +150,9 @@ class GUICapturePipelineTests(unittest.TestCase):
                          ["layout", "capture", "layout", "pixels", "action"])
 
     def test_live_layout_rejects_later_coordinate_with_fresh_evidence(self):
-        changed = dict(self.layout, activeWindow="b")
+        # A window that opens over the second click's point after the first.
+        changed = dict(self.layout, activeWindow="b", windows=[
+            {"id": "0xb", "x": 0, "y": 0, "width": 10, "height": 10}])
         self.layout_mock.side_effect = [self.layout, self.layout,
                                         changed, changed, changed]
         response = runtime.perform_gui([
@@ -159,6 +164,111 @@ class GUICapturePipelineTests(unittest.TestCase):
         self.encoder.assert_called_once_with(mock.sentinel.after)
         self.assertEqual(response["snapshot"]["frameId"],
                          runtime.desktop_layout_frame_id(changed))
+
+    # Point-based staleness: a coordinate still lands where it did when the
+    # same window, with the same geometry, is topmost under it.
+    def layouts(self, *window_lists):
+        return [dict(self.layout, windows=[
+            dict(zip(("id", "x", "y", "width", "height"), window))
+            for window in windows]) for windows in window_lists]
+
+    def publish(self, layout):
+        """Return the frame id of a screenshot GUI returned with layout."""
+        self.layout_mock.side_effect = [layout, layout]
+        response = runtime.perform_gui([{"type": "screenshot"}])
+        self.assertTrue(response["ok"])
+        self.events.clear()
+        self.execute.reset_mock()
+        return response["snapshot"]["frameId"]
+
+    def click_after(self, published, now, *points):
+        frame_id = self.publish(published)
+        self.layout_mock.side_effect = [now] * 8
+        return runtime.perform_gui(
+            [{"type": "click", "x": x, "y": y} for x, y in points],
+            frame_id=frame_id)
+
+    def test_unrelated_window_change_does_not_reject(self):
+        before, after = self.layouts(
+            [("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 20, 20)],
+            [("0xa", 0, 0, 50, 50), ("0xb", 70, 55, 25, 20), ("0xc", 80, 0, 10, 10)])
+        self.assertNotEqual(runtime.desktop_layout_frame_id(before),
+                            runtime.desktop_layout_frame_id(after))
+        response = self.click_after(before, after, (10, 10))
+        self.assertTrue(response["ok"], response.get("error"))
+        self.execute.assert_called_once()
+
+    def test_window_under_the_point_changing_rejects_before_input(self):
+        before = self.layouts([("0xa", 0, 0, 50, 50)])[0]
+        for name, windows in [
+            ("moved", [("0xa", 5, 0, 50, 50)]),
+            ("resized", [("0xa", 0, 0, 40, 50)]),
+            ("covered", [("0xa", 0, 0, 50, 50), ("0xc", 5, 5, 10, 10)]),
+            ("closed", []),
+            ("raised other", [("0xa", 0, 0, 50, 50), ("0xb", 0, 0, 30, 30)]),
+        ]:
+            with self.subTest(name):
+                response = self.click_after(before, self.layouts(windows)[0], (10, 10))
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["failureCode"], "stale_gui_frame")
+                self.execute.assert_not_called()
+
+    def test_point_outside_any_window_stays_valid_until_one_covers_it(self):
+        before, unrelated, covering = self.layouts(
+            [("0xa", 0, 0, 20, 20)],
+            [("0xa", 0, 0, 30, 30)],
+            [("0xa", 0, 0, 30, 30), ("0xd", 50, 50, 30, 30)])
+        self.assertTrue(self.click_after(before, unrelated, (60, 60))["ok"])
+        self.assertFalse(self.click_after(before, covering, (60, 60))["ok"])
+
+    def test_every_point_of_a_drag_is_checked(self):
+        before, after = self.layouts(
+            [("0xa", 0, 0, 50, 50)],
+            [("0xa", 0, 0, 50, 50), ("0xe", 70, 70, 20, 20)])
+        frame_id = self.publish(before)
+        self.layout_mock.side_effect = [after] * 8
+        response = runtime.perform_gui([{"type": "drag", "path": [
+            {"x": 10, "y": 10}, {"x": 75, "y": 75}]}], frame_id=frame_id)
+        self.assertFalse(response["ok"])
+        self.execute.assert_not_called()
+
+    def test_frame_this_provider_did_not_publish_rejects_any_layout_change(self):
+        # After a provider restart the core still holds its old frame id.
+        before, after = self.layouts(
+            [("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 20, 20)],
+            [("0xa", 0, 0, 50, 50), ("0xb", 70, 60, 20, 20)])
+        frame_id = self.publish(before)
+        gui_dispatch._published_layouts.clear()
+        self.layout_mock.side_effect = [after] * 8
+        response = runtime.perform_gui([{"type": "click", "x": 10, "y": 10}],
+                                       frame_id=frame_id)
+        self.assertFalse(response["ok"])
+        self.execute.assert_not_called()
+
+    def test_desktop_resize_rejects(self):
+        before = self.layouts([("0xa", 0, 0, 50, 50)])[0]
+        after = dict(before, desktop=dict(self.bounds, width=90))
+        self.assertFalse(self.click_after(before, after, (10, 10))["ok"])
+
+    def test_mid_batch_unrelated_change_continues_and_target_change_stops(self):
+        before, unrelated, covering = self.layouts(
+            [("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 20, 20)],
+            [("0xa", 0, 0, 50, 50), ("0xb", 65, 60, 20, 20)],
+            [("0xa", 0, 0, 50, 50), ("0xb", 0, 0, 20, 20)])
+        for later, ok, calls in [(unrelated, True, 2), (covering, False, 1)]:
+            with self.subTest(ok=ok):
+                frame_id = self.publish(before)
+                # Bracket of the pre-action grab, then the re-sample before
+                # the second click, then the final bracket.
+                self.layout_mock.side_effect = [before, before] + [later] * 6
+                response = runtime.perform_gui([
+                    {"type": "click", "x": 10, "y": 10},
+                    {"type": "click", "x": 12, "y": 12}], frame_id=frame_id)
+                self.assertEqual(response["ok"], ok)
+                self.assertEqual(self.execute.call_count, calls)
+                if not ok:
+                    self.assertIn("changed during the batch", response["error"])
+                    self.assertTrue(response["mutation_unknown"])
 
     def test_absent_initial_capture_rejects_keyboard_input_too(self):
         self.capture.side_effect = None
@@ -1360,37 +1470,6 @@ class GUIScreenCoordinateTests(unittest.TestCase):
                 "delta_y": 3,
             }, self.desktop)
 
-    def test_gui_rejects_cumulative_wait_before_any_action(self):
-        execute = mock.Mock()
-        with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
-                mock.patch.object(runtime, "execute_gui_action", execute), \
-                patch_gui_capture(
-                    return_value={"frameId": "layout", "screenshotPngBase64": "png"}):
-            response = runtime.perform_gui([
-                {"type": "wait"}
-                for _ in range(runtime.GUI_MAX_TOTAL_WAIT_SECONDS + 1)
-            ])
-        self.assertFalse(response["ok"])
-        self.assertIn("cumulative wait", response["error"])
-        self.assertIn("No actions were dispatched", response["error"])
-        execute.assert_not_called()
-        self.assertNotIn("snapshot", response)
-
-    def test_gui_action_count_limit_is_enforced_before_execution(self):
-        execute = mock.Mock()
-        with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
-                mock.patch.object(runtime, "execute_gui_action", execute), \
-                patch_gui_capture(
-                    return_value={"frameId": "layout", "screenshotPngBase64": "png"}):
-            response = runtime.perform_gui([
-                {"type": "screenshot"}
-                for _ in range(runtime.GUI_MAX_ACTIONS + 1)
-            ])
-
-        self.assertFalse(response["ok"])
-        self.assertIn("at most", response["error"])
-        execute.assert_not_called()
-
     def test_gui_type_and_keypress_state_current_focus_boundary(self):
         with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \
                 mock.patch.object(runtime, "parse_key", return_value=([], "S")), \
@@ -1625,20 +1704,6 @@ class GUIScreenCoordinateTests(unittest.TestCase):
         self.assertEqual(result["reason"], "settle_ms_zero")
         self.assertIn("settle_ms=0", runtime.gui_settle_note(result))
 
-    def test_perform_gui_rejects_settle_above_limit_before_input(self):
-        with mock.patch.object(runtime, "execute_gui_action") as execute, \
-                mock.patch.object(runtime, "desktop_bounds") as bounds:
-            response = runtime.perform_gui(
-                [{"type": "click", "x": 1, "y": 2}],
-                settle_ms=3001,
-            )
-
-        self.assertFalse(response["ok"])
-        self.assertTrue(response["preflight_only"])
-        self.assertIn("between 0 and 3000", response["error"])
-        execute.assert_not_called()
-        bounds.assert_not_called()
-
     def test_perform_gui_uses_builtin_settle_for_mutating_batch(self):
         pixels = {
             "data": bytes([0, 0, 0]),
@@ -1805,7 +1870,9 @@ class GUIScreenCoordinateTests(unittest.TestCase):
             )
 
         self.assertFalse(response["ok"])
-        self.assertIn("STALE GUI FRAME", response["error"])
+        self.assertEqual(response["failureCode"], "stale_gui_frame")
+        self.assertEqual(response["failurePhase"], "precondition")
+        self.assertIn("layout changed", response["error"])
         self.assertEqual(response["dispatched"], 0)
         execute.assert_not_called()
 
@@ -1900,6 +1967,7 @@ class GUIScreenCoordinateTests(unittest.TestCase):
 
         self.assertFalse(response["ok"])
         self.assertIn("changed during the batch", response["error"])
+        self.assertEqual(response["failureCode"], "stale_gui_frame")
         self.assertEqual(executed, ["click", "wait"])
         self.assertIn("before action 3", response["error"])
         self.assertEqual(response["dispatched"], 2)

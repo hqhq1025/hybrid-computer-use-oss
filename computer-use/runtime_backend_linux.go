@@ -62,9 +62,6 @@ func (backend linuxRuntimeBackend) ResolveAndAct(
 func (backend linuxRuntimeBackend) ExecuteBatch(
 	request ProviderDesktopRequest,
 ) (ProviderDesktopResult, error) {
-	if err := validateProviderDesktopRequest(request); err != nil {
-		return ProviderDesktopResult{}, err
-	}
 	wire := newProviderWireRequest(
 		nextLinuxProviderRequestID(), ProviderWireDesktopBatch,
 	)

@@ -414,7 +414,9 @@ var guiToolDescription = fmt.Sprintf("Full-desktop screenshot and pixel input. "
 	"the field first in the same batch. Batch the actions planned from one screenshot; end "+
 	"the batch after an action that may open, close, or move a window, and plan the rest "+
 	"from the returned image. GUI cannot address windows; AX activates and closes them by "+
-	"title. wait is one second with no observation, at most %d s per batch. Example: "+
+	"title. wait is one second with no observation, at most %d s per batch. Errors return "+
+	"code and hint like AX; gui_frame_stale means nothing was sent: plan again from the "+
+	"returned screenshot. Example: "+
 	`{"actions":[{"type":"click","x":640,"y":412},{"type":"type","text":"hello"},{"type":"keypress","keys":["ENTER"]}]}`,
 	guiMaxTotalWait)
 

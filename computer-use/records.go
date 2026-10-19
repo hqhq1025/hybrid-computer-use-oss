@@ -178,8 +178,11 @@ func (s *service) dispatchRecord(name string, args map[string]any, options callO
 	// Records skip the model text budget: the evidence is compacted the same
 	// way, but no text is cut to fit a model context.
 	result := s.callTool(name, args)
-	if name == publicToolAX {
+	switch name {
+	case publicToolAX:
 		result = prepareAXEvidence(result)
+	case publicToolGUI:
+		result = prepareGUIEvidence(result)
 	}
 	record := recordFromResult(name, result)
 	record.Op = op
@@ -223,7 +226,7 @@ func recordFromResult(name string, result toolCallResult) Record {
 func recordFromEvidence(name string, result toolCallResult) Record {
 	record := Record{OK: !result.IsError}
 	evidence := result.StructuredContent
-	if name == publicToolAX && evidence != nil {
+	if evidence != nil && (name == publicToolAX || name == publicToolGUI) {
 		record.Code, _ = evidence["code"].(string)
 		record.Path, _ = evidence["path"].(string)
 		record.Message, _ = evidence["message"].(string)
@@ -237,7 +240,7 @@ func recordFromEvidence(name string, result toolCallResult) Record {
 		}
 		rest := map[string]any{}
 		for key, value := range evidence {
-			if !containsString(axPublicFields, key) {
+			if !containsString(axPublicFields, key) && key != "screen" {
 				rest[key] = value
 			}
 		}
@@ -258,12 +261,7 @@ func recordFromEvidence(name string, result toolCallResult) Record {
 	}
 	record.Text = strings.Join(text, "\n")
 	if name == publicToolGUI {
-		record.InputEmitted = guiInputEmitted(record.Text)
-		record.Screen = guiScreenFromText(record.Text)
-		if !record.OK {
-			record.Code = guiErrorCode(record.Text)
-			record.Message = firstLine(guiErrorMessage(record.Text))
-		}
+		record.Screen = guiRecordScreen(evidence)
 	}
 	if !record.OK && record.Code == "" {
 		record.Code = axCodeRuntimeError
@@ -272,60 +270,16 @@ func recordFromEvidence(name string, result toolCallResult) Record {
 	return record
 }
 
-// guiErrorCode maps GUI failures to the public codes. GUI keeps its own
-// text contract; the stale-frame code exists only in records, where callers
-// branch on it (the design's gui_frame_stale).
-func guiErrorCode(text string) string {
-	switch {
-	case strings.Contains(text, "STALE GUI FRAME"),
-		strings.Contains(text, "require a prior GUI screenshot"):
-		return axCodeGUIFrameStale
-	case strings.Contains(text, "mutation_unknown=true"):
-		return axCodeEffectUnknown
-	case strings.Contains(text, "GUI actions must"), strings.Contains(text, "GUI accepts only"),
-		strings.Contains(text, "GUI requires"), strings.Contains(text, "GUI screenshot"),
-		strings.Contains(text, "invalid_argument"), strings.Contains(text, "settle_ms"):
-		return axCodeInvalidArgument
+// guiRecordScreen reads the screen of a prepared GUI result.
+func guiRecordScreen(evidence map[string]any) *RecordScreen {
+	screen, _ := evidence["screen"].(map[string]any)
+	if screen == nil {
+		return nil
 	}
-	return axCodeRuntimeError
-}
-
-func guiErrorMessage(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "[tool-evidence]") || strings.HasPrefix(line, "{") {
-			continue
-		}
-		return line
-	}
-	return text
-}
-
-func guiScreenFromText(text string) *RecordScreen {
-	for _, line := range strings.Split(text, "\n") {
-		if !strings.HasPrefix(line, `{"`) {
-			continue
-		}
-		var metadata struct {
-			Screen *struct {
-				Width           int    `json:"width"`
-				Height          int    `json:"height"`
-				CoordinateSpace string `json:"coordinate_space"`
-			} `json:"screen"`
-		}
-		if json.Unmarshal([]byte(line), &metadata) == nil && metadata.Screen != nil {
-			return &RecordScreen{
-				Width: metadata.Screen.Width, Height: metadata.Screen.Height,
-				CoordinateSpace: metadata.Screen.CoordinateSpace,
-			}
-		}
-	}
-	return nil
-}
-
-func guiInputEmitted(text string) bool {
-	return strings.Contains(text, `"input_events_emitted":true`) ||
-		strings.Contains(text, `"input_actions_dispatched"`)
+	width, _ := intEvidence(screen["width"])
+	height, _ := intEvidence(screen["height"])
+	space, _ := screen["coordinate_space"].(string)
+	return &RecordScreen{Width: width, Height: height, CoordinateSpace: space}
 }
 
 // recordWindows lists the windows of the latest apps listing in records
@@ -348,8 +302,11 @@ func (s *service) recordWindows() []RecordWindow {
 // errorRecord renders a toolCallResult error from the shared validation
 // path, so records and text agree on code, path and hint.
 func errorRecord(name string, result toolCallResult) Record {
-	if name == publicToolAX {
+	switch name {
+	case publicToolAX:
 		result = prepareAXEvidence(result)
+	case publicToolGUI:
+		result = prepareGUIEvidence(result)
 	}
 	return recordFromResult(name, result)
 }

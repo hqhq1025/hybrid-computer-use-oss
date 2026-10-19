@@ -101,8 +101,13 @@ whether input was sent. Next step by code:
   otherwise use GUI for it.
 - `runtime_error`: retry once; if it repeats, use another channel.
 
-A GUI stale-frame rejection sent nothing; plan again from the returned
-screenshot. A stop response ends desktop automation: report the uncertainty
+GUI errors start with the same line and add one code:
+
+- `gui_frame_stale`: the window under a coordinate changed after the
+  screenshot the coordinates came from, so nothing was sent. Plan again from the returned
+  screenshot.
+
+A stop response ends desktop automation: report the uncertainty
 and stop.
 After two attempts on the same hypothesis without new evidence, change the
 mechanism or the channel. Do not nudge coordinates, add Enter, add waits, or

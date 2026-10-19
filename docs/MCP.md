@@ -33,7 +33,9 @@ fallback remains. Returned MIME and dimensions describe the actual image.
 Lower PNG compression can switch near-budget images to JPEG sooner.
 
 Coordinate actions still validate the captured layout and recheck the live
-layout before each coordinate input. Capture failure before dispatch prevents
+layout before each coordinate input. On Linux a layout change rejects a
+coordinate only when the window under that point changed: another window is
+now topmost there, or that window moved, resized or closed. Capture failure before dispatch prevents
 input. After an action failure, the provider attempts a fresh capture. If final capture or
 encoding fails, the response labels any pre-action fallback explicitly.
 If neither image is available, the response reports unknown visual state.
@@ -343,7 +345,15 @@ Every AX result starts with one JSON line: `ok`, and on failure `code`,
 `GUI` takes an ordered `actions` array: screenshot, pointer, drag, scroll,
 keyboard, text and wait actions. A screenshot establishes a private layout
 lease for the full desktop; coordinate actions fail before input when the
-live layout no longer matches the screenshot they refer to.
+window under one of their points no longer matches the screenshot they refer
+to.
+
+Every GUI result starts with the same JSON line as AX, followed by `screen`
+(the returned image's size and coordinate space) and `actions` (pixel-change
+and settle facts); the screenshot follows as an image. GUI errors use
+`invalid_argument`, `window_changed`, `effect_unknown` and `runtime_error`
+like AX, plus one GUI code: `gui_frame_stale`, coordinates from a screenshot
+whose window under the point has changed, with nothing sent. Its hint is a new screenshot.
 
 AX evidence covers only what the accessibility tree shows, and GUI evidence
 only the returned pixels and reported input delivery. Neither proves file
@@ -390,5 +400,5 @@ A client cannot initialize the server:
 - run `make smoke` outside the desktop to separate protocol problems from
   desktop problems.
 
-When AX reports a stale reference or GUI a stale layout, take a fresh AX
+When AX reports `stale_ref` or GUI `gui_frame_stale`, take a fresh AX
 observation or GUI screenshot instead of repeating the rejected call.

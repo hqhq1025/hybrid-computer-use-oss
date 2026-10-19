@@ -12,9 +12,8 @@ import (
 // one raises the major number.
 const contractVersion = "1.0"
 
-// axCodeGUIFrameStale is reported in records when GUI coordinates refer to
-// a screenshot that no longer matches the desktop layout. The GUI text
-// contract describes the same case in prose.
+// axCodeGUIFrameStale is the GUI code for coordinates that refer to a
+// screenshot that no longer matches the desktop layout. Nothing was sent.
 const axCodeGUIFrameStale = "gui_frame_stale"
 
 // publicError describes one public error code for code callers. It is the

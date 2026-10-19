@@ -63,9 +63,9 @@ func TestTextEvidencePreservesTheOriginalToolContent(t *testing.T) {
 			"task_effect_verified": false,
 		},
 	}
-	visible := withTextEvidence(result)
+	visible := withEvidenceLine(result, nil)
 	if len(visible.Content) != 2 ||
-		!strings.HasPrefix(visible.Content[0].Text, "[tool-evidence] ") ||
+		!strings.HasPrefix(visible.Content[0].Text, "{") ||
 		visible.Content[1].Text != "full accessibility tree" {
 		t.Fatalf("text evidence hid or rewrote the original tool content: %#v", visible.Content)
 	}
@@ -147,7 +147,9 @@ func TestSpillFailureFallsBackToInlineText(t *testing.T) {
 	}
 }
 
-func TestGUISuccessDoesNotAddStaticEvidencePrefix(t *testing.T) {
+// A GUI success starts with the same evidence line as AX: ok and
+// input_emitted first, then the screen and the action facts.
+func TestGUISuccessStartsWithTheEvidenceLine(t *testing.T) {
 	service := newService()
 	emitted := true
 	effectUnknown := true
@@ -168,14 +170,13 @@ func TestGUISuccessDoesNotAddStaticEvidencePrefix(t *testing.T) {
 			Quiescent:          &quiescent,
 		},
 	})
-	if result.StructuredContent != nil {
-		t.Fatalf("routine GUI success returned static evidence: %#v",
-			result.StructuredContent)
+	visible := finalizeForModel(publicToolGUI, result, false)
+	line := visible.Content[0].Text
+	if !strings.HasPrefix(line, `{"ok":true,"input_emitted":true,"screen":{`) {
+		t.Fatalf("GUI success evidence line: %q", line)
 	}
-	visible := withTextEvidence(result)
-	if strings.Contains(resultText(visible), "[tool-evidence]") {
-		t.Fatalf("routine GUI success added fixed evidence prefix: %q",
-			resultText(visible))
+	if last := visible.Content[len(visible.Content)-1]; last.Type != "image" {
+		t.Fatalf("GUI success lost its screenshot: %#v", visible.Content)
 	}
 	source := mainGoSource(t)
 	if !strings.Contains(source, `if name != publicToolGUI`) {
@@ -226,12 +227,12 @@ func TestLegacyTextEvidenceIncludesFinalStructuralBudgetMetadata(t *testing.T) {
 		},
 	}
 	result = enforceAXResponseBudget(result)
-	result = withTextEvidence(result)
+	result = withEvidenceLine(result, nil)
 	if len(result.Content) == 0 ||
-		!strings.HasPrefix(result.Content[0].Text, "[tool-evidence] ") {
-		t.Fatalf("legacy text evidence missing: %#v", result.Content)
+		!strings.HasPrefix(result.Content[0].Text, "{") {
+		t.Fatalf("text evidence missing: %#v", result.Content)
 	}
-	line := strings.TrimPrefix(result.Content[0].Text, "[tool-evidence] ")
+	line := result.Content[0].Text
 	var evidence map[string]any
 	if err := json.Unmarshal([]byte(line), &evidence); err != nil {
 		t.Fatal(err)

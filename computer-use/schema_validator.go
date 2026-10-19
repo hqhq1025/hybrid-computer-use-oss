@@ -137,6 +137,14 @@ func argumentErrorResult(tool string, args map[string]any, argErr *argumentError
 		return result
 	}
 	result := textResult(argErr.Message, true).withEvidenceScope("error_only")
+	if tool == publicToolGUI {
+		path := guiErrorPath(guiArgumentPath(argErr.Path), argErr.Message)
+		if _, present := args["actions"]; !present && path == "" {
+			path = "actions"
+		}
+		setGUIPublicError(&result, axCodeInvalidArgument, path, argErr.Message, guiArgumentHint(args, path))
+		result = withGUIRequested(result, args["actions"])
+	}
 	result.StructuredContent["argument_error_code"] = argErr.Code
 	result.StructuredContent["argument_error_path"] = argErr.Path
 	return result

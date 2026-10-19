@@ -37,9 +37,15 @@ current GUI schema for argument shapes and supported actions.
 - Text and keys go to current desktop focus. A visible focus click and its
   dependent input can share a batch when the click cannot change top-level
   layout. A click already includes press and release.
-- Stale-layout rejection returns fresh pixels without emitting the rejected
-  coordinate action. Recompute coordinates; do not replay earlier actions that
-  already ran in that batch.
+- Every result starts with one JSON line: `ok`, on failure `code`, `path`,
+  `message` and `hint` (a corrected call), then `input_emitted`, `completed`
+  and `requested`, and the returned `screen`.
+- `gui_frame_stale`: the window under a coordinate changed after the
+  screenshot used for it; nothing was sent. Recompute coordinates from the returned
+  screenshot. `window_changed`: the layout changed during the batch after
+  `completed` actions ran; send only what remains. `effect_unknown`: input
+  may have been sent; inspect before retrying. `invalid_argument`: fix the
+  field in `path` as the hint shows. `runtime_error`: retry once.
 
 ## Waiting And Recovery
 

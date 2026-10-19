@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -139,31 +138,6 @@ func structuredContentEnabled() bool {
 	}
 }
 
-func withTextEvidencePrefix(
-	result toolCallResult,
-	prefix string,
-) toolCallResult {
-	if len(result.StructuredContent) == 0 {
-		return result
-	}
-	visible := modelVisibleEvidence(result.StructuredContent)
-	if len(visible) == 0 {
-		return result
-	}
-	payload, err := json.Marshal(visible)
-	if err != nil {
-		return result
-	}
-	result.Content = append(
-		[]contentItem{{
-			Type: "text",
-			Text: prefix + string(payload),
-		}},
-		result.Content...,
-	)
-	return result
-}
-
 var modelPrivateEvidenceKeys = map[string]bool{
 	"content_revision":                        true,
 	"content_revision_before":                 true,
@@ -189,10 +163,6 @@ func modelVisibleEvidence(source map[string]any) map[string]any {
 	return out
 }
 
-func withTextEvidence(result toolCallResult) toolCallResult {
-	return withTextEvidencePrefix(result, "[tool-evidence] ")
-}
-
 func init() {
 	// Public AX error fields are rendered by withAXTextEvidence under their
 	// public names; their internal spellings never reach the model.
@@ -207,12 +177,18 @@ func init() {
 // withAXTextEvidence puts the AX evidence line first: one JSON object that
 // starts with ok, then code, path, message, hint and counts.
 func withAXTextEvidence(result toolCallResult) toolCallResult {
+	return withEvidenceLine(result, axPublicFields)
+}
+
+// withEvidenceLine puts the evidence first as one JSON object whose leading
+// fields are first, in order. AX and GUI share it.
+func withEvidenceLine(result toolCallResult, first []string) toolCallResult {
 	if len(result.StructuredContent) == 0 {
 		return result
 	}
 	visible := modelVisibleEvidence(result.StructuredContent)
 	result.Content = append(
-		[]contentItem{{Type: "text", Text: orderedJSON(visible, axPublicFields)}},
+		[]contentItem{{Type: "text", Text: orderedJSON(visible, first)}},
 		result.Content...,
 	)
 	return result
@@ -273,15 +249,18 @@ func finalizeForModel(name string, result toolCallResult, structured bool) toolC
 	return placeModelEvidence(name, prepareModelEvidence(name, result), structured)
 }
 
-// prepareModelEvidence applies the AX text budget and compacts the AX
-// evidence into its public form. The budget runs first: its metadata
+// prepareModelEvidence applies the AX text budget and compacts the AX or
+// GUI evidence into its public form. The budget runs first: its metadata
 // (response size, truncation reason) must exist before the evidence line is
 // serialized, or fields that live only in the structured channel disappear
 // when that channel is removed.
 func prepareModelEvidence(name string, result toolCallResult) toolCallResult {
-	if name == publicToolAX {
+	switch name {
+	case publicToolAX:
 		result = enforceAXResponseBudget(result)
 		result = prepareAXEvidence(result)
+	case publicToolGUI:
+		result = prepareGUIEvidence(result)
 	}
 	return result
 }
@@ -295,10 +274,13 @@ func placeModelEvidence(name string, result toolCallResult, structured bool) too
 	if structured {
 		return result
 	}
-	if name == publicToolAX {
+	switch name {
+	case publicToolAX:
 		result = withAXTextEvidence(result)
-	} else {
-		result = withTextEvidence(result)
+	case publicToolGUI:
+		result = withEvidenceLine(result, guiPublicFields)
+	default:
+		result = withEvidenceLine(result, nil)
 	}
 	result.StructuredContent = nil
 	return result

@@ -258,7 +258,7 @@
             "openWorldHint": false,
             "title": "Desktop screenshot and input"
           },
-          "description": "Full-desktop screenshot and pixel input. {\"actions\":[{\"type\":\"screenshot\"}]} alone observes. Any other batch is checked before input and returns one final screenshot. x/y are pixels of the latest full-desktop GUI image, never of an AX window image. type/keypress go to the current focus, so click the field first in the same batch. Batch the actions planned from one screenshot; end the batch after an action that may open, close, or move a window, and plan the rest from the returned image. GUI cannot address windows; AX activates and closes them by title. wait is one second with no observation, at most 20 s per batch. Example: {\"actions\":[{\"type\":\"click\",\"x\":640,\"y\":412},{\"type\":\"type\",\"text\":\"hello\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}",
+          "description": "Full-desktop screenshot and pixel input. {\"actions\":[{\"type\":\"screenshot\"}]} alone observes. Any other batch is checked before input and returns one final screenshot. x/y are pixels of the latest full-desktop GUI image, never of an AX window image. type/keypress go to the current focus, so click the field first in the same batch. Batch the actions planned from one screenshot; end the batch after an action that may open, close, or move a window, and plan the rest from the returned image. GUI cannot address windows; AX activates and closes them by title. wait is one second with no observation, at most 20 s per batch. Errors return code and hint like AX; gui_frame_stale means nothing was sent: plan again from the returned screenshot. Example: {\"actions\":[{\"type\":\"click\",\"x\":640,\"y\":412},{\"type\":\"type\",\"text\":\"hello\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}",
           "inputSchema": {
             "description": "One screenshot action observes; otherwise run an input batch.",
             "oneOf": [
@@ -1439,11 +1439,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "GUI requires actions; use {\"actions\":[{\"type\":\"screenshot\"}]} for an immediate observation",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions\",\"message\":\"GUI requires actions; use {\\\"actions\\\":[{\\\"type\\\":\\\"screenshot\\\"}]} for an immediate observation\",\"hint\":\"{\\\"actions\\\":[{\\\"type\\\":\\\"screenshot\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":0}",
               "type": "text"
             }
           ],
@@ -1464,11 +1460,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "GUI actions must not be empty; use one screenshot action for observation",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions\",\"message\":\"GUI actions must not be empty; use one screenshot action for observation\",\"hint\":\"{\\\"actions\\\":[{\\\"type\\\":\\\"screenshot\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":0}",
               "type": "text"
             }
           ],
@@ -1498,11 +1490,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "GUI screenshot must be the only action because no intermediate screenshot is returned",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions\",\"message\":\"GUI screenshot must be the only action because no intermediate screenshot is returned\",\"hint\":\"{\\\"actions\\\":[{\\\"type\\\":\\\"screenshot\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":2}",
               "type": "text"
             }
           ],
@@ -1527,11 +1515,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "actions[0] click requires x and y",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"actions[0] click requires x and y\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"x\\\":640,\\\"y\\\":412}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],
@@ -1559,11 +1543,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "actions[0].button \"middle-ish\" is unsupported; it must be left, right, wheel, back, or forward",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].button\",\"message\":\"actions[0].button \\\"middle-ish\\\" is unsupported; it must be left, right, wheel, back, or forward\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"x\\\":1,\\\"y\\\":1}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],
@@ -1589,11 +1569,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "actions[0] wait does not accept fields: \"ms\"; accepted fields: type",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].ms\",\"message\":\"actions[0] wait does not accept fields: \\\"ms\\\"; accepted fields: type\",\"hint\":\"{\\\"type\\\":\\\"wait\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],
@@ -1620,11 +1596,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "actions[0] scroll requires at least one of scroll_x or scroll_y",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"actions[0] scroll requires at least one of scroll_x or scroll_y\",\"hint\":\"{\\\"type\\\":\\\"scroll\\\",\\\"x\\\":640,\\\"y\\\":412,\\\"scroll_y\\\":-3}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],
@@ -1650,11 +1622,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "actions[0].keys must contain 1 to 8 items",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].keys\",\"message\":\"actions[0].keys must contain 1 to 8 items\",\"hint\":\"{\\\"type\\\":\\\"keypress\\\",\\\"keys\\\":[\\\"CTRL\\\",\\\"S\\\"]}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],
@@ -1679,11 +1647,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "actions[0] type requires text",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"actions[0] type requires text\",\"hint\":\"{\\\"type\\\":\\\"type\\\",\\\"text\\\":\\\"hello\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],
@@ -1708,11 +1672,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "actions[0].type \"bogus\" is unsupported; it must be click, double_click, move, drag, scroll, type, keypress, or wait",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].type\",\"message\":\"actions[0].type \\\"bogus\\\" is unsupported; it must be click, double_click, move, drag, scroll, type, keypress, or wait\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"x\\\":640,\\\"y\\\":412}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],
@@ -1743,11 +1703,7 @@
         "result": {
           "content": [
             {
-              "text": "[tool-evidence] {\"evidence_scope\":\"error_only\",\"task_effect_verified\":false}",
-              "type": "text"
-            },
-            {
-              "text": "actions[0].path must contain 2 to 256 items",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].path\",\"message\":\"actions[0].path must contain 2 to 256 items\",\"hint\":\"{\\\"type\\\":\\\"drag\\\",\\\"path\\\":[{\\\"x\\\":100,\\\"y\\\":200},{\\\"x\\\":300,\\\"y\\\":200}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],
@@ -1772,7 +1728,7 @@
         "result": {
           "content": [
             {
-              "text": "desktop unavailable in contract test",
+              "text": "{\"ok\":false,\"code\":\"runtime_error\",\"message\":\"desktop unavailable in contract test\",\"hint\":\"{\\\"actions\\\":[{\\\"type\\\":\\\"screenshot\\\"}]}\",\"input_emitted\":false}",
               "type": "text"
             }
           ],

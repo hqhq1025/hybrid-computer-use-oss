@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -449,66 +448,14 @@ func (s *service) rejectInvalidCall(name string, args map[string]any) (*axReques
 }
 
 // dispatchValidated runs a call whose arguments already passed the published
-// schema. The tool services still check what they read, so this path alone
-// must accept and reject the same arguments as the schema; the consistency
-// test calls it directly to prove that.
+// schema. The AX services still check what they read, so for AX this path
+// alone must accept and reject the same arguments as the schema; the
+// consistency test calls it directly to prove that. GUI relies on the schema
+// gate for its shape rules and keeps only its cross-field rules here.
 func (s *service) dispatchValidated(name string, args map[string]any) toolCallResult {
 	switch name {
 	case publicToolGUI:
-		invalidFields := make([]string, 0)
-		for field := range args {
-			if field != "actions" && field != "settle_ms" {
-				invalidFields = append(invalidFields, field)
-			}
-		}
-		sort.Strings(invalidFields)
-		if len(invalidFields) > 0 {
-			return textResult(
-				"GUI accepts only actions and optional settle_ms; unsupported field(s): "+
-					strings.Join(invalidFields, ", "),
-				true,
-			).withEvidenceScope("error_only")
-		}
-		actions, ok := args["actions"]
-		if !ok {
-			return textResult(
-				`GUI requires actions; use {"actions":[{"type":"screenshot"}]} for an immediate observation`,
-				true,
-			).withEvidenceScope("error_only")
-		}
-		if items, ok := actions.([]any); ok && len(items) == 0 {
-			return textResult(
-				`GUI actions must not be empty; use one screenshot action for observation`,
-				true,
-			).withEvidenceScope("error_only")
-		}
-		if items, ok := actions.([]any); ok && len(items) == 1 {
-			action, _ := items[0].(map[string]any)
-			if strings.EqualFold(optionalString(action, "type"), "screenshot") {
-				if _, hasSettle := args["settle_ms"]; hasSettle {
-					return textResult(
-						"GUI screenshot observation does not accept settle_ms",
-						true,
-					).withEvidenceScope("error_only")
-				}
-			}
-		}
-		if items, ok := actions.([]any); ok && len(items) > 1 {
-			for _, item := range items {
-				action, _ := item.(map[string]any)
-				if strings.EqualFold(optionalString(action, "type"), "screenshot") {
-					return textResult(
-						"GUI screenshot must be the only action because no intermediate screenshot is returned",
-						true,
-					).withEvidenceScope("error_only")
-				}
-			}
-		}
-		settleMS, err := optionalSettleMS(args)
-		if err != nil {
-			return textResult(err.Error(), true).withEvidenceScope("error_only")
-		}
-		return s.gui(actions, settleMS)
+		return withGUIRequested(s.dispatchGUI(args), args["actions"])
 	case publicToolAX:
 		obs, err := parseObservation(args)
 		if err != nil {
@@ -518,4 +465,16 @@ func (s *service) dispatchValidated(name string, args map[string]any) toolCallRe
 	default:
 		return textResult(fmt.Sprintf("unsupportedTool(%q)", name), true)
 	}
+}
+
+// dispatchGUI runs a GUI call whose arguments passed the published schema.
+// The schema owns every shape rule (accepted fields, a non-empty batch, a
+// screenshot alone and without settle_ms, the settle_ms range); this path
+// only converts the values.
+func (s *service) dispatchGUI(args map[string]any) toolCallResult {
+	settleMS, err := optionalSettleMS(args)
+	if err != nil {
+		return guiError(axCodeInvalidArgument, "settle_ms", err.Error(), guiArgumentHint(args, "settle_ms"))
+	}
+	return s.gui(args["actions"], settleMS)
 }

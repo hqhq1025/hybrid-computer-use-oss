@@ -97,7 +97,7 @@ func TestMCPStructuredContentIsExplicitOptIn(t *testing.T) {
 		t.Fatalf("2025-06-18 opt-in must preserve structuredContent: %#v", result)
 	}
 	for _, item := range result.Content {
-		if strings.HasPrefix(item.Text, "[tool-evidence] ") {
+		if strings.HasPrefix(item.Text, `{"ok":`) {
 			t.Fatalf("opt-in structured clients should not receive duplicate text evidence: %#v", result)
 		}
 	}

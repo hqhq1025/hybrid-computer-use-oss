@@ -127,7 +127,7 @@ func TestSchemaRejectionHappensBeforeAnyProviderCall(t *testing.T) {
 		if code != argumentErrorInvalid {
 			t.Fatalf("%s %s: missing argument error code: %#v", tc.tool, tc.args, result.StructuredContent)
 		}
-		visible := withTextEvidence(result)
+		visible := withEvidenceLine(result, nil)
 		if strings.Contains(resultText(visible), "argument_error") ||
 			strings.Contains(resultText(visible), "public_error") {
 			t.Fatalf("internal argument evidence reached the model: %q", resultText(visible))

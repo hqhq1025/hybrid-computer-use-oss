@@ -100,9 +100,6 @@ func (darwinRuntimeBackend) ExecuteOrderedInput(
 func (darwinRuntimeBackend) ExecuteBatch(
 	request ProviderDesktopRequest,
 ) (ProviderDesktopResult, error) {
-	if err := validateProviderDesktopRequest(request); err != nil {
-		return ProviderDesktopResult{}, err
-	}
 	wire := newProviderWireRequest(
 		nextDarwinProviderRequestID(), ProviderWireDesktopBatch,
 	)

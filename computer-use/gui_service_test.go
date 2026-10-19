@@ -23,6 +23,11 @@ func testJPEGBase64(t *testing.T, width, height int) string {
 	return base64.StdEncoding.EncodeToString(encoded.Bytes())
 }
 
+// guiModelText is the text a model receives for a GUI result.
+func guiModelText(result toolCallResult) string {
+	return resultText(finalizeForModel(publicToolGUI, result, false))
+}
+
 func TestGUIModelResponseKeepsLayoutProvenancePrivate(t *testing.T) {
 	snapshot := &appSnapshot{
 		ScreenshotPNGBase64: "png",
@@ -36,7 +41,7 @@ func TestGUIModelResponseKeepsLayoutProvenancePrivate(t *testing.T) {
 		Height: 1080,
 	}
 	one, yes, no, percent := 1, true, false, 0.5
-	text := guiMetadata(snapshot, ProviderGUIResult{
+	text := compactJSON(guiMetadata(snapshot, ProviderGUIResult{
 		Dispatched:             &one,
 		InputEventsEmitted:     &yes,
 		InputActionsDispatched: &one,
@@ -44,7 +49,7 @@ func TestGUIModelResponseKeepsLayoutProvenancePrivate(t *testing.T) {
 		Quiescent:              &yes,
 		VisualChangeObserved:   &no,
 		VisualChangePercent:    &percent,
-	})
+	}))
 	for _, fragment := range []string{
 		`"coordinate_space":"screen_image_px"`,
 		`"width":1920`,
@@ -145,9 +150,9 @@ func TestGUIInputEmissionInvalidatesAccessibilitySnapshots(t *testing.T) {
 	if len(service.snapshots) != 0 {
 		t.Fatal("mutation_unknown=true must invalidate snapshots after GUI runtime timeout")
 	}
-	if !strings.Contains(resultText(unknownResult), `"mutation_unknown":true`) {
+	if !strings.Contains(guiModelText(unknownResult), `"mutation_unknown":true`) {
 		t.Fatalf("top-level GUI mutation facts were hidden: %s",
-			resultText(unknownResult))
+			guiModelText(unknownResult))
 	}
 
 	field, ok := reflect.TypeOf(ProviderMutationFacts{}).FieldByName("InputEventsEmitted")
@@ -224,7 +229,7 @@ func TestGUIResponseCanonicalizesMissingJPEGMIME(t *testing.T) {
 		service.guiSnapshot.ScreenshotMimeType != "image/jpeg" {
 		t.Fatalf("detected JPEG MIME was not cached: %#v", service.guiSnapshot)
 	}
-	if len(result.Content) < 2 || result.Content[1].MimeType != "image/jpeg" {
+	if last := result.Content[len(result.Content)-1]; last.Type != "image" || last.MimeType != "image/jpeg" {
 		t.Fatalf("detected JPEG MIME was not rendered: %#v", result.Content)
 	}
 }
@@ -321,15 +326,16 @@ func TestGUICoordinateBatchWithoutPriorScreenshotObservesWithoutInput(t *testing
 	if !result.IsError {
 		t.Fatal("coordinate batch without a prior screenshot must not report success")
 	}
-	text := resultText(result)
-	if !strings.Contains(text, "require a prior GUI screenshot") ||
+	text := guiModelText(result)
+	if !strings.HasPrefix(text, `{"ok":false,"code":"gui_frame_stale",`) ||
+		!strings.Contains(text, "require a prior GUI screenshot") ||
 		!strings.Contains(text, "No actions were emitted") {
 		t.Fatalf("missing actionable note: %s", text)
 	}
 	if strings.Contains(text, `"dispatched"`) {
 		t.Fatalf("internal observation must not count as a dispatched action: %s", text)
 	}
-	if len(result.Content) < 2 || result.Content[len(result.Content)-1].Type != "image" {
+	if len(result.Content) == 0 || result.Content[len(result.Content)-1].Type != "image" {
 		t.Fatalf("fresh screenshot was not attached: %#v", result.Content)
 	}
 	if service.guiSnapshot == nil || service.guiSnapshot.FrameID != "fresh-frame" {
