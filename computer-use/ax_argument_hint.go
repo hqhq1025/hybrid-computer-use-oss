@@ -44,17 +44,17 @@ func (e *axArgError) withFix(edits ...axEdit) *axArgError {
 
 // axMinimalCalls are the documented fallback hints, one valid call per mode.
 var axMinimalCalls = map[string]string{
-	a11yModeApps:    `{"mode":"apps"}`,
-	a11yModeObserve: `{"mode":"observe","window_ref":"w1"}`,
-	a11yModeFind:    `{"mode":"find","window_ref":"w1","query":{"name_contains":"Save"}}`,
-	a11yModeAct:     `{"mode":"act","actions":[{"type":"click","ref":"r1"}]}`,
+	axModeApps:    `{"mode":"apps"}`,
+	axModeObserve: `{"mode":"observe","window_ref":"w1"}`,
+	axModeFind:    `{"mode":"find","window_ref":"w1","query":{"name_contains":"Save"}}`,
+	axModeAct:     `{"mode":"act","actions":[{"type":"click","ref":"r1"}]}`,
 }
 
 // axMaxRepairSteps bounds the repair loop; each step fixes one error.
 const axMaxRepairSteps = 8
 
 func axDerivedHint(args map[string]any, err *axArgError) string {
-	fallback := axMinimalCalls[a11yModeApps]
+	fallback := axMinimalCalls[axModeApps]
 	if mode, _ := args["mode"].(string); axMinimalCalls[mode] != "" {
 		fallback = axMinimalCalls[mode]
 	}

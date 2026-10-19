@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	treeViewWorking  = "working"
-	treeViewFull     = "full"
-	a11yScopeWindow  = "window"
-	a11yScopeContent = "content"
+	treeViewWorking = "working"
+	treeViewFull    = "full"
+	axScopeWindow   = "window"
+	axScopeContent  = "content"
 )
 
-var a11yScopeValues = []string{a11yScopeWindow, a11yScopeContent}
+var axScopeValues = []string{axScopeWindow, axScopeContent}
 
 func normalizedTreeView(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -28,12 +28,12 @@ func normalizedTreeView(value string) string {
 	}
 }
 
-func normalizedA11yScope(value string) string {
+func normalizedAXScope(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case a11yScopeContent:
-		return a11yScopeContent
+	case axScopeContent:
+		return axScopeContent
 	default:
-		return a11yScopeWindow
+		return axScopeWindow
 	}
 }
 
@@ -56,7 +56,7 @@ func projectionFromRequest(request axServiceRequest) snapshotProjection {
 		Prune:        request.Prune,
 		Boxes:        request.Boxes,
 		View:         normalizedTreeView(request.TreeView),
-		Scope:        normalizedA11yScope(request.Scope),
+		Scope:        normalizedAXScope(request.Scope),
 		Root:         observationRootKey(request.ObservationRoot),
 	}
 }
@@ -212,9 +212,9 @@ func selectContentScopeRoot(snapshot *appSnapshot) (*elementRecord, error) {
 	)
 }
 
-func recordInA11yScope(snapshot *appSnapshot, record *elementRecord) bool {
+func recordInAXScope(snapshot *appSnapshot, record *elementRecord) bool {
 	if snapshot == nil || record == nil ||
-		normalizedA11yScope(snapshot.scope) == a11yScopeWindow {
+		normalizedAXScope(snapshot.scope) == axScopeWindow {
 		return true
 	}
 	return snapshot.scopeRoot != nil &&
@@ -225,7 +225,7 @@ func scopedCanonicalElementCount(snapshot *appSnapshot) int {
 	if snapshot == nil {
 		return 0
 	}
-	if normalizedA11yScope(snapshot.scope) == a11yScopeContent {
+	if normalizedAXScope(snapshot.scope) == axScopeContent {
 		return snapshot.scopedCanonicalCount
 	}
 	return len(snapshot.Elements)
@@ -375,11 +375,11 @@ func validContentRevision(value string) bool {
 	return true
 }
 
-func applyA11yScope(snapshot *appSnapshot, scope string) error {
+func applyAXScope(snapshot *appSnapshot, scope string) error {
 	if snapshot == nil {
 		return errors.New("cannot apply accessibility scope to a nil snapshot")
 	}
-	scope = normalizedA11yScope(scope)
+	scope = normalizedAXScope(scope)
 	snapshot.scope = scope
 	snapshot.scopeRoot = nil
 	snapshot.scopedCanonicalCount = len(snapshot.Elements)
@@ -388,7 +388,7 @@ func applyA11yScope(snapshot *appSnapshot, scope string) error {
 	snapshot.contentRevision = ""
 	root, err := selectContentScopeRoot(snapshot)
 	if err != nil {
-		if scope == a11yScopeWindow {
+		if scope == axScopeWindow {
 			return nil
 		}
 		return err
@@ -397,7 +397,7 @@ func applyA11yScope(snapshot *appSnapshot, scope string) error {
 	snapshot.contentRoot = root
 	snapshot.contentCanonicalCount = count
 	snapshot.contentRevision = contentRevisionForRecords(snapshot, root)
-	if scope == a11yScopeWindow {
+	if scope == axScopeWindow {
 		return nil
 	}
 	snapshot.scopeRoot = root
@@ -435,7 +435,7 @@ func focusedObservationRoot(snapshot *appSnapshot) *elementRecord {
 			record := &snapshot.Elements[index]
 			if len(record.RuntimeID) == depth &&
 				runtimePathContains(record.RuntimeID, focused.RuntimeID) &&
-				recordInA11yScope(snapshot, record) {
+				recordInAXScope(snapshot, record) {
 				ancestor = record
 				break
 			}
@@ -446,7 +446,7 @@ func focusedObservationRoot(snapshot *appSnapshot) *elementRecord {
 		descendants := 0
 		for index := range snapshot.Elements {
 			record := &snapshot.Elements[index]
-			if recordInA11yScope(snapshot, record) &&
+			if recordInAXScope(snapshot, record) &&
 				runtimePathContains(ancestor.RuntimeID, record.RuntimeID) {
 				descendants++
 			}
@@ -485,13 +485,13 @@ func resolveObservationRoot(
 		if err != nil {
 			return nil, "", err
 		}
-		if !recordInA11yScope(snapshot, record) {
+		if !recordInAXScope(snapshot, record) {
 			return nil, "", fmt.Errorf(
 				"root %d %s %q is outside scope=%q",
 				record.Index,
 				canonicalRole(record),
 				record.Name,
-				normalizedA11yScope(snapshot.scope),
+				normalizedAXScope(snapshot.scope),
 			)
 		}
 		return record, "ref", nil
@@ -513,7 +513,7 @@ func resolveObservationRoot(
 	}
 	if address == "" {
 		var err error
-		address, _, err = a11yTargetAddress(map[string]any{"target": root})
+		address, _, err = axTargetAddress(map[string]any{"target": root})
 		if err != nil {
 			return nil, "", err
 		}
@@ -546,13 +546,13 @@ func resolveObservationRoot(
 			return nil, "", err
 		}
 	}
-	if !recordInA11yScope(snapshot, record) {
+	if !recordInAXScope(snapshot, record) {
 		return nil, "", fmt.Errorf(
 			"root %d %s %q is outside scope=%q",
 			record.Index,
 			canonicalRole(record),
 			record.Name,
-			normalizedA11yScope(snapshot.scope),
+			normalizedAXScope(snapshot.scope),
 		)
 	}
 	return record, mode, nil

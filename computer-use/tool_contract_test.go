@@ -94,7 +94,7 @@ func TestInstructionsDoNotClaimScreenshotsAreAlwaysCostlier(t *testing.T) {
 	}
 }
 
-func TestConsolidatedA11ySurfaceExposesOnlyA11yAndGUI(t *testing.T) {
+func TestConsolidatedAXSurfaceExposesOnlyAXAndGUI(t *testing.T) {
 	t.Setenv("COMPUTER_USE_CHANNELS", "")
 
 	names := map[string]bool{}

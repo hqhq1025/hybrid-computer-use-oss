@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func a11yBatchActionObservation(
+func axBatchActionObservation(
 	index,
 	count int,
 	final observation,
@@ -23,7 +23,7 @@ func a11yBatchActionObservation(
 }
 
 func closedWindowFinalObservation(
-	context *a11yBatchContext,
+	context *axBatchContext,
 	obs observation,
 ) toolCallResult {
 	windowRef := ""
@@ -64,7 +64,7 @@ func closedWindowFinalObservation(
 }
 
 func closedWindowLifecycleProven(
-	context *a11yBatchContext,
+	context *axBatchContext,
 	result toolCallResult,
 ) bool {
 	if context == nil ||
@@ -161,8 +161,8 @@ func stripSupersededFinalObservationUnavailable(
 }
 
 func (s *service) recoverClosedWindowActionObservation(
-	context *a11yBatchContext,
-	action a11yBatchAction,
+	context *axBatchContext,
+	action axBatchAction,
 	result toolCallResult,
 	obs observation,
 ) toolCallResult {
@@ -189,7 +189,7 @@ func (s *service) recoverClosedWindowActionObservation(
 	if omitFinalObservation {
 		probeObservation = observation{mode: observeDiff}
 	}
-	finalObservation := s.a11yBatchFinalObservation(
+	finalObservation := s.axBatchFinalObservation(
 		context,
 		probeObservation,
 		true,
@@ -208,7 +208,7 @@ func (s *service) recoverClosedWindowActionObservation(
 		}
 		return result
 	}
-	merged := mergeA11yBatchFinalObservation(result, finalObservation)
+	merged := mergeAXBatchFinalObservation(result, finalObservation)
 	merged = finalizeVerifiedCloseLifecycle(merged)
 	if omitFinalObservation &&
 		merged.StructuredContent["close_effect_verified"] == true {
@@ -258,8 +258,8 @@ func omitVerifiedCloseFinalObservation(result toolCallResult) toolCallResult {
 	return result
 }
 
-func (s *service) a11yBatchFinalObservation(
-	context *a11yBatchContext,
+func (s *service) axBatchFinalObservation(
+	context *axBatchContext,
 	obs observation,
 	allowClosedWindowLifecycle bool,
 ) toolCallResult {
@@ -273,7 +273,7 @@ func (s *service) a11yBatchFinalObservation(
 		IncludeScreenshot:  &includeScreenshot,
 		TargetWindowHandle: context.windowHandle,
 		SourceRef:          context.windowRef,
-		Scope:              a11yScopeWindow,
+		Scope:              axScopeWindow,
 		TreeView:           treeViewWorking,
 	}
 	snapshot, notes, result := s.refreshSnapshot(context.appToken, request)
@@ -283,7 +283,7 @@ func (s *service) a11yBatchFinalObservation(
 			request.SourceRef = current.Ref
 			snapshot, notes, result = s.refreshSnapshot(context.appToken, request)
 			if !result.IsError {
-				rendered := s.renderA11yBatchFinalObservation(snapshot, notes, obs)
+				rendered := s.renderAXBatchFinalObservation(snapshot, notes, obs)
 				if rendered.StructuredContent == nil {
 					rendered.StructuredContent = map[string]any{}
 				}
@@ -307,11 +307,11 @@ func (s *service) a11yBatchFinalObservation(
 		result.StructuredContent["observation_required"] = true
 		return result
 	}
-	return s.renderA11yBatchFinalObservation(snapshot, notes, obs)
+	return s.renderAXBatchFinalObservation(snapshot, notes, obs)
 }
 
-func (s *service) recoverA11yBatchObservation(
-	context *a11yBatchContext,
+func (s *service) recoverAXBatchObservation(
+	context *axBatchContext,
 	failed toolCallResult,
 	obs observation,
 ) toolCallResult {
@@ -356,7 +356,7 @@ func (s *service) recoverA11yBatchObservation(
 		IncludeScreenshot:  &includeScreenshot,
 		TargetWindowHandle: targetWindowHandle,
 		SourceRef:          sourceRef,
-		Scope:              a11yScopeWindow,
+		Scope:              axScopeWindow,
 		TreeView:           treeViewWorking,
 	}
 	snapshot, notes, observationResult := s.refreshSnapshot(
@@ -366,7 +366,7 @@ func (s *service) recoverA11yBatchObservation(
 	appRootRetryAttempted := false
 	targetedFailureCode := ""
 	if (targetWindowHandle != "" || sourceRef != "") &&
-		a11yRecoveryObservationCanRetryAtAppRoot(observationResult) {
+		axRecoveryObservationCanRetryAtAppRoot(observationResult) {
 		appRootRetryAttempted = true
 		targetedFailureCode, _ =
 			observationResult.StructuredContent["failure_code"].(string)
@@ -387,7 +387,7 @@ func (s *service) recoverA11yBatchObservation(
 		}
 	}
 	if !observationResult.IsError {
-		observationResult = s.renderA11yBatchFinalObservation(
+		observationResult = s.renderAXBatchFinalObservation(
 			snapshot,
 			append(
 				[]string{
@@ -399,7 +399,7 @@ func (s *service) recoverA11yBatchObservation(
 			obs,
 		)
 	}
-	merged := mergeA11yBatchRecoveryObservation(failed, observationResult)
+	merged := mergeAXBatchRecoveryObservation(failed, observationResult)
 	if appRootRetryAttempted && merged.StructuredContent != nil {
 		merged.StructuredContent["recovery_app_root_retry_attempted"] = true
 		if targetedFailureCode != "" {
@@ -410,7 +410,7 @@ func (s *service) recoverA11yBatchObservation(
 	return merged
 }
 
-func a11yRecoveryObservationCanRetryAtAppRoot(result toolCallResult) bool {
+func axRecoveryObservationCanRetryAtAppRoot(result toolCallResult) bool {
 	if !result.IsError || result.StructuredContent == nil {
 		return false
 	}
@@ -423,13 +423,13 @@ func a11yRecoveryObservationCanRetryAtAppRoot(result toolCallResult) bool {
 	}
 }
 
-func mergeA11yBatchRecoveryObservation(
+func mergeAXBatchRecoveryObservation(
 	failed,
 	observationResult toolCallResult,
 ) toolCallResult {
 	originalFailureCode, _ := failed.StructuredContent["failure_code"].(string)
 	originalFailurePhase, _ := failed.StructuredContent["failure_phase"].(string)
-	merged := mergeA11yBatchFinalObservation(failed, observationResult)
+	merged := mergeAXBatchFinalObservation(failed, observationResult)
 	if merged.StructuredContent == nil {
 		merged.StructuredContent = map[string]any{}
 	}
@@ -463,7 +463,7 @@ func mergeA11yBatchRecoveryObservation(
 }
 
 func (s *service) finalObservationContinuation(
-	context *a11yBatchContext,
+	context *axBatchContext,
 	result toolCallResult,
 ) (*AXWindowRefEntry, bool) {
 	if s == nil || context == nil || !result.IsError ||
@@ -492,7 +492,7 @@ func (s *service) finalObservationContinuation(
 	return current, true
 }
 
-func (s *service) renderA11yBatchFinalObservation(
+func (s *service) renderAXBatchFinalObservation(
 	snapshot *appSnapshot,
 	notes []string,
 	obs observation,
@@ -667,7 +667,7 @@ func boundedWorkingObservationLines(snapshot *appSnapshot) []string {
 	return nil
 }
 
-func mergeA11yBatchFinalObservation(
+func mergeAXBatchFinalObservation(
 	actionResult,
 	observationResult toolCallResult,
 ) toolCallResult {

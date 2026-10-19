@@ -197,12 +197,12 @@ func (s *service) recoverNoInputPreconditionObservation(
 		Operation:         axServiceObserve,
 		App:               app,
 		IncludeScreenshot: &includeScreenshot,
-		Scope:             a11yScopeWindow,
+		Scope:             axScopeWindow,
 		TreeView:          treeViewWorking,
 	}
 	snapshot, notes, observationResult := s.refreshSnapshot(app, refresh)
 	if !observationResult.IsError {
-		observationResult = s.renderA11yBatchFinalObservation(
+		observationResult = s.renderAXBatchFinalObservation(
 			snapshot,
 			append(
 				[]string{
@@ -229,7 +229,7 @@ func (s *service) recoverNoInputPreconditionObservation(
 		return required
 	}
 
-	merged := mergeA11yBatchFinalObservation(failed, observationResult)
+	merged := mergeAXBatchFinalObservation(failed, observationResult)
 	if merged.StructuredContent == nil {
 		merged.StructuredContent = map[string]any{}
 	}

@@ -42,7 +42,7 @@ func TestPostconditionFinalObservationUsesLatestSnapshot(t *testing.T) {
 		ScreenshotPNGBase64: "latest-image",
 		ScreenshotMimeType:  "image/png",
 	}
-	result := service.renderA11yBatchFinalObservation(
+	result := service.renderAXBatchFinalObservation(
 		current,
 		nil,
 		observation{mode: observeScreenshot},
@@ -77,7 +77,7 @@ func TestFinalObservationContinuationRequiresCompleteGoneSourceAndSameApp(t *tes
 		"Document",
 		appRef,
 	)
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
@@ -167,13 +167,13 @@ func TestFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T) {
 		},
 	}
 	service.backend = backend
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
 		windowHandle: "w2:0123456789abcdef0123456789abcdef",
 	}
-	result := service.a11yBatchFinalObservation(
+	result := service.axBatchFinalObservation(
 		context,
 		observation{mode: observeScreenshot},
 		false,
@@ -214,13 +214,13 @@ func TestFinalObservationReturnsLifecycleWhenClosedAppRefIsStale(
 		}},
 	}
 	service.backend = backend
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
 		windowHandle: "w2:0123456789abcdef0123456789abcdef",
 	}
-	result := service.a11yBatchFinalObservation(
+	result := service.axBatchFinalObservation(
 		context,
 		observation{mode: observeDiff},
 		true,
@@ -235,7 +235,7 @@ func TestFinalObservationReturnsLifecycleWhenClosedAppRefIsStale(
 }
 
 func TestClosedWindowLifecycleRejectsIncompleteStaleAppFacts(t *testing.T) {
-	context := &a11yBatchContext{windowRef: "w7"}
+	context := &axBatchContext{windowRef: "w7"}
 	for name, fields := range map[string]map[string]any{
 		"incomplete facts": {
 			"failure_code":           "stale_app_ref",
@@ -279,7 +279,7 @@ func TestSuccessfulCloseRecoversLifecycleObservation(t *testing.T) {
 		}},
 	}
 	service.backend = backend
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
@@ -296,7 +296,7 @@ func TestSuccessfulCloseRecoversLifecycleObservation(t *testing.T) {
 	}
 	result := service.recoverClosedWindowActionObservation(
 		context,
-		a11yBatchAction{actionType: "close"},
+		axBatchAction{actionType: "close"},
 		actionResult,
 		observation{mode: observeDiff},
 	)
@@ -336,13 +336,13 @@ func TestFinalObservationDoesNotInferCloseFromNonCloseWindowDisappearance(
 			},
 		}},
 	}
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
 		windowHandle: "w2:0123456789abcdef0123456789abcdef",
 	}
-	result := service.a11yBatchFinalObservation(
+	result := service.axBatchFinalObservation(
 		context,
 		observation{mode: observeDiff},
 		false,
@@ -383,7 +383,7 @@ func TestEmptyCompactFallbackDoesNotClaimFinalObservation(t *testing.T) {
 			Roots:          nil,
 		},
 	}
-	result := service.renderA11yBatchFinalObservation(
+	result := service.renderAXBatchFinalObservation(
 		snapshot,
 		nil,
 		observation{mode: observeDiff},
@@ -477,10 +477,10 @@ func TestBatchFinalObservationAdvancesFreshWorkingTreeBaseline(t *testing.T) {
 	snapshot.publicWindowRef = "w2"
 	snapshot.projection = snapshotProjection{
 		View:  treeViewWorking,
-		Scope: a11yScopeWindow,
+		Scope: axScopeWindow,
 	}
 
-	result := service.renderA11yBatchFinalObservation(
+	result := service.renderAXBatchFinalObservation(
 		snapshot,
 		nil,
 		observation{mode: observeDiff},
@@ -537,7 +537,7 @@ func TestFinalObservationFailureDoesNotOverwritePostconditionFailure(t *testing.
 			"final_observation_returned": false,
 		},
 	}
-	merged := mergeA11yBatchFinalObservation(action, observation)
+	merged := mergeAXBatchFinalObservation(action, observation)
 	if merged.StructuredContent["failure_code"] != "postcondition_unknown" ||
 		merged.StructuredContent["failure_phase"] != "postcondition" ||
 		!merged.IsError {
@@ -569,7 +569,7 @@ func TestRecoveryObservationPreservesOriginalUncertainty(t *testing.T) {
 			"observation_required":       false,
 		},
 	}
-	merged := mergeA11yBatchRecoveryObservation(failed, observation)
+	merged := mergeAXBatchRecoveryObservation(failed, observation)
 	if !merged.IsError ||
 		merged.StructuredContent["failure_code"] != "effect_unknown" ||
 		merged.StructuredContent["failure_phase"] != "action" ||
@@ -607,7 +607,7 @@ func TestRecoveryObservationFailureStillRequiresObservation(t *testing.T) {
 			"observation_required":       true,
 		},
 	}
-	merged := mergeA11yBatchRecoveryObservation(failed, observation)
+	merged := mergeAXBatchRecoveryObservation(failed, observation)
 	if merged.StructuredContent["failure_code"] != "effect_unknown" ||
 		merged.StructuredContent["observation_required"] != true ||
 		merged.StructuredContent["recovery_observation_returned"] != false ||
@@ -671,14 +671,14 @@ func TestRecoveryObservationRetriesAtAppRootWhenReplacementRefStales(t *testing.
 			"current_window_ref":   replacementRef,
 		},
 	}
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		appToken:     appRef,
 		windowRef:    sourceWindowRef,
 		windowHandle: "w2:0123456789abcdef0123456789abcdef",
 	}
 
-	result := service.recoverA11yBatchObservation(
+	result := service.recoverAXBatchObservation(
 		context,
 		failed,
 		observation{mode: observeDiff},
@@ -728,7 +728,7 @@ func TestRecoveryObservationDoesNotRetryUnrelatedFailureAtAppRoot(t *testing.T) 
 				"failure_code": code,
 			},
 		}
-		if a11yRecoveryObservationCanRetryAtAppRoot(result) {
+		if axRecoveryObservationCanRetryAtAppRoot(result) {
 			t.Fatalf("%s unexpectedly allowed app-root retry", code)
 		}
 	}
@@ -752,7 +752,7 @@ func TestRecoveryObservationPreservesNonObserveContinuation(t *testing.T) {
 			},
 		},
 	}
-	merged := mergeA11yBatchRecoveryObservation(failed, observation)
+	merged := mergeAXBatchRecoveryObservation(failed, observation)
 	continuation, ok := merged.StructuredContent["continuation"].(map[string]any)
 	if !ok || continuation["route"] != "GUI" {
 		t.Fatalf("successful recovery dropped unrelated continuation: %#v",
@@ -768,10 +768,10 @@ func TestVerifiedCloseScreenshotDoesNotBecomeEffectUnknown(t *testing.T) {
 		},
 	}
 	observation := closedWindowFinalObservation(
-		&a11yBatchContext{windowRef: "w7"},
+		&axBatchContext{windowRef: "w7"},
 		observation{mode: observeScreenshot},
 	)
-	merged := mergeA11yBatchFinalObservation(action, observation)
+	merged := mergeAXBatchFinalObservation(action, observation)
 	if merged.IsError ||
 		merged.StructuredContent["target_window_absent"] != true ||
 		merged.StructuredContent["observation_required"] != true ||
@@ -801,7 +801,7 @@ func TestMissingFinalObservationMarksEmittedMutationUnknown(t *testing.T) {
 			"observation_required":       true,
 		},
 	}
-	merged := mergeA11yBatchFinalObservation(action, observation)
+	merged := mergeAXBatchFinalObservation(action, observation)
 	if merged.IsError ||
 		merged.StructuredContent["effect_unknown"] != true ||
 		merged.StructuredContent["mutation_unknown"] != true ||
@@ -830,7 +830,7 @@ func TestMissingFinalObservationUsesNestedRuntimeEmissionEvidence(t *testing.T) 
 			"observation_required":       true,
 		},
 	}
-	merged := mergeA11yBatchFinalObservation(action, observation)
+	merged := mergeAXBatchFinalObservation(action, observation)
 	if merged.IsError ||
 		merged.StructuredContent["input_events_emitted"] != true ||
 		merged.StructuredContent["effect_unknown"] != true ||
@@ -860,7 +860,7 @@ func TestFinalObservationFailurePreservesSuccessfulAction(t *testing.T) {
 			"observation_required":       true,
 		},
 	}
-	merged := mergeA11yBatchFinalObservation(action, observation)
+	merged := mergeAXBatchFinalObservation(action, observation)
 	if merged.IsError {
 		t.Fatalf("post-action observation failure reversed successful delivery: %#v",
 			merged)
@@ -882,17 +882,17 @@ func TestFinalObservationFailurePreservesSuccessfulAction(t *testing.T) {
 
 func TestBatchFinalActionCapturesRequestedObservationDirectly(t *testing.T) {
 	final := observation{mode: observeDiff}
-	intermediate := a11yBatchActionObservation(0, 2, final, false)
+	intermediate := axBatchActionObservation(0, 2, final, false)
 	if intermediate.resolvedMode() != observeNone ||
 		intermediate.captureSnapshot == nil ||
 		!*intermediate.captureSnapshot {
 		t.Fatalf("intermediate action observation=%#v", intermediate)
 	}
-	last := a11yBatchActionObservation(1, 2, final, false)
+	last := axBatchActionObservation(1, 2, final, false)
 	if last.resolvedMode() != observeDiff || last.captureSnapshot != nil {
 		t.Fatalf("final action did not own requested observation: %#v", last)
 	}
-	postconditionLast := a11yBatchActionObservation(1, 2, final, true)
+	postconditionLast := axBatchActionObservation(1, 2, final, true)
 	if postconditionLast.resolvedMode() != observeNone ||
 		postconditionLast.captureSnapshot == nil ||
 		*postconditionLast.captureSnapshot {
@@ -923,7 +923,7 @@ func TestFinalObservationCannotRewriteEmittedActionAsPreflight(t *testing.T) {
 			"evidence_scope":             "error_only",
 		},
 	}
-	merged := mergeA11yBatchFinalObservation(action, observation)
+	merged := mergeAXBatchFinalObservation(action, observation)
 	if merged.StructuredContent["preflight_only"] != false {
 		t.Fatalf("emitted action was rewritten as preflight: %#v",
 			merged.StructuredContent)
@@ -953,7 +953,7 @@ func TestFinalObservationCannotClearMonotonicActionEvidence(t *testing.T) {
 			"mutation_unknown":       false,
 		},
 	}
-	merged := mergeA11yBatchFinalObservation(action, observation)
+	merged := mergeAXBatchFinalObservation(action, observation)
 	for _, key := range []string{
 		"input_events_emitted",
 		"partial_input_possible",
@@ -968,7 +968,7 @@ func TestFinalObservationCannotClearMonotonicActionEvidence(t *testing.T) {
 
 func TestVerifiedCloseUsesLifecycleObservationInsteadOfClosedWindowRead(t *testing.T) {
 	result := closedWindowFinalObservation(
-		&a11yBatchContext{windowRef: "w7"},
+		&axBatchContext{windowRef: "w7"},
 		observation{mode: observeDiff},
 	)
 	if result.IsError {
@@ -989,8 +989,8 @@ func TestVerifiedCloseUsesLifecycleObservationInsteadOfClosedWindowRead(t *testi
 func TestExistingCloseLifecycleGetsVerifiedOutcomeFields(t *testing.T) {
 	service := newService()
 	result := service.recoverClosedWindowActionObservation(
-		&a11yBatchContext{windowRef: "w7"},
-		a11yBatchAction{actionType: "close"},
+		&axBatchContext{windowRef: "w7"},
+		axBatchAction{actionType: "close"},
 		toolCallResult{
 			IsError: true,
 			Content: []contentItem{
@@ -1044,7 +1044,7 @@ func TestExistingCloseLifecycleGetsVerifiedOutcomeFields(t *testing.T) {
 
 func TestVerifiedCloseDoesNotClaimTargetScreenshot(t *testing.T) {
 	result := finalizeVerifiedCloseLifecycle(closedWindowFinalObservation(
-		&a11yBatchContext{windowRef: "w7"},
+		&axBatchContext{windowRef: "w7"},
 		observation{mode: observeScreenshot},
 	))
 	if result.IsError {
@@ -1084,7 +1084,7 @@ func TestCloseObserveNoneStillVerifiesLifecycleWithoutReturningObservation(
 		}},
 	}
 	service.backend = backend
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
@@ -1112,7 +1112,7 @@ func TestCloseObserveNoneStillVerifiesLifecycleWithoutReturningObservation(
 
 	result := service.recoverClosedWindowActionObservation(
 		context,
-		a11yBatchAction{actionType: "close"},
+		axBatchAction{actionType: "close"},
 		actionResult,
 		observation{mode: observeNone},
 	)

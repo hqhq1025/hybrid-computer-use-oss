@@ -124,7 +124,7 @@ func TestMergePostconditionFinalObservationRemovesDeferredPlaceholder(t *testing
 			"final_observation_returned": true,
 		},
 	}
-	merged := mergeA11yBatchFinalObservation(action, observation)
+	merged := mergeAXBatchFinalObservation(action, observation)
 	text := resultText(merged)
 	if strings.Contains(text, "observe: none") ||
 		strings.Contains(text, `(observe="none":`) {

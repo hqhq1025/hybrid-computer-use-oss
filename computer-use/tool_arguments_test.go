@@ -22,7 +22,7 @@ func TestElementIndexAcceptsStringAndJSONNumber(t *testing.T) {
 	}
 }
 
-func TestA11yStructuredTargetNormalizesWithoutAmbiguousFields(t *testing.T) {
+func TestAXStructuredTargetNormalizesWithoutAmbiguousFields(t *testing.T) {
 	ref := "r17"
 	cases := []struct {
 		name   string
@@ -58,7 +58,7 @@ func TestA11yStructuredTargetNormalizesWithoutAmbiguousFields(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got, present, err := a11yTargetAddress(map[string]any{
+			got, present, err := axTargetAddress(map[string]any{
 				"target": testCase.target,
 			})
 			if err != nil || !present || got != testCase.want {
@@ -87,7 +87,7 @@ func TestA11yStructuredTargetNormalizesWithoutAmbiguousFields(t *testing.T) {
 			"selector": map[string]any{"state": "click"},
 		}},
 	} {
-		if _, _, err := a11yTargetAddress(invalid); err == nil {
+		if _, _, err := axTargetAddress(invalid); err == nil {
 			t.Fatalf("invalid target accepted: %#v", invalid)
 		}
 	}
@@ -95,7 +95,7 @@ func TestA11yStructuredTargetNormalizesWithoutAmbiguousFields(t *testing.T) {
 
 func TestPublicTargetRefAcceptsOnlyShortElementOrWindowRefs(t *testing.T) {
 	for _, ref := range []string{"r1", "r42", "w1", "w9"} {
-		if got, _, err := a11yTargetAddress(map[string]any{
+		if got, _, err := axTargetAddress(map[string]any{
 			"target": map[string]any{"ref": ref},
 		}); err != nil || got != ref {
 			t.Fatalf("public ref %q rejected: got=%q err=%v", ref, got, err)
@@ -109,7 +109,7 @@ func TestPublicTargetRefAcceptsOnlyShortElementOrWindowRefs(t *testing.T) {
 		"s2:payload",
 		"w2:" + strings.Repeat("a", 32),
 	} {
-		if _, _, err := a11yTargetAddress(map[string]any{
+		if _, _, err := axTargetAddress(map[string]any{
 			"target": map[string]any{"ref": ref},
 		}); err == nil {
 			t.Fatalf("internal or invalid ref %q was accepted", ref)

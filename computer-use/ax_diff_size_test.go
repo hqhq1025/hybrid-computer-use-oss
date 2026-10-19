@@ -40,7 +40,7 @@ func largeEditSnapshots(t *testing.T) (*appSnapshot, *appSnapshot) {
 			sourceApp: "impress", WindowTitle: "Impress", WindowHandle: "w1:handle",
 			publicWindowRef: "w1", SnapshotID: fmt.Sprintf("changed-%d", changed),
 			TreeLines: lines, axSnapshot: typed,
-			projection: snapshotProjection{View: treeViewWorking, Scope: a11yScopeWindow},
+			projection: snapshotProjection{View: treeViewWorking, Scope: axScopeWindow},
 		}
 	}
 	return build(0), build(120)

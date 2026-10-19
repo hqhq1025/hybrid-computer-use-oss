@@ -1095,7 +1095,7 @@ func TestFinalObservationContinuationRejectsDifferentAppOwner(t *testing.T) {
 		"Other",
 		otherAppRef,
 	)
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
@@ -1737,4 +1737,29 @@ func TestAppAndWindowRefLifecycleReleasesIdentity(t *testing.T) {
 	NewWindowRefRegistry(0).MarkLifecycle("w9", AXRefStale, "")
 	(*AppRefRegistry)(nil).MarkLifecycle("a1", AXRefStale, "")
 	(*WindowRefRegistry)(nil).MarkLifecycle("w1", AXRefStale, "")
+}
+
+func TestParseRefProviderIdentityTrimsOnlyTheTrailingFields(t *testing.T) {
+	values := []string{
+		" :1.2 ", " /obj ", " g1 ", " :1.3 ", " /win ", " g2 ", " frame ", " Doc ",
+		" a1 ", " w1 ", " process_instance ", " auto ", " push button ",
+	}
+	got := parseRefProviderIdentity(values)
+	want := refProviderIdentity{
+		busName: " :1.2 ", objectPath: " /obj ", processGeneration: " g1 ",
+		windowBusName: " :1.3 ", windowObjectPath: " /win ", windowProcessGeneration: " g2 ",
+		windowRole: " frame ", windowName: " Doc ",
+		appRef: "a1", logicalWindowRef: "w1", scope: "process_instance",
+		automationID: "auto", providerRole: "push button",
+	}
+	if got != want {
+		t.Fatalf("parseRefProviderIdentity = %#v, want %#v", got, want)
+	}
+	if !got.complete() {
+		t.Fatal("bus, object and generation are present; identity must be complete")
+	}
+	short := parseRefProviderIdentity([]string{":1.2", " "})
+	if short.complete() || short.processGeneration != "" || short.providerRole != "" {
+		t.Fatalf("missing positions must read as empty: %#v", short)
+	}
 }

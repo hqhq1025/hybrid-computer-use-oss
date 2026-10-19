@@ -24,7 +24,7 @@ func findDeliverySnapshot(t testing.TB, value string) (*service, *appSnapshot) {
 			{Index: 1, RuntimeID: []int{0, 0}, ControlType: "entry", Name: "Container", Value: value},
 			{Index: 2, RuntimeID: []int{0, 0, 0}, ControlType: "list item", Name: "Target", States: "[has-click-action]"},
 		},
-		scope: a11yScopeWindow,
+		scope: axScopeWindow,
 	}
 	if err := svc.buildAndRenderAXSnapshotV1(snapshot, treeViewWorking); err != nil {
 		t.Fatal(err)
@@ -196,7 +196,7 @@ func TestFindDeliveryTypedBudgetStillRejectsActualCuts(t *testing.T) {
 }
 
 func findDeliveryFinal(result toolCallResult) toolCallResult {
-	result = withA11yModeEvidence(result, a11yModeFind)
+	result = withAXModeEvidence(result, axModeFind)
 	result = enforceAXResponseBudget(result)
 	result = normalizeAXEvidenceInvariants(result)
 	return withAXTextEvidence(prepareAXEvidence(result))

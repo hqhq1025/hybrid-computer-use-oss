@@ -13,22 +13,22 @@ const (
 )
 
 const (
-	guiMaxActions       = 64
-	guiMaxScrollDelta   = 2000
-	guiMaxDragPoints    = 256
-	guiMaxKeys          = 8
-	guiMaxKeyLength     = 64
-	guiMaxTextLength    = 10000
-	guiMaxTotalWait     = 20
-	guiMaxSettleMS      = 3000
-	a11yBatchMaxActions = 32
-	a11yBatchMaxText    = 20000
-	maxClickCount       = 10
-	maxScrollPages      = 100
-	maxVerifyTimeout    = 60000
-	maxActionText       = 10000
-	maxMCPMessageBytes  = 1 << 20
-	maxDeliveredTrees   = 512
+	guiMaxActions      = 64
+	guiMaxScrollDelta  = 2000
+	guiMaxDragPoints   = 256
+	guiMaxKeys         = 8
+	guiMaxKeyLength    = 64
+	guiMaxTextLength   = 10000
+	guiMaxTotalWait    = 20
+	guiMaxSettleMS     = 3000
+	axBatchMaxActions  = 32
+	axBatchMaxText     = 20000
+	maxClickCount      = 10
+	maxScrollPages     = 100
+	maxVerifyTimeout   = 60000
+	maxActionText      = 10000
+	maxMCPMessageBytes = 1 << 20
+	maxDeliveredTrees  = 512
 )
 
 // serverInstructions is the MCP server description. It says how the two
@@ -156,11 +156,11 @@ func nonBlankString(description string) map[string]any {
 	return property
 }
 
-// a11yInputSchema is the single flat AX schema. It has no oneOf: which
+// axInputSchema is the single flat AX schema. It has no oneOf: which
 // fields belong to which mode or action type is checked by decodeAXRequest,
 // which names the field and shows a corrected call. Keep it under the
 // client compaction budget (TestAXSchemaSurvivesClientCompaction).
-func a11yInputSchema() map[string]any {
+func axInputSchema() map[string]any {
 	query := map[string]any{}
 	for _, field := range axFindFilters {
 		query[field] = nonBlankString("")
@@ -177,7 +177,7 @@ func a11yInputSchema() map[string]any {
 		}},
 		"properties": map[string]any{
 			"mode": map[string]any{
-				"type": "string", "enum": []string{a11yModeApps, a11yModeObserve, a11yModeFind, a11yModeAct},
+				"type": "string", "enum": []string{axModeApps, axModeObserve, axModeFind, axModeAct},
 				"description": "apps lists every top-level window (wN, title, app, active); observe returns a tree or diff with rN; find returns matching rN; act runs actions.",
 			},
 			"app": nonBlankString(appArgumentHelp),
@@ -185,7 +185,7 @@ func a11yInputSchema() map[string]any {
 				"type": "string", "pattern": "^w[1-9][0-9]*$",
 				"description": "observe/find: window to read. act: omit when actions have refs, which name the window; it only sends ref-less keys/text to wN instead of the focused window.",
 			},
-			"scope": map[string]any{"type": "string", "enum": a11yScopeValues, "description": "observe/find; default window."},
+			"scope": map[string]any{"type": "string", "enum": axScopeValues, "description": "observe/find; default window."},
 			"observe": map[string]any{
 				"type": "string", "enum": observeValues,
 				"description": "Returned evidence. act: default diff; observe: default tree. none only with act.",
@@ -201,7 +201,7 @@ func a11yInputSchema() map[string]any {
 				"description": "find: next_cursor from a truncated result; send with mode find only.",
 			},
 			"actions": map[string]any{
-				"type": "array", "minItems": 1, "maxItems": a11yBatchMaxActions,
+				"type": "array", "minItems": 1, "maxItems": axBatchMaxActions,
 				"description": "act: ordered steps; a failed step stops the batch.",
 				"items": map[string]any{
 					"type": "object", "additionalProperties": false, "required": []string{"type"},
@@ -428,7 +428,7 @@ func allToolDefinitions() []toolDefinition {
 			Title:       "Accessibility",
 			Description: axToolDescription,
 			Annotations: annotations("Accessibility"),
-			InputSchema: a11yInputSchema(),
+			InputSchema: axInputSchema(),
 		},
 		{
 			Name:        publicToolGUI,

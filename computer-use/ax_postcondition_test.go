@@ -51,7 +51,7 @@ func TestActionPostconditionReconciliationSamplesAfterPolling(t *testing.T) {
 				ProviderWindowName:              "Sheet",
 			},
 		},
-		scope: a11yScopeWindow,
+		scope: axScopeWindow,
 	}
 	backend := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
@@ -69,7 +69,7 @@ func TestActionPostconditionReconciliationSamplesAfterPolling(t *testing.T) {
 			IncludeScreenshot:  &noScreenshot,
 			TargetWindowHandle: handle,
 			SourceRef:          windowRef,
-			Scope:              a11yScopeWindow,
+			Scope:              axScopeWindow,
 			TreeView:           treeViewWorking,
 		},
 	)
@@ -86,15 +86,15 @@ func TestActionPostconditionReconciliationSamplesAfterPolling(t *testing.T) {
 	}
 	snapshot.Elements[1].States = "[checked enabled showing visible]"
 	backend.observeRequests = nil
-	incomplete := a11yAssertionResult(
+	incomplete := axAssertionResult(
 		"assert_ax observation_incomplete: live AX target incomplete",
 		true,
 		"observation_incomplete",
 		1,
 		0,
 	)
-	reconciled := service.reconcileA11yActionPostcondition(
-		&a11yBatchContext{
+	reconciled := service.reconcileAXActionPostcondition(
+		&axBatchContext{
 			appRef:       appRef,
 			appToken:     appRef,
 			windowRef:    windowRef,
@@ -121,7 +121,7 @@ func TestActionPostconditionReconciliationSamplesAfterPolling(t *testing.T) {
 	}
 }
 
-func TestA11yAssertionSpecOwnsTimeoutAndRejectsIndexPostcondition(t *testing.T) {
+func TestAXAssertionSpecOwnsTimeoutAndRejectsIndexPostcondition(t *testing.T) {
 	assertion := map[string]any{
 		"type":       "state",
 		"target":     map[string]any{"ref": "r17"},
@@ -129,7 +129,7 @@ func TestA11yAssertionSpecOwnsTimeoutAndRejectsIndexPostcondition(t *testing.T) 
 		"value":      true,
 		"timeout_ms": float64(2500),
 	}
-	spec, err := parseA11yAssertionSpec(assertion)
+	spec, err := parseAXAssertionSpec(assertion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +137,8 @@ func TestA11yAssertionSpecOwnsTimeoutAndRejectsIndexPostcondition(t *testing.T) 
 		t.Fatalf("parsed assertion drifted: %#v", spec)
 	}
 	service := newService()
-	if err := service.preflightA11yPostcondition(
-		&a11yBatchContext{windowHandle: "window-1", windowRef: "w1"},
+	if err := service.preflightAXPostcondition(
+		&axBatchContext{windowHandle: "window-1", windowRef: "w1"},
 		map[string]any{
 			"type":   "exists",
 			"target": map[string]any{"index": float64(7)},
@@ -164,7 +164,7 @@ func TestValueAssertionAcceptsAndNormalizesJSONScalars(t *testing.T) {
 				"target": map[string]any{"ref": "r17"},
 				"value":  tc.expected,
 			}
-			spec, err := parseA11yAssertionSpec(assertion)
+			spec, err := parseAXAssertionSpec(assertion)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -183,7 +183,7 @@ func TestValueAssertionAcceptsAndNormalizesJSONScalars(t *testing.T) {
 }
 
 func TestValueContainsRejectsNonStringScalar(t *testing.T) {
-	_, err := parseA11yAssertionSpec(map[string]any{
+	_, err := parseAXAssertionSpec(map[string]any{
 		"type":   "value",
 		"target": map[string]any{"ref": "r17"},
 		"value":  float64(100),
@@ -202,7 +202,7 @@ func TestPostconditionFailureClassificationPreservesUnderlyingCause(t *testing.T
 			"assertion_sampled_live_ui": true,
 		},
 	}
-	classification, underlying := classifyA11yPostconditionFailure(
+	classification, underlying := classifyAXPostconditionFailure(
 		predicateFalse,
 	)
 	if classification != "postcondition_not_satisfied" ||
@@ -221,7 +221,7 @@ func TestPostconditionFailureClassificationPreservesUnderlyingCause(t *testing.T
 			"assertion_sampled_live_ui": false,
 		},
 	}
-	classification, underlying = classifyA11yPostconditionFailure(incomplete)
+	classification, underlying = classifyAXPostconditionFailure(incomplete)
 	if classification != "postcondition_unknown" ||
 		underlying != "observation_incomplete" {
 		t.Fatalf(
@@ -241,8 +241,8 @@ func TestClosedWindowNegativeTitlePostconditionUsesOwningApp(t *testing.T) {
 	}
 	service, appRef, windowRef, _ := sheetBatchService(t)
 	service.backend = backend
-	result := service.runA11yPostcondition(
-		&a11yBatchContext{
+	result := service.runAXPostcondition(
+		&axBatchContext{
 			appRef:       appRef,
 			windowRef:    windowRef,
 			appToken:     appRef,
@@ -266,8 +266,8 @@ func TestClosedWindowNegativeTitlePostconditionUsesOwningApp(t *testing.T) {
 
 func TestRefOwnedBatchScopesSelectorPostconditionToSameWindow(t *testing.T) {
 	service, _, windowRef, elementRef := sheetBatchService(t)
-	context, err := service.deriveA11yBatchContext(
-		"", []a11yBatchAction{{
+	context, err := service.deriveAXBatchContext(
+		"", []axBatchAction{{
 			actionType: "click",
 			targetRef:  elementRef,
 		}}, nil,
@@ -278,7 +278,7 @@ func TestRefOwnedBatchScopesSelectorPostconditionToSameWindow(t *testing.T) {
 	if context.windowRef != windowRef {
 		t.Fatalf("element ref did not preserve its owning window: %#v", context)
 	}
-	if err := service.preflightA11yPostcondition(
+	if err := service.preflightAXPostcondition(
 		context,
 		map[string]any{
 			"type": "exists",
@@ -313,7 +313,7 @@ func TestAssertionBooleansRejectStrings(t *testing.T) {
 			"type": "window_title_contains", "text": "Save", "exists": "no",
 		},
 	} {
-		if _, err := parseA11yAssertionSpec(assertion); err == nil {
+		if _, err := parseAXAssertionSpec(assertion); err == nil {
 			t.Fatalf("%s: string boolean was accepted", name)
 		}
 	}

@@ -239,14 +239,14 @@ func axRepairWaitHint(hint string) (string, bool) {
 func axUntilCallAsWait(args map[string]any) (string, bool) {
 	mode, _ := args["mode"].(string)
 	out := map[string]any{"mode": "act"}
-	if ref, ok := args["window_ref"].(string); ok && mode == a11yModeAct {
+	if ref, ok := args["window_ref"].(string); ok && mode == axModeAct {
 		out["window_ref"] = ref
 	}
-	if observe, ok := args["observe"].(string); ok && mode == a11yModeAct {
+	if observe, ok := args["observe"].(string); ok && mode == axModeAct {
 		out["observe"] = observe
 	}
 	steps := []any{}
-	if mode == a11yModeAct {
+	if mode == axModeAct {
 		items, _ := args["actions"].([]any)
 		for _, item := range items {
 			action, ok := item.(map[string]any)
@@ -423,7 +423,7 @@ func axOrderedCall(call map[string]any) string {
 // runAXWait polls one wait step. It sends no input. The result is a
 // predicate result: assertion_status "pass", a sampled false, or an error
 // when the state could not be read.
-func (s *service) runAXWait(context *a11yBatchContext, wait *axWait) toolCallResult {
+func (s *service) runAXWait(context *axBatchContext, wait *axWait) toolCallResult {
 	switch {
 	case wait.window != "":
 		return s.waitForDesktopWindow(wait)
@@ -483,7 +483,7 @@ func (s *service) waitForDesktopWindow(wait *axWait) toolCallResult {
 				}
 				text = "wait: window " + strings.Join(names, ", ")
 			}
-			result := a11yAssertionResult(text, false, "pass", attempts, 0)
+			result := axAssertionResult(text, false, "pass", attempts, 0)
 			if len(matched) == 1 {
 				result.StructuredContent["wait_window_ref"] = matched[0].ref
 			}
@@ -507,7 +507,7 @@ func (s *service) waitForDesktopWindow(wait *axWait) toolCallResult {
 			} else {
 				text += "; windows: " + axQuotedList(lastTitles, 8)
 			}
-			result := a11yAssertionResult(text, !sampled || lastError != "", "predicate_false", attempts, 0)
+			result := axAssertionResult(text, !sampled || lastError != "", "predicate_false", attempts, 0)
 			if lastError != "" {
 				result.StructuredContent["assertion_status"] = "observation_incomplete"
 			}
@@ -534,7 +534,7 @@ func axQuotedList(values []string, limit int) string {
 
 // waitForQuery polls every visible window of the batch application with
 // find's matching rules.
-func (s *service) waitForQuery(context *a11yBatchContext, wait *axWait) toolCallResult {
+func (s *service) waitForQuery(context *axBatchContext, wait *axWait) toolCallResult {
 	query := wait.query
 	name := optionalString(query, "name_contains")
 	_, nameExact := query["name_equals"]
@@ -568,7 +568,7 @@ func (s *service) waitForQuery(context *a11yBatchContext, wait *axWait) toolCall
 
 // waitForText polls the batch window for an element whose name,
 // description, value, or placeholder contains the text.
-func (s *service) waitForText(context *a11yBatchContext, wait *axWait) toolCallResult {
+func (s *service) waitForText(context *axBatchContext, wait *axWait) toolCallResult {
 	lookup := func(snapshot *appSnapshot) (*elementRecord, error) {
 		if snapshot == nil {
 			return nil, nil
@@ -587,7 +587,7 @@ func (s *service) waitForText(context *a11yBatchContext, wait *axWait) toolCallR
 }
 
 func (s *service) waitOnApplication(
-	context *a11yBatchContext,
+	context *axBatchContext,
 	lookup axElementLookup,
 	display, hint string,
 	goal verifyGoal,
@@ -595,13 +595,13 @@ func (s *service) waitOnApplication(
 ) toolCallResult {
 	app := firstNonEmpty(context.appRef, context.appToken)
 	result := s.verifyLookup(app, lookup, display, hint, false, goal, timeoutMS, 0,
-		a11yScopeWindow, context.windowHandle)
+		axScopeWindow, context.windowHandle)
 	return axWaitResultText(result)
 }
 
 // waitForRef polls one element ref for a value, state, or text, or for its
 // absence.
-func (s *service) waitForRef(context *a11yBatchContext, wait *axWait) toolCallResult {
+func (s *service) waitForRef(context *axBatchContext, wait *axWait) toolCallResult {
 	predicate := map[string]any{"ref": wait.ref, "timeout_ms": float64(wait.timeoutMS)}
 	switch {
 	case wait.value != "":
@@ -620,13 +620,13 @@ func (s *service) waitForRef(context *a11yBatchContext, wait *axWait) toolCallRe
 	if argErr != nil {
 		return textResult(argErr.message, true)
 	}
-	if err := s.preflightA11yPostcondition(context, assertion); err != nil {
+	if err := s.preflightAXPostcondition(context, assertion); err != nil {
 		return axStaleRefResult(wait.ref, err)
 	}
 	if held, ok := s.waitHoldsInLatestRead(context, wait.ref, assertion); ok {
 		return held
 	}
-	return axWaitResultText(s.runA11yPostcondition(context, assertion))
+	return axWaitResultText(s.runAXPostcondition(context, assertion))
 }
 
 // waitHoldsInLatestRead checks a ref wait against the read the previous
@@ -635,7 +635,7 @@ func (s *service) waitForRef(context *a11yBatchContext, wait *axWait) toolCallRe
 // read some elements completely and would otherwise poll to its deadline
 // before a canonical read decides.
 func (s *service) waitHoldsInLatestRead(
-	context *a11yBatchContext,
+	context *axBatchContext,
 	ref string,
 	assertion map[string]any,
 ) (toolCallResult, bool) {
@@ -653,7 +653,7 @@ func (s *service) waitHoldsInLatestRead(
 	if !held {
 		return toolCallResult{}, false
 	}
-	return a11yAssertionResult(fmt.Sprintf("wait: %s %s. %s", ref, goal.describe(), observed),
+	return axAssertionResult(fmt.Sprintf("wait: %s %s. %s", ref, goal.describe(), observed),
 		false, "pass", 1, 0), true
 }
 
@@ -667,7 +667,7 @@ func axWaitResultText(result toolCallResult) toolCallResult {
 	for _, prefix := range []string{"wait: ", "wait false: ", "wait ", "PASS: "} {
 		text = strings.TrimPrefix(text, prefix)
 	}
-	if a11yPostconditionPassed(result) {
+	if axPostconditionPassed(result) {
 		text = "wait: " + text
 	} else if !strings.HasPrefix(text, "wait_timeout") {
 		text = "wait_timeout: " + text
@@ -676,7 +676,7 @@ func axWaitResultText(result toolCallResult) toolCallResult {
 	return result
 }
 
-func a11yBatchOnlyWaits(actions []a11yBatchAction) bool {
+func axBatchOnlyWaits(actions []axBatchAction) bool {
 	for _, action := range actions {
 		if action.actionType != "wait" {
 			return false
@@ -685,9 +685,9 @@ func a11yBatchOnlyWaits(actions []a11yBatchAction) bool {
 	return len(actions) > 0
 }
 
-// preflightA11yWaitRef checks that a wait ref still names an element of the
+// preflightAXWaitRef checks that a wait ref still names an element of the
 // batch window before any input.
-func (s *service) preflightA11yWaitRef(context *a11yBatchContext, ref string) error {
+func (s *service) preflightAXWaitRef(context *axBatchContext, ref string) error {
 	entry, err := s.resolveShortAXRefOwned(ref)
 	if err != nil {
 		return err
@@ -704,7 +704,7 @@ func axWaitEvidenceEntry(index int, result toolCallResult) map[string]any {
 		"action_index":  index,
 		"action_number": index + 1,
 		"action_type":   "wait",
-		"call_error":    !a11yPostconditionPassed(result),
+		"call_error":    !axPostconditionPassed(result),
 	}
 	if status, _ := result.StructuredContent["assertion_status"].(string); status != "" {
 		entry["wait_status"] = status
@@ -717,7 +717,7 @@ func axWaitEvidenceEntry(index int, result toolCallResult) map[string]any {
 // to that window, as when the call had named it. Element refs from the
 // earlier window still fail on window identity.
 func (s *service) rebindAfterWindowWait(
-	context *a11yBatchContext,
+	context *axBatchContext,
 	wait *axWait,
 	result toolCallResult,
 ) {
@@ -754,16 +754,16 @@ func (s *service) rebindAfterWindowWait(
 		IncludeScreenshot:  &noScreenshot,
 		TargetWindowHandle: context.windowHandle,
 		SourceRef:          context.windowRef,
-		Scope:              a11yScopeWindow,
+		Scope:              axScopeWindow,
 		TreeView:           treeViewWorking,
 	})
 }
 
-// stopA11yBatchAtWait ends a batch at a wait that did not hold. The steps
+// stopAXBatchAtWait ends a batch at a wait that did not hold. The steps
 // before it ran; none after it were sent. The current state follows.
-func (s *service) stopA11yBatchAtWait(
-	context *a11yBatchContext,
-	actions []a11yBatchAction,
+func (s *service) stopAXBatchAtWait(
+	context *axBatchContext,
+	actions []axBatchAction,
 	index int,
 	waitResult toolCallResult,
 	actionEvidence []map[string]any,
@@ -820,7 +820,7 @@ func (s *service) stopA11yBatchAtWait(
 	if obs.resolvedMode() == observeNone {
 		return stopped
 	}
-	current := s.a11yBatchFinalObservation(context, obs, false)
+	current := s.axBatchFinalObservation(context, obs, false)
 	if current.IsError {
 		stopped.Content = append(stopped.Content, contentItem{
 			Type: "text",
@@ -840,23 +840,23 @@ func (s *service) stopA11yBatchAtWait(
 	return stopped
 }
 
-// a11yBatchContinuityStop stops before the next input when the batch window
+// axBatchContinuityStop stops before the next input when the batch window
 // changed or cannot be confirmed.
-func (s *service) a11yBatchContinuityStop(
-	context *a11yBatchContext,
-	actions []a11yBatchAction,
+func (s *service) axBatchContinuityStop(
+	context *axBatchContext,
+	actions []axBatchAction,
 	index int,
 	actionEvidence []map[string]any,
 	obs observation,
 ) (toolCallResult, bool) {
-	continuity := s.a11yBatchWindowContinuity(context)
-	if continuity == a11yWindowSame {
+	continuity := s.axBatchWindowContinuity(context)
+	if continuity == axWindowSame {
 		return toolCallResult{}, false
 	}
 	anyInputEmitted, anyPartialPossible, anyMutationUnknown := batchMutationSummary(actionEvidence)
 	failureCode := "stale_target"
 	messageCode := "batch_window_changed"
-	if continuity == a11yWindowUnknown {
+	if continuity == axWindowUnknown {
 		failureCode = "observation_incomplete"
 		messageCode = "batch_window_unknown"
 	}
@@ -886,19 +886,19 @@ func (s *service) a11yBatchContinuityStop(
 		"mutation_unknown":                     anyMutationUnknown || anyInputEmitted || anyPartialPossible,
 		"observation_required":                 true,
 	}
-	return s.recoverA11yBatchObservation(context, stopped, obs), true
+	return s.recoverAXBatchObservation(context, stopped, obs), true
 }
 
-// a11yWaitOnly runs an act call whose steps are all waits. It sends no
+// axWaitOnly runs an act call whose steps are all waits. It sends no
 // input, so it needs no focused window: the batch window comes from a ref
 // or window_ref, or from the focused window when one exists. A window wait
 // needs neither.
-func (s *service) a11yWaitOnly(
-	actions []a11yBatchAction,
+func (s *service) axWaitOnly(
+	actions []axBatchAction,
 	obs observation,
 	windowRef string,
 ) toolCallResult {
-	context := &a11yBatchContext{}
+	context := &axBatchContext{}
 	needsWindow := false
 	for _, action := range actions {
 		if action.wait.window == "" {
@@ -907,7 +907,7 @@ func (s *service) a11yWaitOnly(
 	}
 	if needsWindow {
 		var focus *axDesktopWindow
-		if windowRef == "" && !a11yBatchHasRef(actions) {
+		if windowRef == "" && !axBatchHasRef(actions) {
 			var argErr *axArgError
 			focus, argErr = s.resolveFocusedWindow()
 			if argErr != nil {
@@ -917,17 +917,17 @@ func (s *service) a11yWaitOnly(
 				return axArgErrorResult(argErr, len(actions))
 			}
 		}
-		bound, err := s.deriveA11yBatchContext(windowRef, actions, focus)
+		bound, err := s.deriveAXBatchContext(windowRef, actions, focus)
 		if err != nil {
-			return a11yBatchPreflightError(err, len(actions))
+			return axBatchPreflightError(err, len(actions))
 		}
 		context = bound
 		for index, action := range actions {
 			if action.wait.ref == "" {
 				continue
 			}
-			if err := s.preflightA11yWaitRef(context, action.wait.ref); err != nil {
-				return a11yBatchPreflightError(fmt.Errorf("actions[%d].ref: %w", index, err), len(actions))
+			if err := s.preflightAXWaitRef(context, action.wait.ref); err != nil {
+				return axBatchPreflightError(fmt.Errorf("actions[%d].ref: %w", index, err), len(actions))
 			}
 		}
 	}
@@ -936,11 +936,11 @@ func (s *service) a11yWaitOnly(
 	for index, action := range actions {
 		result := s.runAXWait(context, action.wait)
 		evidence = append(evidence, axWaitEvidenceEntry(index, result))
-		if !a11yPostconditionPassed(result) {
+		if !axPostconditionPassed(result) {
 			if context.windowHandle == "" {
 				obs = observation{mode: observeNone}
 			}
-			return s.stopA11yBatchAtWait(context, actions, index, result, evidence, notes, obs)
+			return s.stopAXBatchAtWait(context, actions, index, result, evidence, notes, obs)
 		}
 		notes = append(notes, firstLine(resultText(result)))
 		s.rebindAfterWindowWait(context, action.wait, result)
@@ -955,7 +955,7 @@ func (s *service) a11yWaitOnly(
 		},
 	}
 	if context.windowHandle != "" && obs.resolvedMode() != observeNone {
-		current := s.a11yBatchFinalObservation(context, obs, false)
+		current := s.axBatchFinalObservation(context, obs, false)
 		if !current.IsError {
 			result.Content = append(result.Content, current.Content...)
 			for _, key := range []string{"final_observation_kind", "final_observation_returned"} {
@@ -1173,7 +1173,7 @@ func decodeAXPredicateTarget(object map[string]any, path, kind string) (map[stri
 				withFix(axRemove(path + ".selector.state"))
 		}
 	}
-	if _, err := a11ySelectorAddress(fields); err != nil {
+	if _, err := axSelectorAddress(fields); err != nil {
 		return nil, axInvalid(path+".selector", "selector "+err.Error(), `{"role":"dialog","name":"Print"}`)
 	}
 	return map[string]any{"selector": fields}, nil

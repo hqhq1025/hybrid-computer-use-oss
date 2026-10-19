@@ -89,7 +89,7 @@ func TestChannelCapabilitySwitch(t *testing.T) {
 	}
 }
 
-func TestA11yReadModesKeepTheirEvidenceBoundaries(t *testing.T) {
+func TestAXReadModesKeepTheirEvidenceBoundaries(t *testing.T) {
 	if got := toolEvidenceScope(publicToolAX, map[string]any{"mode": "apps"}); got != "app_inventory" {
 		t.Fatalf("apps evidence scope=%q", got)
 	}
@@ -107,7 +107,7 @@ func TestA11yReadModesKeepTheirEvidenceBoundaries(t *testing.T) {
 		t.Fatalf("act evidence scope=%q", got)
 	}
 	service := newService()
-	rejected := service.a11yRequest(map[string]any{
+	rejected := service.handleAXRequest(map[string]any{
 		"mode":    "find",
 		"app":     "Editor",
 		"query":   map[string]any{"name_equals": "Save"},

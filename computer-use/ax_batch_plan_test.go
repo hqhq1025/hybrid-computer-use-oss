@@ -5,17 +5,17 @@ import (
 	"testing"
 )
 
-func testA11yBatchPlanContext() *a11yBatchContext {
-	return &a11yBatchContext{
+func testAXBatchPlanContext() *axBatchContext {
+	return &axBatchContext{
 		windowRef:    "w1",
 		windowHandle: "private-window-1",
 	}
 }
 
-func TestA11yBatchPlanGroupsOnlyUntargetedKeypresses(t *testing.T) {
-	plan, err := compileA11yBatchExecutionPlan(
-		testA11yBatchPlanContext(),
-		[]a11yBatchAction{
+func TestAXBatchPlanGroupsOnlyUntargetedKeypresses(t *testing.T) {
+	plan, err := compileAXBatchExecutionPlan(
+		testAXBatchPlanContext(),
+		[]axBatchAction{
 			{actionType: "keypress", key: "DOWN"},
 			{actionType: "keypress", key: "ENTER"},
 			{actionType: "keypress", key: "A"},
@@ -25,30 +25,30 @@ func TestA11yBatchPlanGroupsOnlyUntargetedKeypresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.initialConsistency != a11yPlanCanonicalWindow ||
+	if plan.initialConsistency != axPlanCanonicalWindow ||
 		!plan.requiresMutationLease ||
 		plan.finalObservation != observeDiff {
 		t.Fatalf("unexpected plan header: %#v", plan)
 	}
 	for index, step := range plan.steps {
-		if step.executionClass != a11yPlanOrderedInput ||
-			step.preConsistency != a11yPlanWindowIdentity ||
+		if step.executionClass != axPlanOrderedInput ||
+			step.preConsistency != axPlanWindowIdentity ||
 			step.orderedInputRun != 1 {
 			t.Fatalf("step %d was not in one ordered input run: %#v", index, step)
 		}
 	}
-	if plan.steps[0].boundary != a11yPlanNoBoundary ||
-		plan.steps[1].boundary != a11yPlanNoBoundary ||
-		plan.steps[2].boundary != a11yPlanTransactionBoundary ||
-		plan.steps[2].postConsistency != a11yPlanCanonicalWindow {
+	if plan.steps[0].boundary != axPlanNoBoundary ||
+		plan.steps[1].boundary != axPlanNoBoundary ||
+		plan.steps[2].boundary != axPlanTransactionBoundary ||
+		plan.steps[2].postConsistency != axPlanCanonicalWindow {
 		t.Fatalf("ordered run has incorrect boundaries: %#v", plan.steps)
 	}
 }
 
-func TestA11yBatchPlanSeparatesRunsAtCanonicalActions(t *testing.T) {
-	plan, err := compileA11yBatchExecutionPlan(
-		testA11yBatchPlanContext(),
-		[]a11yBatchAction{
+func TestAXBatchPlanSeparatesRunsAtCanonicalActions(t *testing.T) {
+	plan, err := compileAXBatchExecutionPlan(
+		testAXBatchPlanContext(),
+		[]axBatchAction{
 			{actionType: "click", targetRef: "r1"},
 			{actionType: "keypress", key: "DOWN"},
 			{actionType: "keypress", key: "ENTER"},
@@ -60,12 +60,12 @@ func TestA11yBatchPlanSeparatesRunsAtCanonicalActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantClasses := []a11yPlanExecutionClass{
-		a11yPlanSingleAction,
-		a11yPlanOrderedInput,
-		a11yPlanOrderedInput,
-		a11yPlanSingleAction,
-		a11yPlanOrderedInput,
+	wantClasses := []axPlanExecutionClass{
+		axPlanSingleAction,
+		axPlanOrderedInput,
+		axPlanOrderedInput,
+		axPlanSingleAction,
+		axPlanOrderedInput,
 	}
 	for index, want := range wantClasses {
 		if plan.steps[index].executionClass != want {
@@ -73,9 +73,9 @@ func TestA11yBatchPlanSeparatesRunsAtCanonicalActions(t *testing.T) {
 				plan.steps[index].executionClass, want)
 		}
 	}
-	if plan.steps[0].boundary != a11yPlanTargetedBoundary ||
-		plan.steps[2].boundary != a11yPlanNextActionBoundary ||
-		plan.steps[3].boundary != a11yPlanTargetedBoundary ||
+	if plan.steps[0].boundary != axPlanTargetedBoundary ||
+		plan.steps[2].boundary != axPlanNextActionBoundary ||
+		plan.steps[3].boundary != axPlanTargetedBoundary ||
 		plan.steps[1].orderedInputRun != 1 ||
 		plan.steps[2].orderedInputRun != 1 ||
 		plan.steps[4].orderedInputRun != 2 {
@@ -83,16 +83,16 @@ func TestA11yBatchPlanSeparatesRunsAtCanonicalActions(t *testing.T) {
 	}
 }
 
-func TestA11yBatchPlanKeepsEffectSensitiveActionsOnFullPath(t *testing.T) {
-	actions := []a11yBatchAction{
+func TestAXBatchPlanKeepsEffectSensitiveActionsOnFullPath(t *testing.T) {
+	actions := []axBatchAction{
 		{actionType: "keypress", targetRef: "r1", key: "ENTER"},
 		{actionType: "wait", wait: &axWait{window: "Done"}},
 		{actionType: "type", text: "literal"},
 		{actionType: "scroll", direction: "down"},
 		{actionType: "activate", targetRef: "w1"},
 	}
-	plan, err := compileA11yBatchExecutionPlan(
-		testA11yBatchPlanContext(),
+	plan, err := compileAXBatchExecutionPlan(
+		testAXBatchPlanContext(),
 		actions,
 		observation{mode: observeScreenshot},
 	)
@@ -100,27 +100,27 @@ func TestA11yBatchPlanKeepsEffectSensitiveActionsOnFullPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	for index, step := range plan.steps {
-		if step.executionClass != a11yPlanSingleAction ||
-			step.preConsistency != a11yPlanCanonicalWindow {
+		if step.executionClass != axPlanSingleAction ||
+			step.preConsistency != axPlanCanonicalWindow {
 			t.Fatalf("effect-sensitive step %d entered ordered path: %#v",
 				index, step)
 		}
 	}
-	if plan.steps[0].target != a11yPlanElementTarget ||
-		plan.steps[0].boundary != a11yPlanTargetedBoundary ||
-		plan.steps[1].boundary != a11yPlanWaitBoundary ||
-		plan.steps[2].boundary != a11yPlanCanonicalBoundary ||
-		plan.steps[3].boundary != a11yPlanCanonicalBoundary ||
-		plan.steps[4].target != a11yPlanWindowTarget ||
-		plan.steps[4].boundary != a11yPlanWindowBoundary {
+	if plan.steps[0].target != axPlanElementTarget ||
+		plan.steps[0].boundary != axPlanTargetedBoundary ||
+		plan.steps[1].boundary != axPlanWaitBoundary ||
+		plan.steps[2].boundary != axPlanCanonicalBoundary ||
+		plan.steps[3].boundary != axPlanCanonicalBoundary ||
+		plan.steps[4].target != axPlanWindowTarget ||
+		plan.steps[4].boundary != axPlanWindowBoundary {
 		t.Fatalf("effect-sensitive boundaries are wrong: %#v", plan.steps)
 	}
 }
 
-func TestA11yBatchPlanEndsOrderedRunAtAWait(t *testing.T) {
-	plan, err := compileA11yBatchExecutionPlan(
-		testA11yBatchPlanContext(),
-		[]a11yBatchAction{
+func TestAXBatchPlanEndsOrderedRunAtAWait(t *testing.T) {
+	plan, err := compileAXBatchExecutionPlan(
+		testAXBatchPlanContext(),
+		[]axBatchAction{
 			{actionType: "keypress", key: "ENTER"},
 			{actionType: "wait", wait: &axWait{window: "Done"}},
 		},
@@ -129,35 +129,35 @@ func TestA11yBatchPlanEndsOrderedRunAtAWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.steps[0].boundary != a11yPlanNextActionBoundary ||
-		plan.steps[0].postConsistency != a11yPlanCanonicalWindow ||
-		plan.steps[1].executionClass != a11yPlanSingleAction {
+	if plan.steps[0].boundary != axPlanNextActionBoundary ||
+		plan.steps[0].postConsistency != axPlanCanonicalWindow ||
+		plan.steps[1].executionClass != axPlanSingleAction {
 		t.Fatalf("a wait did not close the ordered run: %#v", plan)
 	}
 }
 
-func TestA11yBatchPlanRejectsUnboundOrMalformedInput(t *testing.T) {
+func TestAXBatchPlanRejectsUnboundOrMalformedInput(t *testing.T) {
 	tests := []struct {
 		name    string
-		context *a11yBatchContext
-		actions []a11yBatchAction
+		context *axBatchContext
+		actions []axBatchAction
 		want    string
 	}{
 		{
 			name:    "nil context",
 			context: nil,
-			actions: []a11yBatchAction{{actionType: "keypress", key: "A"}},
+			actions: []axBatchAction{{actionType: "keypress", key: "A"}},
 			want:    "one bound logical window",
 		},
 		{
 			name:    "empty actions",
-			context: testA11yBatchPlanContext(),
+			context: testAXBatchPlanContext(),
 			want:    "at least one action",
 		},
 		{
 			name:    "malformed target",
-			context: testA11yBatchPlanContext(),
-			actions: []a11yBatchAction{{
+			context: testAXBatchPlanContext(),
+			actions: []axBatchAction{{
 				actionType: "click",
 				targetRef:  `button "Save"`,
 			}},
@@ -166,7 +166,7 @@ func TestA11yBatchPlanRejectsUnboundOrMalformedInput(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := compileA11yBatchExecutionPlan(
+			_, err := compileAXBatchExecutionPlan(
 				test.context,
 				test.actions,
 				observation{},

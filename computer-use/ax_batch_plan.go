@@ -6,159 +6,159 @@ import (
 	"strings"
 )
 
-type a11yPlanExecutionClass string
+type axPlanExecutionClass string
 
 const (
-	a11yPlanSingleAction a11yPlanExecutionClass = "single_action"
-	a11yPlanOrderedInput a11yPlanExecutionClass = "ordered_window_input"
+	axPlanSingleAction axPlanExecutionClass = "single_action"
+	axPlanOrderedInput axPlanExecutionClass = "ordered_window_input"
 )
 
-type a11yPlanConsistency string
+type axPlanConsistency string
 
 const (
-	a11yPlanWindowIdentity  a11yPlanConsistency = "window_identity"
-	a11yPlanCanonicalWindow a11yPlanConsistency = "canonical_window"
+	axPlanWindowIdentity  axPlanConsistency = "window_identity"
+	axPlanCanonicalWindow axPlanConsistency = "canonical_window"
 )
 
-type a11yPlanTargetRequirement string
+type axPlanTargetRequirement string
 
 const (
-	a11yPlanNoTarget      a11yPlanTargetRequirement = "none"
-	a11yPlanElementTarget a11yPlanTargetRequirement = "element_ref"
-	a11yPlanWindowTarget  a11yPlanTargetRequirement = "window_ref"
+	axPlanNoTarget      axPlanTargetRequirement = "none"
+	axPlanElementTarget axPlanTargetRequirement = "element_ref"
+	axPlanWindowTarget  axPlanTargetRequirement = "window_ref"
 )
 
-type a11yPlanBoundary string
+type axPlanBoundary string
 
 const (
-	a11yPlanNoBoundary          a11yPlanBoundary = "none"
-	a11yPlanCanonicalBoundary   a11yPlanBoundary = "canonical_action"
-	a11yPlanTargetedBoundary    a11yPlanBoundary = "targeted_action"
-	a11yPlanWaitBoundary        a11yPlanBoundary = "wait"
-	a11yPlanWindowBoundary      a11yPlanBoundary = "window_transition"
-	a11yPlanNextActionBoundary  a11yPlanBoundary = "next_action_requires_canonical"
-	a11yPlanTransactionBoundary a11yPlanBoundary = "transaction_end"
+	axPlanNoBoundary          axPlanBoundary = "none"
+	axPlanCanonicalBoundary   axPlanBoundary = "canonical_action"
+	axPlanTargetedBoundary    axPlanBoundary = "targeted_action"
+	axPlanWaitBoundary        axPlanBoundary = "wait"
+	axPlanWindowBoundary      axPlanBoundary = "window_transition"
+	axPlanNextActionBoundary  axPlanBoundary = "next_action_requires_canonical"
+	axPlanTransactionBoundary axPlanBoundary = "transaction_end"
 )
 
-type a11yPlannedStep struct {
+type axPlannedStep struct {
 	actionIndex     int
 	actionType      string
-	executionClass  a11yPlanExecutionClass
-	target          a11yPlanTargetRequirement
-	preConsistency  a11yPlanConsistency
-	postConsistency a11yPlanConsistency
-	boundary        a11yPlanBoundary
+	executionClass  axPlanExecutionClass
+	target          axPlanTargetRequirement
+	preConsistency  axPlanConsistency
+	postConsistency axPlanConsistency
+	boundary        axPlanBoundary
 	orderedInputRun int
 }
 
-type a11yBatchExecutionPlan struct {
+type axBatchExecutionPlan struct {
 	windowRef             string
 	windowHandle          string
-	initialConsistency    a11yPlanConsistency
+	initialConsistency    axPlanConsistency
 	requiresMutationLease bool
 	finalObservation      string
-	steps                 []a11yPlannedStep
+	steps                 []axPlannedStep
 }
 
-func a11yPlanTargetForAction(action a11yBatchAction) (
-	a11yPlanTargetRequirement,
+func axPlanTargetForAction(action axBatchAction) (
+	axPlanTargetRequirement,
 	error,
 ) {
 	target := strings.TrimSpace(action.targetRef)
 	switch {
 	case target == "":
-		return a11yPlanNoTarget, nil
+		return axPlanNoTarget, nil
 	case isShortAXRef(target):
-		return a11yPlanElementTarget, nil
+		return axPlanElementTarget, nil
 	case isShortAXWindowRef(target):
-		return a11yPlanWindowTarget, nil
+		return axPlanWindowTarget, nil
 	default:
 		return "", fmt.Errorf("target %q is not a current rN or wN ref", target)
 	}
 }
 
-func a11yPlanDefaultBoundary(
-	action a11yBatchAction,
-	target a11yPlanTargetRequirement,
-) a11yPlanBoundary {
+func axPlanDefaultBoundary(
+	action axBatchAction,
+	target axPlanTargetRequirement,
+) axPlanBoundary {
 	if action.actionType == "activate" || action.actionType == "close" {
-		return a11yPlanWindowBoundary
+		return axPlanWindowBoundary
 	}
 	if action.actionType == "wait" {
-		return a11yPlanWaitBoundary
+		return axPlanWaitBoundary
 	}
-	if target != a11yPlanNoTarget {
-		return a11yPlanTargetedBoundary
+	if target != axPlanNoTarget {
+		return axPlanTargetedBoundary
 	}
-	return a11yPlanCanonicalBoundary
+	return axPlanCanonicalBoundary
 }
 
-func a11yPlanOrderedInputEligible(
-	action a11yBatchAction,
-	target a11yPlanTargetRequirement,
+func axPlanOrderedInputEligible(
+	action axBatchAction,
+	target axPlanTargetRequirement,
 ) bool {
 	return action.actionType == "keypress" &&
-		target == a11yPlanNoTarget
+		target == axPlanNoTarget
 }
 
-// compileA11yBatchExecutionPlan runs only after public normalization, ownership
+// compileAXBatchExecutionPlan runs only after public normalization, ownership
 // binding, and wait preflight. It describes consistency boundaries;
 // providers do not consume it until their batch contract can preserve the same
 // per-action stop and emission evidence as the current path.
-func compileA11yBatchExecutionPlan(
-	context *a11yBatchContext,
-	actions []a11yBatchAction,
+func compileAXBatchExecutionPlan(
+	context *axBatchContext,
+	actions []axBatchAction,
 	final observation,
-) (a11yBatchExecutionPlan, error) {
+) (axBatchExecutionPlan, error) {
 	if context == nil ||
 		strings.TrimSpace(context.windowRef) == "" ||
 		strings.TrimSpace(context.windowHandle) == "" {
-		return a11yBatchExecutionPlan{}, errors.New(
+		return axBatchExecutionPlan{}, errors.New(
 			"AX execution plans require one bound logical window",
 		)
 	}
 	if len(actions) == 0 {
-		return a11yBatchExecutionPlan{}, errors.New(
+		return axBatchExecutionPlan{}, errors.New(
 			"AX execution plans require at least one action",
 		)
 	}
 
-	plan := a11yBatchExecutionPlan{
+	plan := axBatchExecutionPlan{
 		windowRef:             context.windowRef,
 		windowHandle:          context.windowHandle,
-		initialConsistency:    a11yPlanCanonicalWindow,
+		initialConsistency:    axPlanCanonicalWindow,
 		requiresMutationLease: true,
 		finalObservation:      final.resolvedMode(),
-		steps:                 make([]a11yPlannedStep, 0, len(actions)),
+		steps:                 make([]axPlannedStep, 0, len(actions)),
 	}
 
 	nextRun := 0
 	activeRun := 0
 	for index, action := range actions {
-		target, err := a11yPlanTargetForAction(action)
+		target, err := axPlanTargetForAction(action)
 		if err != nil {
-			return a11yBatchExecutionPlan{}, fmt.Errorf(
+			return axBatchExecutionPlan{}, fmt.Errorf(
 				"actions[%d]: %w", index, err,
 			)
 		}
-		step := a11yPlannedStep{
+		step := axPlannedStep{
 			actionIndex:     index,
 			actionType:      action.actionType,
-			executionClass:  a11yPlanSingleAction,
+			executionClass:  axPlanSingleAction,
 			target:          target,
-			preConsistency:  a11yPlanCanonicalWindow,
-			postConsistency: a11yPlanCanonicalWindow,
-			boundary:        a11yPlanDefaultBoundary(action, target),
+			preConsistency:  axPlanCanonicalWindow,
+			postConsistency: axPlanCanonicalWindow,
+			boundary:        axPlanDefaultBoundary(action, target),
 		}
-		if a11yPlanOrderedInputEligible(action, target) {
+		if axPlanOrderedInputEligible(action, target) {
 			if activeRun == 0 {
 				nextRun++
 				activeRun = nextRun
 			}
-			step.executionClass = a11yPlanOrderedInput
-			step.preConsistency = a11yPlanWindowIdentity
-			step.postConsistency = a11yPlanWindowIdentity
-			step.boundary = a11yPlanNoBoundary
+			step.executionClass = axPlanOrderedInput
+			step.preConsistency = axPlanWindowIdentity
+			step.postConsistency = axPlanWindowIdentity
+			step.boundary = axPlanNoBoundary
 			step.orderedInputRun = activeRun
 		} else {
 			activeRun = 0
@@ -168,7 +168,7 @@ func compileA11yBatchExecutionPlan(
 
 	for index := range plan.steps {
 		step := &plan.steps[index]
-		if step.executionClass != a11yPlanOrderedInput {
+		if step.executionClass != axPlanOrderedInput {
 			continue
 		}
 		runEnds := index == len(plan.steps)-1 ||
@@ -176,12 +176,12 @@ func compileA11yBatchExecutionPlan(
 		if !runEnds {
 			continue
 		}
-		step.postConsistency = a11yPlanCanonicalWindow
+		step.postConsistency = axPlanCanonicalWindow
 		switch {
 		case index < len(plan.steps)-1:
-			step.boundary = a11yPlanNextActionBoundary
+			step.boundary = axPlanNextActionBoundary
 		default:
-			step.boundary = a11yPlanTransactionBoundary
+			step.boundary = axPlanTransactionBoundary
 		}
 	}
 	return plan, nil

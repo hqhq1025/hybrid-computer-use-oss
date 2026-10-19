@@ -203,7 +203,7 @@ func TestMacOSKeyPreflightNativeDifferential(t *testing.T) {
 func TestMacOSKeyPreflightValidInputStillDispatches(t *testing.T) {
 	recording := &recordingPlatformBackend{}
 	s := newServiceWithBackend(macOSKeyPreflightBackend{recording})
-	if err := s.preflightPlatformAXKeys([]a11yBatchAction{{actionType: "keypress", key: "SUPER+RIGHT"}}); err != nil {
+	if err := s.preflightPlatformAXKeys([]axBatchAction{{actionType: "keypress", key: "SUPER+RIGHT"}}); err != nil {
 		t.Fatal(err)
 	}
 	s.callTool("GUI", map[string]any{
@@ -216,7 +216,7 @@ func TestMacOSKeyPreflightValidInputStillDispatches(t *testing.T) {
 
 func TestMacOSKeyPreflightDoesNotRestrictOtherBackends(t *testing.T) {
 	s := newServiceWithBackend(&recordingPlatformBackend{})
-	if err := s.preflightPlatformAXKeys([]a11yBatchAction{{actionType: "keypress", key: "F24"}}); err != nil {
+	if err := s.preflightPlatformAXKeys([]axBatchAction{{actionType: "keypress", key: "F24"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.preflightPlatformGUIKeys([]ProviderDesktopAction{{Type: "keypress", Keys: []string{"F24"}}}); err != nil {
@@ -227,7 +227,7 @@ func TestMacOSKeyPreflightDoesNotRestrictOtherBackends(t *testing.T) {
 func TestMacOSKeyPreflightPreservesAcceptedPayload(t *testing.T) {
 	s := newServiceWithBackend(macOSKeyPreflightBackend{&recordingPlatformBackend{}})
 	for _, key := range []string{"I", "\u212a", "\u212aP_ENTER", "\u200bRIGHT\u200b", " Alt + PAGE_UP "} {
-		ax := []a11yBatchAction{{actionType: "keypress", key: key}}
+		ax := []axBatchAction{{actionType: "keypress", key: key}}
 		gui := []ProviderDesktopAction{{Type: "keypress", Keys: []string{key}}}
 		if err := s.preflightPlatformAXKeys(ax); err != nil {
 			t.Fatal(err)

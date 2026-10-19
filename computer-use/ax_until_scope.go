@@ -137,7 +137,7 @@ func (s *service) readUntilWindow(
 		return nil, false
 	}
 	request.TargetWindowHandle = handle
-	request.Scope = a11yScopeWindow
+	request.Scope = axScopeWindow
 	request.KnownRefs = nil
 	request.SourceRef = ""
 	if previous := s.currentSnapshot(request.App); previous != nil {

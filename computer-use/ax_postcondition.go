@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-type a11yAssertionSpec struct {
+type axAssertionSpec struct {
 	assertionType string
 	targetAddress string
 	timeoutMS     int
@@ -50,7 +50,7 @@ func assertionScalarString(
 	}
 }
 
-func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error) {
+func parseAXAssertionSpec(assertion map[string]any) (*axAssertionSpec, error) {
 	if assertion == nil {
 		return nil, errors.New("assertion must be an object")
 	}
@@ -77,7 +77,7 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 	allowed := map[string]bool{
 		"type": true, "stable_ms": true, "timeout_ms": true,
 	}
-	spec := &a11yAssertionSpec{
+	spec := &axAssertionSpec{
 		assertionType: assertionType,
 		timeoutMS:     timeoutMS,
 		stableMS:      stableMS,
@@ -175,7 +175,7 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 		)
 	}
 	if assertionType != "window_title_contains" {
-		targetAddress, _, targetErr := a11yTargetAddress(assertion)
+		targetAddress, _, targetErr := axTargetAddress(assertion)
 		if targetErr != nil {
 			return nil, fmt.Errorf("assertion.target: %w", targetErr)
 		}
@@ -188,7 +188,7 @@ func parseA11yAssertionSpec(assertion map[string]any) (*a11yAssertionSpec, error
 	return spec, nil
 }
 
-func a11yPostconditionPassed(result toolCallResult) bool {
+func axPostconditionPassed(result toolCallResult) bool {
 	if result.IsError || result.StructuredContent == nil {
 		return false
 	}
@@ -199,7 +199,7 @@ func a11yPostconditionPassed(result toolCallResult) bool {
 
 // assertionGoal returns the predicate of a published assertion object.
 func assertionGoal(assertion map[string]any) verifyGoal {
-	spec, err := parseA11yAssertionSpec(assertion)
+	spec, err := parseAXAssertionSpec(assertion)
 	if err != nil {
 		return verifyGoal{}
 	}
@@ -233,34 +233,34 @@ func assertionSpecGoal(assertionType string, assertion map[string]any) verifyGoa
 	return goal
 }
 
-func a11yPostconditionNeedsCanonicalReconciliation(
+func axPostconditionNeedsCanonicalReconciliation(
 	assertion map[string]any,
 	assertionResult toolCallResult,
 ) bool {
 	if !assertionResult.IsError || assertionResult.StructuredContent == nil {
 		return false
 	}
-	_, underlyingCode := classifyA11yPostconditionFailure(assertionResult)
-	spec, err := parseA11yAssertionSpec(assertion)
+	_, underlyingCode := classifyAXPostconditionFailure(assertionResult)
+	spec, err := parseAXAssertionSpec(assertion)
 	return err == nil &&
 		underlyingCode == "observation_incomplete" &&
 		spec.stableMS == 0 &&
 		isShortAXRef(spec.targetAddress)
 }
 
-func (s *service) reconcileA11yActionPostcondition(
-	context *a11yBatchContext,
+func (s *service) reconcileAXActionPostcondition(
+	context *axBatchContext,
 	assertion map[string]any,
 	assertionResult toolCallResult,
 ) toolCallResult {
 	if s == nil || context == nil ||
-		!a11yPostconditionNeedsCanonicalReconciliation(
+		!axPostconditionNeedsCanonicalReconciliation(
 			assertion,
 			assertionResult,
 		) {
 		return assertionResult
 	}
-	spec, _ := parseA11yAssertionSpec(assertion)
+	spec, _ := parseAXAssertionSpec(assertion)
 	expected, err := s.refRegistry.Resolve(spec.targetAddress, "")
 	if err != nil {
 		return assertionResult
@@ -275,14 +275,14 @@ func (s *service) reconcileA11yActionPostcondition(
 			IncludeScreenshot:  &noScreenshot,
 			TargetWindowHandle: context.windowHandle,
 			SourceRef:          context.windowRef,
-			Scope:              a11yScopeWindow,
+			Scope:              axScopeWindow,
 			TreeView:           treeViewWorking,
 		},
 	)
 	if observationResult.IsError || snapshot == nil {
 		return assertionResult
 	}
-	return s.reconcileA11yPostconditionFromCanonicalSnapshot(
+	return s.reconcileAXPostconditionFromCanonicalSnapshot(
 		assertion,
 		assertionResult,
 		snapshot,
@@ -291,14 +291,14 @@ func (s *service) reconcileA11yActionPostcondition(
 	)
 }
 
-func (s *service) reconcileA11yPostconditionFromCanonicalSnapshot(
+func (s *service) reconcileAXPostconditionFromCanonicalSnapshot(
 	assertion map[string]any,
 	assertionResult toolCallResult,
 	snapshot *appSnapshot,
 	notes []string,
 	expected *AXRefEntry,
 ) toolCallResult {
-	spec, err := parseA11yAssertionSpec(assertion)
+	spec, err := parseAXAssertionSpec(assertion)
 	if err != nil || snapshot == nil {
 		return assertionResult
 	}
@@ -329,7 +329,7 @@ func (s *service) reconcileA11yPostconditionFromCanonicalSnapshot(
 	ok, observed := goal.check(record, nil)
 	reconciled := toolCallResult{}
 	if ok {
-		reconciled = a11yAssertionResult(
+		reconciled = axAssertionResult(
 			fmt.Sprintf(
 				"PASS: %s %s in the action's fresh observation. %s",
 				spec.targetAddress,
@@ -380,11 +380,11 @@ func axSnapshotRefCount(roots []*AXNode, ref string) int {
 	return count
 }
 
-func (s *service) preflightA11yPostcondition(
-	context *a11yBatchContext,
+func (s *service) preflightAXPostcondition(
+	context *axBatchContext,
 	assertion map[string]any,
 ) error {
-	spec, err := parseA11yAssertionSpec(assertion)
+	spec, err := parseAXAssertionSpec(assertion)
 	if err != nil {
 		return err
 	}
@@ -425,17 +425,17 @@ func (s *service) preflightA11yPostcondition(
 	return nil
 }
 
-// runA11yPostcondition checks a predicate after a batch's earlier steps. A
+// runAXPostcondition checks a predicate after a batch's earlier steps. A
 // ref predicate reads that element. A selector or title predicate reads the
 // application that owns the batch window, starting from that window, so a
 // window the action closed or a dialog it opened does not hide the answer.
 // The read never re-binds input.
-func (s *service) runA11yPostcondition(
-	context *a11yBatchContext,
+func (s *service) runAXPostcondition(
+	context *axBatchContext,
 	assertion map[string]any,
 ) toolCallResult {
-	readContext := &a11yReadContext{}
-	spec, _ := parseA11yAssertionSpec(assertion)
+	readContext := &axReadContext{}
+	spec, _ := parseAXAssertionSpec(assertion)
 	if spec != nil && isShortAXRef(spec.targetAddress) {
 		if entry, err := s.resolveShortAXRefOwned(spec.targetAddress); err == nil {
 			readContext.appToken = entry.AppRef
@@ -451,10 +451,10 @@ func (s *service) runA11yPostcondition(
 	if readContext.appToken == "" {
 		readContext.appToken = context.appToken
 	}
-	return s.runA11yAssertion(readContext, assertion, a11yScopeWindow)
+	return s.runAXAssertion(readContext, assertion, axScopeWindow)
 }
 
-func classifyA11yPostconditionFailure(
+func classifyAXPostconditionFailure(
 	result toolCallResult,
 ) (classification, underlying string) {
 	if result.StructuredContent == nil {

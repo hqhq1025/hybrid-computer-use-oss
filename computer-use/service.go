@@ -383,11 +383,11 @@ func toolEvidenceScope(name string, args map[string]any) string {
 	case publicToolGUI:
 		return "full_desktop_observation"
 	case publicToolAX:
-		mode, _ := parseA11yMode(args)
+		mode, _ := parseAXMode(args)
 		switch mode {
-		case a11yModeApps:
+		case axModeApps:
 			return "app_inventory"
-		case a11yModeObserve, a11yModeFind:
+		case axModeObserve, axModeFind:
 			return "independent_ui_read"
 		default:
 			return "delivery_or_local_ui"
@@ -405,7 +405,7 @@ func (s *service) dispatch(name string, args map[string]any) toolCallResult {
 	if axCall != nil {
 		// Run the request decoded above; dispatchValidated would decode it
 		// a second time.
-		return s.a11yDecodedRequest(axCall)
+		return s.axDecodedRequest(axCall)
 	}
 	return s.dispatchValidated(name, args)
 }
@@ -514,7 +514,7 @@ func (s *service) dispatchValidated(name string, args map[string]any) toolCallRe
 		if err != nil {
 			return textResult(err.Error(), true).withEvidenceScope("error_only")
 		}
-		return s.a11yRequest(args, obs)
+		return s.handleAXRequest(args, obs)
 	default:
 		return textResult(fmt.Sprintf("unsupportedTool(%q)", name), true)
 	}

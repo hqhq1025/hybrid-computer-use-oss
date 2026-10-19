@@ -192,7 +192,7 @@ func numericElementIndex(selector string) bool {
 	return err == nil
 }
 
-func a11yAssertionResult(
+func axAssertionResult(
 	text string,
 	isError bool,
 	status string,
@@ -220,7 +220,7 @@ func assertionNegativeResult(
 ) toolCallResult {
 	text = strings.TrimSpace(text) +
 		"\nassertion_passed=false retry_same_request=false"
-	result := a11yAssertionResult(
+	result := axAssertionResult(
 		text,
 		false,
 		status,
@@ -279,9 +279,7 @@ func (s *service) verifyWindowTitleWithProbe(
 	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
 	var trueSince time.Time
 	attempts := 0
-	lastTitles := []string{}
-	lastError := ""
-	sampledLiveUI := false
+	poll := windowTitlePoll{lastTitles: []string{}}
 	for {
 		attempts++
 		operation := axServiceRequest{
@@ -291,7 +289,7 @@ func (s *service) verifyWindowTitleWithProbe(
 		// Closing an application's last window can retire its aN before this
 		// poll; the read then names the same exact process.
 		if err := s.bindPredicateAppIdentity(&operation); err != nil {
-			return a11yAssertionResult(
+			return axAssertionResult(
 				"wait: application target: "+err.Error(),
 				true,
 				"invalid_target",
@@ -302,39 +300,10 @@ func (s *service) verifyWindowTitleWithProbe(
 		response, err := probe(
 			providerWindowListRequestFromOperation(operation),
 		)
-		matched := []string{}
-		if err != nil {
-			lastError = err.Error()
-		} else if !response.OK {
-			// An application that no longer exists, read from a complete
-			// inventory, has no window with any title.
-			completeAppAbsence := isShortAXAppRef(app) &&
-				response.Failure != nil &&
-				response.Failure.FactsComplete &&
-				strings.EqualFold(response.Failure.Subject, "app") &&
-				(response.Failure.Code == "stale_target" ||
-					response.Failure.Code == "stale_app_ref" ||
-					response.Failure.Code == "ax_app_unavailable")
-			if completeAppAbsence {
-				lastError = ""
-				sampledLiveUI = true
-				lastTitles = nil
-			} else {
-				lastError = response.Error
-			}
-		} else {
-			lastError = ""
-			sampledLiveUI = true
-			lastTitles = append([]string(nil), response.WindowTitles...)
-			for _, title := range response.WindowTitles {
-				if containsFold(title, titleSubstring) {
-					matched = append(matched, title)
-				}
-			}
-		}
+		matched := poll.record(app, titleSubstring, response, err)
 		predicate := len(matched) > 0
 		if !expected {
-			predicate = !predicate && lastError == ""
+			predicate = !predicate && poll.lastError == ""
 		}
 		if predicate {
 			now := time.Now()
@@ -343,82 +312,161 @@ func (s *service) verifyWindowTitleWithProbe(
 			}
 			stableFor := int(now.Sub(trueSince) / time.Millisecond)
 			if stableMS == 0 || stableFor >= stableMS {
-				status := "present"
-				observed := matched
-				if !expected {
-					status = "absent"
-					observed = lastTitles
-				}
-				result := a11yAssertionResult(
-					fmt.Sprintf(
-						"PASS: application %q window title containing %q is %s. "+
-							"Current window titles: %q.",
-						app,
-						titleSubstring,
-						status,
-						observed,
-					),
-					false,
-					"pass",
-					attempts,
-					stableMS,
+				return poll.passResult(
+					app, titleSubstring, expected, matched, attempts, stableMS,
 				)
-				result.StructuredContent["window_titles"] = lastTitles
-				result.StructuredContent["window_title_matches"] = matched
-				return result
 			}
 		} else {
 			trueSince = time.Time{}
 		}
 		if !time.Now().Before(deadline) {
-			expectation := "appear"
-			if !expected {
-				expectation = "disappear"
-			}
-			text := fmt.Sprintf(
-				"wait false: no window title containing %q satisfied the "+
-					"requested %s predicate within %dms.",
-				titleSubstring,
-				expectation,
-				timeoutMS,
+			return poll.timeoutResult(
+				app, titleSubstring, expected, timeoutMS, attempts, stableMS,
 			)
-			if lastError != "" {
-				text += "\nLast AX application lookup: " + firstLine(lastError)
-			}
-			if len(lastTitles) > 0 {
-				limit := min(5, len(lastTitles))
-				text += fmt.Sprintf(
-					"\nCurrent window candidates for %q: %q.",
-					app,
-					lastTitles[:limit],
-				)
-			}
-			result := toolCallResult{}
-			if sampledLiveUI && lastError == "" {
-				result = assertionNegativeResult(
-					text,
-					"window_title_timeout",
-					attempts,
-					stableMS,
-				)
-			} else {
-				result = a11yAssertionResult(
-					text,
-					true,
-					"observation_incomplete",
-					attempts,
-					stableMS,
-				)
-			}
-			result.StructuredContent["assertion_sampled_live_ui"] =
-				sampledLiveUI
-			result.StructuredContent["inventory_sample_complete"] =
-				sampledLiveUI && lastError == ""
-			result.StructuredContent["window_titles"] = lastTitles
-			return result
 		}
 		time.Sleep(400 * time.Millisecond)
 	}
+}
+
+// windowTitlePoll keeps what the window-title polls have seen so far. The
+// titles and the live-UI flag survive a failed poll; the error is replaced by
+// every poll.
+type windowTitlePoll struct {
+	lastTitles    []string
+	lastError     string
+	sampledLiveUI bool
+}
+
+// record folds one window-list response into the poll and returns the
+// titles that contain titleSubstring.
+func (poll *windowTitlePoll) record(
+	app,
+	titleSubstring string,
+	response *ProviderWindowResult,
+	err error,
+) []string {
+	matched := []string{}
+	if err != nil {
+		poll.lastError = err.Error()
+	} else if !response.OK {
+		// An application that no longer exists, read from a complete
+		// inventory, has no window with any title.
+		completeAppAbsence := isShortAXAppRef(app) &&
+			response.Failure != nil &&
+			response.Failure.FactsComplete &&
+			strings.EqualFold(response.Failure.Subject, "app") &&
+			(response.Failure.Code == "stale_target" ||
+				response.Failure.Code == "stale_app_ref" ||
+				response.Failure.Code == "ax_app_unavailable")
+		if completeAppAbsence {
+			poll.lastError = ""
+			poll.sampledLiveUI = true
+			poll.lastTitles = nil
+		} else {
+			poll.lastError = response.Error
+		}
+	} else {
+		poll.lastError = ""
+		poll.sampledLiveUI = true
+		poll.lastTitles = append([]string(nil), response.WindowTitles...)
+		for _, title := range response.WindowTitles {
+			if containsFold(title, titleSubstring) {
+				matched = append(matched, title)
+			}
+		}
+	}
+	return matched
+}
+
+func (poll *windowTitlePoll) passResult(
+	app,
+	titleSubstring string,
+	expected bool,
+	matched []string,
+	attempts,
+	stableMS int,
+) toolCallResult {
+	status := "present"
+	observed := matched
+	if !expected {
+		status = "absent"
+		observed = poll.lastTitles
+	}
+	result := axAssertionResult(
+		fmt.Sprintf(
+			"PASS: application %q window title containing %q is %s. "+
+				"Current window titles: %q.",
+			app,
+			titleSubstring,
+			status,
+			observed,
+		),
+		false,
+		"pass",
+		attempts,
+		stableMS,
+	)
+	result.StructuredContent["window_titles"] = poll.lastTitles
+	result.StructuredContent["window_title_matches"] = matched
+	return result
+}
+
+// timeoutResult reports a predicate that never held. Only a timeout after a
+// complete live read is a negative answer; any other timeout is incomplete
+// observation.
+func (poll *windowTitlePoll) timeoutResult(
+	app,
+	titleSubstring string,
+	expected bool,
+	timeoutMS,
+	attempts,
+	stableMS int,
+) toolCallResult {
+	expectation := "appear"
+	if !expected {
+		expectation = "disappear"
+	}
+	text := fmt.Sprintf(
+		"wait false: no window title containing %q satisfied the "+
+			"requested %s predicate within %dms.",
+		titleSubstring,
+		expectation,
+		timeoutMS,
+	)
+	if poll.lastError != "" {
+		text += "\nLast AX application lookup: " + firstLine(poll.lastError)
+	}
+	if len(poll.lastTitles) > 0 {
+		limit := min(5, len(poll.lastTitles))
+		text += fmt.Sprintf(
+			"\nCurrent window candidates for %q: %q.",
+			app,
+			poll.lastTitles[:limit],
+		)
+	}
+	result := toolCallResult{}
+	if poll.sampledLiveUI && poll.lastError == "" {
+		result = assertionNegativeResult(
+			text,
+			"window_title_timeout",
+			attempts,
+			stableMS,
+		)
+	} else {
+		result = axAssertionResult(
+			text,
+			true,
+			"observation_incomplete",
+			attempts,
+			stableMS,
+		)
+	}
+	result.StructuredContent["assertion_sampled_live_ui"] =
+		poll.sampledLiveUI
+	result.StructuredContent["inventory_sample_complete"] =
+		poll.sampledLiveUI && poll.lastError == ""
+	result.StructuredContent["window_titles"] = poll.lastTitles
+	return result
 }
 
 func isAXAppUnavailableResult(result toolCallResult) bool {
@@ -445,13 +493,13 @@ func addAssertionSnapshotMetadata(
 
 func snapshotForScopedLookup(snapshot *appSnapshot) *appSnapshot {
 	if snapshot == nil ||
-		normalizedA11yScope(snapshot.scope) != a11yScopeContent {
+		normalizedAXScope(snapshot.scope) != axScopeContent {
 		return snapshot
 	}
 	clone := *snapshot
 	clone.Elements = make([]elementRecord, 0, snapshot.scopedCanonicalCount)
 	for _, record := range snapshot.Elements {
-		if recordInA11yScope(snapshot, &record) {
+		if recordInAXScope(snapshot, &record) {
 			clone.Elements = append(clone.Elements, record)
 		}
 	}
@@ -485,7 +533,7 @@ func (s *service) verifyResolvedAXRef(
 					App:                app,
 					IncludeScreenshot:  &noScreenshot,
 					TargetWindowHandle: entry.WindowHandle,
-					Scope:              a11yScopeWindow,
+					Scope:              axScopeWindow,
 					TreeView:           treeViewWorking,
 				},
 			)
@@ -628,7 +676,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 	snapshotProbe axAssertionSnapshotProbe,
 ) toolCallResult {
 	if target == nil {
-		return a11yAssertionResult(
+		return axAssertionResult(
 			"wait: the ref has no live target identity.",
 			true, "invalid_target", 0, stableMS,
 		)
@@ -640,10 +688,8 @@ func (s *service) verifyResolvedAXRefWithProbes(
 	var trueSince time.Time
 	stableObserved := ""
 	lastObserved := ""
-	lastStatus := "predicate_false"
-	sampledLiveUI := false
+	poll := refAssertionPoll{lastStatus: "predicate_false"}
 	for attempt := 1; ; attempt++ {
-		var sampleProof *axAssertionSnapshotProof
 		operation := axServiceRequest{
 			Action:             axResolveTargetCommand{},
 			App:                app,
@@ -652,7 +698,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 			SourceRef:          displayRef,
 		}
 		if err := s.bindRuntimeAppIdentity(&operation); err != nil {
-			return a11yAssertionResult(
+			return axAssertionResult(
 				"wait: "+err.Error(),
 				true, "invalid_target", attempt, stableMS,
 			)
@@ -663,132 +709,45 @@ func (s *service) verifyResolvedAXRefWithProbes(
 		if response != nil {
 			response.prepareForService()
 		}
-		var record *elementRecord
-		var lookupErr error
-		factsComplete := true
-		switch {
-		case err != nil:
-			lookupErr = err
-			factsComplete = false
-			lastStatus = "observation_incomplete"
-		case response == nil:
-			lookupErr = errors.New("empty accessibility resolver response")
-			factsComplete = false
-			lastStatus = "observation_incomplete"
-		case response.OK:
-			record = response.ResolvedElement
-			sampledLiveUI = true
-			if record == nil {
-				lookupErr = errors.New("live resolver returned no element")
-				factsComplete = false
-				lastStatus = "observation_incomplete"
-			}
-		default:
-			lookupErr = errors.New(firstNonEmpty(
-				publicRuntimeFailureText(*response),
-				response.Error,
-				response.FailureCode,
-			))
-			factsComplete = response.FailureFactsComplete
-			switch response.FailureCode {
-			case "semantic_target_not_found":
-				lastStatus = "locator_missing"
-			case "semantic_target_ambiguous":
-				lastStatus = "locator_ambiguous"
-			case "stale_element_ref":
-				lastStatus = "locator_stale"
-			case "observation_incomplete":
-				lastStatus = "observation_incomplete"
-			default:
-				lastStatus = firstNonEmpty(
-					response.FailureCode, "observation_incomplete",
-				)
-			}
-			// A ref-scoped negative existence assertion asks whether the exact
-			// previously issued object still exists, not whether another
-			// role/name-equivalent object is present. A complete live inventory
-			// may prove that the application generation, logical window, or
-			// provider-bound element has disappeared. Treat that as a successful
-			// absence sample. Incomplete reads remain unknown, and ambiguity
-			// remains an error.
-			if goal.isNegativeExistenceOnly() &&
-				factsComplete &&
-				completeRefAbsenceFailure(*response) {
-				record = nil
-				sampledLiveUI = true
-				lastStatus = "predicate_false"
-				break
-			}
-			if response.FailureCode == "observation_incomplete" &&
-				snapshotProbe != nil {
-				// The resolver probe began before the assertion deadline, but a
-				// provider tree scan may consume that entire interval before it
-				// reports incomplete evidence. Complete that one compound sample
-				// with a canonical read instead of returning unknown immediately
-				// before the final observation proves the same ref. The fallback
-				// remains bounded to one call for this polling attempt.
-				if proof, fallbackResult := snapshotProbe(); proof != nil &&
-					!fallbackResult.IsError &&
-					proof.snapshot != nil &&
-					proof.record != nil {
-					record = proof.record
-					lookupErr = nil
-					factsComplete = true
-					sampledLiveUI = true
-					lastStatus = "predicate_false"
-					sampleProof = proof
-				}
-			}
-			if response.FailureCode == "semantic_target_ambiguous" ||
-				response.FailureCode == "stale_element_ref" ||
-				response.FailureCode == "semantic_target_invalid" {
-				result := a11yAssertionResult(
-					fmt.Sprintf(
-						"wait %s: %s",
-						lastStatus,
-						firstLine(lookupErr.Error()),
-					),
-					true, lastStatus, attempt, stableMS,
-				)
-				result.StructuredContent["assertion_sampled_live_ui"] =
-					sampledLiveUI
-				return result
-			}
+		sample := poll.classify(response, err, goal, snapshotProbe)
+		if sample.locatorFailed {
+			result := axAssertionResult(
+				fmt.Sprintf(
+					"wait %s: %s",
+					poll.lastStatus,
+					firstLine(sample.lookupErr.Error()),
+				),
+				true, poll.lastStatus, attempt, stableMS,
+			)
+			result.StructuredContent["assertion_sampled_live_ui"] =
+				poll.sampledLiveUI
+			return result
 		}
-		if !factsComplete && record == nil {
+		if !sample.factsComplete && sample.record == nil {
 			lastObserved = "the live AX target could not be read completely"
 			trueSince = time.Time{}
 			stableObserved = ""
 		} else {
-			ok, observed := goal.check(record, lookupErr)
+			ok, observed := goal.check(sample.record, sample.lookupErr)
 			lastObserved = observed
 			if ok {
 				now := time.Now()
 				if stableMS == 0 {
-					result := a11yAssertionResult(
+					result := axAssertionResult(
 						fmt.Sprintf(
 							"PASS: %s %s. %s",
 							displayRef, goal.describe(), observed,
 						),
 						false, "pass", attempt, stableMS,
 					)
-					if sampleProof != nil {
-						result.axProofSnapshot = sampleProof.snapshot
-						result.axProofNotes = append(
-							[]string(nil),
-							sampleProof.notes...,
-						)
-						result.StructuredContent["assertion_canonical_fallback"] =
-							true
-					}
-					return result
+					return withCanonicalFallbackProof(result, sample.proof)
 				}
 				if trueSince.IsZero() || stableObserved != observed {
 					trueSince = now
 					stableObserved = observed
 				}
 				if int(now.Sub(trueSince)/time.Millisecond) >= stableMS {
-					result := a11yAssertionResult(
+					result := axAssertionResult(
 						fmt.Sprintf(
 							"PASS: %s %s and remained continuously true for %dms. %s",
 							displayRef,
@@ -798,16 +757,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 						),
 						false, "pass", attempt, stableMS,
 					)
-					if sampleProof != nil {
-						result.axProofSnapshot = sampleProof.snapshot
-						result.axProofNotes = append(
-							[]string(nil),
-							sampleProof.notes...,
-						)
-						result.StructuredContent["assertion_canonical_fallback"] =
-							true
-					}
-					return result
+					return withCanonicalFallbackProof(result, sample.proof)
 				}
 			} else {
 				trueSince = time.Time{}
@@ -817,28 +767,164 @@ func (s *service) verifyResolvedAXRefWithProbes(
 		if !time.Now().Before(deadline) {
 			text := fmt.Sprintf(
 				"wait %s: %s did not satisfy %s within %dms. Last observation: %s",
-				lastStatus,
+				poll.lastStatus,
 				displayRef,
 				goal.describe(),
 				timeoutMS,
 				lastObserved,
 			)
 			result := toolCallResult{}
-			if sampledLiveUI && lastStatus == "predicate_false" {
+			if poll.sampledLiveUI && poll.lastStatus == "predicate_false" {
 				result = assertionNegativeResult(
-					text, lastStatus, attempt, stableMS,
+					text, poll.lastStatus, attempt, stableMS,
 				)
 			} else {
-				result = a11yAssertionResult(
-					text, true, lastStatus, attempt, stableMS,
+				result = axAssertionResult(
+					text, true, poll.lastStatus, attempt, stableMS,
 				)
 			}
 			result.StructuredContent["assertion_sampled_live_ui"] =
-				sampledLiveUI
+				poll.sampledLiveUI
 			return result
 		}
 		time.Sleep(400 * time.Millisecond)
 	}
+}
+
+// refAssertionPoll carries the status of the latest classified sample and
+// whether any sample read the live UI. A successful resolve leaves the
+// status of the previous sample in place.
+type refAssertionPoll struct {
+	lastStatus    string
+	sampledLiveUI bool
+}
+
+// refAssertionSample is one resolver read of the asserted ref.
+type refAssertionSample struct {
+	record        *elementRecord
+	lookupErr     error
+	factsComplete bool
+	// proof is set when a canonical snapshot completed the sample.
+	proof *axAssertionSnapshotProof
+	// locatorFailed means the ref is ambiguous, stale or invalid, so
+	// further polls cannot establish the predicate.
+	locatorFailed bool
+}
+
+// classify turns one resolver response into the element the goal is
+// checked against and updates the poll status.
+func (poll *refAssertionPoll) classify(
+	response *ProviderAccessibilityResult,
+	err error,
+	goal verifyGoal,
+	snapshotProbe axAssertionSnapshotProbe,
+) refAssertionSample {
+	sample := refAssertionSample{factsComplete: true}
+	switch {
+	case err != nil:
+		sample.lookupErr = err
+		sample.factsComplete = false
+		poll.lastStatus = "observation_incomplete"
+	case response == nil:
+		sample.lookupErr = errors.New("empty accessibility resolver response")
+		sample.factsComplete = false
+		poll.lastStatus = "observation_incomplete"
+	case response.OK:
+		sample.record = response.ResolvedElement
+		poll.sampledLiveUI = true
+		if sample.record == nil {
+			sample.lookupErr = errors.New("live resolver returned no element")
+			sample.factsComplete = false
+			poll.lastStatus = "observation_incomplete"
+		}
+	default:
+		poll.classifyFailure(&sample, *response, goal, snapshotProbe)
+	}
+	return sample
+}
+
+func (poll *refAssertionPoll) classifyFailure(
+	sample *refAssertionSample,
+	response ProviderAccessibilityResult,
+	goal verifyGoal,
+	snapshotProbe axAssertionSnapshotProbe,
+) {
+	sample.lookupErr = errors.New(firstNonEmpty(
+		publicRuntimeFailureText(response),
+		response.Error,
+		response.FailureCode,
+	))
+	sample.factsComplete = response.FailureFactsComplete
+	switch response.FailureCode {
+	case "semantic_target_not_found":
+		poll.lastStatus = "locator_missing"
+	case "semantic_target_ambiguous":
+		poll.lastStatus = "locator_ambiguous"
+	case "stale_element_ref":
+		poll.lastStatus = "locator_stale"
+	case "observation_incomplete":
+		poll.lastStatus = "observation_incomplete"
+	default:
+		poll.lastStatus = firstNonEmpty(
+			response.FailureCode, "observation_incomplete",
+		)
+	}
+	// A ref-scoped negative existence assertion asks whether the exact
+	// previously issued object still exists, not whether another
+	// role/name-equivalent object is present. A complete live inventory
+	// may prove that the application generation, logical window, or
+	// provider-bound element has disappeared. Treat that as a successful
+	// absence sample. Incomplete reads remain unknown, and ambiguity
+	// remains an error.
+	if goal.isNegativeExistenceOnly() &&
+		sample.factsComplete &&
+		completeRefAbsenceFailure(response) {
+		sample.record = nil
+		poll.sampledLiveUI = true
+		poll.lastStatus = "predicate_false"
+		return
+	}
+	if response.FailureCode == "observation_incomplete" &&
+		snapshotProbe != nil {
+		// The resolver probe began before the assertion deadline, but a
+		// provider tree scan may consume that entire interval before it
+		// reports incomplete evidence. Complete that one compound sample
+		// with a canonical read instead of returning unknown immediately
+		// before the final observation proves the same ref. The fallback
+		// remains bounded to one call for this polling attempt.
+		if proof, fallbackResult := snapshotProbe(); proof != nil &&
+			!fallbackResult.IsError &&
+			proof.snapshot != nil &&
+			proof.record != nil {
+			sample.record = proof.record
+			sample.lookupErr = nil
+			sample.factsComplete = true
+			poll.sampledLiveUI = true
+			poll.lastStatus = "predicate_false"
+			sample.proof = proof
+		}
+	}
+	sample.locatorFailed = response.FailureCode == "semantic_target_ambiguous" ||
+		response.FailureCode == "stale_element_ref" ||
+		response.FailureCode == "semantic_target_invalid"
+}
+
+// withCanonicalFallbackProof attaches the canonical snapshot that completed
+// a passing sample, so the caller can show the tree the pass was read from.
+func withCanonicalFallbackProof(
+	result toolCallResult,
+	proof *axAssertionSnapshotProof,
+) toolCallResult {
+	if proof != nil {
+		result.axProofSnapshot = proof.snapshot
+		result.axProofNotes = append(
+			[]string(nil),
+			proof.notes...,
+		)
+		result.StructuredContent["assertion_canonical_fallback"] =
+			true
+	}
+	return result
 }
 
 func (g verifyGoal) isNegativeExistenceOnly() bool {
@@ -944,9 +1030,7 @@ func (s *service) verifyLookup(
 	// failure. Reporting only that the requested condition never held leaves
 	// the agent unable to tell whether to keep waiting or whether its last
 	// action never took effect, so it keeps retrying with longer timeouts.
-	var firstWindow string
-	var firstHandle string
-	var firstCount int
+	var first verifyLookupBaseline
 	var trueSince time.Time
 	stableObserved := ""
 	for attempt := 1; ; attempt++ {
@@ -954,7 +1038,7 @@ func (s *service) verifyLookup(
 			Operation:         axServiceObserve,
 			App:               app,
 			IncludeScreenshot: &noScreenshot,
-			Scope:             normalizedA11yScope(scope),
+			Scope:             normalizedAXScope(scope),
 		}
 		if len(targetWindowHandle) > 0 {
 			request.TargetWindowHandle = strings.TrimSpace(targetWindowHandle[0])
@@ -969,22 +1053,8 @@ func (s *service) verifyLookup(
 					elapsed,
 				))
 				if !time.Now().Before(deadline) {
-					text := fmt.Sprintf(
-						"app_unavailable: %q did not become visible on the AX bus within %dms.\n",
-						app,
-						timeoutMS,
-					)
-					for _, line := range attempts {
-						text += "  - " + line + "\n"
-					}
-					text += "Last AX availability result: " +
-						firstLine(resultText(result))
-					return a11yAssertionResult(
-						strings.TrimSpace(text),
-						true,
-						"app_unavailable",
-						attempt,
-						stableMS,
+					return appUnavailableWaitResult(
+						app, timeoutMS, attempts, result, attempt, stableMS,
 					)
 				}
 				time.Sleep(400 * time.Millisecond)
@@ -999,23 +1069,15 @@ func (s *service) verifyLookup(
 		// worse than no assertion.
 		snapshot := read.primary
 		if attempt == 1 {
-			firstWindow, firstHandle, firstCount = snapshot.WindowTitle,
-				snapshot.WindowHandle,
-				scopedCanonicalElementCount(snapshot)
-		}
-		record, lookupErr := lookup(read.lookup)
-		incomplete := false
-		if record == nil && !numeric &&
-			!strings.Contains(strings.ToLower(fmt.Sprint(lookupErr)), "ambiguous") {
-			// The bound window has no match: the effect may be a dialog
-			// or popup in another window of the application.
-			others, complete := s.readOtherWindows(read)
-			if otherRecord, otherErr := lookup(others); otherRecord != nil ||
-				strings.Contains(strings.ToLower(fmt.Sprint(otherErr)), "ambiguous") {
-				record, lookupErr = otherRecord, otherErr
+			first = verifyLookupBaseline{
+				window: snapshot.WindowTitle,
+				handle: snapshot.WindowHandle,
+				count:  scopedCanonicalElementCount(snapshot),
 			}
-			incomplete = !complete && record == nil
 		}
+		record, lookupErr, incomplete := s.lookupAcrossWindows(
+			read, lookup, numeric,
+		)
 		ok, observed := goal.check(record, lookupErr)
 		if incomplete {
 			// No match proves nothing while a visible window was unread.
@@ -1028,30 +1090,14 @@ func (s *service) verifyLookup(
 			attempt, timeoutMS-int(time.Until(deadline).Milliseconds()), observed))
 		if attempt == 1 && lookupErr != nil &&
 			(numeric || selectorAmbiguous) {
-			status := "locator_stale"
-			if selectorAmbiguous {
-				status = "locator_ambiguous"
-			}
-			result := a11yAssertionResult(
-				fmt.Sprintf(
-					"wait %s: %s\nThis locator did not identify one "+
-						"current element, so polling it would not establish the "+
-						"requested predicate. Obtain a fresh ref or use a more "+
-						"specific structured selector.",
-					status, observed,
-				),
-				true,
-				status,
-				attempt,
-				stableMS,
+			return locatorFailureWaitResult(
+				observed, selectorAmbiguous, snapshot, attempt, stableMS,
 			)
-			addAssertionSnapshotMetadata(&result, snapshot)
-			return result
 		}
 		if ok {
 			now := time.Now()
 			if stableMS == 0 {
-				return a11yAssertionResult(fmt.Sprintf(
+				return axAssertionResult(fmt.Sprintf(
 					"PASS: %s %s.\n%s\nAssertions do not change the UI; this is a read of the live tree, not a replay of an earlier snapshot.",
 					displaySelector, goal.describe(), observed),
 					false, "pass", attempt, stableMS)
@@ -1062,7 +1108,7 @@ func (s *service) verifyLookup(
 			}
 			stableFor := int(now.Sub(trueSince) / time.Millisecond)
 			if stableFor >= stableMS {
-				return a11yAssertionResult(fmt.Sprintf(
+				return axAssertionResult(fmt.Sprintf(
 					"PASS: %s %s and remained continuously true for %dms.\n%s\nAssertions do not change the UI; this is a read of the live tree, not a replay of an earlier snapshot.",
 					displaySelector, goal.describe(), stableFor, observed),
 					false, "pass", attempt, stableMS)
@@ -1080,119 +1126,262 @@ func (s *service) verifyLookup(
 		// Sample before checking the deadline so even the smallest budget gets
 		// one complete live-state evaluation.
 		if !time.Now().Before(deadline) {
-			e := &toolError{tool: "wait", summary: fmt.Sprintf(
-				"expected %s %s, and it did not become true within %dms.",
-				displaySelector, goal.describe(), timeoutMS)}
-			e.add("Selector", strconv.Quote(displaySelector))
-			e.add("Snapshot", snapshotAge(snapshot))
-			// Report whether the UI changed during the wait. This separates
-			// three situations: no AX-visible change, a change that is not the
-			// awaited one (the predicate may be the wrong test), and a
-			// different window (the target may live elsewhere). Windows are
-			// compared by instance handle, not title: a second same-titled
-			// window of one app can become the root without any title change
-			// while every element index is renumbered.
-			if (firstHandle != "" && snapshot.WindowHandle != firstHandle) ||
-				snapshot.WindowTitle != firstWindow {
-				e.add("Window changed", fmt.Sprintf(
-					"%q → %q; current snapshot indices changed",
-					firstWindow, snapshot.WindowTitle,
-				))
-			} else if scopedCanonicalElementCount(snapshot) != firstCount {
-				e.add("Tree changed", fmt.Sprintf("%d → %d elements, same window",
-					firstCount, scopedCanonicalElementCount(snapshot)))
-			} else if selectorAmbiguous {
-				e.add("Nothing changed", fmt.Sprintf(
-					"same window, still %d elements — the selector remained ambiguous, "+
-						"so no unique assertion target was identified and this does not "+
-						"say whether the prior action took effect",
-					firstCount))
-			} else {
-				e.add("Nothing changed", fmt.Sprintf(
-					"same window, still %d elements — no AX-visible structural "+
-						"change was observed during the wait. This does not establish "+
-						"whether a prior input was emitted or whether a visual, file, "+
-						"document, or application effect occurred outside A11y",
-					firstCount))
-			}
-			for _, line := range attempts {
-				e.log = append(e.log, "  - "+line)
-			}
-			// Choose the next step by cause. When the target never appeared,
-			// list the closest current elements so the agent need not reread
-			// the whole tree to correct a guessed selector. When an
-			// exists:false wait times out without any UI change, the agent is
-			// probably using the disappearance of an old element as a proxy
-			// for navigation; single-page apps often keep the old node, so the
-			// condition may never hold, and waiting for something new is the
-			// better test. When the UI did change, the candidate list is more
-			// useful than that advice.
-			if selectorAmbiguous {
-				e.next = "the selector remained ambiguous throughout the wait, so the wait " +
-					"never identified one element to test. Use a fresh rN ref or a selector " +
-					"copied from the current tree with enough role, name, and predicates to " +
-					"match exactly one element. This failure does not prove " +
-					"the requested state is false or that the prior action failed."
-			} else if goal.exists != nil && !*goal.exists &&
-				snapshot.WindowTitle == firstWindow && len(snapshot.Elements) == firstCount {
-				e.next = "waiting for an element to DISAPPEAR is a poor proxy for " +
-					"\"the page moved on\": single-page apps routinely leave the old " +
-					"node in the DOM, so this condition may never become true no " +
-					"matter how long you wait. Wait for something NEW instead — a " +
-					"heading you expect on the next screen, or the address bar's " +
-					"value changing. The unchanged AX tree does not attribute the " +
-					"cause of this timeout."
-			} else if closest := closestElements(snapshot, hint, 5); len(closest) > 0 {
-				e.log = append(e.log, "  closest elements currently in the tree:")
-				for _, line := range closest {
-					e.log = append(e.log, "  "+line)
-				}
-				e.next = "the element never appeared. The closest things actually in the tree are listed above — if one of them is what you meant, retry with its selector. Otherwise the target may be absent or the app may expose it under a different A11y name. This assertion does not attribute the cause."
-			} else {
-				e.next = "this is a real observation of the current tree, not a stale cache. The declared A11y predicate was not observed. Inspect a fresh tree, the visual channel, or durable state as appropriate; this assertion alone does not prove why the predicate was absent."
-			}
-			status := "locator_missing"
-			if lookupErr == nil {
-				status = "predicate_false"
-			}
-			if ok && stableMS > 0 {
-				status = "predicate_unstable"
-				e.next = fmt.Sprintf(
-					"the predicate became true but did not remain unchanged for "+
-						"the requested %dms stability window before timeout. "+
-						"Increase timeout_ms, reduce stable_ms, or assert a more "+
-						"specific next-state condition.",
-					stableMS,
-				)
-			}
-			result := toolCallResult{}
-			// For an exists predicate a target that never appeared is the
-			// answer: the predicate is false, not unknown.
-			existsOnly := goal.exists != nil && *goal.exists && goal.state == "" &&
-				goal.valueEquals == "" && goal.valueContains == "" && goal.textContains == ""
-			if status == "locator_missing" && existsOnly {
-				status = "predicate_false"
-				lookupErr = nil
-			}
-			if incomplete {
-				status = "observation_incomplete"
-			}
-			if !incomplete && lookupErr == nil &&
-				(status == "predicate_false" || status == "predicate_unstable") {
-				result = assertionNegativeResult(
-					e.Error(), status, attempt, stableMS,
-				)
-			} else {
-				result = a11yAssertionResult(
-					e.Error(), true, status, attempt, stableMS,
-				)
-			}
-			addAssertionSnapshotMetadata(&result, snapshot)
-			if read.windowRef != "" {
-				result.StructuredContent["until_window_ref"] = read.windowRef
-			}
-			return result
+			return verifyLookupTimeoutResult(verifyLookupTimeout{
+				displaySelector:   displaySelector,
+				hint:              hint,
+				goal:              goal,
+				timeoutMS:         timeoutMS,
+				stableMS:          stableMS,
+				attempt:           attempt,
+				attempts:          attempts,
+				first:             first,
+				snapshot:          snapshot,
+				windowRef:         read.windowRef,
+				lookupErr:         lookupErr,
+				ok:                ok,
+				incomplete:        incomplete,
+				selectorAmbiguous: selectorAmbiguous,
+			})
 		}
 		time.Sleep(400 * time.Millisecond)
+	}
+}
+
+// verifyLookupBaseline is the bound window as the first poll saw it; the
+// timeout report compares the last poll against it.
+type verifyLookupBaseline struct {
+	window string
+	handle string
+	count  int
+}
+
+func appUnavailableWaitResult(
+	app string,
+	timeoutMS int,
+	attempts []string,
+	result toolCallResult,
+	attempt,
+	stableMS int,
+) toolCallResult {
+	text := fmt.Sprintf(
+		"app_unavailable: %q did not become visible on the AX bus within %dms.\n",
+		app,
+		timeoutMS,
+	)
+	for _, line := range attempts {
+		text += "  - " + line + "\n"
+	}
+	text += "Last AX availability result: " +
+		firstLine(resultText(result))
+	return axAssertionResult(
+		strings.TrimSpace(text),
+		true,
+		"app_unavailable",
+		attempt,
+		stableMS,
+	)
+}
+
+// lookupAcrossWindows runs lookup on the bound window and, when that finds
+// no unambiguous miss to report, on the application's other visible
+// windows. incomplete is true when nothing matched and some window could not
+// be read, so the miss proves nothing.
+func (s *service) lookupAcrossWindows(
+	read *untilApplicationRead,
+	lookup axElementLookup,
+	numeric bool,
+) (*elementRecord, error, bool) {
+	record, lookupErr := lookup(read.lookup)
+	incomplete := false
+	if record == nil && !numeric &&
+		!strings.Contains(strings.ToLower(fmt.Sprint(lookupErr)), "ambiguous") {
+		// The bound window has no match: the effect may be a dialog
+		// or popup in another window of the application.
+		others, complete := s.readOtherWindows(read)
+		if otherRecord, otherErr := lookup(others); otherRecord != nil ||
+			strings.Contains(strings.ToLower(fmt.Sprint(otherErr)), "ambiguous") {
+			record, lookupErr = otherRecord, otherErr
+		}
+		incomplete = !complete && record == nil
+	}
+	return record, lookupErr, incomplete
+}
+
+// locatorFailureWaitResult stops a wait whose first poll shows the locator
+// cannot name one current element: polling it would never answer.
+func locatorFailureWaitResult(
+	observed string,
+	selectorAmbiguous bool,
+	snapshot *appSnapshot,
+	attempt,
+	stableMS int,
+) toolCallResult {
+	status := "locator_stale"
+	if selectorAmbiguous {
+		status = "locator_ambiguous"
+	}
+	result := axAssertionResult(
+		fmt.Sprintf(
+			"wait %s: %s\nThis locator did not identify one "+
+				"current element, so polling it would not establish the "+
+				"requested predicate. Obtain a fresh ref or use a more "+
+				"specific structured selector.",
+			status, observed,
+		),
+		true,
+		status,
+		attempt,
+		stableMS,
+	)
+	addAssertionSnapshotMetadata(&result, snapshot)
+	return result
+}
+
+// verifyLookupTimeout is the state of the last poll of a wait that timed
+// out.
+type verifyLookupTimeout struct {
+	displaySelector   string
+	hint              string
+	goal              verifyGoal
+	timeoutMS         int
+	stableMS          int
+	attempt           int
+	attempts          []string
+	first             verifyLookupBaseline
+	snapshot          *appSnapshot
+	windowRef         string
+	lookupErr         error
+	ok                bool
+	incomplete        bool
+	selectorAmbiguous bool
+}
+
+func verifyLookupTimeoutResult(t verifyLookupTimeout) toolCallResult {
+	snapshot := t.snapshot
+	e := &toolError{tool: "wait", summary: fmt.Sprintf(
+		"expected %s %s, and it did not become true within %dms.",
+		t.displaySelector, t.goal.describe(), t.timeoutMS)}
+	e.add("Selector", strconv.Quote(t.displaySelector))
+	e.add("Snapshot", snapshotAge(snapshot))
+	addWaitChangeReport(e, t.first, snapshot, t.selectorAmbiguous)
+	for _, line := range t.attempts {
+		e.log = append(e.log, "  - "+line)
+	}
+	addWaitNextStep(e, t)
+	status := "locator_missing"
+	if t.lookupErr == nil {
+		status = "predicate_false"
+	}
+	if t.ok && t.stableMS > 0 {
+		status = "predicate_unstable"
+		e.next = fmt.Sprintf(
+			"the predicate became true but did not remain unchanged for "+
+				"the requested %dms stability window before timeout. "+
+				"Increase timeout_ms, reduce stable_ms, or assert a more "+
+				"specific next-state condition.",
+			t.stableMS,
+		)
+	}
+	result := toolCallResult{}
+	lookupErr := t.lookupErr
+	// For an exists predicate a target that never appeared is the
+	// answer: the predicate is false, not unknown.
+	goal := t.goal
+	existsOnly := goal.exists != nil && *goal.exists && goal.state == "" &&
+		goal.valueEquals == "" && goal.valueContains == "" && goal.textContains == ""
+	if status == "locator_missing" && existsOnly {
+		status = "predicate_false"
+		lookupErr = nil
+	}
+	if t.incomplete {
+		status = "observation_incomplete"
+	}
+	if !t.incomplete && lookupErr == nil &&
+		(status == "predicate_false" || status == "predicate_unstable") {
+		result = assertionNegativeResult(
+			e.Error(), status, t.attempt, t.stableMS,
+		)
+	} else {
+		result = axAssertionResult(
+			e.Error(), true, status, t.attempt, t.stableMS,
+		)
+	}
+	addAssertionSnapshotMetadata(&result, snapshot)
+	if t.windowRef != "" {
+		result.StructuredContent["until_window_ref"] = t.windowRef
+	}
+	return result
+}
+
+// addWaitChangeReport reports whether the UI changed during the wait. This
+// separates three situations: no AX-visible change, a change that is not the
+// awaited one (the predicate may be the wrong test), and a different window
+// (the target may live elsewhere). Windows are compared by instance handle,
+// not title: a second same-titled window of one app can become the root
+// without any title change while every element index is renumbered.
+func addWaitChangeReport(
+	e *toolError,
+	first verifyLookupBaseline,
+	snapshot *appSnapshot,
+	selectorAmbiguous bool,
+) {
+	if (first.handle != "" && snapshot.WindowHandle != first.handle) ||
+		snapshot.WindowTitle != first.window {
+		e.add("Window changed", fmt.Sprintf(
+			"%q → %q; current snapshot indices changed",
+			first.window, snapshot.WindowTitle,
+		))
+	} else if scopedCanonicalElementCount(snapshot) != first.count {
+		e.add("Tree changed", fmt.Sprintf("%d → %d elements, same window",
+			first.count, scopedCanonicalElementCount(snapshot)))
+	} else if selectorAmbiguous {
+		e.add("Nothing changed", fmt.Sprintf(
+			"same window, still %d elements — the selector remained ambiguous, "+
+				"so no unique assertion target was identified and this does not "+
+				"say whether the prior action took effect",
+			first.count))
+	} else {
+		e.add("Nothing changed", fmt.Sprintf(
+			"same window, still %d elements — no AX-visible structural "+
+				"change was observed during the wait. This does not establish "+
+				"whether a prior input was emitted or whether a visual, file, "+
+				"document, or application effect occurred outside A11y",
+			first.count))
+	}
+}
+
+// addWaitNextStep chooses the next step by cause. When the target never
+// appeared, it lists the closest current elements so the agent need not
+// reread the whole tree to correct a guessed selector. When an exists:false
+// wait times out without any UI change, the agent is probably using the
+// disappearance of an old element as a proxy for navigation; single-page
+// apps often keep the old node, so the condition may never hold, and waiting
+// for something new is the better test. When the UI did change, the
+// candidate list is more useful than that advice.
+func addWaitNextStep(e *toolError, t verifyLookupTimeout) {
+	snapshot := t.snapshot
+	if t.selectorAmbiguous {
+		e.next = "the selector remained ambiguous throughout the wait, so the wait " +
+			"never identified one element to test. Use a fresh rN ref or a selector " +
+			"copied from the current tree with enough role, name, and predicates to " +
+			"match exactly one element. This failure does not prove " +
+			"the requested state is false or that the prior action failed."
+	} else if t.goal.exists != nil && !*t.goal.exists &&
+		snapshot.WindowTitle == t.first.window && len(snapshot.Elements) == t.first.count {
+		e.next = "waiting for an element to DISAPPEAR is a poor proxy for " +
+			"\"the page moved on\": single-page apps routinely leave the old " +
+			"node in the DOM, so this condition may never become true no " +
+			"matter how long you wait. Wait for something NEW instead — a " +
+			"heading you expect on the next screen, or the address bar's " +
+			"value changing. The unchanged AX tree does not attribute the " +
+			"cause of this timeout."
+	} else if closest := closestElements(snapshot, t.hint, 5); len(closest) > 0 {
+		e.log = append(e.log, "  closest elements currently in the tree:")
+		for _, line := range closest {
+			e.log = append(e.log, "  "+line)
+		}
+		e.next = "the element never appeared. The closest things actually in the tree are listed above — if one of them is what you meant, retry with its selector. Otherwise the target may be absent or the app may expose it under a different A11y name. This assertion does not attribute the cause."
+	} else {
+		e.next = "this is a real observation of the current tree, not a stale cache. The declared A11y predicate was not observed. Inspect a fresh tree, the visual channel, or durable state as appropriate; this assertion alone does not prove why the predicate was absent."
 	}
 }

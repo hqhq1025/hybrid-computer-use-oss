@@ -194,111 +194,264 @@ def dispatch_provider_operation(
             target_window_handle=operation.get("window_handle"),
         )
     if operation_kind == "desktop_execute_batch":
-        try:
-            response = perform_gui(
-                operation.get("actions"),
-                operation.get("settle_ms", 800),
-                operation.get("frame_id"),
-            )
-        except Exception as exc:
-            response = {
-                "ok": False,
-                "error": str(exc),
-                "dispatched": 0,
-                "input_events_emitted": False,
-                "input_actions_dispatched": 0,
-                "effect_unknown": False,
-                "quiescent": None,
-            }
-        return finalize_gui_response(response)
+        return _execute_desktop_batch(operation)
     if operation_kind == "observe":
-        snapshot = build_snapshot(
-            operation.get("app", ""),
-            text_limit=parse_text_limit(observation.get("text_limit"), DEFAULT_TEXT_LIMIT),
-            max_tree_nodes=positive_int(observation.get("max_tree_nodes"), MAX_ELEMENTS),
-            max_tree_depth=positive_int(observation.get("max_tree_depth"), MAX_DEPTH),
-            prune=observation.get("prune", True),
-            boxes=bool(observation.get("boxes", False)),
-            known_refs=operation.get("known_refs"),
-            # None selects the default policy, which includes a screenshot.
-            # Find and assertion requests pass False: they query or assert
-            # rather than observe, and assertions poll, so attaching a
-            # screenshot (about 5120 tokens) to every poll would be costly.
-            include_screenshot=observation.get("include_screenshot"),
-            screenshot_scope=observation.get("screenshot_scope", "window"),
-            app_identity=operation.get("app_identity"),
-            target_window_handle=operation.get("window_handle"),
-            # An unchanged window may return its previous tree; see
-            # tree_reuse. Post-action snapshots below always walk.
-            reuse_tree=True,
-        )
-        response = {"ok": True, "snapshot": snapshot}
-        lap("observe_snapshot")
-        # Modal notes come first: they determine how the rest of the tree
-        # should be read.
-        elements = snapshot.get("elements") or []
-        shell_notes = snapshot_diagnostics(elements)
-        # The two diagnostics describe degrees of the same problem and are
-        # never emitted together: snapshot_diagnostics covers a tree reduced to
-        # its window frame, content_host_diagnostic a complete shell whose
-        # content plane is missing. Once the former fires, the latter would
-        # only repeat its conclusion.
-        diagnostics = snapshot.pop("modalNotes", []) + shell_notes
-        if not shell_notes:
-            diagnostics += content_host_diagnostic(elements)
-        if diagnostics:
-            response["notes"] = diagnostics
-        return response
+        return _observe_operation(operation, observation)
     if (
         operation_kind == "resolve_and_act"
         and action_intent == "resolve_target"
     ):
-        app = resolve_operation_app(operation)
-        target_window_handle = operation.get("window_handle")
-        if target_window_handle:
-            window_index, window, _window_selection = select_window_by_handle(
-                app, target_window_handle
-            )
-            _verify_expected_window(
-                window,
-                operation.get("expected_window"),
-            )
-        else:
-            window_index, window = main_window(app)
-        bounds = extents(window)
-        semantic_target = operation.get("target")
-        if not isinstance(semantic_target, dict):
-            raise OperationFailure(
-                "semantic_target_invalid reason=missing_target; no input was emitted.",
-                failure_code="semantic_target_invalid",
-                failure_phase="precondition",
-                input_events_emitted=False,
-            )
-        (
-            _element,
-            element_record,
-            _semantic_note,
-            _window,
-            _bounds,
-        ) = resolve_semantic_target(
-            app,
-            window_index,
-            window,
-            bounds,
-            semantic_target,
-            operation.get("known_refs"),
-            operation,
-        )
-        return {
-            "ok": True,
-            "resolvedElement": element_record,
-        }
+        return _resolve_target_operation(operation)
+    return _perform_ax_action(
+        operation,
+        operation_kind,
+        action_intent,
+        action_input,
+        observation,
+    )
 
+
+def _execute_desktop_batch(operation):
+    try:
+        response = perform_gui(
+            operation.get("actions"),
+            operation.get("settle_ms", 800),
+            operation.get("frame_id"),
+        )
+    except Exception as exc:
+        response = {
+            "ok": False,
+            "error": str(exc),
+            "dispatched": 0,
+            "input_events_emitted": False,
+            "input_actions_dispatched": 0,
+            "effect_unknown": False,
+            "quiescent": None,
+        }
+    return finalize_gui_response(response)
+
+
+def _observe_operation(operation, observation):
+    snapshot = build_snapshot(
+        operation.get("app", ""),
+        text_limit=parse_text_limit(observation.get("text_limit"), DEFAULT_TEXT_LIMIT),
+        max_tree_nodes=positive_int(observation.get("max_tree_nodes"), MAX_ELEMENTS),
+        max_tree_depth=positive_int(observation.get("max_tree_depth"), MAX_DEPTH),
+        prune=observation.get("prune", True),
+        boxes=bool(observation.get("boxes", False)),
+        known_refs=operation.get("known_refs"),
+        # None selects the default policy, which includes a screenshot.
+        # Find and assertion requests pass False: they query or assert
+        # rather than observe, and assertions poll, so attaching a
+        # screenshot (about 5120 tokens) to every poll would be costly.
+        include_screenshot=observation.get("include_screenshot"),
+        screenshot_scope=observation.get("screenshot_scope", "window"),
+        app_identity=operation.get("app_identity"),
+        target_window_handle=operation.get("window_handle"),
+        # An unchanged window may return its previous tree; see
+        # tree_reuse. Post-action snapshots below always walk.
+        reuse_tree=True,
+    )
+    response = {"ok": True, "snapshot": snapshot}
+    lap("observe_snapshot")
+    # Modal notes come first: they determine how the rest of the tree
+    # should be read.
+    elements = snapshot.get("elements") or []
+    shell_notes = snapshot_diagnostics(elements)
+    # The two diagnostics describe degrees of the same problem and are
+    # never emitted together: snapshot_diagnostics covers a tree reduced to
+    # its window frame, content_host_diagnostic a complete shell whose
+    # content plane is missing. Once the former fires, the latter would
+    # only repeat its conclusion.
+    diagnostics = snapshot.pop("modalNotes", []) + shell_notes
+    if not shell_notes:
+        diagnostics += content_host_diagnostic(elements)
+    if diagnostics:
+        response["notes"] = diagnostics
+    return response
+
+
+def _resolve_target_operation(operation):
+    """Resolve a semantic target without acting on it."""
+    app = resolve_operation_app(operation)
+    target_window_handle = operation.get("window_handle")
+    if target_window_handle:
+        window_index, window, _window_selection = select_window_by_handle(
+            app, target_window_handle
+        )
+        _verify_expected_window(
+            window,
+            operation.get("expected_window"),
+        )
+    else:
+        window_index, window = main_window(app)
+    bounds = extents(window)
+    semantic_target = operation.get("target")
+    if not isinstance(semantic_target, dict):
+        raise OperationFailure(
+            "semantic_target_invalid reason=missing_target; no input was emitted.",
+            failure_code="semantic_target_invalid",
+            failure_phase="precondition",
+            input_events_emitted=False,
+        )
+    (
+        _element,
+        element_record,
+        _semantic_note,
+        _window,
+        _bounds,
+    ) = resolve_semantic_target(
+        app,
+        window_index,
+        window,
+        bounds,
+        semantic_target,
+        operation.get("known_refs"),
+        operation,
+    )
+    return {
+        "ok": True,
+        "resolvedElement": element_record,
+    }
+
+
+def _perform_ax_action(
+    operation,
+    operation_kind,
+    action_intent,
+    action_input,
+    observation,
+):
+    """Resolve the target, emit one AX action, and observe its effect.
+
+    The order is fixed: resolve, sample the before-state, act, then settle
+    and read back. Each lap() marks the end of one of those phases.
+    """
     app = resolve_operation_app(operation)
     # One xprop round: the managed client list and the active window are all
     # the external-transition check reads. Window geometry is not needed.
     root_window_before = x11_root_window_state()
     lap("resolve_app_and_root_window")
+    (
+        element,
+        element_record,
+        semantic_note,
+        window,
+        bounds,
+    ) = _resolve_action_target(app, operation, operation_kind, action_input)
+    lap("resolve_target")
+    pixel_bounds = bounds
+    # Capture pixels once before the action and twice after it; only a change
+    # present in both later captures counts. Semantic targets are resolved
+    # across all visible app-owned windows first, so pixel capture and later
+    # focus actions bind to the window that actually matched rather than the
+    # one main_window() picked before resolution.
+    # Without a post-action snapshot there is no pixel note, so skip the sample.
+    pixels_before = (
+        safe(lambda: capture_window_pixels(pixel_bounds))
+        if observation.get("capture_snapshot") is not False
+        else None
+    )
+    lap("pixels_before")
+    # Refresh the geometry from the live node right after resolving it;
+    # otherwise semantic actions would use the live node while synthesized
+    # input used the snapshot geometry.
+    element_record, moved_note = current_geometry(element, element_record, bounds)
+    # Record the top-level window set before acting. wait_for_ui_to_settle()
+    # compares against it to detect opened or closed windows and decide
+    # whether to wait longer for focus to settle.
+    windows_before = safe(lambda: window_identity_set(app))
+    lap("geometry_and_windows_before")
+    # Dispatch queued AT-SPI events now, so the settle wait counts only events
+    # the application emits after the input.
+    ui_events.pump()
+    # Every action reports the route it actually took and whether the result
+    # was verified. A fresh accessibility tree in the response looks like
+    # confirmation but is only a snapshot, not evidence that the action took
+    # effect.
+    notes = []
+    action_evidence = _new_action_evidence()
+    action_evidence_state.replace(action_evidence)
+    _record_target_notes_and_state(
+        notes,
+        action_evidence,
+        element,
+        element_record,
+        semantic_note,
+        moved_note,
+    )
+
+    if operation_kind == "window_action":
+        windowless_response = _perform_window_action(
+            action_intent, app, window, element_record, notes, action_evidence
+        )
+        if windowless_response is not None:
+            return windowless_response
+    elif action_intent == "click":
+        element_record = _perform_click(
+            action_input,
+            window,
+            bounds,
+            element,
+            element_record,
+            notes,
+            action_evidence,
+        )
+    elif action_intent == "scroll":
+        element_record = _perform_scroll(
+            action_input,
+            window,
+            bounds,
+            element,
+            element_record,
+            notes,
+            action_evidence,
+        )
+    elif action_intent == "type":
+        _perform_type(
+            action_input, window, element, element_record, notes, action_evidence
+        )
+    elif action_intent == "keypress":
+        _perform_keypress(
+            action_input, window, element, element_record, notes, action_evidence
+        )
+    elif action_intent == "set_value":
+        _perform_set_value(
+            action_input, window, element, element_record, notes, action_evidence
+        )
+    else:
+        raise RuntimeError(
+            'unsupportedProviderAction("{}")'.format(action_intent)
+        )
+
+    lap("action")
+    # The input may have opened or closed native windows. Reads after this
+    # point (settle, post-action snapshot, recovery) must not bind windows
+    # against the native inventory sampled before the input.
+    _x11_window_inventory_cache.clear()
+    if observation.get("capture_snapshot") is False:
+        return _delivery_only_response(action_evidence, element_record, notes)
+    return _observe_after_action(
+        operation,
+        operation_kind,
+        observation,
+        app,
+        bounds,
+        element_record,
+        notes,
+        action_evidence,
+        root_window_before,
+        windows_before,
+        pixels_before,
+    )
+
+
+def _resolve_action_target(app, operation, operation_kind, action_input):
+    """Return (element, element_record, semantic_note, window, bounds).
+
+    A target names either a snapshot element or a semantic locator, never
+    both. Every failure here happens before any input is emitted.
+    """
     element_record = operation.get("element")
     semantic_target = operation.get("target")
     semantic_note = None
@@ -359,38 +512,11 @@ def dispatch_provider_operation(
                 failure_phase="precondition",
                 input_events_emitted=False,
             )
-    lap("resolve_target")
-    pixel_bounds = bounds
-    # Capture pixels once before the action and twice after it; only a change
-    # present in both later captures counts. Semantic targets are resolved
-    # across all visible app-owned windows first, so pixel capture and later
-    # focus actions bind to the window that actually matched rather than the
-    # one main_window() picked before resolution.
-    # Without a post-action snapshot there is no pixel note, so skip the sample.
-    pixels_before = (
-        safe(lambda: capture_window_pixels(pixel_bounds))
-        if observation.get("capture_snapshot") is not False
-        else None
-    )
-    lap("pixels_before")
-    # Refresh the geometry from the live node right after resolving it;
-    # otherwise semantic actions would use the live node while synthesized
-    # input used the snapshot geometry.
-    element_record, moved_note = current_geometry(element, element_record, bounds)
-    # Record the top-level window set before acting. wait_for_ui_to_settle()
-    # compares against it to detect opened or closed windows and decide
-    # whether to wait longer for focus to settle.
-    windows_before = safe(lambda: window_identity_set(app))
-    lap("geometry_and_windows_before")
-    # Dispatch queued AT-SPI events now, so the settle wait counts only events
-    # the application emits after the input.
-    ui_events.pump()
-    # Every action reports the route it actually took and whether the result
-    # was verified. A fresh accessibility tree in the response looks like
-    # confirmation but is only a snapshot, not evidence that the action took
-    # effect.
-    notes = []
-    action_evidence = {
+    return element, element_record, semantic_note, window, bounds
+
+
+def _new_action_evidence():
+    return {
         "route": "unknown",
         "geometry_sampled": False,
         "geometry_stable": None,
@@ -405,7 +531,16 @@ def dispatch_provider_operation(
         "readback_verified": None,
         "input_emitted": False,
     }
-    action_evidence_state.replace(action_evidence)
+
+
+def _record_target_notes_and_state(
+    notes,
+    action_evidence,
+    element,
+    element_record,
+    semantic_note,
+    moved_note,
+):
     if semantic_note:
         notes.append(semantic_note)
     # The resolved-target note precedes all action notes: first what was
@@ -434,449 +569,551 @@ def dispatch_provider_operation(
                 input_events_emitted=False,
             )
 
-    if operation_kind == "window_action":
-        window_result = perform_ax_window_action(
-            action_intent, app, window, element_record
+
+def _perform_window_action(
+    action_intent, app, window, element_record, notes, action_evidence
+):
+    """Run a native window command; return the response if no window is left."""
+    window_result = perform_ax_window_action(
+        action_intent, app, window, element_record
+    )
+    action_evidence["route"] = "native_window_command"
+    action_evidence["input_emitted"] = True
+    action_evidence["readback_sampled"] = True
+    action_evidence["readback_verified"] = True
+    notes.append(window_result["note"])
+    if window_result["windowless"]:
+        return {
+            "ok": True,
+            "snapshot": windowless_snapshot(
+                window_result["app_name"],
+                window_result["app_pid"],
+                window_result["closed_handle"],
+            ),
+            "input_events_emitted": True,
+            "desktop_state_mutated": True,
+            "mutation_unknown": False,
+            "actionEvidence": action_evidence,
+            "notes": notes,
+        }
+    return None
+
+
+def _perform_click(
+    action_input,
+    window,
+    bounds,
+    element,
+    element_record,
+    notes,
+    action_evidence,
+):
+    """Click by the requested method and return the refreshed element record."""
+    click_method = (action_input.get("click_method") or "auto").lower()
+    click_count = max(1, int(action_input.get("click_count", 1) or 1))
+    if click_method == "accessibility":
+        _accessibility_click(
+            action_input, element, click_count, notes, action_evidence
         )
-        action_evidence["route"] = "native_window_command"
+    elif click_method == "app_post":
+        raise RuntimeError("click_method 'app_post' is not supported on Linux")
+    elif click_method == "sky_click":
+        raise RuntimeError("click_method 'sky_click' is not supported on Linux")
+    elif click_method == "global":
+        element_record = _global_click(
+            action_input,
+            window,
+            bounds,
+            element,
+            element_record,
+            click_count,
+            notes,
+            action_evidence,
+        )
+    elif click_method == "auto":
+        element_record = _auto_click(
+            action_input,
+            window,
+            bounds,
+            element,
+            element_record,
+            click_count,
+            notes,
+            action_evidence,
+        )
+    else:
+        raise RuntimeError("Invalid click_method '{}'".format(click_method))
+    return element_record
+
+
+def _accessibility_click(
+    action_input, element, click_count, notes, action_evidence
+):
+    if element is None:
+        raise RuntimeError("click_method 'accessibility' requires a target ref")
+    if action_input.get("mouse_button", "left") != "left":
+        raise RuntimeError(
+            "click_method 'accessibility' only supports mouse_button 'left'"
+        )
+    if click_count != 1:
+        raise RuntimeError(
+            "click_method 'accessibility' cannot represent click_count > 1; "
+            "use click_method 'auto' or 'global' for a real multi-click"
+        )
+    if not do_action_by_index(element, preferred_action_index(element)):
+        raise RuntimeError(
+            "click_method 'accessibility' could not click the requested element"
+        )
+    action_evidence["route"] = "semantic_action"
+    action_evidence["input_emitted"] = True
+    notes.append(
+        A11Y_CHANNEL
+        + SEMANTIC
+        + "Invoked the element's AT-SPI accessibility action. "
+        + UNVERIFIED_SEMANTIC
+    )
+
+
+def _global_click(
+    action_input,
+    window,
+    bounds,
+    element,
+    element_record,
+    click_count,
+    notes,
+    action_evidence,
+):
+    element_record, _ = require_stable_coordinate_geometry(
+        element, element_record, bounds
+    )
+    x, y = screen_point(
+        bounds,
+        element_record,
+        action_input.get("x"),
+        action_input.get("y"),
+    )
+    require_coordinate_delivery(window, x, y, "click")
+    send_mouse_click(
+        x, y, action_input.get("mouse_button", "left"), click_count
+    )
+    action_evidence["route"] = "coordinate_synthesis"
+    action_evidence["geometry_sampled"] = True
+    action_evidence["geometry_stable"] = True
+    action_evidence["window_focus_verified"] = True
+    action_evidence["point_owner_verified"] = True
+    action_evidence["focus_verified"] = True
+    action_evidence["input_emitted"] = True
+    notes.append(
+        addressing_channel(element_record)
+        + SYNTHESIS
+        + "Synthesized {} coordinate click(s) at ({:.0f}, {:.0f}) in "
+        "window-relative pixels after bringing the window to the foreground. {}{}"
+        .format(
+            click_count,
+            *window_relative(bounds, x, y),
+            UNVERIFIED_SYNTHESIS,
+            # Omit PREFER_ELEMENT_INDEX when the caller already named
+            # an element: this route is usually taken because the
+            # semantic action failed (several applications report
+            # AT-SPI action success without any effect), so
+            # coordinates are the only remaining option.
+            "" if element_record else PREFER_ELEMENT_INDEX,
+        )
+    )
+    return element_record
+
+
+def _auto_click(
+    action_input,
+    window,
+    bounds,
+    element,
+    element_record,
+    click_count,
+    notes,
+    action_evidence,
+):
+    """Prefer the element's AT-SPI action; fall back to a coordinate click."""
+    handled = False
+    if (
+        element is not None
+        and action_input.get("mouse_button", "left") == "left"
+        and click_count == 1
+        and not is_dropdown_item(element, window)
+    ):
+        handled = do_action_by_index(element, preferred_action_index(element))
+    if handled:
+        action_evidence["route"] = "semantic_action"
         action_evidence["input_emitted"] = True
-        action_evidence["readback_sampled"] = True
-        action_evidence["readback_verified"] = True
-        notes.append(window_result["note"])
-        if window_result["windowless"]:
-            return {
-                "ok": True,
-                "snapshot": windowless_snapshot(
-                    window_result["app_name"],
-                    window_result["app_pid"],
-                    window_result["closed_handle"],
-                ),
-                "input_events_emitted": True,
-                "desktop_state_mutated": True,
-                "mutation_unknown": False,
-                "actionEvidence": action_evidence,
-                "notes": notes,
-            }
-    elif action_intent == "click":
-        click_method = (action_input.get("click_method") or "auto").lower()
-        click_count = max(1, int(action_input.get("click_count", 1) or 1))
-        if click_method == "accessibility":
-            if element is None:
-                raise RuntimeError("click_method 'accessibility' requires a target ref")
-            if action_input.get("mouse_button", "left") != "left":
-                raise RuntimeError(
-                    "click_method 'accessibility' only supports mouse_button 'left'"
-                )
-            if click_count != 1:
-                raise RuntimeError(
-                    "click_method 'accessibility' cannot represent click_count > 1; "
-                    "use click_method 'auto' or 'global' for a real multi-click"
-                )
-            if not do_action_by_index(element, preferred_action_index(element)):
-                raise RuntimeError(
-                    "click_method 'accessibility' could not click the requested element"
-                )
-            action_evidence["route"] = "semantic_action"
-            action_evidence["input_emitted"] = True
-            notes.append(
-                A11Y_CHANNEL
-                + SEMANTIC
-                + "Invoked the element's AT-SPI accessibility action. "
-                + UNVERIFIED_SEMANTIC
-            )
-        elif click_method == "app_post":
-            raise RuntimeError("click_method 'app_post' is not supported on Linux")
-        elif click_method == "sky_click":
-            raise RuntimeError("click_method 'sky_click' is not supported on Linux")
-        elif click_method == "global":
-            element_record, _ = require_stable_coordinate_geometry(
-                element, element_record, bounds
-            )
-            x, y = screen_point(
-                bounds,
-                element_record,
-                action_input.get("x"),
-                action_input.get("y"),
-            )
-            require_coordinate_delivery(window, x, y, "click")
-            send_mouse_click(
-                x, y, action_input.get("mouse_button", "left"), click_count
-            )
-            action_evidence["route"] = "coordinate_synthesis"
-            action_evidence["geometry_sampled"] = True
-            action_evidence["geometry_stable"] = True
-            action_evidence["window_focus_verified"] = True
-            action_evidence["point_owner_verified"] = True
-            action_evidence["focus_verified"] = True
-            action_evidence["input_emitted"] = True
-            notes.append(
-                addressing_channel(element_record)
-                + SYNTHESIS
-                + "Synthesized {} coordinate click(s) at ({:.0f}, {:.0f}) in "
-                "window-relative pixels after bringing the window to the foreground. {}{}"
-                .format(
-                    click_count,
-                    *window_relative(bounds, x, y),
-                    UNVERIFIED_SYNTHESIS,
-                    # Omit PREFER_ELEMENT_INDEX when the caller already named
-                    # an element: this route is usually taken because the
-                    # semantic action failed (several applications report
-                    # AT-SPI action success without any effect), so
-                    # coordinates are the only remaining option.
-                    "" if element_record else PREFER_ELEMENT_INDEX,
-                )
-            )
-        elif click_method == "auto":
-            handled = False
-            if (
-                element is not None
-                and action_input.get("mouse_button", "left") == "left"
-                and click_count == 1
-                and not is_dropdown_item(element, window)
-            ):
-                handled = do_action_by_index(element, preferred_action_index(element))
-            if handled:
-                action_evidence["route"] = "semantic_action"
-                action_evidence["input_emitted"] = True
-                notes.append(
-                    A11Y_CHANNEL
-                    + SEMANTIC
-                    + "Invoked the element's AT-SPI accessibility action. "
-                    + UNVERIFIED_SEMANTIC
-                )
-            else:
-                if element is not None and node_role(element) == "menu":
-                    raise OperationFailure(
-                        "semantic_action_unavailable role='menu' name={!r}; "
-                        "the menu exposed no usable AT-SPI action, and automatic "
-                        "coordinate fallback is disabled because duplicated or stale "
-                        "menu geometry can activate a different command. No input was "
-                        "emitted. Open the menu with keyboard navigation or use gui "
-                        "after observing a fresh full-desktop frame.".format(
-                            node_name(element)
-                        ),
-                        failure_code="semantic_action_unavailable",
-                        failure_phase="precondition",
-                        input_events_emitted=False,
-                    )
-                element_record, _ = require_stable_coordinate_geometry(
-                    element, element_record, bounds
-                )
-                x, y = screen_point(
-                    bounds,
-                    element_record,
-                    action_input.get("x"),
-                    action_input.get("y"),
-                )
-                require_coordinate_delivery(window, x, y, "click")
-                send_mouse_click(
-                    x,
-                    y,
-                    action_input.get("mouse_button", "left"),
-                    click_count,
-                )
-                action_evidence["route"] = "coordinate_synthesis"
-                action_evidence["geometry_sampled"] = True
-                action_evidence["geometry_stable"] = True
-                action_evidence["window_focus_verified"] = True
-                action_evidence["point_owner_verified"] = True
-                action_evidence["focus_verified"] = True
-                action_evidence["input_emitted"] = True
-                if is_dropdown_item(element, window):
-                    # Explain why the semantic route was skipped. Otherwise the
-                    # note reads as if the element had no action; it has one,
-                    # but that action closes the drop-down without committing
-                    # the value and leaves nothing to verify.
-                    reason = (
-                        "This element is an item inside a drop-down popup, where the "
-                        "AT-SPI action closes the popup without committing the value "
-                        "and leaves nothing to verify against, so this went straight to "
-                        "{} coordinate click(s) at ({:.0f}, {:.0f}) in window-relative "
-                        "pixels. ".format(
-                            click_count, *window_relative(bounds, x, y))
-                    )
-                else:
-                    reason = (
-                        "No usable AT-SPI action was available, so this fell back to a "
-                        "{} coordinate click(s) at ({:.0f}, {:.0f}) in window-relative pixels "
-                        "after bringing the window to the foreground. ".format(
-                            click_count, *window_relative(bounds, x, y)
-                        )
-                    )
-                notes.append(
-                    addressing_channel(element_record)
-                    + SYNTHESIS
-                    + reason
-                    + UNVERIFIED_SYNTHESIS
-                )
-        else:
-            raise RuntimeError("Invalid click_method '{}'".format(click_method))
-    elif action_intent == "scroll":
-        direction = action_input.get("direction", "down")
-        pages = action_input.get("pages", 1)
-        point = None
-        if action_input.get("window_centre") and bounds is not None:
-            point = (
-                bounds["x"] + bounds["width"] / 2,
-                bounds["y"] + bounds["height"] / 2,
-            )
-        elif element_record and element_record.get("frame"):
-            element_record, _ = require_stable_coordinate_geometry(
-                element, element_record, bounds
-            )
-            point = screen_point(bounds, element_record, None, None)
-        uses_wheel = point is not None and direction not in ("left", "right")
-        if uses_wheel:
-            require_coordinate_delivery(window, point[0], point[1], "scroll")
-        else:
-            require_window_focus(window, "scroll")
-        route = scroll_element(direction, pages, point)
-        if route == "wheel":
-            action_evidence["route"] = "coordinate_synthesis"
-            action_evidence["geometry_sampled"] = True
-            action_evidence["geometry_stable"] = True if element is not None else None
-            action_evidence["window_focus_verified"] = True
-            action_evidence["point_owner_verified"] = True
-            action_evidence["focus_verified"] = True
-            action_evidence["input_emitted"] = True
-            wx, wy = window_relative(bounds, *point)
-            notes.append(
-                A11Y_CHANNEL
-                + SYNTHESIS
-                + "Scrolled with {} wheel notch(es) at ({:.0f}, {:.0f}) in "
-                "window-relative pixels — {}. Two caveats. First, the wheel acts on the "
-                "scrollable ancestor under that point, which is not necessarily the "
-                "element you named. Second, one page is APPROXIMATED as {} notches; "
-                "the real distance is whatever the application's scroll settings say, "
-                "so do not treat pages=1 as exactly one Page_Down. This also moves the "
-                "real pointer. {}".format(
-                    int(math.ceil(float(pages or 1))) * WHEEL_CLICKS_PER_PAGE,
-                    wx,
-                    wy,
-                    # State where the position came from: without a target ref
-                    # the wheel lands at the window centre, and claiming a
-                    # targeted scroll would mislead every later inference.
-                    "no target ref was given, so this is the centre of the window "
-                    "— the wheel lands on whatever scrollable sits there"
-                    if action_input.get("window_centre")
-                    else "the position came from the target ref, so this scroll IS "
-                         "targeted",
-                    WHEEL_CLICKS_PER_PAGE,
-                    UNVERIFIED_SYNTHESIS,
-                )
-            )
-        else:
-            action_evidence["route"] = "keyboard_synthesis"
-            action_evidence["window_focus_verified"] = True
-            action_evidence["focus_verified"] = True
-            action_evidence["input_emitted"] = True
-            notes.append(
-                KEY_CHANNEL
-                + SYNTHESIS
-                + "Scrolled by synthesizing page keys after bringing the window to the "
-                "foreground. NOTE: no target ref directed this scroll — the keys "
-                "go to whatever widget currently holds focus inside the window. This "
-                "route is used when the element has no usable geometry, and for "
-                "horizontal scrolling, whose wheel buttons this project has not "
-                "measured. If the wrong region scrolled, focus that region first "
-                "(click it) and scroll again. {}".format(UNVERIFIED_SYNTHESIS)
-            )
-    elif action_intent == "type":
-        # A caller-supplied element_index is a real target, not a hint. Focus and
-        # verify that exact node before any keyboard fallback.
-        if element_record is not None:
-            focus_target_element(
-                window, element, element_record, "targeted type_text")
-            action_evidence["window_focus_verified"] = True
-            action_evidence["target_focus_verified"] = True
-            (
-                write_outcome,
-                before_chars,
-                after_chars,
-                semantic_input_emitted,
-            ) = insert_text_outcome_on_node(element, action_input.get("text", ""))
-        else:
-            (
-                write_outcome,
-                before_chars,
-                after_chars,
-                semantic_input_emitted,
-            ) = insert_text_outcome_on_node(
-                find_editable_text(window), action_input.get("text", "")
-            )
-        if semantic_input_emitted:
-            action_evidence["route"] = "editable_text_api"
-            action_evidence["input_emitted"] = True
-            action_evidence["readback_sampled"] = True
-        if write_outcome == "effect_unknown":
+        notes.append(
+            A11Y_CHANNEL
+            + SEMANTIC
+            + "Invoked the element's AT-SPI accessibility action. "
+            + UNVERIFIED_SEMANTIC
+        )
+    else:
+        if element is not None and node_role(element) == "menu":
             raise OperationFailure(
-                "effect_unknown: the AT-SPI editable-text API may have changed "
-                "the control, but exact readback was unavailable; automatic "
-                "keyboard fallback was not attempted.",
-                failure_code="effect_unknown",
-                failure_phase="readback",
-                input_events_emitted=semantic_input_emitted,
-                failure_subject="element",
+                "semantic_action_unavailable role='menu' name={!r}; "
+                "the menu exposed no usable AT-SPI action, and automatic "
+                "coordinate fallback is disabled because duplicated or stale "
+                "menu geometry can activate a different command. No input was "
+                "emitted. Open the menu with keyboard navigation or use gui "
+                "after observing a fresh full-desktop frame.".format(
+                    node_name(element)
+                ),
+                failure_code="semantic_action_unavailable",
+                failure_phase="precondition",
+                input_events_emitted=False,
             )
-        if write_outcome == "verified":
-            action_evidence["route"] = "editable_text_api"
-            action_evidence["editable_verified"] = True
-            action_evidence["readback_verified"] = True
-            action_evidence["readback_sampled"] = True
-            action_evidence["input_emitted"] = True
-            notes.append(
-                A11Y_CHANNEL
-                + SEMANTIC
-                + "Wrote the text through the AT-SPI editable-text API and read it back "
-                "to confirm it landed ({} -> {} characters). This confirms the control "
-                "changed; if the control belongs to a dialog, the application may still "
-                "require OK/Apply before the value takes effect.".format(
-                    before_chars, after_chars
-                )
+        element_record, _ = require_stable_coordinate_geometry(
+            element, element_record, bounds
+        )
+        x, y = screen_point(
+            bounds,
+            element_record,
+            action_input.get("x"),
+            action_input.get("y"),
+        )
+        require_coordinate_delivery(window, x, y, "click")
+        send_mouse_click(
+            x,
+            y,
+            action_input.get("mouse_button", "left"),
+            click_count,
+        )
+        action_evidence["route"] = "coordinate_synthesis"
+        action_evidence["geometry_sampled"] = True
+        action_evidence["geometry_stable"] = True
+        action_evidence["window_focus_verified"] = True
+        action_evidence["point_owner_verified"] = True
+        action_evidence["focus_verified"] = True
+        action_evidence["input_emitted"] = True
+        if is_dropdown_item(element, window):
+            # Explain why the semantic route was skipped. Otherwise the
+            # note reads as if the element had no action; it has one,
+            # but that action closes the drop-down without committing
+            # the value and leaves nothing to verify.
+            reason = (
+                "This element is an item inside a drop-down popup, where the "
+                "AT-SPI action closes the popup without committing the value "
+                "and leaves nothing to verify against, so this went straight to "
+                "{} coordinate click(s) at ({:.0f}, {:.0f}) in window-relative "
+                "pixels. ".format(
+                    click_count, *window_relative(bounds, x, y))
             )
         else:
-            if element_record is None:
-                require_window_focus(window, "type")
-                action_evidence["window_focus_verified"] = True
-            else:
-                # The semantic write attempt may itself move focus. Re-establish
-                # and verify the exact target immediately before global synthesis.
-                focus_target_element(
-                    window, element, element_record,
-                    "targeted type_text keyboard fallback")
-                action_evidence["window_focus_verified"] = True
-                action_evidence["target_focus_verified"] = True
-            send_text(action_input.get("text", ""))
-            action_evidence["route"] = "keyboard_synthesis"
-            action_evidence["focus_verified"] = True
-            action_evidence["editable_verified"] = None
-            action_evidence["input_emitted"] = True
-            notes.append(
-                KEY_CHANNEL
-                + SYNTHESIS
-                + "The AT-SPI editable-text write did not land, so this fell back to "
-                "global key synthesis after {}. {}".format(
-                    "verifying the requested element held focus"
-                    if element_record is not None
-                    else "bringing the window to the foreground",
-                    UNVERIFIED_SYNTHESIS,
+            reason = (
+                "No usable AT-SPI action was available, so this fell back to a "
+                "{} coordinate click(s) at ({:.0f}, {:.0f}) in window-relative pixels "
+                "after bringing the window to the foreground. ".format(
+                    click_count, *window_relative(bounds, x, y)
                 )
             )
-    elif action_intent == "keypress":
-        # Parse the key before taking focus, so a misspelled key fails without
-        # first pulling the user's window to the foreground.
-        parse_key(action_input.get("key", ""))
-        if element_record is not None:
-            focus_target_element(
-                window, element, element_record, "targeted press_key")
-            action_evidence["window_focus_verified"] = True
-            action_evidence["target_focus_verified"] = True
-        else:
-            require_window_focus(window, "keypress")
-            action_evidence["window_focus_verified"] = True
-        send_key(action_input.get("key", ""))
+        notes.append(
+            addressing_channel(element_record)
+            + SYNTHESIS
+            + reason
+            + UNVERIFIED_SYNTHESIS
+        )
+    return element_record
+
+
+def _perform_scroll(
+    action_input,
+    window,
+    bounds,
+    element,
+    element_record,
+    notes,
+    action_evidence,
+):
+    direction = action_input.get("direction", "down")
+    pages = action_input.get("pages", 1)
+    point = None
+    if action_input.get("window_centre") and bounds is not None:
+        point = (
+            bounds["x"] + bounds["width"] / 2,
+            bounds["y"] + bounds["height"] / 2,
+        )
+    elif element_record and element_record.get("frame"):
+        element_record, _ = require_stable_coordinate_geometry(
+            element, element_record, bounds
+        )
+        point = screen_point(bounds, element_record, None, None)
+    uses_wheel = point is not None and direction not in ("left", "right")
+    if uses_wheel:
+        require_coordinate_delivery(window, point[0], point[1], "scroll")
+    else:
+        require_window_focus(window, "scroll")
+    route = scroll_element(direction, pages, point)
+    if route == "wheel":
+        action_evidence["route"] = "coordinate_synthesis"
+        action_evidence["geometry_sampled"] = True
+        action_evidence["geometry_stable"] = True if element is not None else None
+        action_evidence["window_focus_verified"] = True
+        action_evidence["point_owner_verified"] = True
+        action_evidence["focus_verified"] = True
+        action_evidence["input_emitted"] = True
+        wx, wy = window_relative(bounds, *point)
+        notes.append(
+            A11Y_CHANNEL
+            + SYNTHESIS
+            + "Scrolled with {} wheel notch(es) at ({:.0f}, {:.0f}) in "
+            "window-relative pixels — {}. Two caveats. First, the wheel acts on the "
+            "scrollable ancestor under that point, which is not necessarily the "
+            "element you named. Second, one page is APPROXIMATED as {} notches; "
+            "the real distance is whatever the application's scroll settings say, "
+            "so do not treat pages=1 as exactly one Page_Down. This also moves the "
+            "real pointer. {}".format(
+                int(math.ceil(float(pages or 1))) * WHEEL_CLICKS_PER_PAGE,
+                wx,
+                wy,
+                # State where the position came from: without a target ref
+                # the wheel lands at the window centre, and claiming a
+                # targeted scroll would mislead every later inference.
+                "no target ref was given, so this is the centre of the window "
+                "— the wheel lands on whatever scrollable sits there"
+                if action_input.get("window_centre")
+                else "the position came from the target ref, so this scroll IS "
+                     "targeted",
+                WHEEL_CLICKS_PER_PAGE,
+                UNVERIFIED_SYNTHESIS,
+            )
+        )
+    else:
         action_evidence["route"] = "keyboard_synthesis"
+        action_evidence["window_focus_verified"] = True
         action_evidence["focus_verified"] = True
         action_evidence["input_emitted"] = True
         notes.append(
             KEY_CHANNEL
             + SYNTHESIS
-            + "Synthesized '{}' after {}. {}".format(
-                action_input.get("key", ""),
+            + "Scrolled by synthesizing page keys after bringing the window to the "
+            "foreground. NOTE: no target ref directed this scroll — the keys "
+            "go to whatever widget currently holds focus inside the window. This "
+            "route is used when the element has no usable geometry, and for "
+            "horizontal scrolling, whose wheel buttons this project has not "
+            "measured. If the wrong region scrolled, focus that region first "
+            "(click it) and scroll again. {}".format(UNVERIFIED_SYNTHESIS)
+        )
+    return element_record
+
+
+def _perform_type(
+    action_input, window, element, element_record, notes, action_evidence
+):
+    # A caller-supplied element_index is a real target, not a hint. Focus and
+    # verify that exact node before any keyboard fallback.
+    if element_record is not None:
+        focus_target_element(
+            window, element, element_record, "targeted type_text")
+        action_evidence["window_focus_verified"] = True
+        action_evidence["target_focus_verified"] = True
+        (
+            write_outcome,
+            before_chars,
+            after_chars,
+            semantic_input_emitted,
+        ) = insert_text_outcome_on_node(element, action_input.get("text", ""))
+    else:
+        (
+            write_outcome,
+            before_chars,
+            after_chars,
+            semantic_input_emitted,
+        ) = insert_text_outcome_on_node(
+            find_editable_text(window), action_input.get("text", "")
+        )
+    if semantic_input_emitted:
+        action_evidence["route"] = "editable_text_api"
+        action_evidence["input_emitted"] = True
+        action_evidence["readback_sampled"] = True
+    if write_outcome == "effect_unknown":
+        raise OperationFailure(
+            "effect_unknown: the AT-SPI editable-text API may have changed "
+            "the control, but exact readback was unavailable; automatic "
+            "keyboard fallback was not attempted.",
+            failure_code="effect_unknown",
+            failure_phase="readback",
+            input_events_emitted=semantic_input_emitted,
+            failure_subject="element",
+        )
+    if write_outcome == "verified":
+        action_evidence["route"] = "editable_text_api"
+        action_evidence["editable_verified"] = True
+        action_evidence["readback_verified"] = True
+        action_evidence["readback_sampled"] = True
+        action_evidence["input_emitted"] = True
+        notes.append(
+            A11Y_CHANNEL
+            + SEMANTIC
+            + "Wrote the text through the AT-SPI editable-text API and read it back "
+            "to confirm it landed ({} -> {} characters). This confirms the control "
+            "changed; if the control belongs to a dialog, the application may still "
+            "require OK/Apply before the value takes effect.".format(
+                before_chars, after_chars
+            )
+        )
+    else:
+        if element_record is None:
+            require_window_focus(window, "type")
+            action_evidence["window_focus_verified"] = True
+        else:
+            # The semantic write attempt may itself move focus. Re-establish
+            # and verify the exact target immediately before global synthesis.
+            focus_target_element(
+                window, element, element_record,
+                "targeted type_text keyboard fallback")
+            action_evidence["window_focus_verified"] = True
+            action_evidence["target_focus_verified"] = True
+        send_text(action_input.get("text", ""))
+        action_evidence["route"] = "keyboard_synthesis"
+        action_evidence["focus_verified"] = True
+        action_evidence["editable_verified"] = None
+        action_evidence["input_emitted"] = True
+        notes.append(
+            KEY_CHANNEL
+            + SYNTHESIS
+            + "The AT-SPI editable-text write did not land, so this fell back to "
+            "global key synthesis after {}. {}".format(
                 "verifying the requested element held focus"
                 if element_record is not None
                 else "bringing the window to the foreground",
                 UNVERIFIED_SYNTHESIS,
             )
         )
-    elif action_intent == "set_value":
-        if element is None:
-            raise RuntimeError("unknown target ref")
-        value = action_input.get("value", "")
-        value_outcome = set_element_value_outcome(element, value)
-        if value_outcome == "effect_unknown":
-            action_evidence["route"] = "value_api"
-            action_evidence["input_emitted"] = True
-            action_evidence["readback_sampled"] = True
-            raise OperationFailure(
-                "effect_unknown: the AT-SPI value API may have changed the "
-                "control, but exact readback was unavailable; automatic "
-                "keyboard fallback was not attempted.",
-                failure_code="effect_unknown",
-                failure_phase="readback",
-                input_events_emitted=True,
-                failure_subject="element",
-            )
-        if value_outcome != "verified":
-            # A refused semantic write does not mean the control is read-only:
-            # Blink text inputs, for example, implement neither the AT-SPI
-            # Value nor the EditableText interface. As click and type_text do,
-            # fall back to synthesis: focus, select all, then type. The note
-            # must state that this path has no read-back confirmation and that
-            # keyboard synthesis is global, so delivery is not guaranteed.
-            focus_target_element(
-                window, element, element_record,
-                "targeted set_value keyboard fallback",
-            )
-            send_key("ctrl+a")
-            time.sleep(0.05)
-            send_text(value)
-            action_evidence["route"] = "keyboard_synthesis"
-            action_evidence["window_focus_verified"] = True
-            action_evidence["target_focus_verified"] = True
-            action_evidence["focus_verified"] = True
-            action_evidence["readback_verified"] = False
-            action_evidence["input_emitted"] = True
-            notes.append(
-                addressing_channel(element_record)
-                + SYNTHESIS
-                + "The AT-SPI value API refused this element (Blink and some toolkits "
-                "do not implement it on text inputs), so this fell back to focusing "
-                "the control, selecting all, and typing. There is no read-back "
-                "confirmation on this path, and keyboard synthesis is global — verify "
-                "from the tree that the control now holds what you wanted. {}".format(
-                    UNVERIFIED_SYNTHESIS)
-            )
-        else:
-            action_evidence["route"] = "value_api"
-            action_evidence["readback_verified"] = True
-            action_evidence["readback_sampled"] = True
-            action_evidence["input_emitted"] = True
-            notes.append(
-                A11Y_CHANNEL
-                + SEMANTIC
-                + "Wrote the value through the AT-SPI API and read it back to confirm the "
-                "control now holds it. Note the limit of that check: it confirms the "
-                "CONTROL changed, not that the application adopted the value. Dialogs "
-                "commonly keep control state separate from document state and only commit "
-                "on OK/Apply — verify the actual effect (document content, a re-read of "
-                "the relevant element) rather than trusting this line."
-            )
+
+
+def _perform_keypress(
+    action_input, window, element, element_record, notes, action_evidence
+):
+    # Parse the key before taking focus, so a misspelled key fails without
+    # first pulling the user's window to the foreground.
+    parse_key(action_input.get("key", ""))
+    if element_record is not None:
+        focus_target_element(
+            window, element, element_record, "targeted press_key")
+        action_evidence["window_focus_verified"] = True
+        action_evidence["target_focus_verified"] = True
     else:
-        raise RuntimeError(
-            'unsupportedProviderAction("{}")'.format(action_intent)
+        require_window_focus(window, "keypress")
+        action_evidence["window_focus_verified"] = True
+    send_key(action_input.get("key", ""))
+    action_evidence["route"] = "keyboard_synthesis"
+    action_evidence["focus_verified"] = True
+    action_evidence["input_emitted"] = True
+    notes.append(
+        KEY_CHANNEL
+        + SYNTHESIS
+        + "Synthesized '{}' after {}. {}".format(
+            action_input.get("key", ""),
+            "verifying the requested element held focus"
+            if element_record is not None
+            else "bringing the window to the foreground",
+            UNVERIFIED_SYNTHESIS,
+        )
+    )
+
+
+def _perform_set_value(
+    action_input, window, element, element_record, notes, action_evidence
+):
+    if element is None:
+        raise RuntimeError("unknown target ref")
+    value = action_input.get("value", "")
+    value_outcome = set_element_value_outcome(element, value)
+    if value_outcome == "effect_unknown":
+        action_evidence["route"] = "value_api"
+        action_evidence["input_emitted"] = True
+        action_evidence["readback_sampled"] = True
+        raise OperationFailure(
+            "effect_unknown: the AT-SPI value API may have changed the "
+            "control, but exact readback was unavailable; automatic "
+            "keyboard fallback was not attempted.",
+            failure_code="effect_unknown",
+            failure_phase="readback",
+            input_events_emitted=True,
+            failure_subject="element",
+        )
+    if value_outcome != "verified":
+        # A refused semantic write does not mean the control is read-only:
+        # Blink text inputs, for example, implement neither the AT-SPI
+        # Value nor the EditableText interface. As click and type_text do,
+        # fall back to synthesis: focus, select all, then type. The note
+        # must state that this path has no read-back confirmation and that
+        # keyboard synthesis is global, so delivery is not guaranteed.
+        focus_target_element(
+            window, element, element_record,
+            "targeted set_value keyboard fallback",
+        )
+        send_key("ctrl+a")
+        time.sleep(0.05)
+        send_text(value)
+        action_evidence["route"] = "keyboard_synthesis"
+        action_evidence["window_focus_verified"] = True
+        action_evidence["target_focus_verified"] = True
+        action_evidence["focus_verified"] = True
+        action_evidence["readback_verified"] = False
+        action_evidence["input_emitted"] = True
+        notes.append(
+            addressing_channel(element_record)
+            + SYNTHESIS
+            + "The AT-SPI value API refused this element (Blink and some toolkits "
+            "do not implement it on text inputs), so this fell back to focusing "
+            "the control, selecting all, and typing. There is no read-back "
+            "confirmation on this path, and keyboard synthesis is global — verify "
+            "from the tree that the control now holds what you wanted. {}".format(
+                UNVERIFIED_SYNTHESIS)
+        )
+    else:
+        action_evidence["route"] = "value_api"
+        action_evidence["readback_verified"] = True
+        action_evidence["readback_sampled"] = True
+        action_evidence["input_emitted"] = True
+        notes.append(
+            A11Y_CHANNEL
+            + SEMANTIC
+            + "Wrote the value through the AT-SPI API and read it back to confirm the "
+            "control now holds it. Note the limit of that check: it confirms the "
+            "CONTROL changed, not that the application adopted the value. Dialogs "
+            "commonly keep control state separate from document state and only commit "
+            "on OK/Apply — verify the actual effect (document content, a re-read of "
+            "the relevant element) rather than trusting this line."
         )
 
-    lap("action")
-    # The input may have opened or closed native windows. Reads after this
-    # point (settle, post-action snapshot, recovery) must not bind windows
-    # against the native inventory sampled before the input.
-    _x11_window_inventory_cache.clear()
-    if observation.get("capture_snapshot") is False:
-        response = {
-            "ok": True,
-            "actionEvidence": action_evidence,
-            "input_events_emitted": bool(action_evidence.get("input_emitted")),
-            "desktop_state_mutated": bool(action_evidence.get("input_emitted")),
-            "mutation_unknown": False,
-            "observationSkipped": True,
-        }
-        if element_record is not None:
-            response["resolvedElement"] = element_record
-        if notes:
-            response["notes"] = notes
-        return response
 
+def _delivery_only_response(action_evidence, element_record, notes):
+    response = {
+        "ok": True,
+        "actionEvidence": action_evidence,
+        "input_events_emitted": bool(action_evidence.get("input_emitted")),
+        "desktop_state_mutated": bool(action_evidence.get("input_emitted")),
+        "mutation_unknown": False,
+        "observationSkipped": True,
+    }
+    if element_record is not None:
+        response["resolvedElement"] = element_record
+    if notes:
+        response["notes"] = notes
+    return response
+
+
+def _observe_after_action(
+    operation,
+    operation_kind,
+    observation,
+    app,
+    bounds,
+    element_record,
+    notes,
+    action_evidence,
+    root_window_before,
+    windows_before,
+    pixels_before,
+):
+    """Settle, read the window back, and report what changed."""
     settle_note = wait_for_ui_to_settle(app, windows_before)
     lap("settle_wait")
     if settle_note:

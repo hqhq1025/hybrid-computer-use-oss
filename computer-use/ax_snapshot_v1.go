@@ -202,7 +202,7 @@ func recordInObservation(snapshot *appSnapshot, record *elementRecord) bool {
 			record.RuntimeID,
 		)
 	}
-	return recordInA11yScope(snapshot, record)
+	return recordInAXScope(snapshot, record)
 }
 
 func ontologyProviderRole(record *elementRecord) string {
@@ -590,26 +590,7 @@ func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
 	if snapshot == nil {
 		return nil, errors.New("cannot build AXSnapshotV1 from nil snapshot")
 	}
-	coverage := providerCoverageSummary(snapshot.Annotations)
-	identityCoverageIncomplete :=
-		coverage.AcquisitionIncomplete > 0 ||
-			coverage.ExpandableHidden > 0
-	out := &AXSnapshotV1{
-		SchemaVersion:              "AXSnapshotV1",
-		AppRef:                     snapshot.publicAppRef,
-		AppIdentity:                appIdentityForSnapshot(snapshot),
-		WindowHandle:               snapshot.WindowHandle,
-		WindowRef:                  snapshot.publicWindowRef,
-		Revision:                   snapshot.SnapshotID,
-		AcquisitionIncomplete:      coverage.AcquisitionIncomplete > 0,
-		IdentityCoverageIncomplete: identityCoverageIncomplete,
-		RefInventoryComplete: !identityCoverageIncomplete &&
-			snapshot.observationRoot == nil &&
-			normalizedA11yScope(snapshot.scope) == a11yScopeWindow &&
-			isShortAXWindowRef(snapshot.publicWindowRef),
-		ByID:    map[string]*AXNode{},
-		ByIndex: map[int]*AXNode{},
-	}
+	out := newAXSnapshotV1Header(snapshot)
 	byProviderIdentity := map[string]*AXNode{}
 	processIdentityEvidence := map[string]*AXNode{}
 	for index := range snapshot.Elements {
@@ -624,13 +605,7 @@ func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
 		if _, exists := out.ByIndex[record.Index]; exists {
 			return nil, fmt.Errorf("duplicate AXSnapshotV1 provider index %d", record.Index)
 		}
-		var parent *AXNode
-		for depth := len(record.RuntimeID) - 1; depth >= 0; depth-- {
-			if candidate := out.ByID[runtimePathKey(record.RuntimeID[:depth])]; candidate != nil {
-				parent = candidate
-				break
-			}
-		}
+		parent := nearestAXSnapshotParent(out, record.RuntimeID)
 		providerRole := ontologyProviderRole(record)
 		descriptor := canonicalRoleDescriptor(providerRole, parent)
 		semanticTarget := semanticRefForRecord(snapshot, *record)
@@ -642,23 +617,10 @@ func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
 			record.ProviderIdentityScope,
 			semanticTarget,
 		)
-		// Process object identity is independent of its projected label.
-		identityScope := strings.TrimSpace(record.ProviderIdentityScope)
-		if identityScope == "process" || identityScope == "process_instance" {
-			objectKey := completeAXProviderIdentity(
-				snapshot.publicWindowRef, record.ProcessGeneration,
-				record.ProviderBusName, record.ProviderObjectPath, identityScope, "",
-			)
-			if objectKey != "" {
-				identity := processIdentityEvidence[objectKey]
-				if identity == nil {
-					identity = &AXNode{Role: descriptor.ModelRole}
-					processIdentityEvidence[objectKey] = identity
-				} else if err := validateExactProviderAlias(identity, record, descriptor.ModelRole); err != nil {
-					return nil, err
-				}
-				retainProviderAliasIdentity(identity, record)
-			}
+		if err := checkProcessObjectAlias(
+			processIdentityEvidence, snapshot, record, descriptor.ModelRole,
+		); err != nil {
+			return nil, err
 		}
 		if providerIdentity != "" {
 			if canonical := byProviderIdentity[providerIdentity]; canonical != nil {
@@ -671,89 +633,18 @@ func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
 				continue
 			}
 		}
-		locatorKind := AXLocatorKind("")
-		if semanticTarget != "" {
-			locatorKind = AXLocatorSemantic
-			if (descriptor.ModelRole == "cell" ||
-				descriptor.ModelRole == "gridcell") &&
-				spreadsheetRangeValue.MatchString(
-					normalizedTreeText(record.Name),
-				) {
-				// An A1-looking name is not a complete spreadsheet identity.
-				// Until document/sheet/table ownership is available, bind the
-				// ref to this exact provider object instead of allowing C2 in a
-				// different sheet to recover the same public ref.
-				if providerIdentity != "" {
-					locatorKind = AXLocatorProviderBound
-				} else {
-					semanticTarget = ""
-					locatorKind = ""
-				}
-			}
-		} else if providerIdentity != "" {
-			semanticTarget = semanticDiagnosticSelector(
-				descriptor.ModelRole,
-				record,
-			)
-			if semanticTarget != "" {
-				locatorKind = AXLocatorProviderBound
-			}
-		}
-		node := &AXNode{
-			ID:            id,
-			Role:          descriptor.ModelRole,
-			SemanticClass: descriptor.SemanticClass,
-			ProviderRole:  providerRole,
-			Name:          normalizedTreeText(record.Name),
-			States:        typedAXStates(record),
-			Properties: AXProperties{
-				Value:       normalizedTreeText(record.Value),
-				Description: normalizedTreeText(record.Description),
-				Placeholder: normalizedTreeText(record.Placeholder),
-			},
-			Relations: record.Relations,
-			NameProvenance: AXNameProvenance{
-				Source:            strings.TrimSpace(record.NameSource),
-				Contributors:      nameContributorIdentities(record),
-				RelationsComplete: record.RelationReadComplete,
-				Confidence:        nameProvenanceConfidence(record),
-			},
-			ProviderIndex:   record.Index,
-			ProviderIndices: []int{record.Index},
-			RuntimeID:       append([]int(nil), record.RuntimeID...),
-			RuntimeIDAliases: [][]int{
-				append([]int(nil), record.RuntimeID...),
-			},
-			ProviderBusName:                 record.ProviderBusName,
-			ProviderObjectPath:              record.ProviderObjectPath,
-			ProcessGeneration:               record.ProcessGeneration,
-			ProviderIdentityScope:           record.ProviderIdentityScope,
-			ProviderWindowBusName:           record.ProviderWindowBusName,
-			ProviderWindowObjectPath:        record.ProviderWindowObjectPath,
-			ProviderWindowProcessGeneration: record.ProviderWindowProcessGeneration,
-			ProviderWindowRole:              record.ProviderWindowRole,
-			ProviderWindowName:              record.ProviderWindowName,
-			ProviderIdentity:                providerIdentity,
-			LocatorKind:                     locatorKind,
-			AutomationID:                    strings.TrimSpace(record.AutomationID),
-			Showing:                         record.Showing,
-			Visible:                         record.Visible,
-			VisibilityEvidence:              cloneVisibilityEvidence(record.VisibilityEvidence),
-			SemanticTarget:                  semanticTarget,
-			SourceRecord:                    record,
-			Parent:                          parent,
-		}
-		if node.VisibilityEvidence != nil && node.VisibilityEvidence.State == "unknown" {
-			node.Showing, node.Visible = nil, nil
-		}
-		node.Capabilities = typedAXCapabilities(record, node.Role)
-		node.SemanticFingerprint = semanticFingerprint(
-			snapshot.WindowHandle,
-			node.Role,
-			node.Name,
-			semanticTarget,
-			node.Relations,
+		locatorKind, semanticTarget := axLocatorForRecord(
+			record, descriptor.ModelRole, semanticTarget, providerIdentity,
 		)
+		node := newAXNodeFromRecord(snapshot, record, axNodeBinding{
+			id:               id,
+			parent:           parent,
+			descriptor:       descriptor,
+			providerRole:     providerRole,
+			providerIdentity: providerIdentity,
+			locatorKind:      locatorKind,
+			semanticTarget:   semanticTarget,
+		})
 		out.ByID[id] = node
 		out.ByIndex[record.Index] = node
 		if providerIdentity != "" {
@@ -772,6 +663,183 @@ func buildAXSnapshotV1(snapshot *appSnapshot) (*AXSnapshotV1, error) {
 	}
 	out.Roots = cloneAXForest(out.CanonicalRoots, nil)
 	return out, out.Validate()
+}
+
+// newAXSnapshotV1Header returns an empty snapshot with the window identity
+// and coverage flags of snapshot.
+func newAXSnapshotV1Header(snapshot *appSnapshot) *AXSnapshotV1 {
+	coverage := providerCoverageSummary(snapshot.Annotations)
+	identityCoverageIncomplete :=
+		coverage.AcquisitionIncomplete > 0 ||
+			coverage.ExpandableHidden > 0
+	return &AXSnapshotV1{
+		SchemaVersion:              "AXSnapshotV1",
+		AppRef:                     snapshot.publicAppRef,
+		AppIdentity:                appIdentityForSnapshot(snapshot),
+		WindowHandle:               snapshot.WindowHandle,
+		WindowRef:                  snapshot.publicWindowRef,
+		Revision:                   snapshot.SnapshotID,
+		AcquisitionIncomplete:      coverage.AcquisitionIncomplete > 0,
+		IdentityCoverageIncomplete: identityCoverageIncomplete,
+		RefInventoryComplete: !identityCoverageIncomplete &&
+			snapshot.observationRoot == nil &&
+			normalizedAXScope(snapshot.scope) == axScopeWindow &&
+			isShortAXWindowRef(snapshot.publicWindowRef),
+		ByID:    map[string]*AXNode{},
+		ByIndex: map[int]*AXNode{},
+	}
+}
+
+// nearestAXSnapshotParent returns the closest ancestor of runtimeID that is
+// already in out. Records arrive in tree order, so ancestors come first.
+func nearestAXSnapshotParent(out *AXSnapshotV1, runtimeID []int) *AXNode {
+	for depth := len(runtimeID) - 1; depth >= 0; depth-- {
+		if candidate := out.ByID[runtimePathKey(runtimeID[:depth])]; candidate != nil {
+			return candidate
+		}
+	}
+	return nil
+}
+
+// checkProcessObjectAlias rejects a record whose process object was already
+// seen with conflicting identity facts. Process object identity is
+// independent of its projected label.
+func checkProcessObjectAlias(
+	evidence map[string]*AXNode,
+	snapshot *appSnapshot,
+	record *elementRecord,
+	role CanonicalRole,
+) error {
+	identityScope := strings.TrimSpace(record.ProviderIdentityScope)
+	if identityScope != "process" && identityScope != "process_instance" {
+		return nil
+	}
+	objectKey := completeAXProviderIdentity(
+		snapshot.publicWindowRef, record.ProcessGeneration,
+		record.ProviderBusName, record.ProviderObjectPath, identityScope, "",
+	)
+	if objectKey == "" {
+		return nil
+	}
+	identity := evidence[objectKey]
+	if identity == nil {
+		identity = &AXNode{Role: role}
+		evidence[objectKey] = identity
+	} else if err := validateExactProviderAlias(identity, record, role); err != nil {
+		return err
+	}
+	retainProviderAliasIdentity(identity, record)
+	return nil
+}
+
+// axLocatorForRecord decides how a ref for this record is found again: by
+// semantic target, or bound to the exact provider object. It returns the
+// semantic target to store, which may be cleared or replaced.
+func axLocatorForRecord(
+	record *elementRecord,
+	role CanonicalRole,
+	semanticTarget, providerIdentity string,
+) (AXLocatorKind, string) {
+	locatorKind := AXLocatorKind("")
+	if semanticTarget != "" {
+		locatorKind = AXLocatorSemantic
+		if (role == "cell" ||
+			role == "gridcell") &&
+			spreadsheetRangeValue.MatchString(
+				normalizedTreeText(record.Name),
+			) {
+			// An A1-looking name is not a complete spreadsheet identity.
+			// Until document/sheet/table ownership is available, bind the
+			// ref to this exact provider object instead of allowing C2 in a
+			// different sheet to recover the same public ref.
+			if providerIdentity != "" {
+				locatorKind = AXLocatorProviderBound
+			} else {
+				semanticTarget = ""
+				locatorKind = ""
+			}
+		}
+	} else if providerIdentity != "" {
+		semanticTarget = semanticDiagnosticSelector(
+			role,
+			record,
+		)
+		if semanticTarget != "" {
+			locatorKind = AXLocatorProviderBound
+		}
+	}
+	return locatorKind, semanticTarget
+}
+
+// axNodeBinding is what buildAXSnapshotV1 decided about one record before
+// it becomes a node.
+type axNodeBinding struct {
+	id               string
+	parent           *AXNode
+	descriptor       RoleDescriptor
+	providerRole     string
+	providerIdentity string
+	locatorKind      AXLocatorKind
+	semanticTarget   string
+}
+
+func newAXNodeFromRecord(snapshot *appSnapshot, record *elementRecord, binding axNodeBinding) *AXNode {
+	node := &AXNode{
+		ID:            binding.id,
+		Role:          binding.descriptor.ModelRole,
+		SemanticClass: binding.descriptor.SemanticClass,
+		ProviderRole:  binding.providerRole,
+		Name:          normalizedTreeText(record.Name),
+		States:        typedAXStates(record),
+		Properties: AXProperties{
+			Value:       normalizedTreeText(record.Value),
+			Description: normalizedTreeText(record.Description),
+			Placeholder: normalizedTreeText(record.Placeholder),
+		},
+		Relations: record.Relations,
+		NameProvenance: AXNameProvenance{
+			Source:            strings.TrimSpace(record.NameSource),
+			Contributors:      nameContributorIdentities(record),
+			RelationsComplete: record.RelationReadComplete,
+			Confidence:        nameProvenanceConfidence(record),
+		},
+		ProviderIndex:   record.Index,
+		ProviderIndices: []int{record.Index},
+		RuntimeID:       append([]int(nil), record.RuntimeID...),
+		RuntimeIDAliases: [][]int{
+			append([]int(nil), record.RuntimeID...),
+		},
+		ProviderBusName:                 record.ProviderBusName,
+		ProviderObjectPath:              record.ProviderObjectPath,
+		ProcessGeneration:               record.ProcessGeneration,
+		ProviderIdentityScope:           record.ProviderIdentityScope,
+		ProviderWindowBusName:           record.ProviderWindowBusName,
+		ProviderWindowObjectPath:        record.ProviderWindowObjectPath,
+		ProviderWindowProcessGeneration: record.ProviderWindowProcessGeneration,
+		ProviderWindowRole:              record.ProviderWindowRole,
+		ProviderWindowName:              record.ProviderWindowName,
+		ProviderIdentity:                binding.providerIdentity,
+		LocatorKind:                     binding.locatorKind,
+		AutomationID:                    strings.TrimSpace(record.AutomationID),
+		Showing:                         record.Showing,
+		Visible:                         record.Visible,
+		VisibilityEvidence:              cloneVisibilityEvidence(record.VisibilityEvidence),
+		SemanticTarget:                  binding.semanticTarget,
+		SourceRecord:                    record,
+		Parent:                          binding.parent,
+	}
+	if node.VisibilityEvidence != nil && node.VisibilityEvidence.State == "unknown" {
+		node.Showing, node.Visible = nil, nil
+	}
+	node.Capabilities = typedAXCapabilities(record, node.Role)
+	node.SemanticFingerprint = semanticFingerprint(
+		snapshot.WindowHandle,
+		node.Role,
+		node.Name,
+		binding.semanticTarget,
+		node.Relations,
+	)
+	return node
 }
 
 func nameContributorIdentities(record *elementRecord) []AXProviderIdentity {

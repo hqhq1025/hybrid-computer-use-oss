@@ -1530,6 +1530,26 @@ class AXWindowCloseEvidenceTests(AtspiPatchedTestCase):
         self.assertTrue(result["windowless"])
         self.assertIn("transition_observed=true", result["note"])
 
+    def test_activation_is_observed_only_when_the_window_becomes_active(self):
+        states = iter([
+            {"windowIds": {"0x100", "0x200"}, "activeWindow": "0x200"},
+            {"windowIds": {"0x100", "0x200"}, "activeWindow": "0x100"},
+        ])
+        with mock.patch.object(
+            runtime, "x11_root_window_state", side_effect=lambda: next(states)
+        ), mock.patch.object(
+            runtime, "app_windows",
+            return_value=runtime.InventoryResult([], complete=True),
+        ), mock.patch.object(
+            runtime, "x11_window_inventory_for_pid",
+            side_effect=AssertionError("activation never reads close evidence"),
+        ), mock.patch.object(runtime, "time", _NoSleep()):
+            observed, windowless = window_resolver._await_window_transition(
+                "activate", self.app, 4242, "0x100"
+            )
+        self.assertTrue(observed)
+        self.assertFalse(windowless)
+
     def test_wmctrl_timeout_preserves_possible_emission(self):
         before = runtime.InventoryResult(
             [(0, self.window)], complete=True

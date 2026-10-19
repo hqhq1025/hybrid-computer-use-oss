@@ -59,7 +59,7 @@ func (b *reportBackend) snapshot(selected reportWindow) *ProviderSnapshot {
 				States: "[editable focusable]", SetValueSupported: &setValue},
 			{Index: 3, RuntimeID: []int{0, 2}, ControlType: "push button", Name: "OK", States: "[has-click-action]"},
 		},
-		scope: a11yScopeWindow,
+		scope: axScopeWindow,
 	}
 	for index := range snapshot.Elements {
 		element := &snapshot.Elements[index]

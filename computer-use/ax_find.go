@@ -161,7 +161,7 @@ func (s *service) findMatches(
 		Operation:         axServiceObserve,
 		App:               app,
 		IncludeScreenshot: &noScreenshot,
-		Scope:             normalizedA11yScope(scope),
+		Scope:             normalizedAXScope(scope),
 	}
 	if len(targetWindowHandle) > 0 {
 		request.TargetWindowHandle = strings.TrimSpace(targetWindowHandle[0])
@@ -178,7 +178,7 @@ func (s *service) findMatches(
 	found.notes = compactFindNotes(notes)
 
 	for _, record := range snapshot.Elements {
-		if !recordInA11yScope(snapshot, &record) {
+		if !recordInAXScope(snapshot, &record) {
 			continue
 		}
 		if recordMatchesFind(

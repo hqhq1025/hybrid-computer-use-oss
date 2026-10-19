@@ -154,19 +154,19 @@ func (s *service) dispatchRecord(name string, args map[string]any, options callO
 	if name == publicToolAX && optionalString(args, "mode") == recordsOpRead {
 		return s.readRecords(args)
 	}
-	if name == publicToolAX && optionalString(args, "mode") == a11yModeFind {
+	if name == publicToolAX && optionalString(args, "mode") == axModeFind {
 		if record, handled := s.findRecords(args); handled {
 			record.Op = op
 			return record
 		}
 	}
-	if name == publicToolAX && optionalString(args, "mode") == a11yModeObserve {
+	if name == publicToolAX && optionalString(args, "mode") == axModeObserve {
 		if record, handled := s.observeRecords(args, options.Since); handled {
 			record.Op = op
 			return record
 		}
 	}
-	if name == publicToolAX && optionalString(args, "mode") == a11yModeAct {
+	if name == publicToolAX && optionalString(args, "mode") == axModeAct {
 		if _, explicit := args["observe"]; !explicit {
 			// Code callers chain actions and read state explicitly; a diff
 			// after every act costs a full read. They ask for one with
@@ -183,7 +183,7 @@ func (s *service) dispatchRecord(name string, args map[string]any, options callO
 	}
 	record := recordFromResult(name, result)
 	record.Op = op
-	if name == publicToolAX && optionalString(args, "mode") == a11yModeApps && record.OK {
+	if name == publicToolAX && optionalString(args, "mode") == axModeApps && record.OK {
 		record.Windows = s.recordWindows()
 	}
 	return record
@@ -366,7 +366,7 @@ func (s *service) observeRecords(args map[string]any, since string) (Record, boo
 		// Screenshots go through the shared path and come back as files.
 		return Record{}, false
 	}
-	readContext, identityErr := s.resolveA11yReadIdentity(request.app, request.windowRef, "")
+	readContext, identityErr := s.resolveAXReadIdentity(request.app, request.windowRef, "")
 	if identityErr != nil {
 		return errorRecord(publicToolAX, axIdentityErrorResult(identityErr)), true
 	}
@@ -382,7 +382,7 @@ func (s *service) observeRecords(args map[string]any, since string) (Record, boo
 		Operation:          axServiceObserve,
 		App:                readContext.appToken,
 		TreeView:           treeViewWorking,
-		Scope:              normalizedA11yScope(request.scope),
+		Scope:              normalizedAXScope(request.scope),
 		ObservationRoot:    root,
 		IncludeScreenshot:  &noScreenshot,
 		TargetWindowHandle: readContext.windowHandle,
@@ -562,16 +562,16 @@ func (s *service) findRecords(args map[string]any) (Record, bool) {
 		resolution, err := s.findCursorRegistry.Resolve(request.cursor)
 		if err != nil {
 			// The same failure the text contract reports for this cursor.
-			return errorRecord(publicToolAX, withA11yModeEvidence(textResult(
+			return errorRecord(publicToolAX, withAXModeEvidence(textResult(
 				"AX find cursor: "+err.Error(), true,
-			).withEvidenceScope("error_only"), a11yModeFind)), true
+			).withEvidenceScope("error_only"), axModeFind)), true
 		}
 		snapshot = resolution.ResultSet.Snapshot
 		matched = resolution.ResultSet.Matches
 		offset = resolution.Cursor.Offset
 		setID = resolution.Cursor.ResultSetID
 	} else {
-		readContext, identityErr := s.resolveA11yReadIdentity(request.app, request.windowRef, "")
+		readContext, identityErr := s.resolveAXReadIdentity(request.app, request.windowRef, "")
 		if identityErr != nil {
 			return errorRecord(publicToolAX, axIdentityErrorResult(identityErr)), true
 		}

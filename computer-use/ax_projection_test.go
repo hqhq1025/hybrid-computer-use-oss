@@ -33,7 +33,7 @@ func TestContentScopeKeepsOneTopLevelContentSubtree(t *testing.T) {
 		},
 	}
 
-	if err := applyA11yScope(snapshot, a11yScopeContent); err != nil {
+	if err := applyAXScope(snapshot, axScopeContent); err != nil {
 		t.Fatalf("content scope failed: %v", err)
 	}
 	if snapshot.scopeRoot == nil || snapshot.scopeRoot.Index != 3 {
@@ -81,7 +81,7 @@ func TestContentScopeUsesFocusToDisambiguateTopLevelRoots(t *testing.T) {
 		},
 	}
 
-	if err := applyA11yScope(snapshot, a11yScopeContent); err != nil {
+	if err := applyAXScope(snapshot, axScopeContent); err != nil {
 		t.Fatalf("focused content scope failed: %v", err)
 	}
 	if snapshot.scopeRoot == nil || snapshot.scopeRoot.Index != 1 {
@@ -115,7 +115,7 @@ func TestContentScopeFailsClosedWithoutUniqueRoot(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := applyA11yScope(snapshot, a11yScopeContent)
+			err := applyAXScope(snapshot, axScopeContent)
 			if err == nil {
 				t.Fatal("content scope must fail closed")
 			}
@@ -136,7 +136,7 @@ func TestContentScopeAndRootIgnoreLegacyTreeBudget(t *testing.T) {
 			{Index: 2, RuntimeID: []int{0, 0}, ControlType: "heading", Name: "Deep target"},
 		},
 	}
-	if err := applyA11yScope(snapshot, a11yScopeContent); err != nil {
+	if err := applyAXScope(snapshot, axScopeContent); err != nil {
 		t.Fatalf("canonical content scope depended on rendered text: %v", err)
 	}
 	if err := applyObservationRoot(snapshot, map[string]any{

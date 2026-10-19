@@ -71,6 +71,11 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
 - Take a GUI screenshot when the question is visual or AX lacks a visible
   element. Do not alternate screenshots and AX reads of an unchanged state.
 - Combine related read-only shell checks into one command or script.
+- Start or restart a GUI application from the shell with
+  `setsid -f APP ARGS >/tmp/APP.log 2>&1 </dev/null`. Some agent shells,
+  Codex among them, kill the process group of each command when it returns;
+  an application started there with `&`, `nohup`, or `disown` dies without
+  showing a window.
 
 ## When Something Fails
 

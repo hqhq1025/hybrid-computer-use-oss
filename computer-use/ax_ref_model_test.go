@@ -66,7 +66,7 @@ func TestAppsHidesAppRefButAppStillAcceptsItAndTheName(t *testing.T) {
 		if argErr != nil {
 			t.Fatalf("app %q rejected: %#v", app, argErr)
 		}
-		context, err := service.resolveA11yReadIdentity(request.app, request.windowRef, "")
+		context, err := service.resolveAXReadIdentity(request.app, request.windowRef, "")
 		if err != nil || context.appToken != app {
 			t.Fatalf("app %q did not bind: %#v %v", app, context, err)
 		}

@@ -109,7 +109,7 @@ func closestElements(snapshot *appSnapshot, declared string, limit int) []string
 	}
 	var out []string
 	for _, record := range snapshot.Elements {
-		if !recordInA11yScope(snapshot, &record) {
+		if !recordInAXScope(snapshot, &record) {
 			continue
 		}
 		haystack := strings.ToLower(record.Name + " " + record.Description)

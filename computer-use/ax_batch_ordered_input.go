@@ -8,7 +8,7 @@ import (
 
 func wholeBatchOrderedInputRequest(
 	requests []ProviderOrderedInputRequest,
-	actions []a11yBatchAction,
+	actions []axBatchAction,
 ) (*ProviderOrderedInputRequest, bool) {
 	if len(requests) != 1 ||
 		len(requests[0].Steps) != len(actions) ||
@@ -58,7 +58,7 @@ func (s *service) bindOrderedInputRuntimeApp(
 }
 
 func orderedInputActionEvidence(
-	actions []a11yBatchAction,
+	actions []axBatchAction,
 	result ProviderOrderedInputResult,
 ) []map[string]any {
 	evidence := make([]map[string]any, 0, len(result.Steps))
@@ -104,7 +104,7 @@ func orderedInputCompletedCount(result ProviderOrderedInputResult) int {
 }
 
 func orderedInputBatchFacts(
-	actions []a11yBatchAction,
+	actions []axBatchAction,
 	result ProviderOrderedInputResult,
 	finalObservationReturned bool,
 	finalObservationRequested bool,
@@ -250,8 +250,8 @@ func orderedInputFirstUnattemptedAction(
 }
 
 func (s *service) orderedInputTransportFailure(
-	context *a11yBatchContext,
-	actions []a11yBatchAction,
+	context *axBatchContext,
+	actions []axBatchAction,
 	err error,
 	obs observation,
 ) toolCallResult {
@@ -286,7 +286,7 @@ func (s *service) orderedInputTransportFailure(
 		},
 	}
 	if obs.resolvedMode() != observeNone {
-		result = s.recoverA11yBatchObservation(context, result, obs)
+		result = s.recoverAXBatchObservation(context, result, obs)
 	}
 	return result
 }
@@ -298,9 +298,9 @@ type orderedInputRunExecution struct {
 	result       toolCallResult
 }
 
-func (s *service) stopA11yOrderedInputRun(
-	context *a11yBatchContext,
-	actions []a11yBatchAction,
+func (s *service) stopAXOrderedInputRun(
+	context *axBatchContext,
+	actions []axBatchAction,
 	start, end int,
 	execution orderedInputRunExecution,
 	evidence []map[string]any,
@@ -350,18 +350,18 @@ func (s *service) stopA11yOrderedInputRun(
 		return completedBatchOptionalObservationWarning(result, facts)
 	}
 	if obs.resolvedMode() != observeNone {
-		result = s.recoverA11yBatchObservation(context, result, obs)
+		result = s.recoverAXBatchObservation(context, result, obs)
 	}
 	for _, key := range []string{"final_observation_returned", "observation_required", "next_identical_observation_required"} {
 		if value, present := result.StructuredContent[key]; present {
 			facts[key] = value
 		}
 	}
-	return prependA11yBatchSummary(result, "", facts)
+	return prependAXBatchSummary(result, "", facts)
 }
 
 func (s *service) executePlannedOrderedInputRun(
-	context *a11yBatchContext,
+	context *axBatchContext,
 	request ProviderOrderedInputRequest,
 	includeScreenshot bool,
 ) orderedInputRunExecution {
@@ -373,7 +373,7 @@ func (s *service) executePlannedOrderedInputRun(
 	}
 	if err := s.bindOrderedInputRuntimeApp(&request); err != nil {
 		return orderedInputRunExecution{
-			result: a11yBatchPreflightError(
+			result: axBatchPreflightError(
 				fmt.Errorf("ordered-input application binding: %w", err),
 				len(request.Steps),
 			),
@@ -466,7 +466,7 @@ func (s *service) executePlannedOrderedInputRun(
 		Operation:         axServiceObserve,
 		App:               context.appToken,
 		IncludeScreenshot: &includeScreenshot,
-		Scope:             a11yScopeWindow,
+		Scope:             axScopeWindow,
 		TreeView:          treeViewWorking,
 	}
 	snapshot, preparationResult := s.prepareProviderSnapshot(
@@ -513,9 +513,9 @@ func (s *service) executePlannedOrderedInputRun(
 }
 
 func (s *service) executeWholeBatchOrderedInput(
-	context *a11yBatchContext,
-	actions []a11yBatchAction,
-	executionPlan a11yBatchExecutionPlan,
+	context *axBatchContext,
+	actions []axBatchAction,
+	executionPlan axBatchExecutionPlan,
 	obs observation,
 ) (toolCallResult, bool) {
 	_, available := orderedInputBackend(s.platformBackend())
@@ -528,7 +528,7 @@ func (s *service) executeWholeBatchOrderedInput(
 		actions,
 	)
 	if err != nil {
-		return a11yBatchValidationError(
+		return axBatchValidationError(
 			"ordered-input compilation: "+err.Error(),
 			len(actions),
 		), true
@@ -598,7 +598,7 @@ func (s *service) executeWholeBatchOrderedInput(
 			}}
 			result.StructuredContent["ordered_input_actions_completed_before_observation_failure"] = true
 			result.StructuredContent["a11y_batch_result"] = facts
-			result = s.recoverA11yBatchObservation(context, result, obs)
+			result = s.recoverAXBatchObservation(context, result, obs)
 			result = completeRecoveredOrderedInputObservation(result, facts)
 			if result.StructuredContent["recovery_observation_returned"] != true {
 				result.IsError = true
@@ -607,7 +607,7 @@ func (s *service) executeWholeBatchOrderedInput(
 		}
 		result.StructuredContent["a11y_batch_result"] = facts
 		if obs.resolvedMode() != observeNone {
-			result = s.recoverA11yBatchObservation(context, result, obs)
+			result = s.recoverAXBatchObservation(context, result, obs)
 		}
 		return result, true
 	}
@@ -616,12 +616,12 @@ func (s *service) executeWholeBatchOrderedInput(
 	result.StructuredContent["final_observation_returned"] = false
 	finalObservationReturned := false
 	if obs.resolvedMode() != observeNone {
-		finalObservation := s.renderA11yBatchFinalObservation(
+		finalObservation := s.renderAXBatchFinalObservation(
 			execution.snapshot,
 			execution.notes,
 			obs,
 		)
-		result = mergeA11yBatchFinalObservation(result, finalObservation)
+		result = mergeAXBatchFinalObservation(result, finalObservation)
 		finalObservationReturned, _ =
 			result.StructuredContent["final_observation_returned"].(bool)
 	}

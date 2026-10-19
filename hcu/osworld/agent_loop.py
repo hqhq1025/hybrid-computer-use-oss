@@ -462,45 +462,12 @@ def run_agent_phase(
         }
 
     turn_index = 0
-    rate_limit_resumes = 0
-    tool_argument_retries = 0
+    retries = _TurnRetries()
     while True:
         turn_index += 1
         label = f"phase-{phase_index:02d}-turn-{turn_index:02d}"
-        request_execute(
-            base_url,
-            [
-                "rm",
-                "-f",
-                GUEST_DONE,
-                GUEST_TRACE,
-                GUEST_STDERR,
-                GUEST_FINAL,
-            ],
-            timeout=30,
-        )
-        command = [GUEST_LAUNCHER, "start", "", label]
-        if session_id:
-            if not AGENT_PROFILES[agent]["can_resume"]:
-                raise RuntimeError(
-                    f"{agent} cannot resume its session under the same system "
-                    "prompt, so it cannot answer ASK_USER"
-                )
-            command = [GUEST_LAUNCHER, "resume", session_id, label]
-        workload_unit = request_launch(base_url, command)
-        write_text(
-            result_dir / f"{label}-workload-unit.json",
-            json.dumps(
-                {
-                    "unit_name": workload_unit,
-                    "turn_token": label,
-                    "requested_at": time.strftime(
-                        "%Y-%m-%dT%H:%M:%SZ",
-                        time.gmtime(),
-                    ),
-                },
-                indent=2,
-            ),
+        workload_unit = _launch_agent_turn(
+            base_url, result_dir, agent, session_id, label
         )
         turn = wait_for_agent_turn(
             base_url=base_url,
@@ -516,27 +483,15 @@ def run_agent_phase(
         deadline += turn["rate_limit_wait_sec"]
         trace_summary = summarize_agent_trace(turn["trace_raw"], agent)
         observed_thread_id = turn["thread_id"] or session_id
-        turns.append({
-            "turn_index": turn_index,
-            "label": label,
-            "thread_id": observed_thread_id,
-            "workload_unit": workload_unit,
-            "agent_returncode": (
-                turn["done_payload"].get("returncode")
-                if turn["done_payload"] else None
-            ),
-            "truncated": turn["truncated"],
-            "budget_exhausted": turn["budget_exhausted"],
-            "final_message": turn["final_message"],
-            "agent_error": trace_summary["agent_error"],
-            "failure_classification": (
-                trace_summary["failure_classification"]
-            ),
-            "rate_limit_wait_sec": turn["rate_limit_wait_sec"],
-            "retry_assisted": (
-                rate_limit_resumes > 0 or tool_argument_retries > 0
-            ),
-        })
+        turns.append(_turn_record(
+            turn_index,
+            label,
+            observed_thread_id,
+            workload_unit,
+            turn,
+            trace_summary,
+            retries,
+        ))
         if turn["truncated"]:
             return phase_result(turn)
         returncode = (
@@ -544,74 +499,20 @@ def run_agent_phase(
             if turn["done_payload"] else None
         )
         if returncode not in {0, None}:
-            failure_classification = trace_summary[
-                "failure_classification"
-            ]
-            can_resume = AGENT_PROFILES[agent]["can_resume"]
-            if (
-                failure_classification == "upstream_rate_limit"
-                and can_resume
-                and observed_thread_id
-                and rate_limit_resumes < RATE_LIMIT_RESUME_LIMIT
-            ):
-                rate_limit_resumes += 1
-                session_id = observed_thread_id
-                upload_prompt(
-                    env,
-                    prompt_path,
-                    transient_resume_prompt(
-                        trace_summary["agent_error"]
-                        or "upstream rate limit"
-                    ),
-                )
-                print(
-                    f"{agent} turn ended on a rate limit; resuming the same session "
-                    f"after {RATE_LIMIT_RESUME_BACKOFF_SEC:.0f}s "
-                    f"({rate_limit_resumes}/{RATE_LIMIT_RESUME_LIMIT})",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                time.sleep(RATE_LIMIT_RESUME_BACKOFF_SEC)
-                deadline += RATE_LIMIT_RESUME_BACKOFF_SEC
-                continue
-            if (
-                failure_classification == "tool_argument_too_large"
-                and can_resume
-                and observed_thread_id
-                and tool_argument_retries < TOOL_ARGUMENT_RETRY_LIMIT
-                and time.monotonic() < deadline
-            ):
-                tool_argument_retries += 1
-                session_id = observed_thread_id
-                upload_prompt(
-                    env,
-                    prompt_path,
-                    tool_argument_resume_prompt(),
-                )
-                print(
-                    f"{agent} shell argv exceeded the process limit; resuming "
-                    "the same thread with binary-safe transfer guidance "
-                    f"({tool_argument_retries}/{TOOL_ARGUMENT_RETRY_LIMIT})",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                continue
-            stderr_text = (
-                turn["stderr_raw"].decode(
-                    "utf-8",
-                    errors="replace",
-                ).strip()
-                if turn["stderr_raw"] else ""
+            deadline += _resume_failed_turn(
+                env=env,
+                prompt_path=prompt_path,
+                agent=agent,
+                turn_index=turn_index,
+                returncode=returncode,
+                turn=turn,
+                trace_summary=trace_summary,
+                observed_thread_id=observed_thread_id,
+                retries=retries,
+                deadline=deadline,
             )
-            failure_message = concise_failure_message(
-                trace_summary["agent_error"]
-                or stderr_text
-                or "no stderr"
-            )
-            raise RuntimeError(
-                f"{agent} turn {turn_index} exited with return code "
-                f"{returncode}: {failure_message}"
-            )
+            session_id = observed_thread_id
+            continue
         if not session_id:
             session_id = turn["thread_id"]
         question = user_question(turn["final_message"])
@@ -644,31 +545,218 @@ def run_agent_phase(
             ),
         }
         user_exchanges.append(exchange)
-        with (result_dir / "user-simulator.jsonl").open(
-            "a",
-            encoding="utf-8",
-        ) as handle:
-            handle.write(json.dumps(exchange, ensure_ascii=False) + "\n")
-        trajectory_row = {
-            "step_num": turn_index,
-            "action_timestamp": exchange["timestamp"],
-            "action": ASK_USER_SENTINEL,
-            "question": question,
-            "user_answer": answer,
-            "screenshot_file": None,
-        }
-        if multi_phase:
-            trajectory_row.update({
-                "phase_index": phase_index,
-                "phase_name": phase_name,
-            })
-        with (result_dir / "traj.jsonl").open(
-            "a",
-            encoding="utf-8",
-        ) as handle:
-            handle.write(json.dumps(
-                trajectory_row,
-                ensure_ascii=False,
-            ))
-            handle.write("\n")
+        _append_user_exchange_logs(result_dir, exchange, multi_phase)
         upload_prompt(env, prompt_path, user_response_prompt(answer))
+
+
+@dataclass
+class _TurnRetries:
+    """Resumes already spent on failed turns of one phase."""
+
+    rate_limit_resumes: int = 0
+    tool_argument_retries: int = 0
+
+
+def _launch_agent_turn(
+    base_url: str,
+    result_dir: Path,
+    agent: str,
+    session_id: str,
+    label: str,
+) -> str:
+    """Clear the previous turn's files and start or resume the agent."""
+    request_execute(
+        base_url,
+        [
+            "rm",
+            "-f",
+            GUEST_DONE,
+            GUEST_TRACE,
+            GUEST_STDERR,
+            GUEST_FINAL,
+        ],
+        timeout=30,
+    )
+    command = [GUEST_LAUNCHER, "start", "", label]
+    if session_id:
+        if not AGENT_PROFILES[agent]["can_resume"]:
+            raise RuntimeError(
+                f"{agent} cannot resume its session under the same system "
+                "prompt, so it cannot answer ASK_USER"
+            )
+        command = [GUEST_LAUNCHER, "resume", session_id, label]
+    workload_unit = request_launch(base_url, command)
+    write_text(
+        result_dir / f"{label}-workload-unit.json",
+        json.dumps(
+            {
+                "unit_name": workload_unit,
+                "turn_token": label,
+                "requested_at": time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ",
+                    time.gmtime(),
+                ),
+            },
+            indent=2,
+        ),
+    )
+    return workload_unit
+
+
+def _turn_record(
+    turn_index: int,
+    label: str,
+    observed_thread_id: str,
+    workload_unit: str,
+    turn: dict,
+    trace_summary: dict,
+    retries: _TurnRetries,
+) -> dict:
+    return {
+        "turn_index": turn_index,
+        "label": label,
+        "thread_id": observed_thread_id,
+        "workload_unit": workload_unit,
+        "agent_returncode": (
+            turn["done_payload"].get("returncode")
+            if turn["done_payload"] else None
+        ),
+        "truncated": turn["truncated"],
+        "budget_exhausted": turn["budget_exhausted"],
+        "final_message": turn["final_message"],
+        "agent_error": trace_summary["agent_error"],
+        "failure_classification": (
+            trace_summary["failure_classification"]
+        ),
+        "rate_limit_wait_sec": turn["rate_limit_wait_sec"],
+        "retry_assisted": (
+            retries.rate_limit_resumes > 0
+            or retries.tool_argument_retries > 0
+        ),
+    }
+
+
+def _resume_failed_turn(
+    *,
+    env: DesktopEnv,
+    prompt_path: Path,
+    agent: str,
+    turn_index: int,
+    returncode: int,
+    turn: dict,
+    trace_summary: dict,
+    observed_thread_id: str,
+    retries: _TurnRetries,
+    deadline: float,
+) -> float:
+    """Prepare to resume a failed turn's session, or raise.
+
+    A rate limit or an oversized tool argument resumes the same session with
+    a prompt that explains the failure, within its retry limit. Returns the
+    time the resume adds to the phase deadline. Any other failure raises.
+    """
+    failure_classification = trace_summary[
+        "failure_classification"
+    ]
+    can_resume = AGENT_PROFILES[agent]["can_resume"]
+    if (
+        failure_classification == "upstream_rate_limit"
+        and can_resume
+        and observed_thread_id
+        and retries.rate_limit_resumes < RATE_LIMIT_RESUME_LIMIT
+    ):
+        retries.rate_limit_resumes += 1
+        upload_prompt(
+            env,
+            prompt_path,
+            transient_resume_prompt(
+                trace_summary["agent_error"]
+                or "upstream rate limit"
+            ),
+        )
+        print(
+            f"{agent} turn ended on a rate limit; resuming the same session "
+            f"after {RATE_LIMIT_RESUME_BACKOFF_SEC:.0f}s "
+            f"({retries.rate_limit_resumes}/{RATE_LIMIT_RESUME_LIMIT})",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(RATE_LIMIT_RESUME_BACKOFF_SEC)
+        return RATE_LIMIT_RESUME_BACKOFF_SEC
+    if (
+        failure_classification == "tool_argument_too_large"
+        and can_resume
+        and observed_thread_id
+        and retries.tool_argument_retries < TOOL_ARGUMENT_RETRY_LIMIT
+        and time.monotonic() < deadline
+    ):
+        retries.tool_argument_retries += 1
+        upload_prompt(
+            env,
+            prompt_path,
+            tool_argument_resume_prompt(),
+        )
+        print(
+            f"{agent} shell argv exceeded the process limit; resuming "
+            "the same thread with binary-safe transfer guidance "
+            f"({retries.tool_argument_retries}/{TOOL_ARGUMENT_RETRY_LIMIT})",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 0.0
+    stderr_text = (
+        turn["stderr_raw"].decode(
+            "utf-8",
+            errors="replace",
+        ).strip()
+        if turn["stderr_raw"] else ""
+    )
+    failure_message = concise_failure_message(
+        trace_summary["agent_error"]
+        or stderr_text
+        or "no stderr"
+    )
+    raise RuntimeError(
+        f"{agent} turn {turn_index} exited with return code "
+        f"{returncode}: {failure_message}"
+    )
+
+
+def _append_user_exchange_logs(
+    result_dir: Path,
+    exchange: dict,
+    multi_phase: bool,
+) -> None:
+    """Append one ASK_USER exchange to the simulator log and the trajectory."""
+    turn_index = exchange["turn_index"]
+    question = exchange["question"]
+    answer = exchange["answer"]
+    phase_index = exchange["phase_index"]
+    phase_name = exchange["phase_name"]
+    with (result_dir / "user-simulator.jsonl").open(
+        "a",
+        encoding="utf-8",
+    ) as handle:
+        handle.write(json.dumps(exchange, ensure_ascii=False) + "\n")
+    trajectory_row = {
+        "step_num": turn_index,
+        "action_timestamp": exchange["timestamp"],
+        "action": ASK_USER_SENTINEL,
+        "question": question,
+        "user_answer": answer,
+        "screenshot_file": None,
+    }
+    if multi_phase:
+        trajectory_row.update({
+            "phase_index": phase_index,
+            "phase_name": phase_name,
+        })
+    with (result_dir / "traj.jsonl").open(
+        "a",
+        encoding="utf-8",
+    ) as handle:
+        handle.write(json.dumps(
+            trajectory_row,
+            ensure_ascii=False,
+        ))
+        handle.write("\n")

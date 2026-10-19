@@ -42,7 +42,7 @@ func TestWindowsKeyPreflightChordBoundaries(t *testing.T) {
 }
 
 func TestWindowsKeyPreflightRejectsLaterBatchKey(t *testing.T) {
-	ax := []a11yBatchAction{{actionType: "click"}, {actionType: "keypress", key: "Ctrl+NotAKey"}}
+	ax := []axBatchAction{{actionType: "click"}, {actionType: "keypress", key: "Ctrl+NotAKey"}}
 	if err := preflightWindowsAXKeys(ax); err == nil || !strings.Contains(err.Error(), "actions[1].keys") {
 		t.Fatalf("AX batch error = %v", err)
 	}

@@ -1144,8 +1144,8 @@ func TestActionabilityUsesRuntimeRouteInsteadOfActionTypeGuess(t *testing.T) {
 }
 
 func TestBatchEvidenceKeepsEveryOrderedAction(t *testing.T) {
-	entries := make([]map[string]any, 0, a11yBatchMaxActions)
-	for index := 0; index < a11yBatchMaxActions; index++ {
+	entries := make([]map[string]any, 0, axBatchMaxActions)
+	for index := 0; index < axBatchMaxActions; index++ {
 		result := toolCallResult{StructuredContent: map[string]any{
 			"actionability": ActionabilityEvidence{
 				Route:        "keyboard_synthesis",
@@ -1157,7 +1157,7 @@ func TestBatchEvidenceKeepsEveryOrderedAction(t *testing.T) {
 			batchActionEvidenceEntry(index, "keypress", result),
 		)
 	}
-	if len(entries) != a11yBatchMaxActions {
+	if len(entries) != axBatchMaxActions {
 		t.Fatalf("batch evidence count=%d", len(entries))
 	}
 	for index, entry := range entries {
@@ -2684,5 +2684,30 @@ func TestReorderDiffLargerThanTreeFallsBackToTree(t *testing.T) {
 	if diff, ok := testIncrementalAXSnapshot(before, after); ok {
 		t.Fatalf("a reorder diff longer than the tree must fall back to the tree:\n%s",
 			strings.Join(diff, "\n"))
+	}
+}
+
+func TestAXLocatorForRecordBindsA1NamedCellsToTheProviderObject(t *testing.T) {
+	cell := &elementRecord{Name: "C2"}
+	for _, tc := range []struct {
+		name             string
+		role             CanonicalRole
+		semanticTarget   string
+		providerIdentity string
+		wantKind         AXLocatorKind
+		wantTarget       string
+	}{
+		{"semantic button", "button", "sem", "", AXLocatorSemantic, "sem"},
+		{"A1 cell with provider object", "cell", "sem", "pid", AXLocatorProviderBound, "sem"},
+		{"A1 cell without provider object", "gridcell", "sem", "", "", ""},
+		{"no semantic target, provider object", "cell", "", "pid", AXLocatorProviderBound, `cell "C2"`},
+		{"no target, no provider object", "cell", "", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, target := axLocatorForRecord(cell, tc.role, tc.semanticTarget, tc.providerIdentity)
+			if kind != tc.wantKind || target != tc.wantTarget {
+				t.Fatalf("axLocatorForRecord = (%q, %q), want (%q, %q)", kind, target, tc.wantKind, tc.wantTarget)
+			}
+		})
 	}
 }

@@ -107,6 +107,9 @@ func boolEvidence(value bool) TriState {
 	return TriFalse
 }
 
+// finalizeActionabilityEvidence completes the stage record of one AX action
+// from the runtime's own evidence. Stage order matters: a stage absent from
+// the initial record is appended where it is first updated.
 func finalizeActionabilityEvidence(
 	evidence ActionabilityEvidence,
 	request axServiceRequest,
@@ -115,106 +118,11 @@ func finalizeActionabilityEvidence(
 	actual *RuntimeActionEvidence,
 ) ActionabilityEvidence {
 	if !success {
-		if actual != nil {
-			evidence.Route = strings.TrimSpace(actual.Route)
-			if evidence.Route == "" {
-				evidence.Route = string(ActivationUnknown)
-			}
-			updateActionabilityStage(
-				&evidence, ActionClassify, "passed", evidence.Route,
-			)
-			if actual.GeometrySampled {
-				updateActionabilityStage(
-					&evidence, ActionSampleGeometry, "passed", "",
-				)
-			}
-			if actual.GeometryStable != nil {
-				evidence.Stable = boolEvidence(*actual.GeometryStable)
-			}
-			if actual.WindowFocusVerified != nil {
-				evidence.WindowFocusVerified =
-					boolEvidence(*actual.WindowFocusVerified)
-				evidence.WindowVerified = evidence.WindowFocusVerified
-			}
-			if actual.TargetFocusVerified != nil {
-				evidence.TargetFocusVerified =
-					boolEvidence(*actual.TargetFocusVerified)
-			}
-			if actual.PointOwnerVerified != nil {
-				evidence.PointOwnerVerified =
-					boolEvidence(*actual.PointOwnerVerified)
-			}
-			if actual.Enabled != nil {
-				evidence.Enabled = boolEvidence(*actual.Enabled)
-			}
-			if actual.Editable != nil {
-				evidence.EditableVerified = boolEvidence(*actual.Editable)
-			}
-			if actual.FocusVerified != nil {
-				evidence.FocusVerified = boolEvidence(*actual.FocusVerified)
-			}
-			if actual.EditableVerified != nil {
-				evidence.EditableVerified = boolEvidence(*actual.EditableVerified)
-			}
-			evidence.InputEmitted = boolEvidence(actual.InputEmitted)
-			if actual.ReadbackSampled {
-				evidence.ReadbackSampled = TriTrue
-				updateActionabilityStage(
-					&evidence, ActionReadBack, "passed", "",
-				)
-			}
-			if actual.ReadbackSampled && actual.ReadbackVerified != nil {
-				evidence.DeliveryVerified =
-					boolEvidence(*actual.ReadbackVerified)
-			}
-		}
-		code := ""
-		if response.StructuredContent != nil {
-			code, _ = response.StructuredContent["failure_code"].(string)
-		}
-		switch code {
-		case "semantic_target_not_found", "semantic_target_ambiguous",
-			"stale_element_ref", "semantic_target_invalid":
-			evidence.Resolution = "failed"
-			updateActionabilityStage(&evidence, ActionResolve, "failed", code)
-		}
-		if response.StructuredContent != nil {
-			if emitted, ok := response.StructuredContent["input_events_emitted"].(bool); ok {
-				evidence.InputEmitted = boolEvidence(emitted)
-			}
-		}
-		if evidence.InputEmitted == TriUnknown {
-			updateActionabilityStage(&evidence, ActionEmit, "unknown", code)
-		} else if evidence.InputEmitted == TriFalse {
-			updateActionabilityStage(&evidence, ActionEmit, "not_executed", code)
-		} else {
-			updateActionabilityStage(&evidence, ActionEmit, "partial_or_emitted", code)
-		}
-		return evidence
+		return finalizeFailedActionabilityEvidence(evidence, response, actual)
 	}
-	if actual != nil && actual.WindowFocusVerified != nil {
-		evidence.WindowFocusVerified =
-			boolEvidence(*actual.WindowFocusVerified)
-		evidence.WindowVerified = evidence.WindowFocusVerified
-	} else {
-		evidence.WindowVerified = TriUnknown
-	}
-	updateActionabilityStage(
-		&evidence,
-		ActionVerifyWindow,
-		map[TriState]string{
-			TriTrue: "passed", TriFalse: "failed", TriUnknown: "unknown",
-		}[evidence.WindowVerified],
-		"",
-	)
+	recordWindowFocusStage(&evidence, actual)
 	if actual != nil {
-		evidence.Route = strings.TrimSpace(actual.Route)
-		if evidence.Route == "" {
-			evidence.Route = string(ActivationUnknown)
-		}
-		updateActionabilityStage(
-			&evidence, ActionClassify, "passed", evidence.Route,
-		)
+		recordRuntimeRoute(&evidence, actual)
 		if actual.GeometrySampled {
 			updateActionabilityStage(
 				&evidence, ActionSampleGeometry, "passed", "",
@@ -224,32 +132,7 @@ func finalizeActionabilityEvidence(
 				&evidence, ActionSampleGeometry, ActionStageNotRequired, "",
 			)
 		}
-		if actual.GeometryStable != nil {
-			evidence.Stable = boolEvidence(*actual.GeometryStable)
-		}
-		if actual.TargetFocusVerified != nil {
-			evidence.TargetFocusVerified =
-				boolEvidence(*actual.TargetFocusVerified)
-		}
-		if actual.PointOwnerVerified != nil {
-			evidence.PointOwnerVerified =
-				boolEvidence(*actual.PointOwnerVerified)
-		}
-		if actual.Enabled != nil {
-			evidence.Enabled = boolEvidence(*actual.Enabled)
-		}
-		if actual.Editable != nil {
-			evidence.EditableVerified = boolEvidence(*actual.Editable)
-		}
-		if actual.FocusVerified != nil {
-			evidence.FocusVerified = boolEvidence(*actual.FocusVerified)
-		}
-		if actual.EditableVerified != nil {
-			evidence.EditableVerified = boolEvidence(*actual.EditableVerified)
-		}
-		if actual.ReadbackSampled && actual.ReadbackVerified != nil {
-			evidence.DeliveryVerified = boolEvidence(*actual.ReadbackVerified)
-		}
+		copyRuntimeVerificationFlags(&evidence, actual)
 	} else {
 		updateActionabilityStage(
 			&evidence, ActionClassify, "unknown", "runtime did not report route",
@@ -258,22 +141,177 @@ func finalizeActionabilityEvidence(
 			&evidence, ActionSampleGeometry, "unknown", "",
 		)
 	}
+	recordFocusStage(&evidence, request)
+	recordEmitStage(&evidence, response, actual)
+	recordReadbackStage(&evidence, actual)
+	// Single AX actions carry no settle predicate; batch postconditions are
+	// reported by the batch, not by this per-action evidence.
+	updateActionabilityStage(
+		&evidence, ActionWaitStable, ActionStageNotRequired, "",
+	)
+	updateActionabilityStage(
+		&evidence, ActionPostcondition, ActionStageNotRequired, "",
+	)
+
+	return evidence
+}
+
+// finalizeFailedActionabilityEvidence keeps whatever partial evidence the
+// runtime reported before the failure and classifies the emit stage from the
+// failure response, so a failed action never claims stages it did not reach.
+func finalizeFailedActionabilityEvidence(
+	evidence ActionabilityEvidence,
+	response toolCallResult,
+	actual *RuntimeActionEvidence,
+) ActionabilityEvidence {
+	if actual != nil {
+		recordRuntimeRoute(&evidence, actual)
+		if actual.GeometrySampled {
+			updateActionabilityStage(
+				&evidence, ActionSampleGeometry, "passed", "",
+			)
+		}
+		if actual.WindowFocusVerified != nil {
+			evidence.WindowFocusVerified =
+				boolEvidence(*actual.WindowFocusVerified)
+			evidence.WindowVerified = evidence.WindowFocusVerified
+		}
+		copyRuntimeVerificationFlags(&evidence, actual)
+		evidence.InputEmitted = boolEvidence(actual.InputEmitted)
+		if actual.ReadbackSampled {
+			evidence.ReadbackSampled = TriTrue
+			updateActionabilityStage(
+				&evidence, ActionReadBack, "passed", "",
+			)
+		}
+	}
+	code := ""
+	if response.StructuredContent != nil {
+		code, _ = response.StructuredContent["failure_code"].(string)
+	}
+	switch code {
+	case "semantic_target_not_found", "semantic_target_ambiguous",
+		"stale_element_ref", "semantic_target_invalid":
+		evidence.Resolution = "failed"
+		updateActionabilityStage(&evidence, ActionResolve, "failed", code)
+	}
+	if response.StructuredContent != nil {
+		if emitted, ok := response.StructuredContent["input_events_emitted"].(bool); ok {
+			evidence.InputEmitted = boolEvidence(emitted)
+		}
+	}
+	if evidence.InputEmitted == TriUnknown {
+		updateActionabilityStage(&evidence, ActionEmit, "unknown", code)
+	} else if evidence.InputEmitted == TriFalse {
+		updateActionabilityStage(&evidence, ActionEmit, "not_executed", code)
+	} else {
+		updateActionabilityStage(&evidence, ActionEmit, "partial_or_emitted", code)
+	}
+	return evidence
+}
+
+// recordRuntimeRoute records the activation route the runtime chose; an
+// empty route stays unknown rather than being guessed from the action type.
+func recordRuntimeRoute(
+	evidence *ActionabilityEvidence,
+	actual *RuntimeActionEvidence,
+) {
+	evidence.Route = strings.TrimSpace(actual.Route)
+	if evidence.Route == "" {
+		evidence.Route = string(ActivationUnknown)
+	}
+	updateActionabilityStage(
+		evidence, ActionClassify, "passed", evidence.Route,
+	)
+}
+
+// copyRuntimeVerificationFlags copies the tri-state checks the runtime
+// reported. A nil flag leaves the prior value, so an unreported check stays
+// unknown. Delivery counts as verified only when a readback was sampled.
+func copyRuntimeVerificationFlags(
+	evidence *ActionabilityEvidence,
+	actual *RuntimeActionEvidence,
+) {
+	if actual.GeometryStable != nil {
+		evidence.Stable = boolEvidence(*actual.GeometryStable)
+	}
+	if actual.TargetFocusVerified != nil {
+		evidence.TargetFocusVerified =
+			boolEvidence(*actual.TargetFocusVerified)
+	}
+	if actual.PointOwnerVerified != nil {
+		evidence.PointOwnerVerified =
+			boolEvidence(*actual.PointOwnerVerified)
+	}
+	if actual.Enabled != nil {
+		evidence.Enabled = boolEvidence(*actual.Enabled)
+	}
+	if actual.Editable != nil {
+		evidence.EditableVerified = boolEvidence(*actual.Editable)
+	}
+	if actual.FocusVerified != nil {
+		evidence.FocusVerified = boolEvidence(*actual.FocusVerified)
+	}
+	if actual.EditableVerified != nil {
+		evidence.EditableVerified = boolEvidence(*actual.EditableVerified)
+	}
+	if actual.ReadbackSampled && actual.ReadbackVerified != nil {
+		evidence.DeliveryVerified = boolEvidence(*actual.ReadbackVerified)
+	}
+}
+
+func recordWindowFocusStage(
+	evidence *ActionabilityEvidence,
+	actual *RuntimeActionEvidence,
+) {
+	if actual != nil && actual.WindowFocusVerified != nil {
+		evidence.WindowFocusVerified =
+			boolEvidence(*actual.WindowFocusVerified)
+		evidence.WindowVerified = evidence.WindowFocusVerified
+	} else {
+		evidence.WindowVerified = TriUnknown
+	}
+	updateActionabilityStage(
+		evidence,
+		ActionVerifyWindow,
+		map[TriState]string{
+			TriTrue: "passed", TriFalse: "failed", TriUnknown: "unknown",
+		}[evidence.WindowVerified],
+		"",
+	)
+}
+
+// recordFocusStage requires verified focus only for text and key input,
+// which go to whatever element holds focus.
+func recordFocusStage(
+	evidence *ActionabilityEvidence,
+	request axServiceRequest,
+) {
 	intent := request.operationName()
 	if intent == "type" || intent == "keypress" {
 		if evidence.FocusVerified == TriTrue {
-			updateActionabilityStage(&evidence, ActionVerifyFocus, "passed", "")
+			updateActionabilityStage(evidence, ActionVerifyFocus, "passed", "")
 		} else if evidence.FocusVerified == TriFalse {
-			updateActionabilityStage(&evidence, ActionVerifyFocus, "failed", "")
+			updateActionabilityStage(evidence, ActionVerifyFocus, "failed", "")
 		} else {
 			updateActionabilityStage(
-				&evidence, ActionVerifyFocus, "unknown", "",
+				evidence, ActionVerifyFocus, "unknown", "",
 			)
 		}
 	} else {
 		updateActionabilityStage(
-			&evidence, ActionVerifyFocus, ActionStageNotRequired, "",
+			evidence, ActionVerifyFocus, ActionStageNotRequired, "",
 		)
 	}
+}
+
+// recordEmitStage prefers the runtime's own emission flag and falls back to
+// the response's input_events_emitted only when the runtime reported nothing.
+func recordEmitStage(
+	evidence *ActionabilityEvidence,
+	response toolCallResult,
+	actual *RuntimeActionEvidence,
+) {
 	emitted := actual != nil && actual.InputEmitted
 	if actual == nil && response.StructuredContent != nil {
 		if value, ok := response.StructuredContent["input_events_emitted"].(bool); ok {
@@ -288,28 +326,24 @@ func finalizeActionabilityEvidence(
 		emitStatus = "not_executed"
 	}
 	updateActionabilityStage(
-		&evidence, ActionEmit, emitStatus,
+		evidence, ActionEmit, emitStatus,
 		"input_emitted="+string(evidence.InputEmitted),
 	)
+}
+
+func recordReadbackStage(
+	evidence *ActionabilityEvidence,
+	actual *RuntimeActionEvidence,
+) {
 	if actual != nil && actual.ReadbackSampled {
 		evidence.ReadbackSampled = TriTrue
-		updateActionabilityStage(&evidence, ActionReadBack, "passed", "")
+		updateActionabilityStage(evidence, ActionReadBack, "passed", "")
 	} else {
 		evidence.ReadbackSampled = TriFalse
 		updateActionabilityStage(
-			&evidence, ActionReadBack, "not_performed", "",
+			evidence, ActionReadBack, "not_performed", "",
 		)
 	}
-	// Single AX actions carry no settle predicate; batch postconditions are
-	// reported by the batch, not by this per-action evidence.
-	updateActionabilityStage(
-		&evidence, ActionWaitStable, ActionStageNotRequired, "",
-	)
-	updateActionabilityStage(
-		&evidence, ActionPostcondition, ActionStageNotRequired, "",
-	)
-
-	return evidence
 }
 
 func attachActionabilityEvidence(

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-type a11yBatchAction struct {
+type axBatchAction struct {
 	actionType string
 	targetRef  string
 	direction  string
@@ -20,7 +20,7 @@ type a11yBatchAction struct {
 	wait *axWait
 }
 
-type a11yBatchContext struct {
+type axBatchContext struct {
 	appRef         string
 	windowRef      string
 	appToken       string
@@ -34,26 +34,26 @@ type a11yBatchContext struct {
 	report *actReportTrace
 }
 
-type a11yWindowContinuity string
+type axWindowContinuity string
 
 const (
-	a11yWindowSame    a11yWindowContinuity = "same"
-	a11yWindowChanged a11yWindowContinuity = "changed"
-	a11yWindowUnknown a11yWindowContinuity = "unknown"
+	axWindowSame    axWindowContinuity = "same"
+	axWindowChanged axWindowContinuity = "changed"
+	axWindowUnknown axWindowContinuity = "unknown"
 )
 
-// deriveA11yBatchContext binds a batch to one logical window. The window
+// deriveAXBatchContext binds a batch to one logical window. The window
 // comes from the actions' rN/wN refs, from window_ref, or, for a batch whose
 // actions carry no ref, from the window that holds keyboard focus. A
 // window_ref that names the same window as the refs is accepted; a
 // different one is rejected. focus is the focused window read before any
 // input; it is used only when nothing else names a window.
-func (s *service) deriveA11yBatchContext(
+func (s *service) deriveAXBatchContext(
 	explicitWindowRef string,
-	actions []a11yBatchAction,
+	actions []axBatchAction,
 	focus *axDesktopWindow,
-) (*a11yBatchContext, error) {
-	context := &a11yBatchContext{}
+) (*axBatchContext, error) {
+	context := &axBatchContext{}
 	bindWindow := func(ref, handle, appRef, appIdentity string) error {
 		ref = strings.TrimSpace(ref)
 		handle = strings.TrimSpace(handle)
@@ -145,48 +145,48 @@ func (s *service) deriveA11yBatchContext(
 	return context, nil
 }
 
-func (s *service) a11yBatchWindowContinuity(
-	context *a11yBatchContext,
-) a11yWindowContinuity {
+func (s *service) axBatchWindowContinuity(
+	context *axBatchContext,
+) axWindowContinuity {
 	if s == nil || context == nil || strings.TrimSpace(context.windowHandle) == "" {
-		return a11yWindowUnknown
+		return axWindowUnknown
 	}
 	snapshot := s.currentSnapshot(context.appToken)
 	if snapshot == nil {
-		return a11yWindowUnknown
+		return axWindowUnknown
 	}
 	if snapshot.WindowAbsent {
-		return a11yWindowChanged
+		return axWindowChanged
 	}
 	if strings.TrimSpace(snapshot.WindowHandle) == "" ||
 		snapshot.WindowHandle != context.windowHandle {
 		if strings.TrimSpace(snapshot.WindowHandle) == "" {
-			return a11yWindowUnknown
+			return axWindowUnknown
 		}
-		return a11yWindowChanged
+		return axWindowChanged
 	}
 	if strings.TrimSpace(context.windowRef) == "" ||
 		strings.TrimSpace(snapshot.publicWindowRef) == "" {
-		return a11yWindowUnknown
+		return axWindowUnknown
 	}
 	windowEntry, err := s.windowRefRegistry.Resolve(context.windowRef, "")
 	if err != nil {
 		var lifecycle *axRefLifecycleError
 		if errors.As(err, &lifecycle) && lifecycle.lifecycle == AXRefNeedsRevalidation {
-			return a11yWindowUnknown
+			return axWindowUnknown
 		}
-		return a11yWindowChanged
+		return axWindowChanged
 	}
 	if windowEntry.WindowHandle != context.windowHandle ||
 		snapshot.publicWindowRef != context.windowRef {
-		return a11yWindowChanged
+		return axWindowChanged
 	}
-	return a11yWindowSame
+	return axWindowSame
 }
 
-func (s *service) executeA11yBatchAction(
-	context *a11yBatchContext,
-	action a11yBatchAction,
+func (s *service) executeAXBatchAction(
+	context *axBatchContext,
+	action axBatchAction,
 	obs observation,
 ) toolCallResult {
 	const noDeclaredTarget = ""
@@ -258,7 +258,7 @@ func (s *service) executeA11yBatchAction(
 	}
 }
 
-func prependA11yBatchSummary(
+func prependAXBatchSummary(
 	result toolCallResult,
 	summary string,
 	facts map[string]any,
@@ -334,7 +334,7 @@ func compactAXActionContent(result toolCallResult) toolCallResult {
 	return result
 }
 
-func a11yBatchValidationError(message string, requested int) toolCallResult {
+func axBatchValidationError(message string, requested int) toolCallResult {
 	result := textResult(
 		message+"\nNo action was sent.",
 		true,
@@ -353,9 +353,9 @@ func a11yBatchValidationError(message string, requested int) toolCallResult {
 	return result
 }
 
-func a11yBatchPreflightError(err error, requested int) toolCallResult {
+func axBatchPreflightError(err error, requested int) toolCallResult {
 	return withArgumentRule(
-		withAXLifecycleFailure(a11yBatchValidationError(err.Error(), requested), err),
+		withAXLifecycleFailure(axBatchValidationError(err.Error(), requested), err),
 		err,
 	)
 }
@@ -403,17 +403,17 @@ func withAXLifecycleFailure(result toolCallResult, err error) toolCallResult {
 	return result
 }
 
-// a11yBatchDecoded runs decoded actions in one window. Window titles and
+// axBatchDecoded runs decoded actions in one window. Window titles and
 // the focused window are resolved here, once, before any input; after that
 // the batch uses only the resolved wN.
-func (s *service) a11yBatchDecoded(
-	actions []a11yBatchAction,
+func (s *service) axBatchDecoded(
+	actions []axBatchAction,
 	obs observation,
 	windowRef string,
 ) toolCallResult {
 	requested := len(actions)
-	if a11yBatchOnlyWaits(actions) {
-		return s.a11yWaitOnly(actions, obs, windowRef)
+	if axBatchOnlyWaits(actions) {
+		return s.axWaitOnly(actions, obs, windowRef)
 	}
 	bindingNotes := []string{}
 	for index := range actions {
@@ -431,7 +431,7 @@ func (s *service) a11yBatchDecoded(
 			window.ref, strconv.Quote(window.title), window.appName))
 	}
 	var focus *axDesktopWindow
-	if windowRef == "" && !a11yBatchHasRef(actions) {
+	if windowRef == "" && !axBatchHasRef(actions) {
 		var argErr *axArgError
 		focus, argErr = s.resolveFocusedWindow()
 		if argErr != nil {
@@ -441,7 +441,7 @@ func (s *service) a11yBatchDecoded(
 			"bound_window: %s %s (%s, focused at preflight)",
 			focus.ref, strconv.Quote(focus.title), focus.appName))
 	}
-	result := s.a11yBatchBound(actions, obs, windowRef, focus, requested)
+	result := s.axBatchBound(actions, obs, windowRef, focus, requested)
 	if len(bindingNotes) > 0 {
 		at := 0
 		if len(result.Content) > 0 && isActReportText(result.Content[0].Text) {
@@ -454,8 +454,8 @@ func (s *service) a11yBatchDecoded(
 	return result
 }
 
-// a11yBatchHasInputRef reports whether an input action names a ref.
-func a11yBatchHasInputRef(actions []a11yBatchAction) bool {
+// axBatchHasInputRef reports whether an input action names a ref.
+func axBatchHasInputRef(actions []axBatchAction) bool {
 	for _, action := range actions {
 		if action.actionType != "wait" && action.targetRef != "" {
 			return true
@@ -464,7 +464,7 @@ func a11yBatchHasInputRef(actions []a11yBatchAction) bool {
 	return false
 }
 
-func a11yBatchHasRef(actions []a11yBatchAction) bool {
+func axBatchHasRef(actions []axBatchAction) bool {
 	for _, action := range actions {
 		if action.targetRef != "" {
 			return true
@@ -473,21 +473,21 @@ func a11yBatchHasRef(actions []a11yBatchAction) bool {
 	return false
 }
 
-// a11yBatchBound runs the batch and puts the act report first.
-func (s *service) a11yBatchBound(
-	actions []a11yBatchAction,
+// axBatchBound runs the batch and puts the act report first.
+func (s *service) axBatchBound(
+	actions []axBatchAction,
 	obs observation,
 	windowRef string,
 	focus *axDesktopWindow,
 	requested int,
 ) toolCallResult {
 	trace := newActReportTrace(obs)
-	result := s.a11yBatchRun(actions, obs, windowRef, focus, requested, trace)
+	result := s.axBatchRun(actions, obs, windowRef, focus, requested, trace)
 	return s.withActReport(result, actions, trace)
 }
 
-func (s *service) a11yBatchRun(
-	actions []a11yBatchAction,
+func (s *service) axBatchRun(
+	actions []axBatchAction,
 	obs observation,
 	windowRef string,
 	focus *axDesktopWindow,
@@ -495,16 +495,16 @@ func (s *service) a11yBatchRun(
 	trace *actReportTrace,
 ) toolCallResult {
 	if err := s.preflightPlatformAXKeys(actions); err != nil {
-		return a11yBatchPreflightError(err, requested)
+		return axBatchPreflightError(err, requested)
 	}
 	if s.platformBackend().HostInfo().Platform == "windows" {
 		if err := preflightWindowsAXKeys(actions); err != nil {
-			return a11yBatchPreflightError(err, requested)
+			return axBatchPreflightError(err, requested)
 		}
 	}
-	context, err := s.deriveA11yBatchContext(windowRef, actions, focus)
+	context, err := s.deriveAXBatchContext(windowRef, actions, focus)
 	if err != nil {
-		return a11yBatchPreflightError(err, requested)
+		return axBatchPreflightError(err, requested)
 	}
 	context.report = trace
 	trace.bind(s, context)
@@ -517,14 +517,14 @@ func (s *service) a11yBatchRun(
 		if action.wait.ref == "" {
 			continue
 		}
-		if err := s.preflightA11yWaitRef(context, action.wait.ref); err != nil {
-			return a11yBatchPreflightError(fmt.Errorf("actions[%d].ref: %w", index, err), requested)
+		if err := s.preflightAXWaitRef(context, action.wait.ref); err != nil {
+			return axBatchPreflightError(fmt.Errorf("actions[%d].ref: %w", index, err), requested)
 		}
 	}
 
-	executionPlan, err := compileA11yBatchExecutionPlan(context, actions, obs)
+	executionPlan, err := compileAXBatchExecutionPlan(context, actions, obs)
 	if err != nil {
-		return a11yBatchPreflightError(err, requested)
+		return axBatchPreflightError(err, requested)
 	}
 	orderedRuns := map[int]ProviderOrderedInputRequest{}
 	// Wait steps poll between actions on the per-action path; the ordered
@@ -536,7 +536,7 @@ func (s *service) a11yBatchRun(
 	if _, available := orderedInputBackend(s.platformBackend()); available && !guarded {
 		requests, err := providerOrderedInputRequestsFromPlan(context, executionPlan, actions)
 		if err != nil {
-			return a11yBatchPreflightError(err, requested)
+			return axBatchPreflightError(err, requested)
 		}
 		if result, used := s.executeWholeBatchOrderedInput(context, actions, executionPlan, obs); used {
 			return result
@@ -554,19 +554,19 @@ func (s *service) a11yBatchRun(
 			trace.recordBefore(s, index)
 			waitResult := s.runAXWait(context, action.wait)
 			actionEvidence = append(actionEvidence, axWaitEvidenceEntry(index, waitResult))
-			if !a11yPostconditionPassed(waitResult) {
-				return s.stopA11yBatchAtWait(context, actions, index, waitResult, actionEvidence, waitNotes, obs)
+			if !axPostconditionPassed(waitResult) {
+				return s.stopAXBatchAtWait(context, actions, index, waitResult, actionEvidence, waitNotes, obs)
 			}
 			waitNotes = append(waitNotes, firstLine(resultText(waitResult)))
 			s.rebindAfterWindowWait(context, action.wait, waitResult)
 			if index < len(actions)-1 && actions[index+1].actionType != "wait" {
-				if stopped, changed := s.a11yBatchContinuityStop(context, actions, index, actionEvidence, obs); changed {
+				if stopped, changed := s.axBatchContinuityStop(context, actions, index, actionEvidence, obs); changed {
 					return stopped
 				}
 			}
 			continue
 		}
-		actionObservation := a11yBatchActionObservation(
+		actionObservation := axBatchActionObservation(
 			index,
 			len(actions),
 			obs,
@@ -577,8 +577,8 @@ func (s *service) a11yBatchRun(
 		if context.boundByFocus {
 			// Keys and text without a ref go to the focused window. If focus
 			// left the bound window, stop instead of sending input elsewhere.
-			if stopped, changed := s.a11yBatchFocusChanged(context, index, len(actions), actionEvidence); changed {
-				return s.recoverA11yBatchObservation(context, stopped, obs)
+			if stopped, changed := s.axBatchFocusChanged(context, index, len(actions), actionEvidence); changed {
+				return s.recoverAXBatchObservation(context, stopped, obs)
 			}
 		}
 		trace.recordBefore(s, index)
@@ -593,18 +593,18 @@ func (s *service) a11yBatchRun(
 			runEvidence := orderedInputActionEvidence(actions[index:runEnd+1], execution.nativeResult)
 			actionEvidence = append(actionEvidence, runEvidence...)
 			if result.IsError {
-				return s.stopA11yOrderedInputRun(context, actions, index, runEnd,
+				return s.stopAXOrderedInputRun(context, actions, index, runEnd,
 					execution, actionEvidence, obs)
 			}
 			actionEntry = runEvidence[len(runEvidence)-1]
 			index = runEnd
 			action = actions[index]
 			if index == len(actions)-1 && obs.resolvedMode() != observeNone {
-				result = mergeA11yBatchFinalObservation(result,
-					s.renderA11yBatchFinalObservation(execution.snapshot, execution.notes, obs))
+				result = mergeAXBatchFinalObservation(result,
+					s.renderAXBatchFinalObservation(execution.snapshot, execution.notes, obs))
 			}
 		} else {
-			result = s.executeA11yBatchAction(context, action, actionObservation)
+			result = s.executeAXBatchAction(context, action, actionObservation)
 			if !result.IsError ||
 				(action.actionType == "close" &&
 					axEvidenceReportsInputEmission(result.StructuredContent)) {
@@ -661,7 +661,7 @@ func (s *service) a11yBatchRun(
 				anyPartialPossible
 			result.StructuredContent["mutation_unknown"] =
 				anyMutationUnknown || anyInputEmitted || anyPartialPossible
-			result = s.recoverA11yBatchObservation(context, result, obs)
+			result = s.recoverAXBatchObservation(context, result, obs)
 			finalObservationReturned, _ =
 				result.StructuredContent["final_observation_returned"].(bool)
 			facts["final_observation_returned"] = finalObservationReturned
@@ -682,7 +682,7 @@ func (s *service) a11yBatchRun(
 						"and did not cause that state."
 				}
 			}
-			return prependA11yBatchSummary(
+			return prependAXBatchSummary(
 				result,
 				fmt.Sprintf(
 					"Stopped at action %d/%d (%s). "+
@@ -698,7 +698,7 @@ func (s *service) a11yBatchRun(
 			actionEvidence = append(actionEvidence, actionEntry)
 		}
 		if index < lastInput && actions[index+1].actionType != "wait" {
-			if stopped, changed := s.a11yBatchContinuityStop(context, actions, index, actionEvidence, obs); changed {
+			if stopped, changed := s.axBatchContinuityStop(context, actions, index, actionEvidence, obs); changed {
 				return stopped
 			}
 			continue
@@ -714,16 +714,16 @@ func (s *service) a11yBatchRun(
 				trace.recordBefore(s, next)
 				waitResult := s.runAXWait(context, actions[next].wait)
 				actionEvidence = append(actionEvidence, axWaitEvidenceEntry(next, waitResult))
-				if !a11yPostconditionPassed(waitResult) {
-					return s.stopA11yBatchAtWait(context, actions, next, waitResult, actionEvidence, waitNotes, obs)
+				if !axPostconditionPassed(waitResult) {
+					return s.stopAXBatchAtWait(context, actions, next, waitResult, actionEvidence, waitNotes, obs)
 				}
 				waitNotes = append(waitNotes, firstLine(resultText(waitResult)))
 				s.rebindAfterWindowWait(context, actions[next].wait, waitResult)
 			}
 			if index < len(actions)-1 && obs.resolvedMode() != observeNone &&
 				action.actionType != "close" {
-				result = mergeA11yBatchFinalObservation(result,
-					s.a11yBatchFinalObservation(context, obs, true))
+				result = mergeAXBatchFinalObservation(result,
+					s.axBatchFinalObservation(context, obs, true))
 			}
 			if index < len(actions)-1 {
 				// The waits after the last input held: the awaited state
@@ -741,7 +741,7 @@ func (s *service) a11yBatchRun(
 			if obs.resolvedMode() != observeNone && !windowAction {
 				if required, _ :=
 					result.StructuredContent["observation_required"].(bool); required {
-					result = s.recoverA11yBatchObservation(
+					result = s.recoverAXBatchObservation(
 						context,
 						result,
 						obs,
@@ -785,7 +785,7 @@ func (s *service) a11yBatchRun(
 			} else {
 				facts["final_observation_action_index"] = index
 			}
-			return prependA11yBatchSummary(
+			return prependAXBatchSummary(
 				result,
 				"",
 				facts,
@@ -884,10 +884,10 @@ func compactBatchActionability(value any) any {
 	}
 }
 
-// a11yBatchFocusChanged reports whether keyboard focus left the window a
+// axBatchFocusChanged reports whether keyboard focus left the window a
 // focus-bound batch was bound to, and if so returns the stop result.
-func (s *service) a11yBatchFocusChanged(
-	context *a11yBatchContext,
+func (s *service) axBatchFocusChanged(
+	context *axBatchContext,
 	index, count int,
 	actionEvidence []map[string]any,
 ) (toolCallResult, bool) {

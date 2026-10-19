@@ -1,5 +1,6 @@
 """Resolution of snapshot refs and semantic targets to live nodes."""
 
+from dataclasses import dataclass
 from typing import Any
 
 import time
@@ -190,11 +191,149 @@ def find_element_at_snapshot_path_with_bounds(app, record, window_bounds):
     return None
 
 
+@dataclass(frozen=True)
+class _SemanticLocator:
+    """The fields of a semantic target that resolution reads."""
+
+    selector: str
+    role: str
+    name_key: str
+    has_name: bool
+    predicates: list
+    target_window_handle: str
+    provider_bus: str
+    provider_path: str
+    provider_generation: str
+    provider_window_bus: str
+    provider_window_path: str
+    provider_window_generation: str
+    locator_kind: str
+    allow_provider_rebind: bool
+    provider_requested: bool
+    provider_window_requested: bool
+
+
 def resolve_semantic_target(
     app, window_index, window, bounds, target, known_refs, operation
 ):
-    """Resolve one live semantic target across visible app-owned windows."""
+    """Resolve one live semantic target across visible app-owned windows.
+
+    The steps run in a fixed order and each may fail closed before input:
+    decode the locator, choose the candidate windows, try the exact provider
+    identity, scan the candidates for live matches, then require exactly one.
+    """
     observation = operation.get("observation") or {}
+    locator = _decode_semantic_target(target)
+    text_limit = parse_text_limit(
+        observation.get("text_limit"), DEFAULT_TEXT_LIMIT)
+    candidates = [(window_index, window)]
+    candidate_inventory_complete = True
+    provider_window_recovered = False
+    provider_scan_hint = None
+    if locator.provider_window_requested:
+        (
+            candidates,
+            candidate_inventory_complete,
+            provider_window_recovered,
+            provider_scan_hint,
+        ) = _provider_window_candidates(
+            app, window_index, window, locator, observation
+        )
+    elif locator.target_window_handle:
+        (
+            candidates,
+            candidate_inventory_complete,
+        ) = _logical_window_candidates(app, window_index, window, locator)
+
+    if locator.locator_kind == "provider_bound":
+        return _resolve_provider_bound_target(
+            app,
+            window_index,
+            window,
+            bounds,
+            target,
+            locator,
+            candidates,
+            candidate_inventory_complete,
+            provider_scan_hint,
+            observation,
+            text_limit,
+        )
+
+    if locator.locator_kind == "semantic" and locator.provider_requested:
+        resolved = _resolve_prior_provider_identity(
+            app,
+            window_index,
+            window,
+            bounds,
+            target,
+            locator,
+            candidates,
+            provider_scan_hint,
+            observation,
+            text_limit,
+        )
+        if resolved is not None:
+            return resolved
+
+    candidate_count = len(candidates)
+    needs_provider_action_scan = any(
+        str(predicate.get("kind") or "") == "action"
+        for predicate in locator.predicates
+    )
+    if not needs_provider_action_scan:
+        provider_matches = []
+        by_name, by_description, scan_incomplete = _lightweight_semantic_scan(
+            app,
+            window_index,
+            window,
+            bounds,
+            target,
+            locator,
+            candidates,
+            observation,
+            text_limit,
+        )
+    else:
+        (
+            provider_matches,
+            by_name,
+            by_description,
+            scan_incomplete,
+        ) = _render_semantic_scan(
+            app,
+            window_index,
+            window,
+            bounds,
+            target,
+            locator,
+            candidates,
+            known_refs,
+            observation,
+            text_limit,
+        )
+
+    resolved = _unique_provider_match(app, provider_matches)
+    if resolved is not None:
+        return resolved
+    record, matched_window, matched_bounds, _candidate = _unique_semantic_match(
+        by_name,
+        by_description,
+        scan_incomplete,
+        locator.selector,
+        candidate_count,
+    )
+    node = _live_node_for_semantic_match(
+        app, target, locator, record, matched_bounds
+    )
+    note = _semantic_resolution_note(
+        target, locator, candidate_count, provider_window_recovered
+    )
+    return node, record, note, matched_window, matched_bounds
+
+
+def _decode_semantic_target(target):
+    """Read the locator fields and reject a target that names nothing."""
     selector = str(target.get("selector") or "")
     role = str(target.get("role") or "").strip()
     name = str(target.get("name") or "")
@@ -242,191 +381,97 @@ def resolve_semantic_target(
             failure_phase="precondition",
             input_events_emitted=False,
         )
+    return _SemanticLocator(
+        selector=selector,
+        role=role,
+        name_key=name_key,
+        has_name=has_name,
+        predicates=predicates,
+        target_window_handle=target_window_handle,
+        provider_bus=provider_bus,
+        provider_path=provider_path,
+        provider_generation=provider_generation,
+        provider_window_bus=provider_window_bus,
+        provider_window_path=provider_window_path,
+        provider_window_generation=provider_window_generation,
+        locator_kind=locator_kind,
+        allow_provider_rebind=allow_provider_rebind,
+        provider_requested=provider_requested,
+        provider_window_requested=provider_window_requested,
+    )
 
-    text_limit = parse_text_limit(
-        observation.get("text_limit"), DEFAULT_TEXT_LIMIT)
+
+def _provider_window_candidates(app, window_index, window, locator, observation):
+    """Narrow the candidates to the target's provider window.
+
+    Returns (candidates, inventory_complete, window_recovered, scan_hint).
+    The scan hint is set when the window was found through its element.
+    """
+    selector = locator.selector
+    target_window_handle = locator.target_window_handle
+    provider_bus = locator.provider_bus
+    provider_path = locator.provider_path
+    provider_generation = locator.provider_generation
+    provider_window_bus = locator.provider_window_bus
+    provider_window_path = locator.provider_window_path
+    provider_window_generation = locator.provider_window_generation
+    provider_requested = locator.provider_requested
     candidates = [(window_index, window)]
-    candidate_inventory_complete = True
     provider_window_recovered = False
     provider_scan_hint = None
-    if provider_window_requested:
-        seen_windows = {window_index}
-        window_inventory = app_windows(app)
-        candidate_inventory_complete = inventory_complete(window_inventory)
-        for candidate_index, candidate_window in window_inventory:
-            if candidate_index in seen_windows:
-                continue
-            seen_windows.add(candidate_index)
-            candidates.append((candidate_index, candidate_window))
-        all_candidates = candidates
-        exact_provider_windows = [
+    seen_windows = {window_index}
+    window_inventory = app_windows(app)
+    candidate_inventory_complete = inventory_complete(window_inventory)
+    for candidate_index, candidate_window in window_inventory:
+        if candidate_index in seen_windows:
+            continue
+        seen_windows.add(candidate_index)
+        candidates.append((candidate_index, candidate_window))
+    all_candidates = candidates
+    exact_provider_windows = [
+        (candidate_index, candidate_window)
+        for candidate_index, candidate_window in all_candidates
+        if provider_bus_name(candidate_window) == provider_window_bus
+        and provider_object_path(candidate_window) == provider_window_path
+        and process_generation(node_pid(candidate_window))
+        == provider_window_generation
+    ]
+    logical_window_matches = []
+    if target_window_handle:
+        logical_window_matches = [
             (candidate_index, candidate_window)
             for candidate_index, candidate_window in all_candidates
-            if provider_bus_name(candidate_window) == provider_window_bus
-            and provider_object_path(candidate_window) == provider_window_path
-            and process_generation(node_pid(candidate_window))
-            == provider_window_generation
-        ]
-        logical_window_matches = []
-        if target_window_handle:
-            logical_window_matches = [
-                (candidate_index, candidate_window)
-                for candidate_index, candidate_window in all_candidates
-                if window_instance_handle(
-                    app, candidate_index, candidate_window
-                ) == target_window_handle
-                and provider_bus_name(candidate_window) == provider_window_bus
-                and process_generation(node_pid(candidate_window))
-                == provider_window_generation
-            ]
-        # A strong logical window is backed by a one-to-one native window
-        # identity. Toolkits may rebuild the provider top-level object while
-        # leaving that native window and the exact provider element alive.
-        # In that case, allow the later exact-element identity scan to decide
-        # continuity without requiring the obsolete wrapper bus/path.
-        if (
-            not logical_window_matches
-            and target_window_handle.startswith("w2:")
-            and provider_requested
-        ):
-            logical_window_matches = [
-                (candidate_index, candidate_window)
-                for candidate_index, candidate_window in all_candidates
-                if window_instance_handle(
-                    app, candidate_index, candidate_window
-                ) == target_window_handle
-                and process_generation(node_pid(candidate_window))
-                == provider_generation
-            ]
-        if (
-            not exact_provider_windows
-            and not logical_window_matches
-            and provider_requested
-        ):
-            if not candidate_inventory_complete:
-                raise OperationFailure(
-                    "observation_incomplete: the accessibility window inventory "
-                    "could not be read completely; no input was emitted.",
-                    failure_code="observation_incomplete",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                    failure_subject="window",
-                )
-            if target_window_handle.startswith("w2:"):
-                raise OperationFailure(
-                    "stale_element_ref reason=originating_window_disappeared "
-                    "selector={!r}; no input was emitted.".format(selector),
-                    failure_code="stale_element_ref",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                    failure_subject="window",
-                    replacement_window=recovery_window_candidate(
-                        app, window_inventory
-                    ),
-                )
-            provider_scan_hint = scan_provider_identity(
-                all_candidates,
-                provider_bus,
-                provider_path,
-                provider_generation,
-                max_nodes=positive_int(
-                    observation.get("max_tree_nodes"), MAX_ELEMENTS
-                ),
-                deadline=time.monotonic() + TREE_DEADLINE_SECONDS,
-            )
-            if provider_scan_hint:
-                owner_indexes = {
-                    path[0]
-                    for _node, path in provider_scan_hint
-                    if path
-                }
-                logical_window_matches = [
-                    (candidate_index, candidate_window)
-                    for candidate_index, candidate_window in all_candidates
-                    if candidate_index in owner_indexes
-                ]
-                provider_window_recovered = bool(logical_window_matches)
-            elif not provider_scan_hint.complete:
-                raise OperationFailure(
-                    "observation_incomplete: the provider identity could not be "
-                    "checked completely; no input was emitted.",
-                    failure_code="observation_incomplete",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                    failure_subject="element",
-                )
-        if exact_provider_windows:
-            candidates = exact_provider_windows
-        elif logical_window_matches:
-            # Provider object paths may change while the same one-to-one native
-            # window remains alive. Semantic recovery stays inside that exact
-            # stable window and still requires one unique canonical match.
-            candidates = logical_window_matches
-            provider_window_recovered = True
-        else:
-            if not candidate_inventory_complete:
-                raise OperationFailure(
-                    "observation_incomplete: the accessibility window inventory "
-                    "could not be read completely; no input was emitted.",
-                    failure_code="observation_incomplete",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                    failure_subject="window",
-                )
-            raise OperationFailure(
-                "stale_element_ref reason=provider_window_disappeared "
-                "selector={!r}; no input was emitted.".format(selector),
-                failure_code="stale_element_ref",
-                failure_phase="precondition",
-                input_events_emitted=False,
-                replacement_window=recovery_window_candidate(
-                    app, window_inventory
-                ),
-            )
-    elif target_window_handle:
-        seen_windows = {window_index}
-        window_inventory = app_windows(app)
-        candidate_inventory_complete = inventory_complete(window_inventory)
-        for candidate_index, candidate_window in window_inventory:
-            if candidate_index in seen_windows:
-                continue
-            if not (
-                state_contains(candidate_window, Atspi.StateType.SHOWING)
-                or state_contains(candidate_window, Atspi.StateType.ACTIVE)
-                or state_contains(candidate_window, Atspi.StateType.MODAL)
-            ):
-                continue
-            seen_windows.add(candidate_index)
-            candidates.append((candidate_index, candidate_window))
-        candidates = [
-            (candidate_index, candidate_window)
-            for candidate_index, candidate_window in candidates
             if window_instance_handle(
                 app, candidate_index, candidate_window
             ) == target_window_handle
+            and provider_bus_name(candidate_window) == provider_window_bus
+            and process_generation(node_pid(candidate_window))
+            == provider_window_generation
         ]
-        if not candidates:
-            if not candidate_inventory_complete:
-                raise OperationFailure(
-                    "observation_incomplete: the accessibility window inventory "
-                    "could not be read completely; no input was emitted.",
-                    failure_code="observation_incomplete",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                    failure_subject="window",
-                )
-            raise OperationFailure(
-                "stale_element_ref reason=originating_window_disappeared "
-                "selector={!r}; no input was emitted.".format(selector),
-                failure_code="stale_element_ref",
-                failure_phase="precondition",
-                input_events_emitted=False,
-                replacement_window=recovery_window_candidate(
-                    app, window_inventory
-                ),
-            )
-
-    if locator_kind == "provider_bound":
+    # A strong logical window is backed by a one-to-one native window
+    # identity. Toolkits may rebuild the provider top-level object while
+    # leaving that native window and the exact provider element alive.
+    # In that case, allow the later exact-element identity scan to decide
+    # continuity without requiring the obsolete wrapper bus/path.
+    if (
+        not logical_window_matches
+        and target_window_handle.startswith("w2:")
+        and provider_requested
+    ):
+        logical_window_matches = [
+            (candidate_index, candidate_window)
+            for candidate_index, candidate_window in all_candidates
+            if window_instance_handle(
+                app, candidate_index, candidate_window
+            ) == target_window_handle
+            and process_generation(node_pid(candidate_window))
+            == provider_generation
+        ]
+    if (
+        not exact_provider_windows
+        and not logical_window_matches
+        and provider_requested
+    ):
         if not candidate_inventory_complete:
             raise OperationFailure(
                 "observation_incomplete: the accessibility window inventory "
@@ -436,29 +481,41 @@ def resolve_semantic_target(
                 input_events_emitted=False,
                 failure_subject="window",
             )
-        provider_scan = provider_scan_hint or resolve_provider_runtime_paths(
-            app, target, candidates
-        )
-        if not provider_scan:
-            max_nodes = positive_int(
+        if target_window_handle.startswith("w2:"):
+            raise OperationFailure(
+                "stale_element_ref reason=originating_window_disappeared "
+                "selector={!r}; no input was emitted.".format(selector),
+                failure_code="stale_element_ref",
+                failure_phase="precondition",
+                input_events_emitted=False,
+                failure_subject="window",
+                replacement_window=recovery_window_candidate(
+                    app, window_inventory
+                ),
+            )
+        provider_scan_hint = scan_provider_identity(
+            all_candidates,
+            provider_bus,
+            provider_path,
+            provider_generation,
+            max_nodes=positive_int(
                 observation.get("max_tree_nodes"), MAX_ELEMENTS
-            )
-            provider_scan = scan_provider_identity(
-                candidates,
-                provider_bus,
-                provider_path,
-                provider_generation,
-                max_nodes=max_nodes,
-                deadline=time.monotonic() + TREE_DEADLINE_SECONDS,
-            )
-            provider_scan = resolve_table_cell_from_owner(
-                provider_scan, target
-            )
-        # A bus + object-path + process-generation tuple is already a unique
-        # provider address. Once that exact object is found, unrelated sibling
-        # read failures cannot make it ambiguous. Completeness is still
-        # required before declaring the provider identity absent.
-        if not provider_scan.complete and not provider_scan:
+            ),
+            deadline=time.monotonic() + TREE_DEADLINE_SECONDS,
+        )
+        if provider_scan_hint:
+            owner_indexes = {
+                path[0]
+                for _node, path in provider_scan_hint
+                if path
+            }
+            logical_window_matches = [
+                (candidate_index, candidate_window)
+                for candidate_index, candidate_window in all_candidates
+                if candidate_index in owner_indexes
+            ]
+            provider_window_recovered = bool(logical_window_matches)
+        elif not provider_scan_hint.complete:
             raise OperationFailure(
                 "observation_incomplete: the provider identity could not be "
                 "checked completely; no input was emitted.",
@@ -467,277 +524,484 @@ def resolve_semantic_target(
                 input_events_emitted=False,
                 failure_subject="element",
             )
-        if not provider_scan:
+    if exact_provider_windows:
+        candidates = exact_provider_windows
+    elif logical_window_matches:
+        # Provider object paths may change while the same one-to-one native
+        # window remains alive. Semantic recovery stays inside that exact
+        # stable window and still requires one unique canonical match.
+        candidates = logical_window_matches
+        provider_window_recovered = True
+    else:
+        if not candidate_inventory_complete:
             raise OperationFailure(
-                "stale_element_ref reason=provider_identity_disappeared; "
+                "observation_incomplete: the accessibility window inventory "
+                "could not be read completely; no input was emitted.",
+                failure_code="observation_incomplete",
+                failure_phase="precondition",
+                input_events_emitted=False,
+                failure_subject="window",
+            )
+        raise OperationFailure(
+            "stale_element_ref reason=provider_window_disappeared "
+            "selector={!r}; no input was emitted.".format(selector),
+            failure_code="stale_element_ref",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            replacement_window=recovery_window_candidate(
+                app, window_inventory
+            ),
+        )
+    return (
+        candidates,
+        candidate_inventory_complete,
+        provider_window_recovered,
+        provider_scan_hint,
+    )
+
+
+def _logical_window_candidates(app, window_index, window, locator):
+    """Narrow the candidates to the visible window with the target's handle."""
+    selector = locator.selector
+    target_window_handle = locator.target_window_handle
+    candidates = [(window_index, window)]
+    seen_windows = {window_index}
+    window_inventory = app_windows(app)
+    candidate_inventory_complete = inventory_complete(window_inventory)
+    for candidate_index, candidate_window in window_inventory:
+        if candidate_index in seen_windows:
+            continue
+        if not (
+            state_contains(candidate_window, Atspi.StateType.SHOWING)
+            or state_contains(candidate_window, Atspi.StateType.ACTIVE)
+            or state_contains(candidate_window, Atspi.StateType.MODAL)
+        ):
+            continue
+        seen_windows.add(candidate_index)
+        candidates.append((candidate_index, candidate_window))
+    candidates = [
+        (candidate_index, candidate_window)
+        for candidate_index, candidate_window in candidates
+        if window_instance_handle(
+            app, candidate_index, candidate_window
+        ) == target_window_handle
+    ]
+    if not candidates:
+        if not candidate_inventory_complete:
+            raise OperationFailure(
+                "observation_incomplete: the accessibility window inventory "
+                "could not be read completely; no input was emitted.",
+                failure_code="observation_incomplete",
+                failure_phase="precondition",
+                input_events_emitted=False,
+                failure_subject="window",
+            )
+        raise OperationFailure(
+            "stale_element_ref reason=originating_window_disappeared "
+            "selector={!r}; no input was emitted.".format(selector),
+            failure_code="stale_element_ref",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            replacement_window=recovery_window_candidate(
+                app, window_inventory
+            ),
+        )
+    return candidates, candidate_inventory_complete
+
+
+def _resolve_provider_bound_target(
+    app,
+    window_index,
+    window,
+    bounds,
+    target,
+    locator,
+    candidates,
+    candidate_inventory_complete,
+    provider_scan_hint,
+    observation,
+    text_limit,
+):
+    """Resolve a provider-bound ref by its exact provider identity only."""
+    target_window_handle = locator.target_window_handle
+    provider_bus = locator.provider_bus
+    provider_path = locator.provider_path
+    provider_generation = locator.provider_generation
+    if not candidate_inventory_complete:
+        raise OperationFailure(
+            "observation_incomplete: the accessibility window inventory "
+            "could not be read completely; no input was emitted.",
+            failure_code="observation_incomplete",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="window",
+        )
+    provider_scan = provider_scan_hint or resolve_provider_runtime_paths(
+        app, target, candidates
+    )
+    if not provider_scan:
+        max_nodes = positive_int(
+            observation.get("max_tree_nodes"), MAX_ELEMENTS
+        )
+        provider_scan = scan_provider_identity(
+            candidates,
+            provider_bus,
+            provider_path,
+            provider_generation,
+            max_nodes=max_nodes,
+            deadline=time.monotonic() + TREE_DEADLINE_SECONDS,
+        )
+        provider_scan = resolve_table_cell_from_owner(
+            provider_scan, target
+        )
+    # A bus + object-path + process-generation tuple is already a unique
+    # provider address. Once that exact object is found, unrelated sibling
+    # read failures cannot make it ambiguous. Completeness is still
+    # required before declaring the provider identity absent.
+    if not provider_scan.complete and not provider_scan:
+        raise OperationFailure(
+            "observation_incomplete: the provider identity could not be "
+            "checked completely; no input was emitted.",
+            failure_code="observation_incomplete",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="element",
+        )
+    if not provider_scan:
+        raise OperationFailure(
+            "stale_element_ref reason=provider_identity_disappeared; "
+            "no input was emitted.",
+            failure_code="stale_element_ref",
+            failure_phase="precondition",
+            input_events_emitted=False,
+        )
+    records = []
+    nodes_by_path = {}
+    bounds_by_window = {}
+    windows_by_index = {
+        candidate_index: candidate_window
+        for candidate_index, candidate_window in candidates
+    }
+    for matched_node, path in provider_scan:
+        matched_window = windows_by_index.get(path[0])
+        matched_bounds = (
+            bounds
+            if path[0] == window_index and matched_window is window
+            else extents(matched_window)
+        )
+        if matched_window is None or matched_bounds is None:
+            raise OperationFailure(
+                "observation_incomplete: the provider target window could "
+                "not be sampled completely; no input was emitted.",
+                failure_code="observation_incomplete",
+                failure_phase="precondition",
+                input_events_emitted=False,
+                failure_subject="element",
+            )
+        record = provider_identity_record(
+            matched_node, path, matched_bounds, text_limit
+        )
+        records.append(record)
+        nodes_by_path[tuple(path)] = matched_node
+        bounds_by_window[path[0]] = matched_bounds
+    logical_window = target_window_handle or "provider-window"
+    merged = deduplicate_provider_records(records, logical_window)
+    if len(merged) != 1:
+        raise OperationFailure(
+            "stale_element_ref reason=provider_identity_changed; "
+            "no input was emitted.",
+            failure_code="stale_element_ref",
+            failure_phase="precondition",
+            input_events_emitted=False,
+        )
+    record = merged[0]
+    if not provider_identity_matches_target(record, target):
+        raise OperationFailure(
+            "stale_element_ref reason=provider_identity_changed; "
+            "no input was emitted.",
+            failure_code="stale_element_ref",
+            failure_phase="precondition",
+            input_events_emitted=False,
+        )
+    resolved_path = tuple(record.get("runtimeId") or [])
+    matched_node = nodes_by_path.get(resolved_path)
+    matched_window = windows_by_index.get(resolved_path[0])
+    matched_bounds = bounds_by_window.get(resolved_path[0])
+    if matched_node is None or matched_window is None:
+        raise OperationFailure(
+            "observation_incomplete: the provider target could not be "
+            "re-read consistently; no input was emitted.",
+            failure_code="observation_incomplete",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="element",
+        )
+    return (
+        matched_node,
+        record,
+        "[semantic-resolution] provider_identity=true unique=true; "
+        "resolved immediately before input.",
+        matched_window,
+        matched_bounds,
+    )
+
+
+def _resolve_prior_provider_identity(
+    app,
+    window_index,
+    window,
+    bounds,
+    target,
+    locator,
+    candidates,
+    provider_scan_hint,
+    observation,
+    text_limit,
+):
+    """Resolve a semantic ref through the provider object it last named.
+
+    Returns None when semantic matching should decide instead: the object is
+    gone or changed and the target allows a provider rebind.
+    """
+    provider_bus = locator.provider_bus
+    provider_path = locator.provider_path
+    provider_generation = locator.provider_generation
+    locator_kind = locator.locator_kind
+    allow_provider_rebind = locator.allow_provider_rebind
+    max_nodes = positive_int(
+        observation.get("max_tree_nodes"), MAX_ELEMENTS
+    )
+    provider_scan = provider_scan_hint or resolve_provider_runtime_paths(
+        app, target, candidates
+    )
+    if not provider_scan:
+        provider_scan = scan_provider_identity(
+            candidates,
+            provider_bus,
+            provider_path,
+            provider_generation,
+            max_nodes=max_nodes,
+            deadline=time.monotonic() + TREE_DEADLINE_SECONDS,
+        )
+    if not provider_scan.complete and not provider_scan:
+        raise OperationFailure(
+            "observation_incomplete: the prior provider identity could not "
+            "be checked completely; no input was emitted.",
+            failure_code="observation_incomplete",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="element",
+        )
+    if not provider_scan:
+        if not allow_provider_rebind:
+            raise OperationFailure(
+                "stale_element_ref reason=provider_identity_replaced; "
                 "no input was emitted.",
                 failure_code="stale_element_ref",
                 failure_phase="precondition",
                 input_events_emitted=False,
             )
-        records = []
-        nodes_by_path = {}
-        bounds_by_window = {}
+    else:
+        matched_node, resolved_path = provider_scan[0]
         windows_by_index = {
             candidate_index: candidate_window
             for candidate_index, candidate_window in candidates
         }
-        for matched_node, path in provider_scan:
-            matched_window = windows_by_index.get(path[0])
-            matched_bounds = (
-                bounds
-                if path[0] == window_index and matched_window is window
-                else extents(matched_window)
-            )
-            if matched_window is None or matched_bounds is None:
-                raise OperationFailure(
-                    "observation_incomplete: the provider target window could "
-                    "not be sampled completely; no input was emitted.",
-                    failure_code="observation_incomplete",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                    failure_subject="element",
-                )
-            record = provider_identity_record(
-                matched_node, path, matched_bounds, text_limit
-            )
-            records.append(record)
-            nodes_by_path[tuple(path)] = matched_node
-            bounds_by_window[path[0]] = matched_bounds
-        logical_window = target_window_handle or "provider-window"
-        merged = deduplicate_provider_records(records, logical_window)
-        if len(merged) != 1:
-            raise OperationFailure(
-                "stale_element_ref reason=provider_identity_changed; "
-                "no input was emitted.",
-                failure_code="stale_element_ref",
-                failure_phase="precondition",
-                input_events_emitted=False,
-            )
-        record = merged[0]
-        if not provider_identity_matches_target(record, target):
-            raise OperationFailure(
-                "stale_element_ref reason=provider_identity_changed; "
-                "no input was emitted.",
-                failure_code="stale_element_ref",
-                failure_phase="precondition",
-                input_events_emitted=False,
-            )
-        resolved_path = tuple(record.get("runtimeId") or [])
-        matched_node = nodes_by_path.get(resolved_path)
         matched_window = windows_by_index.get(resolved_path[0])
-        matched_bounds = bounds_by_window.get(resolved_path[0])
-        if matched_node is None or matched_window is None:
+        matched_bounds = (
+            bounds
+            if resolved_path[0] == window_index and matched_window is window
+            else extents(matched_window)
+        )
+        if matched_window is None or matched_bounds is None:
             raise OperationFailure(
-                "observation_incomplete: the provider target could not be "
-                "re-read consistently; no input was emitted.",
+                "observation_incomplete: the prior provider target window could "
+                "not be sampled completely; no input was emitted.",
                 failure_code="observation_incomplete",
                 failure_phase="precondition",
                 input_events_emitted=False,
                 failure_subject="element",
             )
-        return (
-            matched_node,
-            record,
-            "[semantic-resolution] provider_identity=true unique=true; "
-            "resolved immediately before input.",
-            matched_window,
-            matched_bounds,
+        record = provider_identity_record(
+            matched_node, resolved_path, matched_bounds, text_limit
         )
+        if not provider_identity_matches_target(record, target) and not (
+            allow_provider_rebind and locator_kind == "semantic"
+        ):
+            raise OperationFailure(
+                "stale_element_ref reason=provider_identity_changed; "
+                "no input was emitted.",
+                failure_code="stale_element_ref",
+                failure_phase="precondition",
+                input_events_emitted=False,
+            )
+        if provider_identity_matches_target(record, target):
+            return (
+                matched_node,
+                record,
+                "[semantic-resolution] provider_identity=true unique=true; "
+                "resolved immediately before input.",
+                matched_window,
+                matched_bounds,
+            )
+    return None
 
-    if locator_kind == "semantic" and provider_requested:
-        max_nodes = positive_int(
+
+def _lightweight_semantic_scan(
+    app,
+    window_index,
+    window,
+    bounds,
+    target,
+    locator,
+    candidates,
+    observation,
+    text_limit,
+):
+    """Match the target without rendering full records for non-matches.
+
+    Returns (by_name, by_description, scan_incomplete).
+    """
+    name_key = locator.name_key
+    has_name = locator.has_name
+    target_window_handle = locator.target_window_handle
+    by_name = []
+    by_description = []
+    scan_incomplete = False
+    lightweight_candidates = []
+    for candidate_index, candidate_window in candidates:
+        candidate_bounds = (
+            bounds
+            if candidate_index == window_index and candidate_window is window
+            else extents(candidate_window)
+        )
+        if candidate_bounds is None:
+            scan_incomplete = True
+            continue
+        lightweight_candidates.append(
+            (candidate_index, candidate_window, candidate_bounds)
+        )
+    semantic_scan = scan_semantic_target(
+        lightweight_candidates,
+        target,
+        max_nodes=positive_int(
             observation.get("max_tree_nodes"), MAX_ELEMENTS
+        ),
+        deadline=time.monotonic() + TREE_DEADLINE_SECONDS,
+        text_limit=text_limit,
+    )
+    if not semantic_scan.complete:
+        scan_incomplete = True
+    grouped: dict[int, dict[str, Any]] = {}
+    for record, candidate_window, candidate_bounds in semantic_scan:
+        runtime_id = list(record.get("runtimeId") or [])
+        candidate_index = runtime_id[0] if runtime_id else window_index
+        window_group: dict[str, Any] = grouped.setdefault(
+            candidate_index,
+            {
+                "window": candidate_window,
+                "bounds": candidate_bounds,
+                "records": [],
+            },
         )
-        provider_scan = provider_scan_hint or resolve_provider_runtime_paths(
-            app, target, candidates
+        window_group["records"].append(record)
+    semantic_records = []
+    for candidate_index, window_group in grouped.items():
+        logical_window = (
+            target_window_handle
+            or safe(
+                lambda: window_instance_handle(
+                    app, candidate_index, window_group["window"]
+                ),
+                "",
+            )
+            or "window-index:{}".format(candidate_index)
         )
-        if not provider_scan:
-            provider_scan = scan_provider_identity(
-                candidates,
-                provider_bus,
-                provider_path,
-                provider_generation,
-                max_nodes=max_nodes,
-                deadline=time.monotonic() + TREE_DEADLINE_SECONDS,
-            )
-        if not provider_scan.complete and not provider_scan:
-            raise OperationFailure(
-                "observation_incomplete: the prior provider identity could not "
-                "be checked completely; no input was emitted.",
-                failure_code="observation_incomplete",
-                failure_phase="precondition",
-                input_events_emitted=False,
-                failure_subject="element",
-            )
-        if not provider_scan:
-            if not allow_provider_rebind:
-                raise OperationFailure(
-                    "stale_element_ref reason=provider_identity_replaced; "
-                    "no input was emitted.",
-                    failure_code="stale_element_ref",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                )
-        else:
-            matched_node, resolved_path = provider_scan[0]
-            windows_by_index = {
-                candidate_index: candidate_window
-                for candidate_index, candidate_window in candidates
-            }
-            matched_window = windows_by_index.get(resolved_path[0])
-            matched_bounds = (
-                bounds
-                if resolved_path[0] == window_index and matched_window is window
-                else extents(matched_window)
-            )
-            if matched_window is None or matched_bounds is None:
-                raise OperationFailure(
-                    "observation_incomplete: the prior provider target window could "
-                    "not be sampled completely; no input was emitted.",
-                    failure_code="observation_incomplete",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                    failure_subject="element",
-                )
-            record = provider_identity_record(
-                matched_node, resolved_path, matched_bounds, text_limit
-            )
-            if not provider_identity_matches_target(record, target) and not (
-                allow_provider_rebind and locator_kind == "semantic"
-            ):
-                raise OperationFailure(
-                    "stale_element_ref reason=provider_identity_changed; "
-                    "no input was emitted.",
-                    failure_code="stale_element_ref",
-                    failure_phase="precondition",
-                    input_events_emitted=False,
-                )
-            if provider_identity_matches_target(record, target):
-                return (
-                    matched_node,
+        records = deduplicate_provider_records(
+            window_group["records"], logical_window
+        )
+        if any(
+            record.get("_providerIdentityConflict")
+            for record in records
+        ):
+            scan_incomplete = True
+        for record in records:
+            semantic_records.append(
+                (
                     record,
-                    "[semantic-resolution] provider_identity=true unique=true; "
-                    "resolved immediately before input.",
-                    matched_window,
-                    matched_bounds,
+                    window_group["window"],
+                    window_group["bounds"],
+                    records,
                 )
+            )
+    for (
+        record,
+        candidate_window,
+        candidate_bounds,
+        sibling_records,
+    ) in semantic_records:
+        match_group = "name"
+        if has_name and (
+            semantic_text_key(record.get("name")) != name_key
+        ):
+            match_group = "description"
+        destination = (
+            by_name if match_group == "name" else by_description
+        )
+        candidate_payload = None
+        if len(destination) < 5:
+            candidate_index = int(
+                (record.get("runtimeId") or [window_index])[0]
+            )
+            candidate_payload = ambiguity_candidate(
+                record,
+                sibling_records,
+                app,
+                candidate_index,
+                candidate_window,
+            )
+        destination.append(
+            (
+                record,
+                candidate_window,
+                candidate_bounds,
+                candidate_payload,
+            )
+        )
+    return by_name, by_description, scan_incomplete
 
+
+def _render_semantic_scan(
+    app,
+    window_index,
+    window,
+    bounds,
+    target,
+    locator,
+    candidates,
+    known_refs,
+    observation,
+    text_limit,
+):
+    """Match the target against fully rendered canonical records.
+
+    Action predicates need the rendered records. Returns
+    (provider_matches, by_name, by_description, scan_incomplete).
+    """
+    role = locator.role
+    name_key = locator.name_key
+    has_name = locator.has_name
+    target_window_handle = locator.target_window_handle
+    provider_bus = locator.provider_bus
+    provider_path = locator.provider_path
+    provider_generation = locator.provider_generation
+    provider_requested = locator.provider_requested
     indexer = StableIndexer(known_refs)
     provider_matches = []
     by_name = []
     by_description = []
     scan_incomplete = False
-    candidate_count = len(candidates)
-    render_candidates = candidates
-    needs_provider_action_scan = any(
-        str(predicate.get("kind") or "") == "action"
-        for predicate in predicates
-    )
-    if not needs_provider_action_scan:
-        lightweight_candidates = []
-        for candidate_index, candidate_window in candidates:
-            candidate_bounds = (
-                bounds
-                if candidate_index == window_index and candidate_window is window
-                else extents(candidate_window)
-            )
-            if candidate_bounds is None:
-                scan_incomplete = True
-                continue
-            lightweight_candidates.append(
-                (candidate_index, candidate_window, candidate_bounds)
-            )
-        semantic_scan = scan_semantic_target(
-            lightweight_candidates,
-            target,
-            max_nodes=positive_int(
-                observation.get("max_tree_nodes"), MAX_ELEMENTS
-            ),
-            deadline=time.monotonic() + TREE_DEADLINE_SECONDS,
-            text_limit=text_limit,
-        )
-        if not semantic_scan.complete:
-            scan_incomplete = True
-        grouped: dict[int, dict[str, Any]] = {}
-        for record, candidate_window, candidate_bounds in semantic_scan:
-            runtime_id = list(record.get("runtimeId") or [])
-            candidate_index = runtime_id[0] if runtime_id else window_index
-            window_group: dict[str, Any] = grouped.setdefault(
-                candidate_index,
-                {
-                    "window": candidate_window,
-                    "bounds": candidate_bounds,
-                    "records": [],
-                },
-            )
-            window_group["records"].append(record)
-        semantic_records = []
-        for candidate_index, window_group in grouped.items():
-            logical_window = (
-                target_window_handle
-                or safe(
-                    lambda: window_instance_handle(
-                        app, candidate_index, window_group["window"]
-                    ),
-                    "",
-                )
-                or "window-index:{}".format(candidate_index)
-            )
-            records = deduplicate_provider_records(
-                window_group["records"], logical_window
-            )
-            if any(
-                record.get("_providerIdentityConflict")
-                for record in records
-            ):
-                scan_incomplete = True
-            for record in records:
-                semantic_records.append(
-                    (
-                        record,
-                        window_group["window"],
-                        window_group["bounds"],
-                        records,
-                    )
-                )
-        for (
-            record,
-            candidate_window,
-            candidate_bounds,
-            sibling_records,
-        ) in semantic_records:
-            match_group = "name"
-            if has_name and (
-                semantic_text_key(record.get("name")) != name_key
-            ):
-                match_group = "description"
-            destination = (
-                by_name if match_group == "name" else by_description
-            )
-            candidate_payload = None
-            if len(destination) < 5:
-                candidate_index = int(
-                    (record.get("runtimeId") or [window_index])[0]
-                )
-                candidate_payload = ambiguity_candidate(
-                    record,
-                    sibling_records,
-                    app,
-                    candidate_index,
-                    candidate_window,
-                )
-            destination.append(
-                (
-                    record,
-                    candidate_window,
-                    candidate_bounds,
-                    candidate_payload,
-                )
-            )
-        render_candidates = []
-
-    for candidate_index, candidate_window in render_candidates:
+    for candidate_index, candidate_window in candidates:
         candidate_bounds = (
             bounds
             if candidate_index == window_index and candidate_window is window
@@ -840,7 +1104,11 @@ def resolve_semantic_target(
                     candidate_payload,
                 )
             )
+    return provider_matches, by_name, by_description, scan_incomplete
 
+
+def _unique_provider_match(app, provider_matches):
+    """Return the resolution for one exact provider match, or None."""
     if len(provider_matches) > 1:
         raise OperationFailure(
             "provider_identity_ambiguous; no input was emitted.",
@@ -865,6 +1133,13 @@ def resolve_semantic_target(
                 matched_window,
                 matched_bounds,
             )
+    return None
+
+
+def _unique_semantic_match(
+    by_name, by_description, scan_incomplete, selector, candidate_count
+):
+    """Return the one match; name matches outrank description matches."""
     matches = by_name if by_name else by_description
     if not matches:
         if scan_incomplete:
@@ -908,8 +1183,13 @@ def resolve_semantic_target(
             input_events_emitted=False,
             failure_subject="element",
         )
+    return matches[0]
 
-    record, matched_window, matched_bounds, _candidate = matches[0]
+
+def _live_node_for_semantic_match(app, target, locator, record, matched_bounds):
+    """Return the live node of the match, checking rebind lineage first."""
+    allow_provider_rebind = locator.allow_provider_rebind
+    provider_requested = locator.provider_requested
     if allow_provider_rebind and provider_requested:
         permitted_paths = [target.get("runtimeId") or []]
         permitted_paths.extend(target.get("runtimeAliases") or [])
@@ -935,6 +1215,14 @@ def resolve_semantic_target(
             failure_phase="precondition",
             input_events_emitted=False,
         )
+    return node
+
+
+def _semantic_resolution_note(
+    target, locator, candidate_count, provider_window_recovered
+):
+    selector = locator.selector
+    target_window_handle = locator.target_window_handle
     scope_note = " window_scope=verified" if target_window_handle else ""
     source_note = ""
     if target.get("sourceIndex") is not None:
@@ -956,4 +1244,4 @@ def resolve_semantic_target(
             else ""
         ),
     )
-    return node, record, note, matched_window, matched_bounds
+    return note

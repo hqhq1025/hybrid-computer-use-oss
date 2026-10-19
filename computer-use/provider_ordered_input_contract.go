@@ -92,9 +92,9 @@ func orderedInputBackend(
 }
 
 func providerOrderedInputRequestsFromPlan(
-	context *a11yBatchContext,
-	plan a11yBatchExecutionPlan,
-	actions []a11yBatchAction,
+	context *axBatchContext,
+	plan axBatchExecutionPlan,
+	actions []axBatchAction,
 ) ([]ProviderOrderedInputRequest, error) {
 	if context == nil ||
 		strings.TrimSpace(context.appToken) == "" ||
@@ -127,12 +127,12 @@ func providerOrderedInputRequestsFromPlan(
 				"ordered-input plan action indices do not match the normalized batch",
 			)
 		}
-		if step.executionClass != a11yPlanOrderedInput {
+		if step.executionClass != axPlanOrderedInput {
 			activeRun = 0
 			continue
 		}
 		action := actions[step.actionIndex]
-		if !a11yPlanOrderedInputEligible(action, step.target) ||
+		if !axPlanOrderedInputEligible(action, step.target) ||
 			step.orderedInputRun <= 0 {
 			return nil, fmt.Errorf(
 				"ordered-input plan step %d is not an eligible untargeted keypress",
@@ -208,10 +208,10 @@ func (request ProviderOrderedInputRequest) Validate() error {
 		return err
 	}
 	if len(request.Steps) == 0 ||
-		len(request.Steps) > a11yBatchMaxActions {
+		len(request.Steps) > axBatchMaxActions {
 		return fmt.Errorf(
 			"ordered-input steps must contain between 1 and %d actions",
-			a11yBatchMaxActions,
+			axBatchMaxActions,
 		)
 	}
 	for index, step := range request.Steps {
@@ -327,7 +327,38 @@ func providerOrderedInputRetryableFailure(failure *ProviderFailure) bool {
 	}
 }
 
+// ValidateFor checks that a provider's ordered-input result is a coherent
+// answer to request: the steps mirror the request, at most one step failed
+// and nothing ran after it, the aggregate mutation facts match the steps, and
+// the terminal fields fit a success, a final observation failure, or a stop.
 func (result ProviderOrderedInputResult) ValidateFor(
+	request ProviderOrderedInputRequest,
+) error {
+	if err := result.validateShapeFor(request); err != nil {
+		return err
+	}
+	steps, err := result.validateSteps(request)
+	if err != nil {
+		return err
+	}
+	if err := result.validateAggregate(steps); err != nil {
+		return err
+	}
+	if steps.failedPosition < 0 {
+		return result.validateUnstoppedTerminal(request, steps.anyEmission)
+	}
+	return result.validateStoppedTerminal(steps)
+}
+
+// orderedInputStepSummary is what the per-step pass learns about the run as
+// a whole. failedPosition is -1 when no step failed.
+type orderedInputStepSummary struct {
+	failedPosition int
+	anyEmission    bool
+	anyPartial     bool
+}
+
+func (result ProviderOrderedInputResult) validateShapeFor(
 	request ProviderOrderedInputRequest,
 ) error {
 	if err := request.Validate(); err != nil {
@@ -347,44 +378,22 @@ func (result ProviderOrderedInputResult) ValidateFor(
 			len(request.Steps),
 		)
 	}
+	return nil
+}
 
-	failedPosition := -1
-	anyEmission := false
-	anyPartial := false
+func (result ProviderOrderedInputResult) validateSteps(
+	request ProviderOrderedInputRequest,
+) (orderedInputStepSummary, error) {
+	summary := orderedInputStepSummary{failedPosition: -1}
 	for position, step := range result.Steps {
-		requestStep := request.Steps[position]
-		if step.ActionIndex != requestStep.ActionIndex {
-			return fmt.Errorf(
-				"ordered-input result step %d has action_index %d, want %d",
-				position,
-				step.ActionIndex,
-				requestStep.ActionIndex,
-			)
+		if err := validateOrderedInputStepFields(
+			position, step, request.Steps[position],
+		); err != nil {
+			return summary, err
 		}
-		if !validProviderOrderedInputStatus(step.Status) {
-			return fmt.Errorf(
-				"ordered-input result step %d has invalid status %q",
-				position,
-				step.Status,
-			)
-		}
-		if !validProviderOrderedInputEmission(step.Emission) {
-			return fmt.Errorf(
-				"ordered-input result step %d has invalid emission %q",
-				position,
-				step.Emission,
-			)
-		}
-		if !validProviderOrderedInputContinuity(step.WindowContinuity) {
-			return fmt.Errorf(
-				"ordered-input result step %d has invalid window continuity %q",
-				position,
-				step.WindowContinuity,
-			)
-		}
-		if failedPosition >= 0 &&
+		if summary.failedPosition >= 0 &&
 			step.Status != ProviderOrderedInputNotAttempted {
-			return errors.New(
+			return summary, errors.New(
 				"ordered-input result continued after the first failed action",
 			)
 		}
@@ -393,57 +402,31 @@ func (result ProviderOrderedInputResult) ValidateFor(
 			if !step.DispatchAttempted ||
 				step.Emission != ProviderOrderedInputEmissionComplete ||
 				step.WindowContinuity != ProviderOrderedInputWindowSame {
-				return fmt.Errorf(
+				return summary, fmt.Errorf(
 					"ordered-input completed step %d requires same-window dispatch and complete emission",
 					position,
 				)
 			}
 		case ProviderOrderedInputFailed:
-			if failedPosition >= 0 {
-				return errors.New(
+			if summary.failedPosition >= 0 {
+				return summary, errors.New(
 					"ordered-input result contains multiple failed actions",
 				)
 			}
-			failedPosition = position
-			if !step.DispatchAttempted &&
-				step.Emission != ProviderOrderedInputEmissionNone {
-				return fmt.Errorf(
-					"ordered-input failed step %d claims emission without dispatch",
-					position,
-				)
-			}
-			if step.DispatchAttempted &&
-				step.WindowContinuity != ProviderOrderedInputWindowSame {
-				return fmt.Errorf(
-					"ordered-input failed step %d dispatched without proving the expected window",
-					position,
-				)
-			}
-			if !step.DispatchAttempted &&
-				step.WindowContinuity == ProviderOrderedInputWindowUnchecked {
-				return fmt.Errorf(
-					"ordered-input failed step %d lacks pre-dispatch window continuity",
-					position,
-				)
-			}
-			if (step.WindowContinuity == ProviderOrderedInputWindowChanged ||
-				step.WindowContinuity == ProviderOrderedInputWindowUnknown) &&
-				step.Emission != ProviderOrderedInputEmissionNone {
-				return fmt.Errorf(
-					"ordered-input failed step %d emitted after window continuity was lost",
-					position,
-				)
+			summary.failedPosition = position
+			if err := validateOrderedInputFailedStep(position, step); err != nil {
+				return summary, err
 			}
 		case ProviderOrderedInputNotAttempted:
-			if failedPosition < 0 {
-				return errors.New(
+			if summary.failedPosition < 0 {
+				return summary, errors.New(
 					"ordered-input result has an unattempted step before any failure",
 				)
 			}
 			if step.DispatchAttempted ||
 				step.Emission != ProviderOrderedInputEmissionNone ||
 				step.WindowContinuity != ProviderOrderedInputWindowUnchecked {
-				return fmt.Errorf(
+				return summary, fmt.Errorf(
 					"ordered-input unattempted step %d contains execution evidence",
 					position,
 				)
@@ -451,19 +434,102 @@ func (result ProviderOrderedInputResult) ValidateFor(
 		}
 		if step.Emission == ProviderOrderedInputEmissionComplete ||
 			step.Emission == ProviderOrderedInputEmissionPartial {
-			anyEmission = true
+			summary.anyEmission = true
 		}
 		if step.Emission == ProviderOrderedInputEmissionPartial {
-			anyPartial = true
+			summary.anyPartial = true
 		}
 	}
+	return summary, nil
+}
 
-	if result.Mutation.InputEventsEmitted != anyEmission {
+// validateOrderedInputStepFields checks one step on its own: it answers the
+// request step at the same position and every enum holds a known value.
+func validateOrderedInputStepFields(
+	position int,
+	step ProviderOrderedInputStepResult,
+	requestStep ProviderOrderedInputStep,
+) error {
+	if step.ActionIndex != requestStep.ActionIndex {
+		return fmt.Errorf(
+			"ordered-input result step %d has action_index %d, want %d",
+			position,
+			step.ActionIndex,
+			requestStep.ActionIndex,
+		)
+	}
+	if !validProviderOrderedInputStatus(step.Status) {
+		return fmt.Errorf(
+			"ordered-input result step %d has invalid status %q",
+			position,
+			step.Status,
+		)
+	}
+	if !validProviderOrderedInputEmission(step.Emission) {
+		return fmt.Errorf(
+			"ordered-input result step %d has invalid emission %q",
+			position,
+			step.Emission,
+		)
+	}
+	if !validProviderOrderedInputContinuity(step.WindowContinuity) {
+		return fmt.Errorf(
+			"ordered-input result step %d has invalid window continuity %q",
+			position,
+			step.WindowContinuity,
+		)
+	}
+	return nil
+}
+
+// validateOrderedInputFailedStep checks that a failed step emits input only
+// after it dispatched into the expected window, and that a step stopped
+// before dispatch still reports the window check it ran.
+func validateOrderedInputFailedStep(
+	position int,
+	step ProviderOrderedInputStepResult,
+) error {
+	if !step.DispatchAttempted &&
+		step.Emission != ProviderOrderedInputEmissionNone {
+		return fmt.Errorf(
+			"ordered-input failed step %d claims emission without dispatch",
+			position,
+		)
+	}
+	if step.DispatchAttempted &&
+		step.WindowContinuity != ProviderOrderedInputWindowSame {
+		return fmt.Errorf(
+			"ordered-input failed step %d dispatched without proving the expected window",
+			position,
+		)
+	}
+	if !step.DispatchAttempted &&
+		step.WindowContinuity == ProviderOrderedInputWindowUnchecked {
+		return fmt.Errorf(
+			"ordered-input failed step %d lacks pre-dispatch window continuity",
+			position,
+		)
+	}
+	if (step.WindowContinuity == ProviderOrderedInputWindowChanged ||
+		step.WindowContinuity == ProviderOrderedInputWindowUnknown) &&
+		step.Emission != ProviderOrderedInputEmissionNone {
+		return fmt.Errorf(
+			"ordered-input failed step %d emitted after window continuity was lost",
+			position,
+		)
+	}
+	return nil
+}
+
+func (result ProviderOrderedInputResult) validateAggregate(
+	steps orderedInputStepSummary,
+) error {
+	if result.Mutation.InputEventsEmitted != steps.anyEmission {
 		return errors.New(
 			"ordered-input aggregate input emission contradicts step evidence",
 		)
 	}
-	if result.Mutation.PartialInputPossible != anyPartial {
+	if result.Mutation.PartialInputPossible != steps.anyPartial {
 		return errors.New(
 			"ordered-input aggregate partial emission contradicts step evidence",
 		)
@@ -478,59 +544,73 @@ func (result ProviderOrderedInputResult) ValidateFor(
 			"ordered-input first_unattempted_action_index contradicts step evidence",
 		)
 	}
+	return nil
+}
 
-	if failedPosition < 0 {
-		if !result.OK {
-			if result.Failure == nil ||
-				result.Failure.Phase != "observation" ||
-				!result.Failure.FactsComplete {
-				return errors.New(
-					"ordered-input result without a failed step requires a complete observation failure",
-				)
-			}
-			if result.StoppedActionIndex != nil ||
-				result.FirstUnattemptedActionIndex != nil ||
-				result.Snapshot != nil ||
-				result.RetrySameRequest {
-				return errors.New(
-					"ordered-input final observation failure contains invalid stop, snapshot, or retry evidence",
-				)
-			}
-			if anyEmission && !result.Mutation.MutationUnknown {
-				return errors.New(
-					"ordered-input final observation failure after emission must preserve mutation_unknown",
-				)
-			}
-			return nil
-		}
-		if result.Failure != nil ||
-			result.StoppedActionIndex != nil ||
-			result.FirstUnattemptedActionIndex != nil {
+// validateUnstoppedTerminal checks a run in which every step completed. It
+// either succeeded with a final snapshot of the expected window, or only its
+// final observation failed.
+func (result ProviderOrderedInputResult) validateUnstoppedTerminal(
+	request ProviderOrderedInputRequest,
+	anyEmission bool,
+) error {
+	if !result.OK {
+		if result.Failure == nil ||
+			result.Failure.Phase != "observation" ||
+			!result.Failure.FactsComplete {
 			return errors.New(
-				"ordered-input successful result contains failure or stop evidence",
+				"ordered-input result without a failed step requires a complete observation failure",
 			)
 		}
-		if result.Snapshot == nil ||
-			result.Snapshot.WindowAbsent ||
-			result.Snapshot.WindowHandle != request.WindowHandle {
+		if result.StoppedActionIndex != nil ||
+			result.FirstUnattemptedActionIndex != nil ||
+			result.Snapshot != nil ||
+			result.RetrySameRequest {
 			return errors.New(
-				"ordered-input success requires the final canonical snapshot for the expected window",
+				"ordered-input final observation failure contains invalid stop, snapshot, or retry evidence",
 			)
 		}
-		if result.RetrySameRequest {
+		if anyEmission && !result.Mutation.MutationUnknown {
 			return errors.New(
-				"ordered-input successful result cannot retry the same request",
+				"ordered-input final observation failure after emission must preserve mutation_unknown",
 			)
 		}
 		return nil
 	}
+	if result.Failure != nil ||
+		result.StoppedActionIndex != nil ||
+		result.FirstUnattemptedActionIndex != nil {
+		return errors.New(
+			"ordered-input successful result contains failure or stop evidence",
+		)
+	}
+	if result.Snapshot == nil ||
+		result.Snapshot.WindowAbsent ||
+		result.Snapshot.WindowHandle != request.WindowHandle {
+		return errors.New(
+			"ordered-input success requires the final canonical snapshot for the expected window",
+		)
+	}
+	if result.RetrySameRequest {
+		return errors.New(
+			"ordered-input successful result cannot retry the same request",
+		)
+	}
+	return nil
+}
 
+// validateStoppedTerminal checks a run that stopped at its failed step. A
+// same-request retry is allowed only when nothing was emitted and the stop
+// was a transient failure before dispatch into the expected window.
+func (result ProviderOrderedInputResult) validateStoppedTerminal(
+	steps orderedInputStepSummary,
+) error {
 	if result.OK {
 		return errors.New(
 			"ordered-input result with a failed step cannot be successful",
 		)
 	}
-	failedStep := result.Steps[failedPosition]
+	failedStep := result.Steps[steps.failedPosition]
 	if result.Failure == nil {
 		return errors.New(
 			"ordered-input failed result requires typed failure evidence",
@@ -548,13 +628,13 @@ func (result ProviderOrderedInputResult) ValidateFor(
 			"ordered-input stopped_action_index must identify the failed action",
 		)
 	}
-	if anyEmission && !result.Mutation.MutationUnknown {
+	if steps.anyEmission && !result.Mutation.MutationUnknown {
 		return errors.New(
 			"ordered-input failure after emission must preserve mutation_unknown",
 		)
 	}
 	if result.RetrySameRequest {
-		if anyEmission ||
+		if steps.anyEmission ||
 			failedStep.DispatchAttempted ||
 			failedStep.WindowContinuity != ProviderOrderedInputWindowSame ||
 			!providerOrderedInputRetryableFailure(result.Failure) {

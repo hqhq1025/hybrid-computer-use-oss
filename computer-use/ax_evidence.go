@@ -28,19 +28,19 @@ func enforceAXImageOutputPolicy(
 }
 
 func axRequestExplicitlyIncludesScreenshot(args map[string]any) bool {
-	mode, err := parseA11yMode(args)
+	mode, err := parseAXMode(args)
 	if err != nil {
 		return false
 	}
 	switch mode {
-	case a11yModeObserve:
+	case axModeObserve:
 		obs, err := parseObservation(args)
 		if err != nil {
 			return false
 		}
 		return obs.resolvedMode() == observeScreenshot ||
 			obs.resolvedMode() == observeFull
-	case a11yModeAct:
+	case axModeAct:
 		obs, err := parseObservation(args)
 		if err != nil {
 			return false
@@ -172,7 +172,7 @@ func compactAXModelEvidence(
 ) map[string]any {
 	compact := map[string]any{}
 	mode := strings.TrimSpace(fmt.Sprint(full["ax_mode"]))
-	if mode == a11yModeFind {
+	if mode == axModeFind {
 		for _, key := range []string{
 			"find_match_count", "find_page_start", "find_page_count", "next_cursor",
 			"find_delivery_complete", "find_context_omitted", "find_display_excerpt",
@@ -201,7 +201,7 @@ func compactAXModelEvidence(
 	targetedCoverageFailure := coverageIncomplete &&
 		axTargetedCoverageFailure(full, mode, isError)
 	if coverageIncomplete &&
-		(mode == a11yModeObserve || targetedCoverageFailure) {
+		(mode == axModeObserve || targetedCoverageFailure) {
 		compact["coverage"] = "partial"
 		compact["tree_complete"] = false
 	}
@@ -211,7 +211,7 @@ func compactAXModelEvidence(
 	}
 	if targetedCoverageFailure {
 		compact["target_resolution"] = "incomplete"
-		if mode == a11yModeAct {
+		if mode == axModeAct {
 			recover["target"] = "find|GUI"
 		} else {
 			recover["target"] = "GUI"

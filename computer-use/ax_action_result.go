@@ -173,7 +173,7 @@ func (s *service) stabilizePostActionTransientCommit(
 			IncludeScreenshot:  &withoutScreenshot,
 			TargetWindowHandle: after.WindowHandle,
 			SourceRef:          sourceRef,
-			Scope:              a11yScopeWindow,
+			Scope:              axScopeWindow,
 			TreeView:           treeViewWorking,
 		}
 		applyProjection(&sourceProbeRequest, after.projection)
@@ -191,7 +191,7 @@ func (s *service) stabilizePostActionTransientCommit(
 			ScreenshotScope:    request.ScreenshotScope,
 			TargetWindowHandle: replacement.WindowHandle,
 			SourceRef:          replacement.Ref,
-			Scope:              a11yScopeWindow,
+			Scope:              axScopeWindow,
 			TreeView:           treeViewWorking,
 		}
 		applyProjection(&finalRequest, after.projection)
@@ -283,7 +283,7 @@ func (s *service) stabilizePostActionWindowIdentity(
 		App:                app,
 		IncludeScreenshot:  &includeScreenshot,
 		TargetWindowHandle: targetWindowHandle,
-		Scope:              a11yScopeWindow,
+		Scope:              axScopeWindow,
 		TreeView:           treeViewWorking,
 	}
 	applyProjection(&refresh, after.projection)
@@ -440,7 +440,7 @@ func (s *service) stabilizePostActionContent(
 		IncludeScreenshot:  &includeScreenshot,
 		TargetWindowHandle: windowHandle,
 		SourceRef:          snapshotLogicalWindowRef(after),
-		Scope:              a11yScopeWindow,
+		Scope:              axScopeWindow,
 		TreeView:           treeViewWorking,
 	}
 	applyProjection(&refresh, after.projection)

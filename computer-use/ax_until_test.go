@@ -50,7 +50,7 @@ func TestTruncatedFindPrintsTheNextPageCall(t *testing.T) {
 	if argErr != nil {
 		t.Fatalf("printed call is not valid: %#v", argErr)
 	}
-	next := findDeliveryFinal(svc.a11yFind(request))
+	next := findDeliveryFinal(svc.axFind(request))
 	if next.IsError || !strings.Contains(resultText(next), "range=4..") {
 		t.Fatalf("next page call failed: %s", resultText(next))
 	}

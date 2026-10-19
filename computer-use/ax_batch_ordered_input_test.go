@@ -9,7 +9,7 @@ import (
 // Inspect the delivered text evidence, including its JSON round trip.
 func publicBatchEvidence(t *testing.T, result toolCallResult) map[string]any {
 	t.Helper()
-	result.StructuredContent["ax_mode"] = a11yModeAct
+	result.StructuredContent["ax_mode"] = axModeAct
 	visible := withAXTextEvidence(prepareAXEvidence(result))
 	wire, err := json.Marshal(visible)
 	if err != nil {
@@ -74,7 +74,7 @@ func orderedInputTestSnapshot() *appSnapshot {
 			{Index: 3, RuntimeID: []int{0, 0, 1}, ControlType: "push button", Name: "Save", States: "[has-click-action]"},
 			{Index: 4, RuntimeID: []int{0, 1}, ControlType: "status bar", Name: "Ready"},
 		},
-		scope: a11yScopeWindow,
+		scope: axScopeWindow,
 	}
 }
 
@@ -90,7 +90,7 @@ func TestOrderedBatchPreflightsEntireRequestBeforeNativeDispatch(t *testing.T) {
 		legacy := &recordingPlatformBackend{}
 		backend := &orderedInputRecordingBackend{recordingPlatformBackend: legacy}
 		s.backend = backend
-		result := s.a11yBatch([]any{
+		result := s.axBatch([]any{
 			map[string]any{"type": "keypress", "keys": []any{"A"}}, invalid,
 		}, observation{mode: observeNone}, window)
 
@@ -107,7 +107,7 @@ func TestOrderedBatchCrossWindowTailRejectedBeforeInput(t *testing.T) {
 	legacy := &recordingPlatformBackend{}
 	backend := &orderedInputRecordingBackend{recordingPlatformBackend: legacy}
 	s.backend = backend
-	result := s.a11yBatch([]any{
+	result := s.axBatch([]any{
 		map[string]any{"type": "click", "ref": ref},
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
 		map[string]any{"type": "close", "ref": otherWindow},
@@ -135,7 +135,7 @@ func TestOrderedBatchWithAWaitKeepsThePerActionPath(t *testing.T) {
 		if between {
 			actions = append(actions, map[string]any{"type": "keypress", "keys": []any{"TAB"}})
 		}
-		result := s.a11yBatch(actions, observation{mode: observeDiff}, window)
+		result := s.axBatch(actions, observation{mode: observeDiff}, window)
 		if result.IsError || len(backend.requests) != 0 || len(legacy.actionRequests) != len(actions)-1 {
 			t.Fatalf("batch with a wait left the per-action path: between=%t result=%s calls=%#v",
 				between, resultText(result), legacy.calls)
@@ -159,7 +159,7 @@ func TestOrderedBatchOptionalFinalObservationFailure(t *testing.T) {
 		if tail {
 			actions = append(actions, map[string]any{"type": "type", "text": "must not run"})
 		}
-		result := s.a11yBatch(actions, observation{mode: observeNone}, window)
+		result := s.axBatch(actions, observation{mode: observeNone}, window)
 		facts := result.StructuredContent["a11y_batch_result"].(map[string]any)
 		if result.IsError != tail || len(backend.requests) != 1 || len(legacy.calls) != 0 ||
 			facts["actions_completed_without_call_error"] != 1 || facts["final_observation_returned"] != false ||

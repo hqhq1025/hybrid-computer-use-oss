@@ -153,7 +153,7 @@ func TestDecodeAXPredicateMapsToInternalAssertions(t *testing.T) {
 				t.Fatalf("%s: %s=%#v want %#v (%#v)", name, key, got[key], value, got)
 			}
 		}
-		if _, specErr := parseA11yAssertionSpec(got); specErr != nil {
+		if _, specErr := parseAXAssertionSpec(got); specErr != nil {
 			t.Fatalf("%s: internal assertion rejected: %v", name, specErr)
 		}
 	}
@@ -177,16 +177,16 @@ func TestValuePredicateNegateInvertsTheGoal(t *testing.T) {
 
 func TestReadIdentityDerivesOwnerFromElementRef(t *testing.T) {
 	service, appRef, windowRef, elementRef := sheetBatchService(t)
-	got, err := service.resolveA11yReadIdentity("", "", elementRef)
+	got, err := service.resolveAXReadIdentity("", "", elementRef)
 	if err != nil || got.appToken != appRef || got.windowRef != windowRef {
 		t.Fatalf("owned assertion identity=%#v err=%v", got, err)
 	}
-	got, err = service.resolveA11yReadIdentity("", windowRef, elementRef)
+	got, err = service.resolveAXReadIdentity("", windowRef, elementRef)
 	if err != nil || got.appToken != appRef ||
 		got.windowRef != windowRef || got.windowHandle == "" {
 		t.Fatalf("window-scoped assertion identity=%#v err=%v", got, err)
 	}
-	got, err = service.resolveA11yReadIdentity(appRef, "", "")
+	got, err = service.resolveAXReadIdentity(appRef, "", "")
 	if err != nil || got.appToken != appRef {
 		t.Fatalf("app accepts aN: %#v err=%v", got, err)
 	}
@@ -198,7 +198,7 @@ func TestReadIdentityRejectsMismatchedWindowRef(t *testing.T) {
 		"libreoffice", "w2:fedcba9876543210fedcba9876543210", `dialog "Question"`, "c1",
 		":1.84", "/window/2", "pid:10:start:100", "dialog", "Question", appRef,
 	)
-	if _, err := service.resolveA11yReadIdentity("", other, elementRef); err == nil ||
+	if _, err := service.resolveAXReadIdentity("", other, elementRef); err == nil ||
 		!strings.Contains(err.Error(), "omit window_ref") {
 		t.Fatalf("mismatched window_ref accepted: %v", err)
 	}

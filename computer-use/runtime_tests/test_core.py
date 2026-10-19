@@ -1325,6 +1325,38 @@ class PerformOperationGuardTests(AtspiPatchedTestCase):
         setattr(runtime, name, value)
         self.addCleanup(setattr, runtime, name, original)
 
+    def test_numeric_and_semantic_target_together_are_rejected_before_input(self):
+        with self.assertRaises(runtime.OperationFailure) as raised:
+            runtime.dispatch_provider_operation(
+                {
+                    "app": "x",
+                    "element": {"index": 3},
+                    "target": {"selector": "push button \"OK\""},
+                    "input": {"key": "ENTER"},
+                },
+                operation_kind="resolve_and_act",
+                action_intent="keypress",
+            )
+        self.assertEqual(raised.exception.failure_code, "semantic_target_invalid")
+        self.assertFalse(raised.exception.input_events_emitted)
+        self.assertEqual(self.sent_keys, [])
+        self.assertEqual(self.focus_calls, [])
+
+    def test_defunct_target_fails_as_stale_before_focus_or_input(self):
+        defunct = FakeNode(states=(STATE.DEFUNCT, STATE.ENABLED))
+        self._patch("find_element_at_snapshot_path", lambda app, record: defunct)
+        self._patch("focus_target_element", mock.Mock(
+            side_effect=AssertionError("a defunct target must not take focus")))
+        with self.assertRaises(runtime.OperationFailure) as raised:
+            perform_provider_operation(
+                {"intent": "keypress", "app": "x", "key": "ENTER",
+                 "element": {"index": 3, "path": [0, 1]}}
+            )
+        self.assertEqual(raised.exception.failure_code, "stale_element_ref")
+        self.assertIn("target_defunct", str(raised.exception))
+        self.assertFalse(raised.exception.input_events_emitted)
+        self.assertEqual(self.sent_keys, [])
+
     def test_press_key_requires_focus_first(self):
         perform_provider_operation({"intent": "keypress", "app": "x", "key": "ctrl+a"})
 

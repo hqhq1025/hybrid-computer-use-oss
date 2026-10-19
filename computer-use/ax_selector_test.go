@@ -60,7 +60,7 @@ func TestSelectorAndFindRoleSpellingsNameTheSameRole(t *testing.T) {
 			recordMatchesFind(button, role, "", "", "", false, false) {
 			t.Fatalf("find role %q", role)
 		}
-		address, err := a11ySelectorAddress(map[string]any{"role": role, "name": "Paragraph..."})
+		address, err := axSelectorAddress(map[string]any{"role": role, "name": "Paragraph..."})
 		if err != nil {
 			t.Fatal(err)
 		}

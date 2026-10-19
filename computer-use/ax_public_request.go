@@ -30,7 +30,7 @@ const (
 	axCodeAmbiguousWindow  = "ambiguous_window"
 	axCodeWindowNotFound   = "window_not_found"
 	axCodeNoFocusedWindow  = "no_focused_window"
-	a11yModeApps           = "apps"
+	axModeApps             = "apps"
 	axDefaultFindPageSize  = 20
 	axDefaultWaitTimeout   = 5000
 	axMaxUntilStableMS     = 5000
@@ -112,7 +112,7 @@ type axRequest struct {
 	query     map[string]any
 	limit     int
 	cursor    string
-	actions   []a11yBatchAction
+	actions   []axBatchAction
 }
 
 var (
@@ -123,10 +123,10 @@ var (
 )
 
 var axModeFields = map[string][]string{
-	a11yModeApps:    {"mode"},
-	a11yModeObserve: {"mode", "app", "window_ref", "scope", "observe", "root"},
-	a11yModeFind:    {"mode", "app", "window_ref", "scope", "query", "limit", "cursor"},
-	a11yModeAct:     {"mode", "window_ref", "actions", "observe"},
+	axModeApps:    {"mode"},
+	axModeObserve: {"mode", "app", "window_ref", "scope", "observe", "root"},
+	axModeFind:    {"mode", "app", "window_ref", "scope", "query", "limit", "cursor"},
+	axModeAct:     {"mode", "window_ref", "actions", "observe"},
 }
 
 var axActionTypes = []string{
@@ -184,7 +184,7 @@ func decodeAXCall(args map[string]any) (*axRequest, *axArgError) {
 			`{"mode":"apps"}`)
 	}
 	mode, ok := rawMode.(string)
-	if !ok || !containsString([]string{a11yModeApps, a11yModeObserve, a11yModeFind, a11yModeAct}, mode) {
+	if !ok || !containsString([]string{axModeApps, axModeObserve, axModeFind, axModeAct}, mode) {
 		if mode == "assert_ax" {
 			return nil, axInvalid("mode",
 				`mode "assert_ax" was removed; wait with an act call that has only wait steps`,
@@ -215,7 +215,7 @@ func decodeAXCall(args map[string]any) (*axRequest, *axArgError) {
 		return nil, axInvalid("window_ref", "use app or window_ref, not both; window_ref already identifies its app",
 			`{"mode":"`+mode+`","window_ref":"`+request.windowRef+`"}`)
 	}
-	if request.scope, err = axOptionalEnum(args, "scope", "", a11yScopeValues); err != nil {
+	if request.scope, err = axOptionalEnum(args, "scope", "", axScopeValues); err != nil {
 		return nil, err
 	}
 	if request.observe, err = axOptionalEnum(args, "observe", "", observeValues); err != nil {
@@ -232,7 +232,7 @@ func decodeAXCall(args map[string]any) (*axRequest, *axArgError) {
 		return nil, err
 	}
 	switch mode {
-	case a11yModeObserve:
+	case axModeObserve:
 		if request.observe == observeNone {
 			return nil, axInvalid("observe", `observe "none" returns nothing; to wait without input, send act with only wait steps`,
 				"").withRule(axRuleObserveNone).withFix(axRemove("observe"))
@@ -241,11 +241,11 @@ func decodeAXCall(args map[string]any) (*axRequest, *axArgError) {
 			return nil, axInvalid("app", "observe needs app or window_ref",
 				"").withRule(axRuleRequiredForMode).withFix(axSet("window_ref", "w1"))
 		}
-	case a11yModeFind:
+	case axModeFind:
 		if err := decodeAXFind(args, request); err != nil {
 			return nil, err
 		}
-	case a11yModeAct:
+	case axModeAct:
 		raw, present := args["actions"]
 		if !present {
 			return nil, axInvalid("actions", "act requires actions",
@@ -333,7 +333,7 @@ func decodeAXQuery(raw any, path string) (map[string]any, *axArgError) {
 	return query, nil
 }
 
-func decodeAXActions(raw any) ([]a11yBatchAction, *axArgError) {
+func decodeAXActions(raw any) ([]axBatchAction, *axArgError) {
 	items, ok := raw.([]any)
 	if !ok {
 		return nil, axInvalid("actions", "actions must be an array of action objects",
@@ -343,11 +343,11 @@ func decodeAXActions(raw any) ([]a11yBatchAction, *axArgError) {
 		return nil, axInvalid("actions", `act needs at least one action; use mode "observe" to read`,
 			`[{"type":"click","ref":"r1"}]`)
 	}
-	if len(items) > a11yBatchMaxActions {
-		return nil, axInvalid("actions", fmt.Sprintf("act accepts at most %d actions", a11yBatchMaxActions), "").
-			withFix(axSet("actions", items[:a11yBatchMaxActions]))
+	if len(items) > axBatchMaxActions {
+		return nil, axInvalid("actions", fmt.Sprintf("act accepts at most %d actions", axBatchMaxActions), "").
+			withFix(axSet("actions", items[:axBatchMaxActions]))
 	}
-	actions := make([]a11yBatchAction, 0, len(items))
+	actions := make([]axBatchAction, 0, len(items))
 	totalText := 0
 	for index, item := range items {
 		path := fmt.Sprintf("actions[%d]", index)
@@ -364,16 +364,16 @@ func decodeAXActions(raw any) ([]a11yBatchAction, *axArgError) {
 				`{"type":"wait","window":"window title","gone":true}`).withRule(argumentRuleCloseNotLast)
 		}
 		totalText += len([]rune(action.text)) + len([]rune(action.value))
-		if totalText > a11yBatchMaxText {
-			return nil, axInvalid(path, fmt.Sprintf("text and value together are limited to %d characters per call", a11yBatchMaxText), "").withRule(argumentRuleTextBudget)
+		if totalText > axBatchMaxText {
+			return nil, axInvalid(path, fmt.Sprintf("text and value together are limited to %d characters per call", axBatchMaxText), "").withRule(argumentRuleTextBudget)
 		}
 		actions = append(actions, action)
 	}
 	return actions, nil
 }
 
-func decodeAXAction(object map[string]any, path string) (a11yBatchAction, *axArgError) {
-	action := a11yBatchAction{pages: 1}
+func decodeAXAction(object map[string]any, path string) (axBatchAction, *axArgError) {
+	action := axBatchAction{pages: 1}
 	rawType, hasType := object["type"]
 	actionType, _ := rawType.(string)
 	if !hasType || !containsString(axActionTypes, actionType) {

@@ -72,7 +72,7 @@ func TestFocusedFallbackTriggersOneContentStabilizationRead(t *testing.T) {
 	previous.SnapshotID = "previous"
 	previous.contentRevision = "c1:0123456789abcdef01234567"
 	previous.projection = snapshotProjection{
-		View: treeViewWorking, Scope: a11yScopeWindow,
+		View: treeViewWorking, Scope: axScopeWindow,
 	}
 	previous.axSnapshot = nil
 	service.rememberDeliveredSnapshot(previous)

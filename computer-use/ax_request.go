@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-type a11yReadContext struct {
+type axReadContext struct {
 	appToken     string
 	appRef       string
 	windowRef    string
@@ -14,32 +14,32 @@ type a11yReadContext struct {
 }
 
 const (
-	a11yModeObserve = "observe"
-	a11yModeFind    = "find"
-	a11yModeAct     = "act"
-	// a11yModeAssert names the internal predicate check that a wait step
+	axModeObserve = "observe"
+	axModeFind    = "find"
+	axModeAct     = "act"
+	// axModeAssert names the internal predicate check that a wait step
 	// runs. It is not a public mode.
-	a11yModeAssert = "assert_ax"
+	axModeAssert = "assert_ax"
 )
 
-// parseA11yMode returns the public mode of a call, or an error when it is
+// parseAXMode returns the public mode of a call, or an error when it is
 // missing or unknown. Only exact values are accepted.
-func parseA11yMode(args map[string]any) (string, error) {
+func parseAXMode(args map[string]any) (string, error) {
 	mode, _ := args["mode"].(string)
 	switch mode {
-	case a11yModeApps, a11yModeObserve, a11yModeFind, a11yModeAct:
+	case axModeApps, axModeObserve, axModeFind, axModeAct:
 		return mode, nil
 	}
 	return "", errors.New("mode must be apps, observe, find, or act")
 }
 
-// resolveA11yReadIdentity binds a read to one app or window. app accepts an
+// resolveAXReadIdentity binds a read to one app or window. app accepts an
 // application name, app id, PID, or an aN ref from apps; window_ref names
 // one window. A target rN supplies the identity when neither is given.
-func (s *service) resolveA11yReadIdentity(
+func (s *service) resolveAXReadIdentity(
 	app, windowRef, target string,
-) (*a11yReadContext, error) {
-	context := &a11yReadContext{}
+) (*axReadContext, error) {
+	context := &axReadContext{}
 	if isShortAXRef(target) {
 		entry, err := s.resolveShortAXRefOwned(target)
 		if err != nil {
@@ -96,7 +96,7 @@ func (s *service) resolveA11yReadIdentity(
 	return context, nil
 }
 
-func withA11yModeEvidence(
+func withAXModeEvidence(
 	result toolCallResult,
 	mode string,
 ) toolCallResult {
@@ -107,7 +107,7 @@ func withA11yModeEvidence(
 	return result
 }
 
-func (s *service) a11yRequest(
+func (s *service) handleAXRequest(
 	args map[string]any,
 	_ observation,
 ) toolCallResult {
@@ -119,29 +119,29 @@ func (s *service) a11yRequest(
 		}
 		return axArgErrorResult(argErr, requested)
 	}
-	return s.a11yDecodedRequest(request)
+	return s.axDecodedRequest(request)
 }
 
-// a11yDecodedRequest runs an AX call whose arguments are already decoded.
+// axDecodedRequest runs an AX call whose arguments are already decoded.
 // dispatch decodes each call once and passes the request here.
-func (s *service) a11yDecodedRequest(request *axRequest) toolCallResult {
+func (s *service) axDecodedRequest(request *axRequest) toolCallResult {
 	obs := observation{mode: request.observe}
 	switch request.mode {
-	case a11yModeApps:
-		return withA11yModeEvidence(
+	case axModeApps:
+		return withAXModeEvidence(
 			s.listApps().withEvidenceScope("app_inventory"),
-			a11yModeApps,
+			axModeApps,
 		)
-	case a11yModeObserve:
-		return s.a11yObserve(request, obs)
-	case a11yModeFind:
-		return s.a11yFind(request)
+	case axModeObserve:
+		return s.axObserve(request, obs)
+	case axModeFind:
+		return s.axFind(request)
 	default:
-		return s.a11yAct(request, obs)
+		return s.axAct(request, obs)
 	}
 }
 
-func (s *service) a11yObserve(
+func (s *service) axObserve(
 	request *axRequest,
 	obs observation,
 ) toolCallResult {
@@ -158,15 +158,15 @@ func (s *service) a11yObserve(
 		enabled := true
 		includeScreenshot = &enabled
 	}
-	readContext, identityErr := s.resolveA11yReadIdentity(request.app, request.windowRef, "")
+	readContext, identityErr := s.resolveAXReadIdentity(request.app, request.windowRef, "")
 	if identityErr != nil {
 		return axIdentityErrorResult(identityErr)
 	}
 	if obs.mode == observeDiff && root == nil {
-		return withA11yModeEvidence(
-			s.a11yDiffObservation(readContext, request.scope).
+		return withAXModeEvidence(
+			s.axDiffObservation(readContext, request.scope).
 				withEvidenceScope("independent_ui_read"),
-			a11yModeObserve,
+			axModeObserve,
 		)
 	}
 	// observe "full" always returns the whole tree, even when an earlier
@@ -182,13 +182,13 @@ func (s *service) a11yObserve(
 		root,
 		readContext.windowHandle,
 	).withEvidenceScope("independent_ui_read")
-	return withA11yModeEvidence(result, a11yModeObserve)
+	return withAXModeEvidence(result, axModeObserve)
 }
 
-// a11yDiffObservation reads the window and renders it as a diff against the
+// axDiffObservation reads the window and renders it as a diff against the
 // last tree delivered for it, falling back to the working tree.
-func (s *service) a11yDiffObservation(
-	readContext *a11yReadContext,
+func (s *service) axDiffObservation(
+	readContext *axReadContext,
 	scope string,
 ) toolCallResult {
 	noScreenshot := false
@@ -198,7 +198,7 @@ func (s *service) a11yDiffObservation(
 		IncludeScreenshot:  &noScreenshot,
 		TargetWindowHandle: readContext.windowHandle,
 		SourceRef:          readContext.windowRef,
-		Scope:              normalizedA11yScope(scope),
+		Scope:              normalizedAXScope(scope),
 		TreeView:           treeViewWorking,
 	}
 	snapshot, notes, result := s.refreshSnapshot(readContext.appToken, request)
@@ -210,16 +210,16 @@ func (s *service) a11yDiffObservation(
 		// baseline: return the tree.
 		return s.getAppStateResult(snapshot, notes, false)
 	}
-	return s.renderA11yBatchFinalObservation(snapshot, notes, observation{mode: observeDiff})
+	return s.renderAXBatchFinalObservation(snapshot, notes, observation{mode: observeDiff})
 }
 
-// runA11yAssertion evaluates one internal assertion against a read context.
-func (s *service) runA11yAssertion(
-	readContext *a11yReadContext,
+// runAXAssertion evaluates one internal assertion against a read context.
+func (s *service) runAXAssertion(
+	readContext *axReadContext,
 	assertion map[string]any,
 	scope string,
 ) toolCallResult {
-	spec, err := parseA11yAssertionSpec(assertion)
+	spec, err := parseAXAssertionSpec(assertion)
 	if err != nil {
 		return textResult(err.Error(), true).withEvidenceScope("error_only")
 	}
@@ -236,9 +236,9 @@ func (s *service) runA11yAssertion(
 			spec.timeoutMS,
 			spec.stableMS,
 		)
-		return withA11yModeEvidence(
+		return withAXModeEvidence(
 			result.withEvidenceScope(assertionEvidenceScope(result)),
-			a11yModeAssert,
+			axModeAssert,
 		)
 	}
 	goal := assertionGoal(assertion)
@@ -263,15 +263,15 @@ func (s *service) runA11yAssertion(
 		// The live resolver can fail to read some provider-bound elements
 		// completely. One fresh canonical read of the window then decides
 		// the predicate, as it does for an action's until.
-		if a11yPostconditionNeedsCanonicalReconciliation(assertion, result) {
-			result = s.reconcileA11yActionPostcondition(&a11yBatchContext{
+		if axPostconditionNeedsCanonicalReconciliation(assertion, result) {
+			result = s.reconcileAXActionPostcondition(&axBatchContext{
 				appToken:     firstNonEmpty(entry.AppRef, readContext.appToken),
 				windowRef:    entry.LogicalWindowRef,
 				windowHandle: entry.WindowHandle,
 			}, assertion, result)
 		}
 		result = result.withEvidenceScope("independent_ui_read")
-		return withA11yModeEvidence(result, a11yModeAssert)
+		return withAXModeEvidence(result, axModeAssert)
 	}
 	result := s.verify(
 		readContext.appToken,
@@ -287,18 +287,18 @@ func (s *service) runA11yAssertion(
 		result.StructuredContent["assertion_sampled_live_ui"] == true {
 		result.StructuredContent["evidence_scope"] = "independent_ui_read"
 	}
-	return withA11yModeEvidence(result, a11yModeAssert)
+	return withAXModeEvidence(result, axModeAssert)
 }
 
-func (s *service) a11yFind(request *axRequest) toolCallResult {
+func (s *service) axFind(request *axRequest) toolCallResult {
 	if request.cursor != "" {
-		return withA11yModeEvidence(
+		return withAXModeEvidence(
 			s.continueFind(request.cursor, request.limit).
 				withEvidenceScope("cached_observation_page"),
-			a11yModeFind,
+			axModeFind,
 		)
 	}
-	readContext, identityErr := s.resolveA11yReadIdentity(request.app, request.windowRef, "")
+	readContext, identityErr := s.resolveAXReadIdentity(request.app, request.windowRef, "")
 	if identityErr != nil {
 		return axIdentityErrorResult(identityErr)
 	}
@@ -325,19 +325,19 @@ func (s *service) a11yFind(request *axRequest) toolCallResult {
 		request.scope,
 		readContext.windowHandle,
 	).withEvidenceScope("independent_ui_read")
-	return withA11yModeEvidence(result, a11yModeFind)
+	return withAXModeEvidence(result, axModeFind)
 }
 
-func (s *service) a11yAct(
+func (s *service) axAct(
 	request *axRequest,
 	obs observation,
 ) toolCallResult {
-	result := s.a11yBatchDecoded(
+	result := s.axBatchDecoded(
 		request.actions,
 		obs,
 		request.windowRef,
 	).withEvidenceScope("delivery_or_local_ui")
-	return withA11yModeEvidence(result, a11yModeAct)
+	return withAXModeEvidence(result, axModeAct)
 }
 
 // axIdentityErrorResult reports a read identity that could not be bound.

@@ -27,14 +27,14 @@ func TestCompactAXActionContentDropsRoutineRouteNotes(t *testing.T) {
 	}
 }
 
-func TestA11yBatchSourceKeepsExecutionContract(t *testing.T) {
+func TestAXBatchSourceKeepsExecutionContract(t *testing.T) {
 	source := mainGoSource(t)
 	for _, fragment := range []string{
-		`a11yBatchActionObservation(`,
+		`axBatchActionObservation(`,
 		`if index == count-1 && !waitsFollow`,
 		`index < len(actions)-1 && index == lastInput`,
 		`s.runAXWait(context, action.wait)`,
-		`s.executeA11yBatchAction(`,
+		`s.executeAXBatchAction(`,
 		`"observation_required"] = true`,
 	} {
 		if !strings.Contains(source, fragment) {
@@ -64,7 +64,7 @@ func TestDecodeAXActionsAcceptsFlatShapes(t *testing.T) {
 }
 
 func TestDecodeAXActionsRejectsWithPathAndHint(t *testing.T) {
-	tooMany := make([]any, a11yBatchMaxActions+1)
+	tooMany := make([]any, axBatchMaxActions+1)
 	for index := range tooMany {
 		tooMany[index] = map[string]any{"type": "keypress", "keys": []any{"TAB"}}
 	}
@@ -194,11 +194,11 @@ func TestBatchMutationSummaryPreservesActionUnknown(t *testing.T) {
 
 func TestRefOwnedBatchDerivesOneWindowAndKeyboardInheritance(t *testing.T) {
 	service, appRef, windowRef, elementRef := sheetBatchService(t)
-	actions := []a11yBatchAction{
+	actions := []axBatchAction{
 		{actionType: "click", targetRef: elementRef},
 		{actionType: "keypress", key: "ENTER"},
 	}
-	context, err := service.deriveA11yBatchContext("", actions, nil)
+	context, err := service.deriveAXBatchContext("", actions, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestWaitRefsArePreflightedBeforeFirstInput(t *testing.T) {
 	backend := &recordingPlatformBackend{}
 	service.backend = backend
 
-	result := service.a11yBatch(
+	result := service.axBatch(
 		[]any{
 			map[string]any{"type": "click", "ref": elementRef},
 			map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
@@ -240,7 +240,7 @@ func TestWaitRefsArePreflightedBeforeFirstInput(t *testing.T) {
 
 func TestRefLessBatchWithoutFocusOrWindowHasNoWindow(t *testing.T) {
 	service, _, _, _ := sheetBatchService(t)
-	_, err := service.deriveA11yBatchContext("", []a11yBatchAction{{
+	_, err := service.deriveAXBatchContext("", []axBatchAction{{
 		actionType: "keypress",
 		key:        "CTRL+S",
 	}}, nil)
@@ -259,8 +259,8 @@ func TestCrossWindowBatchFailsBeforeInput(t *testing.T) {
 		":1.84", "/window/2", "pid:10:start:100", "dialog", "Question",
 		appRef,
 	)
-	_, err := service.deriveA11yBatchContext(
-		"", []a11yBatchAction{
+	_, err := service.deriveAXBatchContext(
+		"", []axBatchAction{
 			{actionType: "click", targetRef: firstRef},
 			{actionType: "click", targetRef: secondRef},
 		}, nil,
@@ -272,7 +272,7 @@ func TestCrossWindowBatchFailsBeforeInput(t *testing.T) {
 
 func TestBatchAcceptsMatchingWindowRefAndRejectsAnother(t *testing.T) {
 	service, appRef, windowRef, elementRef := sheetBatchService(t)
-	context, err := service.deriveA11yBatchContext(windowRef, []a11yBatchAction{{
+	context, err := service.deriveAXBatchContext(windowRef, []axBatchAction{{
 		actionType: "click", targetRef: elementRef,
 	}}, nil)
 	if err != nil || context.windowRef != windowRef {
@@ -282,7 +282,7 @@ func TestBatchAcceptsMatchingWindowRefAndRejectsAnother(t *testing.T) {
 		"libreoffice", "w2:fedcba9876543210fedcba9876543210", `dialog "Question"`, "c1",
 		":1.84", "/window/2", "pid:10:start:100", "dialog", "Question", appRef,
 	)
-	_, err = service.deriveA11yBatchContext(other, []a11yBatchAction{{
+	_, err = service.deriveAXBatchContext(other, []axBatchAction{{
 		actionType: "click", targetRef: elementRef,
 	}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "omit window_ref") {
@@ -292,8 +292,8 @@ func TestBatchAcceptsMatchingWindowRefAndRejectsAnother(t *testing.T) {
 
 func TestBatchContextCarriesPrivateWindowExpectation(t *testing.T) {
 	service, _, windowRef, elementRef := sheetBatchService(t)
-	context, err := service.deriveA11yBatchContext(
-		"", []a11yBatchAction{
+	context, err := service.deriveAXBatchContext(
+		"", []axBatchAction{
 			{actionType: "click", targetRef: elementRef},
 		}, nil,
 	)
@@ -312,7 +312,7 @@ func TestBatchContextCarriesPrivateWindowExpectation(t *testing.T) {
 
 func TestBatchStopsAfterConfirmedWindowTransition(t *testing.T) {
 	service, appRef, _, _ := sheetBatchService(t)
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		appToken:     appRef,
 		windowHandle: "w2:0123456789abcdef0123456789abcdef",
@@ -320,7 +320,7 @@ func TestBatchStopsAfterConfirmedWindowTransition(t *testing.T) {
 	service.snapshots[appRef] = &appSnapshot{
 		WindowHandle: "w2:fedcba9876543210fedcba9876543210",
 	}
-	if got := service.a11yBatchWindowContinuity(context); got != a11yWindowChanged {
+	if got := service.axBatchWindowContinuity(context); got != axWindowChanged {
 		t.Fatal("confirmed logical-window transition was not detected")
 	}
 }
@@ -328,7 +328,7 @@ func TestBatchStopsAfterConfirmedWindowTransition(t *testing.T) {
 func TestBatchAllowsProviderRebindInsideSameNativeWindow(t *testing.T) {
 	service, appRef, windowRef, _ := sheetBatchService(t)
 	handle := "w2:0123456789abcdef0123456789abcdef"
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		appToken:     appRef,
 		windowRef:    windowRef,
@@ -342,24 +342,24 @@ func TestBatchAllowsProviderRebindInsideSameNativeWindow(t *testing.T) {
 			ProcessGeneration: "pid:10:start:100",
 		},
 	}
-	if got := service.a11yBatchWindowContinuity(context); got != a11yWindowSame {
+	if got := service.axBatchWindowContinuity(context); got != axWindowSame {
 		t.Fatal("provider rebind inside the same native window must keep wN valid")
 	}
 }
 
 func TestBatchStopsWhenWindowContinuityCannotBeSampled(t *testing.T) {
 	service, appRef, windowRef, _ := sheetBatchService(t)
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		appToken:     appRef,
 		windowRef:    windowRef,
 		windowHandle: "w2:0123456789abcdef0123456789abcdef",
 	}
-	if got := service.a11yBatchWindowContinuity(context); got != a11yWindowUnknown {
+	if got := service.axBatchWindowContinuity(context); got != axWindowUnknown {
 		t.Fatalf("missing refreshed snapshot was reported as %s", got)
 	}
 	service.snapshots[appRef] = &appSnapshot{}
-	if got := service.a11yBatchWindowContinuity(context); got != a11yWindowUnknown {
+	if got := service.axBatchWindowContinuity(context); got != axWindowUnknown {
 		t.Fatalf("missing refreshed window handle was reported as %s", got)
 	}
 }
@@ -383,21 +383,21 @@ func TestBatchStopsWhenLogicalWindowChangesOnSameNativeHandle(t *testing.T) {
 		publicAppRef:    appRef,
 		publicWindowRef: newWindowRef,
 	}
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		appToken:     appRef,
 		windowRef:    oldWindowRef,
 		windowHandle: handle,
 	}
-	if got := service.a11yBatchWindowContinuity(context); got != a11yWindowChanged {
+	if got := service.axBatchWindowContinuity(context); got != axWindowChanged {
 		t.Fatalf("same-handle logical replacement was reported as %s", got)
 	}
 }
 
-// a11yBatch decodes public action objects and runs them, so tests can drive
+// axBatch decodes public action objects and runs them, so tests can drive
 // a batch from raw JSON-shaped actions. The public act path decodes in
-// decodeAXRequest and calls a11yBatchDecoded directly.
-func (s *service) a11yBatch(
+// decodeAXRequest and calls axBatchDecoded directly.
+func (s *service) axBatch(
 	rawActions any,
 	obs observation,
 	windowRef string,
@@ -410,5 +410,5 @@ func (s *service) a11yBatch(
 		}
 		return axArgErrorResult(argErr, requested)
 	}
-	return s.a11yBatchDecoded(actions, obs, windowRef)
+	return s.axBatchDecoded(actions, obs, windowRef)
 }

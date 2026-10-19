@@ -70,7 +70,7 @@ func validateMacOSKeypress(specification string) error {
 	return nil
 }
 
-func (s *service) preflightPlatformAXKeys(actions []a11yBatchAction) error {
+func (s *service) preflightPlatformAXKeys(actions []axBatchAction) error {
 	if s.platformBackend().HostInfo().Platform != "darwin" {
 		return nil
 	}

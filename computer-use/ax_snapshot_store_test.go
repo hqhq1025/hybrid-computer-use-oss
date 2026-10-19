@@ -14,22 +14,22 @@ func TestContentScopeHasIndependentCacheIdentityAndDoesNotPersist(t *testing.T) 
 		App:             appDescriptor{Name: "App", PID: 7},
 		projection: snapshotProjection{
 			View:  treeViewWorking,
-			Scope: a11yScopeWindow,
+			Scope: axScopeWindow,
 		},
 	}
 	content := *window
-	content.projection.Scope = a11yScopeContent
+	content.projection.Scope = axScopeContent
 	if deliveredTreeKey(window) == deliveredTreeKey(&content) ||
 		deliveredSnapshotKey(window) == deliveredSnapshotKey(&content) {
 		t.Fatal("window and content projections must not share delivery caches")
 	}
 
-	request := axServiceRequest{Scope: a11yScopeContent}
+	request := axServiceRequest{Scope: axScopeContent}
 	applyProjection(&request, snapshotProjection{
 		View:  treeViewFull,
-		Scope: a11yScopeWindow,
+		Scope: axScopeWindow,
 	})
-	if request.Scope != a11yScopeContent {
+	if request.Scope != axScopeContent {
 		t.Fatal("a cached projection must not overwrite request-local content scope")
 	}
 }
@@ -42,7 +42,7 @@ func TestContentRevisionDrivesContentTreeDeliveryIdentity(t *testing.T) {
 		contentRevision: "c1:0123456789abcdef01234567",
 		projection: snapshotProjection{
 			View:  treeViewWorking,
-			Scope: a11yScopeContent,
+			Scope: axScopeContent,
 		},
 	}
 	second := *first
@@ -274,7 +274,7 @@ func TestIncompleteSnapshotDoesNotReplaceCompleteDiffBaseline(t *testing.T) {
 		sourceApp:       "editor",
 		WindowHandle:    "window-1",
 		publicWindowRef: "w1",
-		projection:      snapshotProjection{View: treeViewWorking, Scope: a11yScopeWindow},
+		projection:      snapshotProjection{View: treeViewWorking, Scope: axScopeWindow},
 	}
 	incomplete := *complete
 	incomplete.Annotations = []axProviderAnnotation{{
@@ -375,14 +375,14 @@ func TestCompactActionObservationDoesNotAdvanceDeliveredTreeBaseline(t *testing.
 	previous.sourceApp = "editor"
 	previous.publicWindowRef = "w1"
 	previous.SnapshotID = "previous"
-	previous.projection = snapshotProjection{View: treeViewWorking, Scope: a11yScopeWindow}
+	previous.projection = snapshotProjection{View: treeViewWorking, Scope: axScopeWindow}
 	service.rememberDeliveredSnapshot(previous)
 
 	current := editorFormSnapshot()
 	current.sourceApp = "editor"
 	current.publicWindowRef = "w1"
 	current.SnapshotID = "current"
-	current.projection = snapshotProjection{View: treeViewWorking, Scope: a11yScopeWindow}
+	current.projection = snapshotProjection{View: treeViewWorking, Scope: axScopeWindow}
 	current.TreeLines = append([]string(nil), previous.TreeLines...)
 	current.TreeLines[1] = strings.Repeat("changed ", 900)
 	compact := compactActionObservationLines(current)
@@ -405,7 +405,7 @@ func TestCompactActionObservationDoesNotAdvanceDeliveredTreeBaseline(t *testing.
 func TestContentAndRepeatedTreeOutputKeepRevisionPrivate(t *testing.T) {
 	snapshot := editorFormSnapshot()
 	snapshot.contentRevision = "c1:deadbeef"
-	snapshot.scope = a11yScopeContent
+	snapshot.scope = axScopeContent
 	snapshot.scopeRoot = &elementRecord{
 		ControlType: "document web",
 		Name:        "Example",
@@ -538,7 +538,7 @@ func TestRootedAndWindowObservationsUseDifferentCaches(t *testing.T) {
 	window := editorFormSnapshot()
 	window.publicWindowRef = "w1"
 	window.projection = snapshotProjection{
-		View: treeViewWorking, Scope: a11yScopeWindow,
+		View: treeViewWorking, Scope: axScopeWindow,
 	}
 	rooted := *window
 	rooted.projection.Root = `{"focused":true}`

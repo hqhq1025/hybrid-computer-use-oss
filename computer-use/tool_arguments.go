@@ -20,7 +20,7 @@ func optionalString(args map[string]any, key string) string {
 	return value
 }
 
-func a11yTargetAddress(args map[string]any) (string, bool, error) {
+func axTargetAddress(args map[string]any) (string, bool, error) {
 	raw, present := args["target"]
 	if !present {
 		return "", false, nil
@@ -74,14 +74,14 @@ func a11yTargetAddress(args map[string]any) (string, bool, error) {
 	if !ok {
 		return "", true, errors.New("target.selector must be an object")
 	}
-	address, err := a11ySelectorAddress(selector)
+	address, err := axSelectorAddress(selector)
 	if err != nil {
 		return "", true, fmt.Errorf("target.selector: %w", err)
 	}
 	return address, true, nil
 }
 
-func a11ySelectorAddress(selector map[string]any) (string, error) {
+func axSelectorAddress(selector map[string]any) (string, error) {
 	allowed := map[string]bool{
 		"role": true, "name": true, "description": true,
 		"placeholder": true, "state": true,

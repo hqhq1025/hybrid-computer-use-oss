@@ -579,7 +579,7 @@ func TestProviderOrderedInputBackendIsOptional(t *testing.T) {
 
 func TestProviderOrderedInputRequestsCompileOnlyPlannedRuns(t *testing.T) {
 	handle := "w2:" + strings.Repeat("b", 32)
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appToken:     "a1",
 		windowRef:    "w1",
 		windowHandle: handle,
@@ -591,14 +591,14 @@ func TestProviderOrderedInputRequestsCompileOnlyPlannedRuns(t *testing.T) {
 			Name:              "Document",
 		},
 	}
-	actions := []a11yBatchAction{
+	actions := []axBatchAction{
 		{actionType: "click", targetRef: "r1"},
 		{actionType: "keypress", key: "DOWN"},
 		{actionType: "keypress", key: "ENTER"},
 		{actionType: "set_value", targetRef: "r2", value: "6"},
 		{actionType: "keypress", key: "TAB"},
 	}
-	plan, err := compileA11yBatchExecutionPlan(
+	plan, err := compileAXBatchExecutionPlan(
 		context,
 		actions,
 		observation{mode: observeDiff},
@@ -639,13 +639,13 @@ func TestProviderOrderedInputRequestsCompileOnlyPlannedRuns(t *testing.T) {
 }
 
 func TestProviderOrderedInputRequestsFallBackWithoutWindowIdentity(t *testing.T) {
-	context := testA11yBatchPlanContext()
+	context := testAXBatchPlanContext()
 	context.appToken = "a1"
-	actions := []a11yBatchAction{{
+	actions := []axBatchAction{{
 		actionType: "keypress",
 		key:        "ENTER",
 	}}
-	plan, err := compileA11yBatchExecutionPlan(
+	plan, err := compileAXBatchExecutionPlan(
 		context,
 		actions,
 		observation{},
@@ -735,7 +735,7 @@ func completedOrderedInputObservationFailure(
 	return result
 }
 
-func TestA11yMixedBatchExecutesEveryPlannedOrderedInputRun(t *testing.T) {
+func TestAXMixedBatchExecutesEveryPlannedOrderedInputRun(t *testing.T) {
 	service, _, _, elementRef := orderedInputTestService(t)
 	legacy := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
@@ -754,7 +754,7 @@ func TestA11yMixedBatchExecutesEveryPlannedOrderedInputRun(t *testing.T) {
 	}
 	service.backend = backend
 
-	result := service.a11yBatch([]any{
+	result := service.axBatch([]any{
 		map[string]any{
 			"type": "click",
 			"ref":  elementRef,
@@ -794,7 +794,7 @@ func TestA11yMixedBatchExecutesEveryPlannedOrderedInputRun(t *testing.T) {
 	}
 }
 
-func TestA11yMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
+func TestAXMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 	service, _, _, elementRef := orderedInputTestService(t)
 	legacy := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
@@ -842,7 +842,7 @@ func TestA11yMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 	}
 	service.backend = backend
 
-	result := service.a11yBatch([]any{
+	result := service.axBatch([]any{
 		map[string]any{
 			"type": "click",
 			"ref":  elementRef,
@@ -881,14 +881,14 @@ func TestA11yMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 	}
 }
 
-func TestA11yWholeOrderedTransportFailurePreservesUncertainty(t *testing.T) {
+func TestAXWholeOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 	service, _, windowRef, _ := orderedInputTestService(t)
 	service.backend = &orderedInputRecordingBackend{
 		recordingPlatformBackend: &recordingPlatformBackend{},
 		err:                      errors.New("connection closed after request write"),
 	}
 
-	result := service.a11yBatch([]any{
+	result := service.axBatch([]any{
 		map[string]any{"type": "keypress", "keys": []any{"A"}},
 		map[string]any{"type": "keypress", "keys": []any{"B"}},
 	},
@@ -910,7 +910,7 @@ func TestA11yWholeOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 	}
 }
 
-func TestA11yMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
+func TestAXMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 	service, _, _, elementRef := orderedInputTestService(t)
 	legacy := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{
@@ -925,7 +925,7 @@ func TestA11yMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 	}
 	service.backend = backend
 
-	result := service.a11yBatch([]any{
+	result := service.axBatch([]any{
 		map[string]any{
 			"type": "click",
 			"ref":  elementRef,
@@ -956,7 +956,7 @@ func TestA11yMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 	}
 }
 
-func TestA11yBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) {
+func TestAXBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) {
 	service, _, windowRef, _ := orderedInputTestService(t)
 	legacy := &recordingPlatformBackend{}
 	backend := &orderedInputRecordingBackend{
@@ -969,7 +969,7 @@ func TestA11yBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) 
 	}
 	service.backend = backend
 
-	result := service.a11yBatch([]any{
+	result := service.axBatch([]any{
 		map[string]any{"type": "keypress", "keys": []any{"DOWN"}},
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
 	},
@@ -998,7 +998,7 @@ func TestA11yBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) 
 	}
 }
 
-func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testing.T) {
+func TestAXWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testing.T) {
 	service, _, windowRef, _ := orderedInputTestService(t)
 	current := mixedOrderedInputBatchTestSnapshot()
 	current.WindowHandle = "w2:11111111111111111111111111111111"
@@ -1027,7 +1027,7 @@ func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testin
 	}
 	service.backend = backend
 
-	result := service.a11yBatch([]any{
+	result := service.axBatch([]any{
 		map[string]any{"type": "keypress", "keys": []any{"SUPER", "F"}},
 	},
 		observation{mode: observeDiff},
@@ -1073,7 +1073,7 @@ func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testin
 			legacy.observeRequests)
 	}
 
-	result.StructuredContent["ax_mode"] = a11yModeAct
+	result.StructuredContent["ax_mode"] = axModeAct
 	prepared := prepareAXEvidence(result)
 	if prepared.StructuredContent["input_emitted"] != true ||
 		prepared.StructuredContent["task_effect_verified"] == true {
@@ -1085,7 +1085,7 @@ func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testin
 	}
 }
 
-func TestA11yWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
+func TestAXWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
 	service, _, windowRef, _ := orderedInputTestService(t)
 	recoveryFailure := ProviderAccessibilityResult{
 		OK:    false,
@@ -1109,7 +1109,7 @@ func TestA11yWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
 	}
 	service.backend = backend
 
-	result := service.a11yBatch([]any{
+	result := service.axBatch([]any{
 		map[string]any{"type": "keypress", "keys": []any{"SUPER", "F"}},
 	},
 		observation{mode: observeDiff},
@@ -1135,7 +1135,7 @@ func TestA11yWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
 	}
 }
 
-func TestA11yBatchPreservesOrderedPartialEmissionWithoutLegacyRetry(t *testing.T) {
+func TestAXBatchPreservesOrderedPartialEmissionWithoutLegacyRetry(t *testing.T) {
 	service, _, windowRef, _ := orderedInputTestService(t)
 	legacy := &recordingPlatformBackend{}
 	backend := &orderedInputRecordingBackend{
@@ -1184,7 +1184,7 @@ func TestA11yBatchPreservesOrderedPartialEmissionWithoutLegacyRetry(t *testing.T
 	}
 	service.backend = backend
 
-	result := service.a11yBatch([]any{
+	result := service.axBatch([]any{
 		map[string]any{"type": "keypress", "keys": []any{"A"}},
 		map[string]any{"type": "keypress", "keys": []any{"B"}},
 		map[string]any{"type": "keypress", "keys": []any{"C"}},

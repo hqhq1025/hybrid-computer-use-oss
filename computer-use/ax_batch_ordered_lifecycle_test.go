@@ -43,7 +43,7 @@ func TestOrderedBatchTypedLifecycleScope(t *testing.T) {
 				},
 			}
 			s.backend = backend
-			result := s.a11yBatch([]any{
+			result := s.axBatch([]any{
 				map[string]any{"type": "keypress", "keys": []any{"ESC"}},
 			}, observation{mode: observeNone}, window)
 
@@ -60,7 +60,7 @@ func TestOrderedBatchTypedLifecycleScope(t *testing.T) {
 					s.windowRefRegistry.entries[sibling].Lifecycle, s.refRegistry.entries[element].Lifecycle)
 			}
 			if tc.window != AXRefActive {
-				result = s.a11yBatch([]any{
+				result = s.axBatch([]any{
 					map[string]any{"type": "keypress", "keys": []any{"ESC"}},
 				}, observation{mode: observeNone}, window)
 
@@ -89,7 +89,7 @@ func TestOrderedBatchInvalidResultCannotRetireIdentity(t *testing.T) {
 		},
 	}
 	s.backend = backend
-	result := s.a11yBatch([]any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
+	result := s.axBatch([]any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
 		observation{mode: observeNone}, window)
 
 	if !result.IsError || result.StructuredContent["failure_code"] != "runtime_transport_lost" ||
@@ -111,7 +111,7 @@ func TestOrderedBatchRequestRejectionIsNotTransportUncertainty(t *testing.T) {
 		}},
 	}
 	s.backend = backend
-	result := s.a11yBatch([]any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
+	result := s.axBatch([]any{map[string]any{"type": "keypress", "keys": []any{"ESC"}}},
 		observation{mode: observeNone}, window)
 
 	facts := result.StructuredContent["a11y_batch_result"].(map[string]any)

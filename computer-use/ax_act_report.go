@@ -40,7 +40,7 @@ func newActReportTrace(obs observation) *actReportTrace {
 	return &actReportTrace{before: map[int]*appSnapshot{}, observe: obs.resolvedMode()}
 }
 
-func (t *actReportTrace) bind(s *service, context *a11yBatchContext) {
+func (t *actReportTrace) bind(s *service, context *axBatchContext) {
 	if t == nil || context == nil {
 		return
 	}
@@ -82,7 +82,7 @@ func (t *actReportTrace) after(s *service, index int) *appSnapshot {
 // before any input gets no report: nothing happened.
 func (s *service) withActReport(
 	result toolCallResult,
-	actions []a11yBatchAction,
+	actions []axBatchAction,
 	trace *actReportTrace,
 ) toolCallResult {
 	if trace == nil || trace.appToken == "" || result.StructuredContent == nil ||

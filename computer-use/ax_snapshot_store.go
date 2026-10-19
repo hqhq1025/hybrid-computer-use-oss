@@ -35,7 +35,7 @@ func (s *service) getAppState(
 		Operation:       axServiceObserve,
 		App:             app,
 		TreeView:        normalizedTreeView(view),
-		Scope:           normalizedA11yScope(scope),
+		Scope:           normalizedAXScope(scope),
 		ObservationRoot: observationRoot,
 	}
 	if len(targetWindowHandle) > 0 {
@@ -100,13 +100,13 @@ func deliveredTreeKey(snapshot *appSnapshot) string {
 		return ""
 	}
 	identity := snapshot.SnapshotID
-	if normalizedA11yScope(snapshot.projection.Scope) == a11yScopeContent &&
+	if normalizedAXScope(snapshot.projection.Scope) == axScopeContent &&
 		snapshot.contentRevision != "" {
 		identity = snapshot.contentRevision
 	}
 	return windowRef + "|" + identity + "|" +
 		normalizedTreeView(snapshot.projection.View) + "|" +
-		normalizedA11yScope(snapshot.projection.Scope) + "|" +
+		normalizedAXScope(snapshot.projection.Scope) + "|" +
 		snapshot.projection.Root
 }
 
@@ -140,7 +140,7 @@ func deliveredSnapshotKey(snapshot *appSnapshot) string {
 		return ""
 	}
 	return identity + "|" + normalizedTreeView(snapshot.projection.View) + "|" +
-		normalizedA11yScope(snapshot.projection.Scope) + "|" +
+		normalizedAXScope(snapshot.projection.Scope) + "|" +
 		snapshot.projection.Root
 }
 

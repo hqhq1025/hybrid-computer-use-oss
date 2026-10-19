@@ -91,7 +91,7 @@ func callMayEmitInput(name string, args map[string]any) bool {
 		}
 		return false
 	case publicToolAX:
-		if optionalString(args, "mode") != a11yModeAct {
+		if optionalString(args, "mode") != axModeAct {
 			return false
 		}
 		// An act of only wait steps sends no input; it is the read that

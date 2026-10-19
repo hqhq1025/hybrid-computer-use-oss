@@ -1811,3 +1811,63 @@ class SemanticRuntimeResolutionTests(AtspiPatchedTestCase):
         self.assertEqual(raised.exception.failure_code, "stale_element_ref")
         self.assertEqual(raised.exception.failure_phase, "precondition")
         self.assertFalse(raised.exception.input_events_emitted)
+
+
+class SemanticTargetDecodeTests(unittest.TestCase):
+    def test_target_without_role_name_or_predicates_is_invalid(self):
+        with self.assertRaises(runtime.OperationFailure) as raised:
+            element_resolver._decode_semantic_target({"selector": "  "})
+        self.assertEqual(raised.exception.failure_code, "semantic_target_invalid")
+        self.assertIn("reason=empty", str(raised.exception))
+        self.assertFalse(raised.exception.input_events_emitted)
+
+    def test_provider_bound_target_needs_the_full_provider_identity(self):
+        with self.assertRaises(runtime.OperationFailure) as raised:
+            element_resolver._decode_semantic_target({
+                "role": "push button",
+                "locatorKind": "Provider_Bound",
+                "providerBusName": ":1.4",
+                "providerObjectPath": "/obj/7",
+            })
+        self.assertIn(
+            "provider_bound_identity_incomplete", str(raised.exception))
+
+    def test_provider_requests_need_all_three_identity_parts(self):
+        locator = element_resolver._decode_semantic_target({
+            "role": "push button",
+            "providerBusName": ":1.4",
+            "providerObjectPath": "/obj/7",
+            "processGeneration": "pid:4:start:9",
+            "providerWindowBusName": ":1.4",
+            "providerWindowObjectPath": "/win/1",
+        })
+        self.assertEqual(locator.locator_kind, "semantic")
+        self.assertTrue(locator.provider_requested)
+        self.assertFalse(locator.provider_window_requested)
+
+
+class UniqueSemanticMatchTests(unittest.TestCase):
+    def test_name_matches_outrank_description_matches(self):
+        by_name = [({"name": "Save"}, "w", "b", None)]
+        by_description = [({"name": "x"}, "w", "b", None)] * 3
+        self.assertIs(
+            element_resolver._unique_semantic_match(
+                by_name, by_description, False, "Save", 1),
+            by_name[0],
+        )
+
+    def test_unique_match_in_an_incomplete_scan_is_not_proof(self):
+        with self.assertRaises(runtime.OperationFailure) as raised:
+            element_resolver._unique_semantic_match(
+                [({"name": "Save"}, "w", "b", None)], [], True, "Save", 1)
+        self.assertEqual(raised.exception.failure_code, "observation_incomplete")
+
+    def test_ambiguity_reports_at_most_five_candidates(self):
+        matches = [({"name": "Save"}, "w", "b", {"ref": i}) for i in range(7)]
+        with self.assertRaises(runtime.OperationFailure) as raised:
+            element_resolver._unique_semantic_match(
+                matches, [], False, "Save", 2)
+        self.assertEqual(
+            raised.exception.failure_code, "semantic_target_ambiguous")
+        self.assertEqual(raised.exception.candidate_count, 7)
+        self.assertEqual(len(raised.exception.candidates), 5)

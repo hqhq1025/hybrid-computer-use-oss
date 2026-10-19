@@ -303,7 +303,7 @@ func editorFormSnapshot() *appSnapshot {
 			{Index: 3, RuntimeID: []int{0, 0, 1}, ControlType: "push button", Name: "Save", States: "[has-click-action]"},
 			{Index: 4, RuntimeID: []int{0, 1}, ControlType: "status bar", Name: "Ready"},
 		},
-		scope: a11yScopeWindow,
+		scope: axScopeWindow,
 	}
 }
 

@@ -110,12 +110,12 @@ func (b *appWideBackend) ListWindows(request ProviderWindowListRequest) (Provide
 	return ProviderWindowResult{OK: true, AppName: "LibreOffice", AppPID: 10, WindowTitles: titles}, nil
 }
 
-func untilScopeService(t *testing.T, open ...untilFakeWindow) (*service, *appWideBackend, *a11yBatchContext) {
+func untilScopeService(t *testing.T, open ...untilFakeWindow) (*service, *appWideBackend, *axBatchContext) {
 	t.Helper()
 	s, appRef, windowRef, _ := sheetBatchService(t)
 	backend := &appWideBackend{open: open}
 	s.backend = backend
-	return s, backend, &a11yBatchContext{
+	return s, backend, &axBatchContext{
 		appRef: appRef, appToken: appRef, windowRef: windowRef, windowHandle: untilMainHandle,
 	}
 }
@@ -134,7 +134,7 @@ func TestSelectorUntilSeesDialogInAnotherWindowOfTheApp(t *testing.T) {
 		{"role": "dialog"},
 		{"role": "button", "name": "Insert"},
 	} {
-		result := s.runA11yPostcondition(context, map[string]any{
+		result := s.runAXPostcondition(context, map[string]any{
 			"type": "exists", "target": map[string]any{"selector": selector},
 			"value": true, "timeout_ms": 1,
 		})
@@ -158,21 +158,21 @@ func TestDialogSelectorMatchesAModalTopLevelWindow(t *testing.T) {
 			"target": map[string]any{"selector": map[string]any{"role": "dialog"}}}
 	}
 	s, _, context := untilScopeService(t, untilMainWindow(), newFolder)
-	if result := s.runA11yPostcondition(context, exists(true)); result.IsError || untilStatus(result) != "pass" {
+	if result := s.runAXPostcondition(context, exists(true)); result.IsError || untilStatus(result) != "pass" {
 		t.Fatalf("modal frame must satisfy role dialog: %s", resultText(result))
 	}
 	context.windowHandle = untilDialogHandle
-	if result := s.runA11yPostcondition(context, exists(true)); result.IsError || untilStatus(result) != "pass" {
+	if result := s.runAXPostcondition(context, exists(true)); result.IsError || untilStatus(result) != "pass" {
 		t.Fatalf("modal frame bound as the batch window must satisfy role dialog: %s", resultText(result))
 	}
 	plain := newFolder
 	plain.modal = false
 	s, _, context = untilScopeService(t, untilMainWindow(), plain)
-	if result := s.runA11yPostcondition(context, exists(true)); untilStatus(result) == "pass" {
+	if result := s.runAXPostcondition(context, exists(true)); untilStatus(result) == "pass" {
 		t.Fatalf("a non-modal frame is not a dialog: %s", resultText(result))
 	}
 	s, _, context = untilScopeService(t, untilMainWindow())
-	if result := s.runA11yPostcondition(context, exists(false)); result.IsError || untilStatus(result) != "pass" {
+	if result := s.runAXPostcondition(context, exists(false)); result.IsError || untilStatus(result) != "pass" {
 		t.Fatalf("no modal window left: %s", resultText(result))
 	}
 }
@@ -180,7 +180,7 @@ func TestDialogSelectorMatchesAModalTopLevelWindow(t *testing.T) {
 // A negative selector is true only when no window of the app matches.
 func TestNegativeSelectorUntilChecksEveryWindowOfTheApp(t *testing.T) {
 	s, _, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	result := s.runA11yPostcondition(context, map[string]any{
+	result := s.runAXPostcondition(context, map[string]any{
 		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "dialog"}},
 		"value": false, "timeout_ms": 1,
 	})
@@ -192,7 +192,7 @@ func TestNegativeSelectorUntilChecksEveryWindowOfTheApp(t *testing.T) {
 // A selector found in the bound window costs one read, as before.
 func TestSelectorUntilMatchedInBoundWindowReadsOneWindow(t *testing.T) {
 	s, backend, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	result := s.runA11yPostcondition(context, map[string]any{
+	result := s.runAXPostcondition(context, map[string]any{
 		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "button", "name": "Save"}},
 		"value": true, "timeout_ms": 1,
 	})
@@ -204,7 +204,7 @@ func TestSelectorUntilMatchedInBoundWindowReadsOneWindow(t *testing.T) {
 // A false selector until names the dialog that has focus in its hint.
 func TestFalseSelectorUntilHintNamesTheFocusedDialog(t *testing.T) {
 	s, _, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	result := s.runA11yPostcondition(context, map[string]any{
+	result := s.runAXPostcondition(context, map[string]any{
 		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "button", "name": "Never"}},
 		"value": true, "timeout_ms": 1,
 	})
@@ -218,7 +218,7 @@ func TestFalseSelectorUntilHintNamesTheFocusedDialog(t *testing.T) {
 // of the app, not the batch window (tasks a434992a, 8ba5ae7a).
 func TestTitleUntilSeesANewWindowOfTheApp(t *testing.T) {
 	s, backend, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	result := s.runA11yPostcondition(context, map[string]any{
+	result := s.runAXPostcondition(context, map[string]any{
 		"type": "window_title_contains", "text": "Insert Sheet", "exists": true, "timeout_ms": 1,
 	})
 	if result.IsError || untilStatus(result) != "pass" {
@@ -237,7 +237,7 @@ func TestTitleUntilSeesANewWindowOfTheApp(t *testing.T) {
 func TestNegatedTitleUntilAfterTheBatchDialogClosed(t *testing.T) {
 	s, _, context := untilScopeService(t, untilMainWindow())
 	context.windowHandle = untilDialogHandle
-	result := s.runA11yPostcondition(context, map[string]any{
+	result := s.runAXPostcondition(context, map[string]any{
 		"type": "window_title_contains", "text": "Insert Sheet", "exists": false, "timeout_ms": 1,
 	})
 	if result.IsError || untilStatus(result) != "pass" {
@@ -245,7 +245,7 @@ func TestNegatedTitleUntilAfterTheBatchDialogClosed(t *testing.T) {
 	}
 	stillOpen, _, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
 	context.windowHandle = untilDialogHandle
-	result = stillOpen.runA11yPostcondition(context, map[string]any{
+	result = stillOpen.runAXPostcondition(context, map[string]any{
 		"type": "window_title_contains", "text": "Insert Sheet", "exists": false, "timeout_ms": 1,
 	})
 	if result.IsError || untilStatus(result) == "pass" {
@@ -258,7 +258,7 @@ func TestNegatedTitleUntilAfterTheBatchDialogClosed(t *testing.T) {
 func TestSelectorUntilAfterTheBatchDialogClosed(t *testing.T) {
 	s, _, context := untilScopeService(t, untilMainWindow())
 	context.windowHandle = untilDialogHandle
-	result := s.runA11yPostcondition(context, map[string]any{
+	result := s.runAXPostcondition(context, map[string]any{
 		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "dialog"}},
 		"value": false, "timeout_ms": 1,
 	})
@@ -277,7 +277,7 @@ func TestNegatedTitleUntilAfterTheAppExited(t *testing.T) {
 	assertion := map[string]any{
 		"type": "window_title_contains", "text": "H2O_Factsheet_WA.docx", "exists": false, "timeout_ms": 1,
 	}
-	result := s.runA11yPostcondition(context, assertion)
+	result := s.runAXPostcondition(context, assertion)
 	if result.IsError || untilStatus(result) != "pass" {
 		t.Fatalf("an exited app has no window with that title: %s", resultText(result))
 	}
@@ -296,7 +296,7 @@ func TestNegatedTitleUntilAfterTheAppExited(t *testing.T) {
 	}
 
 	backend.appGoneFacts = false
-	result = s.runA11yPostcondition(context, assertion)
+	result = s.runAXPostcondition(context, assertion)
 	if !result.IsError || untilStatus(result) != "observation_incomplete" {
 		t.Fatalf("an incomplete inventory must stay unknown: %s", resultText(result))
 	}
@@ -306,7 +306,7 @@ func TestNegatedSelectorUntilAfterTheAppExited(t *testing.T) {
 	s, backend, context := untilScopeService(t)
 	backend.appGone, backend.appGoneFacts = true, true
 	s.markAppIdentityLifecycle(context.appRef, AXRefStale, "stale_app_ref")
-	result := s.runA11yPostcondition(context, map[string]any{
+	result := s.runAXPostcondition(context, map[string]any{
 		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "dialog"}},
 		"value": false, "timeout_ms": 1,
 	})

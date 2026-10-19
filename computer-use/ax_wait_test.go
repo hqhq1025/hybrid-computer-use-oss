@@ -54,7 +54,7 @@ func TestPanelUntilCallsAreRejectedWithAnEquivalentWait(t *testing.T) {
 		if strings.Join(inputs, ",") != strings.Join(want, ",") || waits == 0 {
 			t.Fatalf("%s: hint %s changed the input steps: %v want %v", original, argErr.hint, inputs, want)
 		}
-		if call["mode"] == a11yModeAct {
+		if call["mode"] == axModeAct {
 			if ref, ok := call["window_ref"]; ok && hint["window_ref"] != ref {
 				t.Fatalf("%s: hint dropped window_ref: %s", original, argErr.hint)
 			}

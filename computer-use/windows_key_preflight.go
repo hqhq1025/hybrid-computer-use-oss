@@ -43,7 +43,7 @@ func validateWindowsKeypress(specification string) error {
 	return nil
 }
 
-func preflightWindowsAXKeys(actions []a11yBatchAction) error {
+func preflightWindowsAXKeys(actions []axBatchAction) error {
 	for index, action := range actions {
 		if action.actionType == "keypress" {
 			if err := validateWindowsKeypress(action.key); err != nil {

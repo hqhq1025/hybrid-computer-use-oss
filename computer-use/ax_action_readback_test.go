@@ -155,7 +155,7 @@ func TestActionFallbackPrefersChangedContentWhenFocusIsNavigation(t *testing.T) 
 			{Index: 3, RuntimeID: []int{0, 1}, ControlType: "document web", Name: "Composition Settings"},
 			{Index: 4, RuntimeID: []int{0, 1, 0}, ControlType: "check box", Name: "Automatically quote"},
 		},
-		scope:           a11yScopeWindow,
+		scope:           axScopeWindow,
 		contentRevision: "c1:changed",
 	}
 	typedTreeTextForTest(t, snapshot)

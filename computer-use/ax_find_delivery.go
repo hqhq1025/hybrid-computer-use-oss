@@ -102,7 +102,7 @@ func findDeliveryFits(result toolCallResult) bool {
 	for key, value := range result.StructuredContent {
 		copy.StructuredContent[key] = value
 	}
-	copy = withA11yModeEvidence(copy, a11yModeFind)
+	copy = withAXModeEvidence(copy, axModeFind)
 	copy = enforceAXResponseBudget(copy)
 	if copy.StructuredContent["truncation_reason"] == "response_budget" ||
 		resultText(copy) != resultText(result) {
@@ -159,6 +159,67 @@ func (s *service) deliverFindPage(
 	if limit > maxAXFindPageSize {
 		limit = maxAXFindPageSize
 	}
+	page := newFindPageBuilder(snapshot, matched, offset, query, notes, followsFailedAction)
+	units, count := page.selectUnits(limit)
+	if count == 0 {
+		return findDeliveryBudgetFailure(setID != "")
+	}
+	end := offset + count
+	// Context is optional. Bound every display field and append whole lines only,
+	// retaining canonical ordering and semantic ancestors where space permits.
+	contextSnapshot := newAXFindSnapshot(
+		snapshot.axSnapshot,
+		boundFindContextNodes(buildAXFindContext(snapshot, matched[offset:end], projected)),
+	)
+	lines, err := RenderAXSnapshotYAML(contextSnapshot, AXRenderOptions{RootKey: "context"})
+	if err != nil {
+		return textResult("AX find context renderer failed: "+err.Error(), true)
+	}
+	included := page.fittingContextLines(units, lines, count)
+	nextCursor, continuation := "", ""
+	if end < len(matched) {
+		if setID == "" {
+			nextCursor = s.findCursorRegistry.Create(snapshot, matched, end, query)
+		} else {
+			nextCursor = s.findCursorRegistry.Continue(setID, end)
+		}
+		continuation = findReservedContinuation
+		if nextCursor != "" {
+			continuation = findNextPageLine(nextCursor)
+		}
+	}
+	result := page.result(units, findContextPrefix(lines, included), continuation, count, included < len(lines))
+	if !findDeliveryFits(result) {
+		// A future evidence change must fail closed, not expose a truncated target.
+		if nextCursor != "" {
+			delete(s.findCursorRegistry.entries, nextCursor)
+		}
+		return findDeliveryBudgetFailure(setID != "")
+	}
+	s.rememberDeliveredFindExposure(snapshot, matched[offset:end], contextSnapshot, lines[:included])
+	return result
+}
+
+// findReservedContinuation is the longer of the two continuation forms when
+// no cursor could be stored. Page sizing reserves room for both forms.
+const findReservedContinuation = " continuation=unavailable_budget refine_query=true"
+
+// findPageBuilder renders one find page for a fixed header, so the page can
+// be measured against the response budget with different units and context.
+type findPageBuilder struct {
+	snapshot            *appSnapshot
+	matched             []elementRecord
+	offset              int
+	header              string
+	headerClipped       bool
+	diagnostics         string
+	followsFailedAction bool
+}
+
+func newFindPageBuilder(
+	snapshot *appSnapshot, matched []elementRecord, offset int,
+	query string, notes []string, followsFailedAction bool,
+) findPageBuilder {
 	title, titleClipped := findDisplayExcerpt(snapshot.WindowTitle, 256)
 	queryText, queryClipped := findDisplayExcerpt(query, 256)
 	header := fmt.Sprintf("window: %q\nmatches: %d query=%q", title, len(matched), queryText)
@@ -169,82 +230,76 @@ func (s *service) deliverFindPage(
 	for _, note := range modelFacingAXNotes(notes) {
 		diagnostics += "Note: " + note + "\n"
 	}
-	makeResult := func(units, context, continuation string, count int, omitted bool) toolCallResult {
-		text := fmt.Sprintf("%s range=%d..%d%s\n%saddressability:\n%s",
-			header, offset+1, offset+count, continuation, diagnostics, units)
-		text += context
-		if omitted {
-			text += "context_omitted=true\n"
-		}
-		result := withFailedActionContinuity(textResult(text, false), followsFailedAction)
-		addTreeProjectionMetadata(&result, snapshot)
-		result.StructuredContent["find_delivery_complete"] = true
-		result.StructuredContent["find_context_omitted"] = omitted
-		result.StructuredContent["find_display_excerpt"] =
-			titleClipped || queryClipped || strings.Contains(units+context, "bytes omitted]")
-		result.StructuredContent["find_match_count"] = len(matched)
-		result.StructuredContent["find_page_start"] = offset + 1
-		result.StructuredContent["find_page_count"] = count
-		if strings.HasPrefix(continuation, " next_cursor=") {
-			cursor := strings.TrimPrefix(continuation, " next_cursor=")
-			cursor, _, _ = strings.Cut(cursor, "\n")
-			result.StructuredContent["next_cursor"] = cursor
-		}
-		return result
+	return findPageBuilder{
+		snapshot:            snapshot,
+		matched:             matched,
+		offset:              offset,
+		header:              header,
+		headerClipped:       titleClipped || queryClipped,
+		diagnostics:         diagnostics,
+		followsFailedAction: followsFailedAction,
 	}
-	// Reserve both possible continuation forms before committing a cursor.
-	reserve := " continuation=unavailable_budget refine_query=true"
-	fits := func(units, context string, count int, omitted bool) bool {
-		if offset+count >= len(matched) {
-			return findDeliveryFits(makeResult(units, context, "", count, omitted))
-		}
-		return findDeliveryFits(makeResult(units, context, reserve, count, omitted)) &&
-			findDeliveryFits(makeResult(units, context, findNextPageLine("f18446744073709551615"), count, omitted))
+}
+
+func (page findPageBuilder) result(units, context, continuation string, count int, omitted bool) toolCallResult {
+	text := fmt.Sprintf("%s range=%d..%d%s\n%saddressability:\n%s",
+		page.header, page.offset+1, page.offset+count, continuation, page.diagnostics, units)
+	text += context
+	if omitted {
+		text += "context_omitted=true\n"
 	}
+	result := withFailedActionContinuity(textResult(text, false), page.followsFailedAction)
+	addTreeProjectionMetadata(&result, page.snapshot)
+	result.StructuredContent["find_delivery_complete"] = true
+	result.StructuredContent["find_context_omitted"] = omitted
+	result.StructuredContent["find_display_excerpt"] =
+		page.headerClipped || strings.Contains(units+context, "bytes omitted]")
+	result.StructuredContent["find_match_count"] = len(page.matched)
+	result.StructuredContent["find_page_start"] = page.offset + 1
+	result.StructuredContent["find_page_count"] = count
+	if strings.HasPrefix(continuation, " next_cursor=") {
+		cursor := strings.TrimPrefix(continuation, " next_cursor=")
+		cursor, _, _ = strings.Cut(cursor, "\n")
+		result.StructuredContent["next_cursor"] = cursor
+	}
+	return result
+}
+
+// fits reports whether the page fits the budget. A page that does not end
+// the match list must fit with either continuation form, so it is measured
+// before a cursor is committed.
+func (page findPageBuilder) fits(units, context string, count int, omitted bool) bool {
+	if page.offset+count >= len(page.matched) {
+		return findDeliveryFits(page.result(units, context, "", count, omitted))
+	}
+	return findDeliveryFits(page.result(units, context, findReservedContinuation, count, omitted)) &&
+		findDeliveryFits(page.result(units, context, findNextPageLine("f18446744073709551615"), count, omitted))
+}
+
+// selectUnits returns the match units that fit, in order, up to limit.
+func (page findPageBuilder) selectUnits(limit int) (string, int) {
 	units, count := "", 0
-	for index := offset; index < len(matched) && count < limit; index++ {
-		unit := findMatchUnit(snapshot.axSnapshot, matched[index], index+1)
-		if !fits(units+unit, "", count+1, true) {
+	for index := page.offset; index < len(page.matched) && count < limit; index++ {
+		unit := findMatchUnit(page.snapshot.axSnapshot, page.matched[index], index+1)
+		if !page.fits(units+unit, "", count+1, true) {
 			break
 		}
 		units += unit
 		count++
 	}
-	if count == 0 {
-		return findDeliveryBudgetFailure(setID != "")
-	}
-	end := offset + count
-	// Context is optional. Bound every display field and append whole lines only,
-	// retaining canonical ordering and semantic ancestors where space permits.
-	nodes := buildAXFindContext(snapshot, matched[offset:end], projected)
-	var bound func([]*AXNode) []*AXNode
-	bound = func(nodes []*AXNode) []*AXNode {
-		out := make([]*AXNode, 0, len(nodes))
-		for _, node := range nodes {
-			display := findDisplayNode(node)
-			display.Children = bound(node.Children)
-			out = append(out, display)
-		}
-		return out
-	}
-	contextSnapshot := newAXFindSnapshot(snapshot.axSnapshot, bound(nodes))
-	lines, err := RenderAXSnapshotYAML(contextSnapshot, AXRenderOptions{RootKey: "context"})
-	if err != nil {
-		return textResult("AX find context renderer failed: "+err.Error(), true)
-	}
-	contextPrefix := func(count int) string {
-		if count == 0 {
-			return ""
-		}
-		return strings.Join(lines[:count], "\n") + "\n"
-	}
-	// Search prefixes rather than serializing the entire response once per line.
+	return units, count
+}
+
+// fittingContextLines returns how many leading context lines fit beside
+// units. It searches prefixes rather than serializing the entire response
+// once per line.
+func (page findPageBuilder) fittingContextLines(units string, lines []string, count int) int {
 	included := len(lines)
-	if !fits(units, contextPrefix(included), count, false) {
+	if !page.fits(units, findContextPrefix(lines, included), count, false) {
 		low, high := 0, len(lines)-1
 		for low < high {
 			mid := (low + high + 1) / 2
-			if fits(units, contextPrefix(mid), count, true) {
+			if page.fits(units, findContextPrefix(lines, mid), count, true) {
 				low = mid
 			} else {
 				high = mid - 1
@@ -252,28 +307,34 @@ func (s *service) deliverFindPage(
 		}
 		included = low
 	}
-	nextCursor, continuation := "", ""
-	if end < len(matched) {
-		if setID == "" {
-			nextCursor = s.findCursorRegistry.Create(snapshot, matched, end, query)
-		} else {
-			nextCursor = s.findCursorRegistry.Continue(setID, end)
-		}
-		continuation = reserve
-		if nextCursor != "" {
-			continuation = findNextPageLine(nextCursor)
-		}
+	return included
+}
+
+func findContextPrefix(lines []string, count int) string {
+	if count == 0 {
+		return ""
 	}
-	result := makeResult(units, contextPrefix(included), continuation, count, included < len(lines))
-	if !findDeliveryFits(result) {
-		// A future evidence change must fail closed, not expose a truncated target.
-		if nextCursor != "" {
-			delete(s.findCursorRegistry.entries, nextCursor)
-		}
-		return findDeliveryBudgetFailure(setID != "")
+	return strings.Join(lines[:count], "\n") + "\n"
+}
+
+// boundFindContextNodes copies the context forest with bounded display fields.
+func boundFindContextNodes(nodes []*AXNode) []*AXNode {
+	out := make([]*AXNode, 0, len(nodes))
+	for _, node := range nodes {
+		display := findDisplayNode(node)
+		display.Children = boundFindContextNodes(node.Children)
+		out = append(out, display)
 	}
-	// Only the complete units and context lines surviving the final MCP budget
-	// check establish exposure. Ref assignment alone is not delivery evidence.
+	return out
+}
+
+// rememberDeliveredFindExposure records hidden refs the model has now seen.
+// Only the complete units and context lines surviving the final MCP budget
+// check establish exposure. Ref assignment alone is not delivery evidence.
+func (s *service) rememberDeliveredFindExposure(
+	snapshot *appSnapshot, delivered []elementRecord,
+	contextSnapshot *AXSnapshotV1, deliveredContext []string,
+) {
 	remember := func(node *AXNode) {
 		if node == nil || !isShortAXRef(node.Ref) {
 			return
@@ -282,11 +343,11 @@ func (s *service) deliverFindPage(
 			s.rememberExposedHiddenRef(snapshot, record)
 		}
 	}
-	for _, record := range matched[offset:end] {
+	for _, record := range delivered {
 		remember(snapshot.axSnapshot.ByIndex[record.Index])
 	}
-	deliveredLines := make(map[string]bool, included)
-	for _, line := range lines[:included] {
+	deliveredLines := make(map[string]bool, len(deliveredContext))
+	for _, line := range deliveredContext {
 		deliveredLines[line] = true
 	}
 	var rememberContext func([]*AXNode, int)
@@ -301,7 +362,6 @@ func (s *service) deliverFindPage(
 		}
 	}
 	rememberContext(contextSnapshot.Roots, 1)
-	return result
 }
 
 // findNextPageLine is the continuation printed on a truncated find page: the

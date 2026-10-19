@@ -239,15 +239,15 @@ func axTargetedCoverageFailure(
 	isError bool,
 ) bool {
 	switch mode {
-	case a11yModeFind:
+	case axModeFind:
 		count, present := intEvidence(full["find_match_count"])
 		return present && count == 0
-	case a11yModeAssert:
+	case axModeAssert:
 		status := strings.ToLower(strings.TrimSpace(
 			fmt.Sprint(full["assertion_status"]),
 		))
 		return status == "locator_missing"
-	case a11yModeAct:
+	case axModeAct:
 		if !isError || evidenceIsTrue(full["input_events_emitted"]) {
 			return false
 		}
@@ -273,7 +273,7 @@ func addTreeProjectionMetadata(
 	result.StructuredContent["tree_view"] = normalizedTreeView(
 		snapshot.projection.View,
 	)
-	result.StructuredContent["ax_scope"] = normalizedA11yScope(
+	result.StructuredContent["ax_scope"] = normalizedAXScope(
 		snapshot.projection.Scope,
 	)
 	result.StructuredContent["canonical_element_count"] = len(snapshot.Elements)

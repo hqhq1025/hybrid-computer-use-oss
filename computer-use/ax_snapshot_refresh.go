@@ -236,7 +236,7 @@ func (s *service) prepareProviderSnapshot(
 	if accessibilityOperationCanMutate(request) && isShortAXRef(request.SourceRef) {
 		response.Snapshot.actedRef = request.SourceRef
 	}
-	if err := applyA11yScope(response.Snapshot, request.Scope); err != nil {
+	if err := applyAXScope(response.Snapshot, request.Scope); err != nil {
 		return nil, textResult(err.Error(), true).
 			withEvidenceScope("error_only")
 	}
@@ -1016,7 +1016,7 @@ func continuityNotes(previous, current *appSnapshot) []string {
 	if previous.SnapshotID == "" || current.SnapshotID == "" {
 		return notes
 	}
-	if normalizedA11yScope(current.projection.Scope) == a11yScopeContent &&
+	if normalizedAXScope(current.projection.Scope) == axScopeContent &&
 		previous.contentRevision != "" && current.contentRevision != "" {
 		current.comparedToPrevious = true
 		current.identicalToPrevious =

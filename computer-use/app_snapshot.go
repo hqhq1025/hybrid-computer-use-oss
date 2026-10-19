@@ -256,7 +256,7 @@ func (s *appSnapshot) renderedText() string {
 		lines = append(lines, "windows:")
 		lines = append(lines, renderedWindowInventory(s.Windows)...)
 	}
-	if normalizedA11yScope(s.scope) == a11yScopeContent && s.scopeRoot != nil {
+	if normalizedAXScope(s.scope) == axScopeContent && s.scopeRoot != nil {
 		lines = append(lines, fmt.Sprintf(
 			"scope: content root=%s %q",
 			canonicalRole(s.scopeRoot),

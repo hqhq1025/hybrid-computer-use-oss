@@ -13,7 +13,7 @@ func deliveredDiffBaselineSnapshot(id string, lines ...string) *appSnapshot {
 		publicWindowRef: "w1",
 		SnapshotID:      id,
 		TreeLines:       append([]string{"ax:"}, lines...),
-		projection:      snapshotProjection{View: treeViewWorking, Scope: a11yScopeWindow},
+		projection:      snapshotProjection{View: treeViewWorking, Scope: axScopeWindow},
 	}
 }
 

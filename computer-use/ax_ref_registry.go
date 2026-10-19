@@ -868,6 +868,60 @@ func refIdentityKey(
 	}, "\x00")
 }
 
+// refProviderIdentity is the optional provider identity that AcquireTyped
+// receives as positional strings. Positions 8 to 12 are trimmed when read;
+// positions 0 to 7 keep their raw value, which the continuity checks see.
+type refProviderIdentity struct {
+	busName, objectPath, processGeneration                   string
+	windowBusName, windowObjectPath, windowProcessGeneration string
+	windowRole, windowName                                   string
+	appRef, logicalWindowRef, scope                          string
+	automationID, providerRole                               string
+}
+
+func parseRefProviderIdentity(values []string) refProviderIdentity {
+	at := func(index int) string {
+		if len(values) > index {
+			return values[index]
+		}
+		return ""
+	}
+	return refProviderIdentity{
+		busName:                 at(0),
+		objectPath:              at(1),
+		processGeneration:       at(2),
+		windowBusName:           at(3),
+		windowObjectPath:        at(4),
+		windowProcessGeneration: at(5),
+		windowRole:              at(6),
+		windowName:              at(7),
+		appRef:                  strings.TrimSpace(at(8)),
+		logicalWindowRef:        strings.TrimSpace(at(9)),
+		scope:                   strings.TrimSpace(at(10)),
+		automationID:            strings.TrimSpace(at(11)),
+		providerRole:            strings.TrimSpace(at(12)),
+	}
+}
+
+// complete reports whether the identity names one live provider object.
+func (identity refProviderIdentity) complete() bool {
+	return strings.TrimSpace(identity.busName) != "" &&
+		strings.TrimSpace(identity.objectPath) != "" &&
+		strings.TrimSpace(identity.processGeneration) != ""
+}
+
+// refAcquisition is one AcquireTyped request after its arguments are read.
+type refAcquisition struct {
+	locatorKind    AXLocatorKind
+	appIdentity    string
+	windowHandle   string
+	semanticTarget string
+	role           CanonicalRole
+	name           string
+	revision       string
+	provider       refProviderIdentity
+}
+
 func (registry *RefRegistry) AcquireTyped(
 	locatorKind AXLocatorKind,
 	appIdentity,
@@ -884,60 +938,18 @@ func (registry *RefRegistry) AcquireTyped(
 	if locatorKind == "" {
 		locatorKind = AXLocatorSemantic
 	}
-	providerBusName := ""
-	providerObjectPath := ""
-	processGeneration := ""
-	providerWindowBusName := ""
-	providerWindowObjectPath := ""
-	providerWindowProcessGeneration := ""
-	providerWindowRole := ""
-	providerWindowName := ""
-	if len(providerIdentity) > 0 {
-		providerBusName = providerIdentity[0]
+	request := refAcquisition{
+		locatorKind:    locatorKind,
+		appIdentity:    appIdentity,
+		windowHandle:   windowHandle,
+		semanticTarget: semanticTarget,
+		role:           role,
+		name:           name,
+		revision:       revision,
+		provider:       parseRefProviderIdentity(providerIdentity),
 	}
-	if len(providerIdentity) > 1 {
-		providerObjectPath = providerIdentity[1]
-	}
-	if len(providerIdentity) > 2 {
-		processGeneration = providerIdentity[2]
-	}
-	if len(providerIdentity) > 3 {
-		providerWindowBusName = providerIdentity[3]
-	}
-	if len(providerIdentity) > 4 {
-		providerWindowObjectPath = providerIdentity[4]
-	}
-	if len(providerIdentity) > 5 {
-		providerWindowProcessGeneration = providerIdentity[5]
-	}
-	if len(providerIdentity) > 6 {
-		providerWindowRole = providerIdentity[6]
-	}
-	if len(providerIdentity) > 7 {
-		providerWindowName = providerIdentity[7]
-	}
-	appRef := ""
-	if len(providerIdentity) > 8 {
-		appRef = strings.TrimSpace(providerIdentity[8])
-	}
-	logicalWindowRef := ""
-	if len(providerIdentity) > 9 {
-		logicalWindowRef = strings.TrimSpace(providerIdentity[9])
-	}
-	providerIdentityScope := ""
-	if len(providerIdentity) > 10 {
-		providerIdentityScope = strings.TrimSpace(providerIdentity[10])
-	}
-	automationID, providerRole := "", ""
-	if len(providerIdentity) > 11 {
-		automationID = strings.TrimSpace(providerIdentity[11])
-	}
-	if len(providerIdentity) > 12 {
-		providerRole = strings.TrimSpace(providerIdentity[12])
-	}
-	providerComplete := strings.TrimSpace(providerBusName) != "" &&
-		strings.TrimSpace(providerObjectPath) != "" &&
-		strings.TrimSpace(processGeneration) != ""
+	provider := request.provider
+	providerComplete := provider.complete()
 	if locatorKind == AXLocatorProviderBound && !providerComplete {
 		return ""
 	}
@@ -947,109 +959,136 @@ func (registry *RefRegistry) AcquireTyped(
 	}
 	registry.tick++
 	ownerIdentity := appIdentity
-	if appRef != "" {
-		ownerIdentity = appRef
+	if provider.appRef != "" {
+		ownerIdentity = provider.appRef
 	}
 	key := refIdentityKey(
-		locatorKind, ownerIdentity, logicalWindowRef, windowHandle,
+		locatorKind, ownerIdentity, provider.logicalWindowRef, windowHandle,
 		semanticTarget, role, name,
-		providerBusName, providerObjectPath, processGeneration,
-		providerWindowBusName, providerWindowObjectPath,
-		providerWindowProcessGeneration, providerIdentityScope,
+		provider.busName, provider.objectPath, provider.processGeneration,
+		provider.windowBusName, provider.windowObjectPath,
+		provider.windowProcessGeneration, provider.scope,
 	)
-	if ref := registry.byIdentity[key]; ref != "" {
-		if entry := registry.entries[ref]; entry != nil {
-			if entry.Lifecycle != AXRefActive &&
-				entry.Lifecycle != AXRefNeedsRevalidation {
-				delete(registry.byIdentity, key)
-			} else {
-				if processInstanceBindingChanged(entry, providerBusName, providerObjectPath,
-					processGeneration, providerIdentityScope) ||
-					!providerWindowOwnershipContinuous(entry, providerWindowBusName,
-						providerWindowObjectPath, providerWindowProcessGeneration) ||
-					entry.WindowHandle != strings.TrimSpace(windowHandle) {
-					registry.MarkSuperseded(ref, "provider instance or window continuity lost")
-				} else if locatorKind == AXLocatorProviderBound &&
-					providerComplete &&
-					!providerBoundProjectionContinuity(entry, &AXRefEntry{
-						LocatorKind: locatorKind, AppRef: appRef,
-						LogicalWindowRef: logicalWindowRef, WindowHandle: windowHandle,
-						ProviderBusName: providerBusName, ProviderObjectPath: providerObjectPath,
-						ProcessGeneration: processGeneration, ProviderIdentityScope: providerIdentityScope,
-						ProviderWindowBusName:           providerWindowBusName,
-						ProviderWindowObjectPath:        providerWindowObjectPath,
-						ProviderWindowProcessGeneration: providerWindowProcessGeneration,
-						Role:                            role, ProviderRole: providerRole, Name: name,
-						AutomationID: automationID, SemanticTarget: semanticTarget,
-					}, nil) {
-					entry.Lifecycle = AXRefSuperseded
-					entry.StaleReason = "provider identity now exposes a different semantic object"
-					delete(registry.byIdentity, key)
-				} else {
-					entry.AppRef = appRef
-					entry.LogicalWindowRef = logicalWindowRef
-					providerChanged := locatorKind == AXLocatorSemantic &&
-						completeProviderIdentityChanged(
-							entry,
-							providerBusName,
-							providerObjectPath,
-							processGeneration,
-						)
-					if !providerChanged {
-						entry.ProviderBusName = strings.TrimSpace(providerBusName)
-						entry.ProviderObjectPath = strings.TrimSpace(providerObjectPath)
-						entry.ProcessGeneration = strings.TrimSpace(processGeneration)
-						entry.ProviderIdentityScope = providerIdentityScope
-					}
-					entry.LastSeenRevision = revision
-					entry.LastUsedTick = registry.tick
-					entry.ProviderWindowRole = normalizedTreeText(providerWindowRole)
-					entry.ProviderWindowName = normalizedTreeText(providerWindowName)
-					if locatorKind == AXLocatorProviderBound {
-						entry.AutomationID = automationID
-						entry.ProviderRole = providerRole
-						entry.Role = role
-						entry.Name = name
-						entry.SemanticTarget = strings.TrimSpace(semanticTarget)
-					}
-					entry.Lifecycle = AXRefActive
-					entry.StaleReason = ""
-					return ref
-				}
-			}
-		}
-		delete(registry.byIdentity, key)
+	if ref, reused := registry.reuseIdentityRef(key, request); reused {
+		return ref
 	}
-	if providerIdentityScope == "process_instance" && !providerComplete {
+	if provider.scope == "process_instance" && !providerComplete {
 		return ""
 	}
+	return registry.mintRef(key, request)
+}
+
+// reuseIdentityRef returns the ref already issued for key when its entry is
+// still live and the provider object and window are continuous. Otherwise it
+// retires the entry, drops key from the identity index and reports false.
+func (registry *RefRegistry) reuseIdentityRef(key string, request refAcquisition) (string, bool) {
+	ref := registry.byIdentity[key]
+	if ref == "" {
+		return "", false
+	}
+	provider := request.provider
+	if entry := registry.entries[ref]; entry != nil {
+		if entry.Lifecycle != AXRefActive &&
+			entry.Lifecycle != AXRefNeedsRevalidation {
+			delete(registry.byIdentity, key)
+		} else {
+			if processInstanceBindingChanged(entry, provider.busName, provider.objectPath,
+				provider.processGeneration, provider.scope) ||
+				!providerWindowOwnershipContinuous(entry, provider.windowBusName,
+					provider.windowObjectPath, provider.windowProcessGeneration) ||
+				entry.WindowHandle != strings.TrimSpace(request.windowHandle) {
+				registry.MarkSuperseded(ref, "provider instance or window continuity lost")
+			} else if request.locatorKind == AXLocatorProviderBound &&
+				provider.complete() &&
+				!providerBoundProjectionContinuity(entry, &AXRefEntry{
+					LocatorKind: request.locatorKind, AppRef: provider.appRef,
+					LogicalWindowRef: provider.logicalWindowRef, WindowHandle: request.windowHandle,
+					ProviderBusName: provider.busName, ProviderObjectPath: provider.objectPath,
+					ProcessGeneration: provider.processGeneration, ProviderIdentityScope: provider.scope,
+					ProviderWindowBusName:           provider.windowBusName,
+					ProviderWindowObjectPath:        provider.windowObjectPath,
+					ProviderWindowProcessGeneration: provider.windowProcessGeneration,
+					Role:                            request.role, ProviderRole: provider.providerRole, Name: request.name,
+					AutomationID: provider.automationID, SemanticTarget: request.semanticTarget,
+				}, nil) {
+				entry.Lifecycle = AXRefSuperseded
+				entry.StaleReason = "provider identity now exposes a different semantic object"
+				delete(registry.byIdentity, key)
+			} else {
+				registry.refreshReusedEntry(entry, request)
+				return ref, true
+			}
+		}
+	}
+	delete(registry.byIdentity, key)
+	return "", false
+}
+
+// refreshReusedEntry records the current observation on a reused entry. A
+// semantic ref keeps its old provider object when the provider identity
+// changed; a provider-bound ref takes the current role, name and target.
+func (registry *RefRegistry) refreshReusedEntry(entry *AXRefEntry, request refAcquisition) {
+	provider := request.provider
+	entry.AppRef = provider.appRef
+	entry.LogicalWindowRef = provider.logicalWindowRef
+	providerChanged := request.locatorKind == AXLocatorSemantic &&
+		completeProviderIdentityChanged(
+			entry,
+			provider.busName,
+			provider.objectPath,
+			provider.processGeneration,
+		)
+	if !providerChanged {
+		entry.ProviderBusName = strings.TrimSpace(provider.busName)
+		entry.ProviderObjectPath = strings.TrimSpace(provider.objectPath)
+		entry.ProcessGeneration = strings.TrimSpace(provider.processGeneration)
+		entry.ProviderIdentityScope = provider.scope
+	}
+	entry.LastSeenRevision = request.revision
+	entry.LastUsedTick = registry.tick
+	entry.ProviderWindowRole = normalizedTreeText(provider.windowRole)
+	entry.ProviderWindowName = normalizedTreeText(provider.windowName)
+	if request.locatorKind == AXLocatorProviderBound {
+		entry.AutomationID = provider.automationID
+		entry.ProviderRole = provider.providerRole
+		entry.Role = request.role
+		entry.Name = request.name
+		entry.SemanticTarget = strings.TrimSpace(request.semanticTarget)
+	}
+	entry.Lifecycle = AXRefActive
+	entry.StaleReason = ""
+}
+
+// mintRef issues the next rN for key and indexes its entry.
+func (registry *RefRegistry) mintRef(key string, request refAcquisition) string {
+	provider := request.provider
 	ref := "r" + strconv.FormatUint(registry.next, 10)
 	registry.next++
 	entry := &AXRefEntry{
 		Ref:                             ref,
 		IdentityKey:                     key,
-		LocatorKind:                     locatorKind,
+		LocatorKind:                     request.locatorKind,
 		Lifecycle:                       AXRefActive,
-		AppRef:                          strings.TrimSpace(appRef),
-		AppIdentity:                     strings.ToLower(strings.TrimSpace(appIdentity)),
-		LogicalWindowRef:                logicalWindowRef,
-		WindowHandle:                    strings.TrimSpace(windowHandle),
-		ProviderBusName:                 strings.TrimSpace(providerBusName),
-		ProviderObjectPath:              strings.TrimSpace(providerObjectPath),
-		ProcessGeneration:               strings.TrimSpace(processGeneration),
-		ProviderIdentityScope:           providerIdentityScope,
-		ProviderWindowBusName:           strings.TrimSpace(providerWindowBusName),
-		ProviderWindowObjectPath:        strings.TrimSpace(providerWindowObjectPath),
-		ProviderWindowProcessGeneration: strings.TrimSpace(providerWindowProcessGeneration),
-		ProviderWindowRole:              normalizedTreeText(providerWindowRole),
-		ProviderWindowName:              normalizedTreeText(providerWindowName),
-		SemanticTarget:                  strings.TrimSpace(semanticTarget),
-		AutomationID:                    automationID,
-		ProviderRole:                    providerRole,
-		Role:                            role,
-		Name:                            name,
-		CreatedRevision:                 revision,
-		LastSeenRevision:                revision,
+		AppRef:                          strings.TrimSpace(provider.appRef),
+		AppIdentity:                     strings.ToLower(strings.TrimSpace(request.appIdentity)),
+		LogicalWindowRef:                provider.logicalWindowRef,
+		WindowHandle:                    strings.TrimSpace(request.windowHandle),
+		ProviderBusName:                 strings.TrimSpace(provider.busName),
+		ProviderObjectPath:              strings.TrimSpace(provider.objectPath),
+		ProcessGeneration:               strings.TrimSpace(provider.processGeneration),
+		ProviderIdentityScope:           provider.scope,
+		ProviderWindowBusName:           strings.TrimSpace(provider.windowBusName),
+		ProviderWindowObjectPath:        strings.TrimSpace(provider.windowObjectPath),
+		ProviderWindowProcessGeneration: strings.TrimSpace(provider.windowProcessGeneration),
+		ProviderWindowRole:              normalizedTreeText(provider.windowRole),
+		ProviderWindowName:              normalizedTreeText(provider.windowName),
+		SemanticTarget:                  strings.TrimSpace(request.semanticTarget),
+		AutomationID:                    provider.automationID,
+		ProviderRole:                    provider.providerRole,
+		Role:                            request.role,
+		Name:                            request.name,
+		CreatedRevision:                 request.revision,
+		LastSeenRevision:                request.revision,
 		LastUsedTick:                    registry.tick,
 	}
 	registry.entries[ref] = entry

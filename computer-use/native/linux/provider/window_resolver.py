@@ -29,6 +29,43 @@ from .x11_windows import (
 
 
 def perform_ax_window_action(tool, app, window, element_record):
+    """Run activate or close on one top-level window and confirm the effect.
+
+    Every check before the command fails closed with no command emitted; once
+    wmctrl starts, an unconfirmed effect is reported as effect_unknown.
+    """
+    handle, window_id = _window_action_preflight(
+        tool, app, window, element_record
+    )
+    app_name = str(node_name(app) or "").strip()
+    app_pid = node_pid(app)
+    _emit_native_window_command(tool, window_id)
+    observed, windowless = _await_window_transition(
+        tool, app, app_pid, window_id
+    )
+    if not observed:
+        raise OperationFailure(
+            "effect_unknown: the native window command was emitted, but a "
+            "complete X11 inventory did not confirm that the exact target "
+            "window disappeared.",
+            failure_code="effect_unknown",
+            failure_phase="postcondition",
+            input_events_emitted=True,
+        )
+    return {
+        "note": (
+            "[a11y][window] {} requested; transition_observed={} "
+            "windowless_after_close={}."
+        ).format(tool, str(observed).lower(), str(windowless).lower()),
+        "windowless": windowless,
+        "app_name": app_name,
+        "app_pid": app_pid,
+        "closed_handle": handle,
+    }
+
+
+def _window_action_preflight(tool, app, window, element_record):
+    """Return (handle, window_id) of the exact native window to command."""
     role = str((element_record or {}).get("controlType") or "").strip().lower()
     path = list((element_record or {}).get("runtimeId") or [])
     if role not in AX_WINDOW_ROLES or len(path) != 1:
@@ -109,8 +146,10 @@ def perform_ax_window_action(tool, app, window, element_record):
             input_events_emitted=False,
             failure_subject="window",
         )
-    app_name = str(node_name(app) or "").strip()
-    app_pid = node_pid(app)
+    return handle, window_id
+
+
+def _emit_native_window_command(tool, window_id):
     try:
         result = subprocess.run(
             ["wmctrl", "-ia" if tool == "activate" else "-ic", window_id],
@@ -145,6 +184,14 @@ def perform_ax_window_action(tool, app, window, element_record):
         input_emitted=True,
     )
     _x11_window_inventory_cache.clear()
+
+
+def _await_window_transition(tool, app, app_pid, window_id):
+    """Poll until the command's effect is observed or the deadline passes.
+
+    Returns (observed, windowless). Activation is observed when the window is
+    active; close is observed only when the exact native window is gone.
+    """
     deadline = time.monotonic() + AX_WINDOW_ACTION_TIMEOUT_SECONDS
     observed = False
     windowless = False
@@ -180,25 +227,7 @@ def perform_ax_window_action(tool, app, window, element_record):
         if observed or time.monotonic() >= deadline:
             break
         time.sleep(AX_WINDOW_ACTION_POLL_SECONDS)
-    if not observed:
-        raise OperationFailure(
-            "effect_unknown: the native window command was emitted, but a "
-            "complete X11 inventory did not confirm that the exact target "
-            "window disappeared.",
-            failure_code="effect_unknown",
-            failure_phase="postcondition",
-            input_events_emitted=True,
-        )
-    return {
-        "note": (
-            "[a11y][window] {} requested; transition_observed={} "
-            "windowless_after_close={}."
-        ).format(tool, str(observed).lower(), str(windowless).lower()),
-        "windowless": windowless,
-        "app_name": app_name,
-        "app_pid": app_pid,
-        "closed_handle": handle,
-    }
+    return observed, windowless
 
 
 def resolve_window_action_target(app, target):

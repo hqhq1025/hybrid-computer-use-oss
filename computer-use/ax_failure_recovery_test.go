@@ -444,7 +444,7 @@ func TestContentTransitionFallbackReturnsWorkingTree(t *testing.T) {
 	previous.SnapshotID = "previous"
 	previous.contentRevision = "c1:0123456789abcdef01234567"
 	previous.projection = snapshotProjection{
-		View: treeViewWorking, Scope: a11yScopeWindow,
+		View: treeViewWorking, Scope: axScopeWindow,
 	}
 	previous.axSnapshot = nil
 	service.rememberDeliveredSnapshot(previous)
@@ -455,7 +455,7 @@ func TestContentTransitionFallbackReturnsWorkingTree(t *testing.T) {
 	current.SnapshotID = "current"
 	current.contentRevision = "c1:89abcdef0123456701234567"
 	current.projection = snapshotProjection{
-		View: treeViewWorking, Scope: a11yScopeWindow,
+		View: treeViewWorking, Scope: axScopeWindow,
 	}
 	current.axSnapshot = nil
 	current.TreeLines = []string{
@@ -500,13 +500,13 @@ func TestFinalObservationReturnsLifecycleWhenClosedAppHasNoReplacementWindow(
 		}},
 	}
 	service.backend = backend
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
 		windowHandle: "w2:0123456789abcdef0123456789abcdef",
 	}
-	result := service.a11yBatchFinalObservation(
+	result := service.axBatchFinalObservation(
 		context,
 		observation{mode: observeDiff},
 		true,
@@ -539,7 +539,7 @@ func TestSharedDiffFallbackReturnsFreshBoundedWorkingTree(t *testing.T) {
 	snapshot.publicWindowRef = "w2"
 	snapshot.projection = snapshotProjection{
 		View:  treeViewWorking,
-		Scope: a11yScopeWindow,
+		Scope: axScopeWindow,
 	}
 
 	result, lines, returned, compact, fullTree :=
@@ -594,7 +594,7 @@ func TestCloseObserveNoneDoesNotLeakReplacementWindowObservation(t *testing.T) {
 		},
 	}
 	service.backend = backend
-	context := &a11yBatchContext{
+	context := &axBatchContext{
 		appRef:       appRef,
 		windowRef:    sourceWindowRef,
 		appToken:     appRef,
@@ -609,7 +609,7 @@ func TestCloseObserveNoneDoesNotLeakReplacementWindowObservation(t *testing.T) {
 
 	result := service.recoverClosedWindowActionObservation(
 		context,
-		a11yBatchAction{actionType: "close"},
+		axBatchAction{actionType: "close"},
 		actionResult,
 		observation{mode: observeNone},
 	)

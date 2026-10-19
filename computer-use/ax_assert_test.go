@@ -10,7 +10,7 @@ import (
 
 func TestScopedLookupExcludesApplicationChrome(t *testing.T) {
 	snapshot := &appSnapshot{
-		scope: a11yScopeContent,
+		scope: axScopeContent,
 		scopeRoot: &elementRecord{
 			Index: 2, RuntimeID: []int{1}, ControlType: "document web",
 		},
@@ -126,14 +126,14 @@ func TestPendingStaleGateBlocksNumericVerify(t *testing.T) {
 	exists := true
 	goal := verifyGoal{exists: &exists}
 	blocked := service.verify(
-		"edit", "17", "17", goal, 10, 0, a11yScopeWindow)
+		"edit", "17", "17", goal, 10, 0, axScopeWindow)
 	if !blocked.IsError ||
 		!strings.Contains(resultText(blocked), "cannot reuse an element index") {
 		t.Fatalf("the stale app's loose alias must block its old numeric index: %#v", blocked)
 	}
 
 	noCache := newService().verify(
-		"editor", "17", "17", goal, 10, 0, a11yScopeWindow)
+		"editor", "17", "17", goal, 10, 0, axScopeWindow)
 	if !noCache.IsError ||
 		!strings.Contains(resultText(noCache), "without a current snapshot") {
 		t.Fatalf("numeric verify must always be bound to a current app snapshot: %#v", noCache)
@@ -755,14 +755,14 @@ func TestValueEqualsAssertionUsesExactTrimmedValue(t *testing.T) {
 		"target": map[string]any{"ref": "r17"},
 		"value":  "5",
 	}
-	spec, err := parseA11yAssertionSpec(assertion)
+	spec, err := parseAXAssertionSpec(assertion)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if spec.assertionType != "value_equals" {
 		t.Fatalf("assertion type = %q", spec.assertionType)
 	}
-	containsSpec, err := parseA11yAssertionSpec(map[string]any{
+	containsSpec, err := parseAXAssertionSpec(map[string]any{
 		"type":   "value",
 		"target": map[string]any{"ref": "r17"},
 		"value":  "5",
