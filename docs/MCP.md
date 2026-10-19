@@ -289,7 +289,7 @@ application aN -> top-level window wN -> element rN
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
 - `act` runs ordered steps: actions
-  `{type, ref|title, text|keys|value|direction|pages}` and `wait` steps. The
+  `{type, ref|title, text|keys|value|direction|pages|to_ref}` and `wait` steps. The
   `rN` or `wN` refs name the window, so an `act` call with refs needs no
   `window_ref`; `window_ref` only sends ref-less `keypress` and `type` to a
   window other than the focused one. `activate` and `close` accept a window
@@ -309,6 +309,16 @@ application aN -> top-level window wN -> element rN
   current state follows; a read that is incomplete keeps polling until the
   timeout. After a `window` wait, keys and text without `ref` go to that
   window. An `act` with only `wait` steps waits without input.
+- A `select` step selects without typing or clicking. `{"ref":"rA"}`
+  selects the whole element, or the item in a list. `"text"` selects that
+  exact substring of `rA`; it must occur once. `"to_ref":"rB"` selects from
+  the start of `rA` through the end of `rB`, for two cells of one table or
+  for two sibling text elements such as Writer paragraphs. The provider reads
+  the selection back and reports it as a note, for example
+  `[select] selected 4 cells A2:B3`; it fails with `effect_unknown` when it
+  cannot read back what it asked for. On Linux, text across paragraphs is
+  selected with the caret at the start of `rA` and `ctrl+shift+Down`, because
+  AT-SPI selects inside one object only.
 - The removed `until` field, and its older spellings `postcondition` and
   `assertion`, are rejected before any input. The hint is the same call
   rewritten with `wait` steps.

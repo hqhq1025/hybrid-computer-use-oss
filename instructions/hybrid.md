@@ -56,6 +56,11 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
 {"mode":"act","actions":[{"type":"click","ref":"r7"},{"type":"wait","query":{"role":"menu item","name_contains":"Paragraph"}},{"type":"click","ref":"r9"}]}
 ```
 
+- Select text or cells with a `select` step before a command that applies to
+  the selection: `{"type":"select","ref":"r4","to_ref":"r5"}` selects from
+  paragraph `r4` through paragraph `r5`, or the cell range between two cells;
+  `"text"` selects one substring of `ref`. The result reports what is now
+  selected; check it before applying the command.
 - Take a GUI screenshot when the question is visual or AX lacks a visible
   element. Do not alternate screenshots and AX reads of an unchanged state.
 - Combine related read-only shell checks into one command or script.
