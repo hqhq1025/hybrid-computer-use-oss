@@ -97,7 +97,7 @@ The CLI and SDK start it on first use.
 | Start | first call forks `computer-use serve`; a `flock` beside the socket makes concurrent first calls start one daemon |
 | Methods | `hello` (version, contract version, display check), `call`, `schema`, `status`, `stop`, `mcp` |
 | Sessions | each connection has its own session unless `hello` names one (`HCU_SESSION`, `--session`); same name, same session |
-| Input lock | one call runs at a time across all sessions, so input never interleaves |
+| Input lock | one call runs at a time across all sessions, so input never interleaves. A `wait` step polls inside its call and holds the lock for at most its `timeout_ms` (default 5000, at most 60000), as the `until` it replaced did; the lock is not released between polls. The CLI `wait` command and SDK `wait()` send `observe:"none"`, so a wait adds no tree read after it, also when it times out. An act of only `wait` steps sends no input, so an in-process MCP server allows it while a daemon runs |
 | `request_id` | a call with an id runs once; a repeat (also on a new connection) returns the first result with `replayed: true`; kept 10 minutes |
 | Environment | `hello` with another display is refused; a call after the daemon's own session environment changed is refused with `runtime_error` |
 | Restart | ref counters are saved beside the socket, so a restarted daemon never issues an old number; old refs fail as expired |
@@ -117,7 +117,7 @@ computer-use help cli                                   full usage and exit code
 
 Default output is the MCP text, byte for byte; `--json` (for `act` and `gui`,
 `--records`) prints the record. Exit status comes from the error table: 0
-success, 2 `invalid_argument`, 3 `until_failed`/`until_unknown`, 4
+success, 2 `invalid_argument`, 3 `wait_timeout`, 4
 `stale_ref`/`gui_frame_stale`, 5 `window_changed`/`effect_unknown`, 6
 `app_unavailable`/`ambiguous_window`/`window_not_found`/`no_focused_window`,
 10 `runtime_error`, 64 usage. No exit status mixes codes that sent no input

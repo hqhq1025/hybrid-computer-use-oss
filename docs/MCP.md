@@ -286,26 +286,30 @@ application aN -> top-level window wN -> element rN
   still accepts an `aN`, a name, an app id or a PID.
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
-- `act` runs flat actions in one window:
-  `{type, ref|title, text|keys|value|direction|pages, until}`. The `rN` or
-  `wN` refs name that window, so an `act` call with refs needs no
+- `act` runs ordered steps: actions
+  `{type, ref|title, text|keys|value|direction|pages}` and `wait` steps. The
+  `rN` or `wN` refs name the window, so an `act` call with refs needs no
   `window_ref`; `window_ref` only sends ref-less `keypress` and `type` to a
-  window other than the focused one. `activate` and
-  `close` accept a window title substring, resolved to one `wN` before any
-  input. `keypress` and `type` without `ref` go to the window that had focus
-  when the call started.
-- `until` is one predicate (`exists`, `state`, `value`, `text`, `title`, with
-  `negate`, `timeout_ms`, `stable_ms`) on an action, an `act` call, or an
-  `observe` call. On `observe` and on a whole `act` call a false predicate is
-  a result, not an error. A `selector` predicate and a `title` predicate
-  observe the whole application that owns the call's window: all of its
-  top-level windows, including dialogs and popup menus. A `ref` predicate
-  reads that one element. A negated `title` is true when no window of the
-  application has a matching title, also when the application has no window
-  left or has exited, provided the window inventory was read completely.
-  `until` never sends input and never changes which window receives input.
-  When `until_failed` or `until_unknown` knows the window that appeared or
-  took focus, the hint observes that `wN`.
+  window other than the focused one. `activate` and `close` accept a window
+  title substring, resolved to one `wN` before any input. `keypress` and
+  `type` without `ref` go to the window that had focus when the call started.
+  Every step uses the same rule: the first step that fails stops the batch,
+  and the result says how many ran.
+- A `wait` step sends no input. Its forms are `window` (a top-level window
+  whose title contains the text, read from the whole desktop, so another
+  process or a relaunched application counts), `query` (an element in any
+  visible window of the batch's application, including dialogs and popups,
+  matched as `find` matches), `ref` with `value`, `state` or `text` (one
+  element), and `text` alone (text anywhere in the batch window). `gone:true`
+  waits for absence; an exited application has no window. `timeout_ms`
+  defaults to 5000. On timeout the step fails with `wait_timeout`, the
+  message says what was seen or why the state could not be read, and the
+  current state follows; a read that is incomplete keeps polling until the
+  timeout. After a `window` wait, keys and text without `ref` go to that
+  window. An `act` with only `wait` steps waits without input.
+- The removed `until` field, and its older spellings `postcondition` and
+  `assertion`, are rejected before any input. The hint is the same call
+  rewritten with `wait` steps.
 
 Every `act` result that sent input starts, after the evidence line, with a
 report built from the reads the call makes anyway:
@@ -322,19 +326,19 @@ the role, the name, and the state or value fields that changed. It says
 it, and `unknown (reason)` when no read after the action covers it. The
 `windows` line compares the application's top-level windows before the first
 action with those after the last; new windows get a `wN` at once. When the
-report shows every targeted element changed, or an `until` held, the evidence
-line does not also say `effect_unknown`.
+report shows every targeted element changed, or a `wait` after the last action
+held, the evidence line does not also say `effect_unknown`.
 
 References describe current state; they are not durable selectors. Every
 mutation resolves its reference against the live accessibility tree again and
 rejects stale or cross-window targets before any input.
 
 Every AX result starts with one JSON line: `ok`, and on failure `code`,
-`path`, `message` and `hint` (a corrected call), then `until`,
-`input_emitted`, `completed` and `requested`. The codes are
-`invalid_argument`, `stale_ref`, `window_changed`, `until_failed`,
-`until_unknown`, `effect_unknown`, `app_unavailable`, `runtime_error`,
-`ambiguous_window`, `window_not_found` and `no_focused_window`.
+`path`, `message` and `hint` (a corrected call), then `input_emitted`,
+`completed` and `requested`. The codes are `invalid_argument`, `stale_ref`,
+`window_changed`, `wait_timeout`, `effect_unknown`, `app_unavailable`,
+`runtime_error`, `ambiguous_window`, `window_not_found` and
+`no_focused_window`.
 
 `GUI` takes an ordered `actions` array: screenshot, pointer, drag, scroll,
 keyboard, text and wait actions. A screenshot establishes a private layout

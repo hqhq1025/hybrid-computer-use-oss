@@ -467,7 +467,8 @@ func TestPrepareAXEvidenceKeepsAssertionTimeoutFacts(t *testing.T) {
 	}
 }
 
-func TestPrepareAXEvidenceKeepsRequestedPostcondition(t *testing.T) {
+// Internal predicate evidence reaches the model under the public name wait.
+func TestPrepareAXEvidenceNamesPredicateEvidenceWait(t *testing.T) {
 	result := toolCallResult{
 		Content: []contentItem{{Type: "text", Text: "batch result"}},
 		StructuredContent: map[string]any{
@@ -500,7 +501,7 @@ func TestPrepareAXEvidenceKeepsRequestedPostcondition(t *testing.T) {
 	}
 	result = prepareAXEvidence(result)
 	batch := result.StructuredContent["batch"].(map[string]any)
-	postcondition, ok := batch["until"].(map[string]any)
+	postcondition, ok := batch["wait"].(map[string]any)
 	if !ok || postcondition["status"] != "pass" {
 		t.Fatalf("requested postcondition evidence was lost: %#v", batch)
 	}
@@ -537,7 +538,7 @@ func TestPrepareAXEvidenceKeepsUnknownFinalObservation(t *testing.T) {
 		"observation_required":           true,
 		"observation_failure_code":       "runtime_timeout",
 		"post_action_observation_status": "unknown",
-		"until_verified":                 false,
+		"wait_verified":                  false,
 	} {
 		if result.StructuredContent[key] != expected {
 			t.Fatalf("%s=%#v want %#v in %#v",

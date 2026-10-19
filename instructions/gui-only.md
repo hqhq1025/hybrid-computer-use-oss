@@ -2,7 +2,7 @@
 
 The only Computer Use MCP tool available is GUI. Shell, file editing, browser
 automation, and documented application APIs remain available when exposed by
-the agent. AX trees, refs, and `until` predicates are unavailable. Follow the
+the agent. AX trees, refs, and `wait` steps are unavailable. Follow the
 current GUI schema for argument shapes and supported actions.
 
 ## Choose A Channel

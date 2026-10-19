@@ -535,10 +535,19 @@ func TestInProcessMCPRefusesInputWhileADaemonRuns(t *testing.T) {
 	for _, read := range []map[string]any{
 		{"name": "AX", "arguments": map[string]any{"mode": "observe", "window_ref": "w1"}},
 		{"name": "GUI", "arguments": map[string]any{"actions": []any{map[string]any{"type": "screenshot"}}}},
+		// An act of only wait steps sends no input.
+		{"name": "AX", "arguments": map[string]any{"mode": "act", "actions": []any{
+			map[string]any{"type": "wait", "window": "Saved"}}}},
 	} {
 		if guard.refuse(map[string]any{"method": "tools/call", "params": read}) != nil {
 			t.Fatalf("reads stay allowed: %v", read)
 		}
+	}
+	clickThenWait := map[string]any{"method": "tools/call", "params": map[string]any{
+		"name": "AX", "arguments": map[string]any{"mode": "act", "actions": []any{
+			map[string]any{"type": "click", "ref": "r1"}, map[string]any{"type": "wait", "window": "Saved"}}}}}
+	if guard.refuse(clickThenWait) == nil {
+		t.Fatal("an act with an action and a wait sends input and must be refused")
 	}
 	guard.live = func(string) bool { return false }
 	if guard.refuse(act) != nil {

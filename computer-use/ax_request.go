@@ -17,8 +17,8 @@ const (
 	a11yModeObserve = "observe"
 	a11yModeFind    = "find"
 	a11yModeAct     = "act"
-	// a11yModeAssert names the internal predicate check that observe+until
-	// and act until run. It is not a public mode.
+	// a11yModeAssert names the internal predicate check that a wait step
+	// runs. It is not a public mode.
 	a11yModeAssert = "assert_ax"
 )
 
@@ -35,8 +35,7 @@ func parseA11yMode(args map[string]any) (string, error) {
 
 // resolveA11yReadIdentity binds a read to one app or window. app accepts an
 // application name, app id, PID, or an aN ref from apps; window_ref names
-// one window. A ref-owned until target supplies the identity when neither is
-// given.
+// one window. A target rN supplies the identity when neither is given.
 func (s *service) resolveA11yReadIdentity(
 	app, windowRef, target string,
 ) (*a11yReadContext, error) {
@@ -146,9 +145,6 @@ func (s *service) a11yObserve(
 	request *axRequest,
 	obs observation,
 ) toolCallResult {
-	if request.until != nil {
-		return s.a11yObserveUntil(request, obs)
-	}
 	var root map[string]any
 	switch {
 	case request.root == "focused":
@@ -187,73 +183,6 @@ func (s *service) a11yObserve(
 		readContext.windowHandle,
 	).withEvidenceScope("independent_ui_read")
 	return withA11yModeEvidence(result, a11yModeObserve)
-}
-
-// a11yObserveUntil waits for a predicate and then returns the requested
-// observation. A predicate that stays false is a result, not an error.
-func (s *service) a11yObserveUntil(
-	request *axRequest,
-	obs observation,
-) toolCallResult {
-	target := optionalString(axUntilTarget(request.until), "ref")
-	readContext, identityErr := s.resolveA11yReadIdentity(request.app, request.windowRef, target)
-	if identityErr != nil {
-		return axIdentityErrorResult(identityErr)
-	}
-	check := s.runA11yAssertion(readContext, request.until, request.scope)
-	check = withA11yModeEvidence(check, a11yModeObserve)
-	status, _ := check.StructuredContent["assertion_status"].(string)
-	passed := !check.IsError && status == "pass"
-	predicateFalse := !check.IsError && status != "pass"
-	if check.StructuredContent == nil {
-		check.StructuredContent = map[string]any{}
-	}
-	check.StructuredContent["until_result"] = map[bool]string{true: "true", false: "false"}[passed]
-	if check.IsError {
-		check.StructuredContent["until_result"] = "unknown"
-		return check
-	}
-	_ = predicateFalse
-	if obs.resolvedMode() == observeNone || readContext.appToken == "" {
-		return check
-	}
-	var includeScreenshot *bool
-	if obs.resolvedMode() == observeScreenshot || obs.resolvedMode() == observeFull {
-		enabled := true
-		includeScreenshot = &enabled
-	}
-	var current toolCallResult
-	if obs.resolvedMode() == observeDiff || obs.resolvedMode() == "" {
-		current = s.a11yDiffObservation(readContext, request.scope)
-	} else {
-		forceFull := obs.resolvedMode() == observeFull
-		current = s.getAppState(
-			readContext.appToken,
-			nil, nil, nil, nil,
-			includeScreenshot,
-			&forceFull,
-			treeViewWorking,
-			request.scope,
-			nil,
-			readContext.windowHandle,
-		)
-	}
-	if current.IsError {
-		// The predicate result stands; the follow-up read is extra evidence.
-		check.Content = append(check.Content, contentItem{
-			Type: "text",
-			Text: "current state unavailable: " + firstLine(resultText(current)),
-		})
-		return check
-	}
-	check.Content = append(check.Content, current.Content...)
-	for _, key := range []string{"tree_complete_for_model", "coverage_incomplete_nodes",
-		"structural_budget_omitted_nodes", "final_observation_kind"} {
-		if value, present := current.StructuredContent[key]; present {
-			check.StructuredContent[key] = value
-		}
-	}
-	return check
 }
 
 // a11yDiffObservation reads the window and renders it as a diff against the
@@ -406,7 +335,6 @@ func (s *service) a11yAct(
 	result := s.a11yBatchDecoded(
 		request.actions,
 		obs,
-		request.until,
 		request.windowRef,
 	).withEvidenceScope("delivery_or_local_ui")
 	return withA11yModeEvidence(result, a11yModeAct)

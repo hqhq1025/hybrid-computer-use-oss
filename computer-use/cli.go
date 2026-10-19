@@ -35,7 +35,7 @@ var cliShorthands = map[string]cliShorthand{
 		}
 		return publicToolAX, map[string]any{"mode": "apps"}, nil
 	}},
-	"observe": {"observe <app|wN> [--root rN|focused] [--scope window|content] [--as tree|diff|full|screenshot] [--until JSON]",
+	"observe": {"observe <app|wN> [--root rN|focused] [--scope window|content] [--as tree|diff|full|screenshot]",
 		func(p []string, f cliFlags) (string, map[string]any, error) {
 			if len(p) != 1 {
 				return "", nil, usageError("observe needs one app or wN")
@@ -45,22 +45,27 @@ var cliShorthands = map[string]cliShorthand{
 			copyFlag(args, f, "root", "root")
 			copyFlag(args, f, "scope", "scope")
 			copyFlag(args, f, "as", "observe")
-			if err := jsonFlag(args, f, "until", "until"); err != nil {
+			if err := passRemovedUntil(args, f); err != nil {
 				return "", nil, err
 			}
 			return publicToolAX, args, nil
 		}},
-	"wait": {"wait <app|wN> --until JSON [--as none|diff|tree]",
+	"wait": {"wait [wN] STEP_JSON [--as diff|tree]",
 		func(p []string, f cliFlags) (string, map[string]any, error) {
-			if len(p) != 1 || !f.has("until") {
-				return "", nil, usageError("wait needs one app or wN and --until")
+			if len(p) == 0 || len(p) > 2 || (len(p) == 2 && !axWindowRefPattern.MatchString(p[0])) {
+				return "", nil, usageError(`wait needs one wait step as JSON, e.g. '{"window":"Save"}', after an optional wN`)
 			}
-			args := map[string]any{"mode": "observe", "observe": "none"}
-			setTarget(args, p[0])
-			copyFlag(args, f, "as", "observe")
-			if err := jsonFlag(args, f, "until", "until"); err != nil {
+			step, err := waitStepArg(p[len(p)-1])
+			if err != nil {
 				return "", nil, err
 			}
+			// A wait reads nothing more by default: a final tree read would
+			// keep the desktop lock longer than the wait itself.
+			args := map[string]any{"mode": "act", "actions": []any{step}, "observe": "none"}
+			if len(p) == 2 {
+				args["window_ref"] = p[0]
+			}
+			copyFlag(args, f, "as", "observe")
 			return publicToolAX, args, nil
 		}},
 	"find": {"find <app|wN> [--role R] [--name S] [--name-has S] [--text S] [--text-has S] [--state S] [--limit N] | find --cursor fN",
@@ -114,7 +119,7 @@ var cliShorthands = map[string]cliShorthand{
 	"scroll":   singleAction("scroll rN up|down|left|right [--pages N]", "scroll", "ref", "direction"),
 	"activate": singleAction("activate wN|TITLE", "activate", "window"),
 	"close":    singleAction("close wN|TITLE", "close", "window"),
-	"act": {"act --json '{\"actions\":[...]}' [--window wN] [--until JSON] [--as none|diff|tree]",
+	"act": {"act --json '{\"actions\":[...]}' [--window wN] [--wait STEP_JSON] [--as none|diff|tree]",
 		func(p []string, f cliFlags) (string, map[string]any, error) {
 			if len(p) != 0 || !f.has("json") {
 				return "", nil, usageError("act needs --json with an object holding actions")
@@ -129,7 +134,7 @@ var cliShorthands = map[string]cliShorthand{
 			}
 			copyFlag(args, f, "window", "window_ref")
 			copyFlag(args, f, "as", "observe")
-			if err := jsonFlag(args, f, "until", "until"); err != nil {
+			if err := appendWaitFlag(args, f); err != nil {
 				return "", nil, err
 			}
 			return publicToolAX, args, nil
@@ -218,7 +223,7 @@ func singleAction(usage, actionType string, fields ...string) cliShorthand {
 		args := map[string]any{"mode": "act", "actions": []any{action}}
 		copyFlag(args, f, "window", "window_ref")
 		copyFlag(args, f, "as", "observe")
-		if err := jsonFlag(args, f, "until", "until"); err != nil {
+		if err := appendWaitFlag(args, f); err != nil {
 			return "", nil, err
 		}
 		return publicToolAX, args, nil
@@ -248,16 +253,49 @@ func copyFlag(args map[string]any, f cliFlags, flag, field string) {
 	}
 }
 
-func jsonFlag(args map[string]any, f cliFlags, flag, field string) error {
-	raw, ok := f[flag]
+// waitStepArg reads one wait step written as JSON. The type is always
+// wait, so a step given to wait or --wait never sends input; the core checks
+// every other field.
+func waitStepArg(raw string) (map[string]any, error) {
+	var step map[string]any
+	if err := decodeJSONArg(raw, &step); err != nil || step == nil {
+		return nil, usageError(`a wait step is a JSON object such as '{"window":"Save"}'`)
+	}
+	step["type"] = "wait"
+	return step, nil
+}
+
+// passRemovedUntil passes the removed --until flag through as the until
+// field, so the core rejects the call before any input and its hint shows
+// the same call with a wait step; the CLI keeps no conversion of its own.
+func passRemovedUntil(args map[string]any, f cliFlags) error {
+	raw, ok := f["until"]
 	if !ok {
 		return nil
 	}
 	var value any
 	if err := decodeJSONArg(raw, &value); err != nil {
-		return usageError("--" + flag + ": " + err.Error())
+		return usageError("--until was removed; use --wait STEP_JSON")
 	}
-	args[field] = value
+	args["until"] = value
+	return nil
+}
+
+// appendWaitFlag adds the step given with --wait after the actions.
+func appendWaitFlag(args map[string]any, f cliFlags) error {
+	if err := passRemovedUntil(args, f); err != nil {
+		return err
+	}
+	raw, ok := f["wait"]
+	if !ok {
+		return nil
+	}
+	step, err := waitStepArg(raw)
+	if err != nil {
+		return usageError("--wait: " + err.Error())
+	}
+	actions, _ := args["actions"].([]any)
+	args["actions"] = append(actions, step)
 	return nil
 }
 
@@ -610,6 +648,10 @@ Output: model text by default, identical to the MCP result; --json (or
 --records for act and gui) prints one records JSON object. Images are files.
 Options: --session NAME (or HCU_SESSION), --socket PATH (or HCU_SOCKET),
 --request-id ID (act retries return the first result), --since SNAPSHOT_ID.
+Input commands also take --window wN, --as none|diff|tree, and --wait STEP_JSON:
+one wait step, e.g. '{"window":"Save"}' or '{"ref":"r3","state":"checked"}',
+that runs after the action; it fails with exit 3 (wait_timeout) when it does
+not hold.
 
 Exit status:
 `)
@@ -618,6 +660,6 @@ Exit status:
 		entry := publicErrorCodes[code]
 		fmt.Fprintf(&out, "  %-3d %-18s input emitted: %-5s %s\n", entry.ExitCode, code, entry.InputEmitted, entry.Recovery)
 	}
-	out.WriteString("  0   success; a false until on a read is a result, not an error\n  64  command-line usage error\n")
+	out.WriteString("  0   success\n  64  command-line usage error\n")
 	return out.String()
 }

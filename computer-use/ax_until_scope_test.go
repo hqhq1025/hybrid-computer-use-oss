@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -213,17 +212,6 @@ func TestFalseSelectorUntilHintNamesTheFocusedDialog(t *testing.T) {
 	if untilStatus(result) != "predicate_false" || !isShortAXWindowRef(ref) || ref == context.windowRef {
 		t.Fatalf("false until: status=%s window=%q", untilStatus(result), ref)
 	}
-	hint := untilWindowHint(map[string]any{"until_window_ref": ref})
-	public := axPublicEvidence(map[string]any{
-		"failure_code": "action_postcondition_not_satisfied", "until_window_ref": ref,
-	}, true, nil)
-	if hint != `{"mode":"observe","window_ref":"`+ref+`"}` || public["hint"] != hint {
-		t.Fatalf("hint %q public %#v", hint, public)
-	}
-	generic := axPublicEvidence(map[string]any{"failure_code": "action_postcondition_not_satisfied"}, true, nil)
-	if generic["hint"] != axPublicHints[axCodeUntilFailed] {
-		t.Fatalf("without a known window the generic hint stays: %#v", generic)
-	}
 }
 
 // Shape 2: a title until for a new window is evaluated against every window
@@ -327,137 +315,6 @@ func TestNegatedSelectorUntilAfterTheAppExited(t *testing.T) {
 	}
 }
 
-// The whole act call: closing the last window with a negated title until
-// reports until true, not until_unknown.
-func TestActCloseLastWindowWithNegatedTitleUntil(t *testing.T) {
-	s, backend, context := untilScopeService(t, untilMainWindow())
-	backend.windowResponse = &ProviderWindowResult{
-		OK: true, Snapshot: &ProviderSnapshot{WindowAbsent: true, ClosedWindowHandle: untilMainHandle},
-		Mutation:       &ProviderMutationFacts{InputEventsEmitted: true, DesktopStateMutated: true},
-		ActionEvidence: &ProviderActionEvidence{InputEmitted: true, Route: "native_window_command"},
-	}
-	closeThenGone := &closingBackend{appWideBackend: backend, appRef: context.appRef, service: s}
-	s.backend = closeThenGone
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "act", "actions": []any{map[string]any{"type": "close", "ref": context.windowRef}},
-		"until": map[string]any{"type": "title", "text": "Sheet", "negate": true, "timeout_ms": 1.0},
-	})
-	if line := publicLine(t, result); !strings.HasPrefix(line, `{"ok":true,"until":"true"`) {
-		t.Fatalf("evidence line %s\n%s", line, resultText(result))
-	}
-}
-
-// relaunchBackend models an application that was closed and launched
-// again: the old process is gone, and a name lookup sees the new process
-// once its window appears.
-type relaunchBackend struct {
-	appWideBackend
-	newTitles []string
-	shownFrom int
-}
-
-func (b *relaunchBackend) ListWindows(request ProviderWindowListRequest) (ProviderWindowResult, error) {
-	b.listRequests = append(b.listRequests, request)
-	if request.AppIdentity != nil {
-		return ProviderWindowResult{OK: false, Error: "stale_app_ref: gone",
-			Failure: &ProviderFailure{Code: "stale_app_ref", Phase: "precondition", Subject: "app", FactsComplete: true}}, nil
-	}
-	if len(b.listRequests) < b.shownFrom {
-		// The complete desktop inventory has no such application yet.
-		return ProviderWindowResult{OK: true}, nil
-	}
-	return ProviderWindowResult{OK: true, AppName: "LibreOffice", AppPID: 11, WindowTitles: b.newTitles}, nil
-}
-
-// Tasks 7ae48c60 #34 and 7767eef2 #15 (full-e), 0b17a146 #16 (full-d): the
-// app was closed and launched again. A title until bound to the old
-// process never saw the new window; it must follow the app name.
-func TestTitleUntilFollowsTheAppNameAcrossARelaunch(t *testing.T) {
-	s, _, context := untilScopeService(t)
-	s.markAppIdentityLifecycle(context.appRef, AXRefStale, "stale_app_ref")
-	backend := &relaunchBackend{newTitles: []string{"30_1.pptx - LibreOffice Impress"}, shownFrom: 3}
-	s.backend = backend
-	result := s.runA11yPostcondition(context, map[string]any{
-		"type": "window_title_contains", "text": "30_1.pptx", "exists": true, "timeout_ms": 2000,
-	})
-	if result.IsError || untilStatus(result) != "pass" {
-		t.Fatalf("the relaunched window was not seen: %s", resultText(result))
-	}
-	for _, request := range backend.listRequests {
-		if request.App != "LibreOffice" || request.AppIdentity != nil {
-			t.Fatalf("a poll was bound to the old process: %#v", backend.listRequests)
-		}
-	}
-}
-
-// A complete inventory in which the title never appears answers the until:
-// false, not unknown.
-func TestTitleUntilNeverShownInACompleteInventoryIsFalse(t *testing.T) {
-	s, _, context := untilScopeService(t)
-	backend := &relaunchBackend{shownFrom: 1 << 30}
-	s.backend = backend
-	result := s.runA11yPostcondition(context, map[string]any{
-		"type": "window_title_contains", "text": "30_1.pptx", "exists": true, "timeout_ms": 1,
-	})
-	if result.IsError || untilStatus(result) != "window_title_timeout" {
-		t.Fatalf("a complete inventory without the title must be until false: %s", resultText(result))
-	}
-	negated := s.runA11yPostcondition(context, map[string]any{
-		"type": "window_title_contains", "text": "30_1.pptx", "exists": false, "timeout_ms": 1,
-	})
-	if negated.IsError || untilStatus(negated) != "pass" {
-		t.Fatalf("the negated title must be true: %s", resultText(negated))
-	}
-}
-
-// dialogOKBackend closes the dialog when the batch presses its OK button.
-type dialogOKBackend struct {
-	appWideBackend
-}
-
-func (b *dialogOKBackend) ResolveAndAct(request ProviderActionRequest) (ProviderAccessibilityResult, error) {
-	b.actionRequests = append(b.actionRequests, request)
-	b.open = []untilFakeWindow{untilMainWindow()}
-	return ProviderAccessibilityResult{OK: true, Snapshot: b.snapshotFor(untilMainWindow()),
-		Mutation:       &ProviderMutationFacts{InputEventsEmitted: true},
-		ActionEvidence: &ProviderActionEvidence{InputEmitted: true, Route: "keyboard_synthesis"}}, nil
-}
-
-// Full-d a434992a #10/#20 and 04d9aeaf #9: the batch acts in a dialog and
-// presses OK, then waits on the main window title (or on the dialog title
-// to go). The title read was bound to the batch window, the dialog that the
-// action closed, so every poll hit stale_window_ref and the until ended
-// unknown although the main window title was there.
-func TestTitleUntilAfterTheBatchClosedItsDialog(t *testing.T) {
-	for _, until := range []map[string]any{
-		{"type": "title", "text": "Sheet", "timeout_ms": 1.0},
-		{"type": "title", "text": "Insert Sheet", "negate": true, "timeout_ms": 1.0},
-	} {
-		s, _, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-		backend := &dialogOKBackend{appWideBackend{open: []untilFakeWindow{untilMainWindow(), untilDialogWindow()}}}
-		s.backend = backend
-		dialog := s.windowRefRegistry.Acquire("libreoffice", untilDialogHandle, `dialog "Insert Sheet"`, "c1",
-			":1.84", "/window/2", "pid:10:start:100", "dialog", "Insert Sheet", context.appRef)
-		for _, form := range []map[string]any{
-			{"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"}}}, "until": until},
-			{"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"}, "until": until}}},
-		} {
-			backend.open = []untilFakeWindow{untilMainWindow(), untilDialogWindow()}
-			form["mode"], form["window_ref"], form["observe"] = "act", dialog, "none"
-			result := s.callTool(publicToolAX, form)
-			if line := publicLine(t, result); !strings.HasPrefix(line, `{"ok":true`) ||
-				!strings.Contains(line, `"until_verified":true`) && !strings.Contains(line, `"until":"true"`) {
-				t.Fatalf("until %v after the dialog closed: %s\n%s", until, line, resultText(result))
-			}
-			for _, request := range backend.listRequests {
-				if request.WindowHandle != "" {
-					t.Fatalf("the title read was bound to one window: %#v", request)
-				}
-			}
-		}
-	}
-}
-
 // closingBackend closes the app with its last window, the way LibreOffice
 // exits when its last document closes.
 type closingBackend struct {
@@ -472,27 +329,4 @@ func (b *closingBackend) ActOnWindow(request ProviderWindowActionRequest) (Provi
 	b.appGone, b.appGoneFacts = true, true
 	b.service.markAppIdentityLifecycle(b.appRef, AXRefStale, "stale_app_ref")
 	return result, err
-}
-
-// Model-visible AX output speaks the current interface: until, not the
-// removed postcondition field, in the evidence line and in the text.
-func TestFailedUntilOutputNamesNoRemovedField(t *testing.T) {
-	s, _, window := untilTitleService(t, "Sheet")
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "act", "window_ref": window,
-		"actions": []any{
-			map[string]any{"type": "keypress", "keys": []any{"ENTER"},
-				"until": map[string]any{"type": "title", "text": "Dialog", "timeout_ms": 1.0}},
-			map[string]any{"type": "type", "text": "must not run"},
-		},
-	})
-	text := resultText(withAXTextEvidence(prepareAXEvidence(result)))
-	for _, removed := range []string{"postcondition", "assert_ax", "observation_target", "app_ref", "target.ref"} {
-		if strings.Contains(text, removed) {
-			t.Fatalf("model-visible output names %q:\n%s", removed, text)
-		}
-	}
-	if !strings.Contains(text, `"action_until":`) || !strings.Contains(text, "action 1 until:") {
-		t.Fatalf("until evidence missing:\n%s", text)
-	}
 }

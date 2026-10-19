@@ -75,27 +75,6 @@ func TestSelectorAndFindRoleSpellingsNameTheSameRole(t *testing.T) {
 	}
 }
 
-// An exists until whose name is not exact fails, and its first line names
-// the closest element so the next call can use the right name.
-func TestFailedExistsUntilNamesTheClosestCandidate(t *testing.T) {
-	s, _, context := untilScopeService(t, untilMainWindow())
-	result := s.runA11yPostcondition(context, map[string]any{
-		"type": "exists", "value": true, "timeout_ms": 1,
-		"target": map[string]any{"selector": map[string]any{"role": "push_button", "name": "Sav"}},
-	})
-	line := firstLine(resultText(result))
-	if untilStatus(result) != "predicate_false" || !strings.Contains(line, `closest: button "Save"`) {
-		t.Fatalf("first line must name the closest candidate: %s", line)
-	}
-	if got := closestSelectorCandidates(`menuitem "Paragraph"`, 3, []elementRecord{
-		{ControlType: "push button", Name: "Paragraph"},
-		{ControlType: "menu item", Name: "Paragraph..."},
-		{ControlType: "menu item", Name: "Character..."},
-	}); strings.Join(got, "|") != `menuitem "Paragraph..."|button "Paragraph"` {
-		t.Fatalf("candidates %q", got)
-	}
-}
-
 func TestSelectorFindsTheRealClosingQuote(t *testing.T) {
 	role, name, hasName, rest := parseSelector(`toggle button "Menu" [desc="View options"]`)
 	if role != "toggle button" || name != "Menu" || !hasName {

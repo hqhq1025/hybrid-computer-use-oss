@@ -43,21 +43,31 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
   took focus, with a `wN` you can use at once. When these lines already show
   the result, do not read or wait again. Continue from the diff for other
   changes; read again only when the next decision needs more.
-- When a later step depends on a state that appears later, attach it as
-  `until` instead of a separate read:
+- One `act` can mix actions and `wait` steps in any order. Steps run in
+  order, and the first step that fails stops the batch. A `wait` sends no
+  input. It holds until its condition is true, or fails with `wait_timeout`
+  after `timeout_ms` (default 5000) and returns the current state:
 
 ```json
-{"mode":"act","actions":[{"type":"set_value","ref":"r31","value":"14"}],"until":{"type":"value","ref":"r31","value":"14"}}
-{"mode":"act","actions":[{"type":"click","ref":"r5","until":{"type":"state","ref":"r5","state":"checked"}},{"type":"click","ref":"r9"}]}
-{"mode":"observe","window_ref":"w1","until":{"type":"exists","selector":{"role":"dialog","name":"Print"},"timeout_ms":15000}}
+{"mode":"act","actions":[{"type":"click","ref":"r12"},{"type":"wait","window":"Export"},{"type":"type","text":"q3.csv"},{"type":"keypress","keys":["ENTER"]},{"type":"wait","window":"Export","gone":true}]}
+{"mode":"act","actions":[{"type":"click","ref":"r7"},{"type":"wait","query":{"role":"menu item","name_contains":"Paragraph"}},{"type":"click","ref":"r9"}]}
+{"mode":"act","actions":[{"type":"wait","window":"Untitled"}]}
 ```
 
-  The first verifies a value. The second lets the later click run only after
-  the earlier one took effect. The third waits for a dialog; with `app`
-  instead of `window_ref`, it also waits for an application that is starting.
-  A `selector` or `title` predicate checks every window of the application,
-  so it finds a dialog or menu that opens as its own window.
-
+  The first opens a dialog, waits for it, types into it, confirms, and waits
+  for it to close. After a `window` wait, keys and text without `ref` go to
+  that window. The second waits for a menu item before the next click; a
+  `query` takes the same fields as `find`. The third waits without input,
+  for example for an application that is starting.
+- Forms of `wait`: `window` (a top-level window whose title contains the
+  text, on the whole desktop), `query` (an element in any window of the
+  batch's application), `ref` with `value`, `state`, or `text` (one
+  element), or `text` alone (text anywhere in the window). `gone:true`
+  waits for absence; a closed or exited application has no windows.
+- Do not add a `wait` for what the report already shows. A checkbox that
+  shows `checked=false→true`, or a dialog listed as `opened`, needs no wait.
+  Wait only when a later step needs a state that may arrive after the
+  action returns: a slow dialog, a menu item, a value computed later.
 - Take a GUI screenshot when the question is visual or AX lacks a visible
   element. Do not alternate screenshots and AX reads of an unchanged state.
 - Combine related read-only shell checks into one command or script.
@@ -73,17 +83,17 @@ whether input was sent. Next step by code:
   or one fresh `find`.
 - `window_changed`: the batch stopped after `completed` actions. Read the
   returned state and send only what remains.
-- `until_failed`: the batch stopped at the action whose `until` failed; the
-  actions before it ran. Read the returned state and revise the plan; do not
-  resend the same batch.
-- `until_unknown`: the predicate could not be checked. Check the requirement
-  with another read or channel.
+- `wait_timeout`: the batch stopped at that `wait`; the steps before it ran
+  and none after it. The message says what was seen instead, or that the
+  state could not be read. Read the returned state and revise the plan; do
+  not resend the same batch.
 - `effect_unknown`: input may have been sent. Inspect state before any retry,
   so that nothing is applied twice.
 - `ambiguous_window`, `window_not_found`: choose a `wN` from the listed windows.
 - `no_focused_window`: start the batch with `activate`.
-- `app_unavailable`: if the application is still starting, wait once with
-  `observe`, `app`, and `until`; otherwise use GUI for it.
+- `app_unavailable`: if the application is still starting, wait once for
+  its window with `{"mode":"act","actions":[{"type":"wait","window":"..."}]}`;
+  otherwise use GUI for it.
 - `runtime_error`: retry once; if it repeats, use another channel.
 
 A GUI stale-frame rejection sent nothing; plan again from the returned

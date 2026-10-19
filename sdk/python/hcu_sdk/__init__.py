@@ -10,7 +10,7 @@ and returns the core's records; it validates nothing itself.
     w = d.apps().windows[0].ref             # "w1"
     for el in d.find_all(w, role="button"):
         print(el.ref, el.name)
-    d.click("r12", until={"type": "title", "text": "Saved"})
+    d.click("r12", wait={"window": "Saved"})  # click, then a wait step
 
 Every method returns a Record: a dict with attribute access, exactly the
 JSON the core returned. Errors raise HcuError; its subclass is named after
@@ -248,12 +248,17 @@ def _target(args, target):
     return args
 
 
-def _act(action, window_ref=None, until=None, observe=None):
+def _wait_step(step):
+    """A wait step from its fields: {"window": "Save"} -> {"type": "wait", ...}."""
+    return dict(step, type="wait")
+
+
+def _act(action, window_ref=None, wait=None, observe=None):
     args = {"mode": "act", "actions": [action]}
+    if wait is not None:
+        args["actions"].append(_wait_step(wait))
     if window_ref:
         args["window_ref"] = window_ref
-    if until is not None:
-        args["until"] = until
     if observe is not None:
         args["observe"] = observe
     return args
@@ -283,15 +288,21 @@ class _Builders:
     def apps(self):
         return self.call("AX", {"mode": "apps"})
 
-    def observe(self, target, root=None, scope=None, observe=None, until=None, since=None):
+    def observe(self, target, root=None, scope=None, observe=None, since=None):
         args = _target({"mode": "observe"}, target)
-        for key, value in (("root", root), ("scope", scope), ("observe", observe), ("until", until)):
+        for key, value in (("root", root), ("scope", scope), ("observe", observe)):
             if value is not None:
                 args[key] = value
         return self.call("AX", args, since=since)
 
-    def wait(self, target, until, observe="none"):
-        return self.observe(target, until=until, observe=observe)
+    def wait(self, step, window_ref=None, observe="none"):
+        """Wait without input: an act with one wait step, for example
+        d.wait({"window": "Save"}) or d.wait({"ref": "r3", "state": "checked"}).
+        A step that does not hold raises hcu.WaitTimeout."""
+        args = {"mode": "act", "actions": [_wait_step(step)], "observe": observe}
+        if window_ref:
+            args["window_ref"] = window_ref
+        return self.call("AX", args)
 
     def find(self, target=None, limit=None, cursor=None, scope=None, **query):
         args = {"mode": "find"}
@@ -309,17 +320,17 @@ class _Builders:
     def read(self, refs):
         return self.call("AX", {"mode": "read", "refs": list(refs)})
 
-    def act(self, actions, window_ref=None, until=None, observe=None, request_id=None):
+    def act(self, actions, window_ref=None, observe=None, request_id=None):
+        """Ordered steps: actions and {"type": "wait", ...} steps."""
         args = {"mode": "act", "actions": list(actions)}
         if window_ref:
             args["window_ref"] = window_ref
-        if until is not None:
-            args["until"] = until
         if observe is not None:
             args["observe"] = observe
         return self.call("AX", args, request_id=request_id)
 
-    # Single-action helpers take window_ref, until, observe and request_id.
+    # Single-action helpers take window_ref, wait (one wait step that runs
+    # after the action), observe and request_id.
 
     def click(self, ref, request_id=None, **options):
         return self.call("AX", _act({"type": "click", "ref": ref}, **options), request_id=request_id)

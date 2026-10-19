@@ -78,7 +78,7 @@ def _input_schema(tool, records):
 _DESCRIPTIONS = {
     "AX": "Desktop accessibility (HCU AX). Same arguments as the AX MCP tool, plus mode read, "
           "request_id and since. Returns a JSON string: {ok, code, message, hint, op, window, "
-          "elements|matches|read|diff, page{returned,total,next_cursor}, until, input_emitted, "
+          "elements|matches|read|diff, page{returned,total,next_cursor}, input_emitted, "
           "completed, requested, timing_ms}. Never truncated; page with next_cursor.",
     "GUI": "Full-desktop screenshot and pixel input (HCU GUI). Same arguments as the GUI MCP tool, "
            "plus request_id. Returns a JSON string with screen{width,height,image} where image is "

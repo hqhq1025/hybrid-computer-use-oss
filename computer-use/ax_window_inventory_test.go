@@ -192,7 +192,7 @@ func TestTitleResolvesOnceAndNeverRebinds(t *testing.T) {
 		t.Fatal(argErr)
 	}
 	backend.err = errNoWindow
-	result := service.a11yBatchDecoded(actions, observation{mode: observeNone}, nil, "")
+	result := service.a11yBatchDecoded(actions, observation{mode: observeNone}, "")
 	if backend.listings != 1 {
 		t.Fatalf("title was resolved %d times, want once", backend.listings)
 	}
@@ -219,7 +219,7 @@ func TestClosedWindowAfterTitleResolutionFailsAsStale(t *testing.T) {
 	// must fail on the ref, not search titles again.
 	service.windowRefRegistry.MarkLifecycle(window.ref, AXRefStale, "window_closed")
 	result := service.a11yBatchBound([]a11yBatchAction{{actionType: "close", targetRef: window.ref}},
-		observation{mode: observeNone}, nil, "", nil, 1)
+		observation{mode: observeNone}, "", nil, 1)
 	if !result.IsError || backend.listings != 1 || len(backend.calls) != 0 {
 		t.Fatalf("closed window was not reported stale before input: %#v listings=%d calls=%v",
 			result.StructuredContent, backend.listings, backend.calls)
@@ -283,7 +283,7 @@ func TestFocusChangeBeforeFirstActionStopsWithoutInput(t *testing.T) {
 	actions, _ := decodeAXActions([]any{
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
 	})
-	result := service.a11yBatchDecoded(actions, observation{mode: observeNone}, nil, "")
+	result := service.a11yBatchDecoded(actions, observation{mode: observeNone}, "")
 	if !result.IsError || result.StructuredContent[axPublicErrorCodeKey] != axCodeWindowChanged ||
 		len(backend.actionRequests) != 0 {
 		t.Fatalf("focus change before input: %#v requests=%d", result.StructuredContent, len(backend.actionRequests))
@@ -331,7 +331,7 @@ func TestFocusChangeAfterActionKStopsAtKPlusOne(t *testing.T) {
 		map[string]any{"type": "keypress", "keys": []any{"B"}},
 		map[string]any{"type": "keypress", "keys": []any{"C"}},
 	})
-	result := service.a11yBatchDecoded(actions, observation{mode: observeNone}, nil, "")
+	result := service.a11yBatchDecoded(actions, observation{mode: observeNone}, "")
 	if !result.IsError || result.StructuredContent[axPublicErrorCodeKey] != axCodeWindowChanged {
 		t.Fatalf("focus change after action 2: %#v", result.StructuredContent)
 	}

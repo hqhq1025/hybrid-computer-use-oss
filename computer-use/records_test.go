@@ -183,8 +183,8 @@ func TestRequestIDRunsACallOnce(t *testing.T) {
 // Every public code the core can return is in the published error table.
 func TestEveryPublicErrorCodeIsPublished(t *testing.T) {
 	core := []string{
-		axCodeInvalidArgument, axCodeStaleRef, axCodeWindowChanged, axCodeUntilFailed,
-		axCodeUntilUnknown, axCodeEffectUnknown, axCodeAppUnavailable, axCodeRuntimeError,
+		axCodeInvalidArgument, axCodeStaleRef, axCodeWindowChanged, axCodeWaitTimeout,
+		axCodeEffectUnknown, axCodeAppUnavailable, axCodeRuntimeError,
 		axCodeAmbiguousWindow, axCodeWindowNotFound, axCodeNoFocusedWindow, axCodeGUIFrameStale,
 	}
 	for _, code := range core {

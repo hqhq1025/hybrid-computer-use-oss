@@ -21,14 +21,15 @@ var cliGolden = []struct {
 	{"apps", "AX", `{"mode":"apps"}`},
 	{"observe w1", "AX", `{"mode":"observe","window_ref":"w1"}`},
 	{"observe soffice --root r5 --scope content --as diff", "AX", `{"mode":"observe","app":"soffice","root":"r5","scope":"content","observe":"diff"}`},
-	{`observe w1 --until {"type":"title","text":"Saved"}`, "AX", `{"mode":"observe","window_ref":"w1","until":{"type":"title","text":"Saved"}}`},
-	{`wait w1 --until {"type":"exists","ref":"r3","negate":true}`, "AX", `{"mode":"observe","window_ref":"w1","observe":"none","until":{"type":"exists","ref":"r3","negate":true}}`},
+	{`wait {"window":"Save"}`, "AX", `{"mode":"act","actions":[{"type":"wait","window":"Save"}],"observe":"none"}`},
+	{`wait w1 {"ref":"r3","gone":true,"timeout_ms":900} --as diff`, "AX", `{"mode":"act","window_ref":"w1","actions":[{"type":"wait","ref":"r3","gone":true,"timeout_ms":900}],"observe":"diff"}`},
 	{"find w1 --role button --name-has Sort --limit 5", "AX", `{"mode":"find","window_ref":"w1","query":{"role":"button","name_contains":"Sort"},"limit":5}`},
 	{"find soffice --name OK --text-has total --state checked", "AX", `{"mode":"find","app":"soffice","query":{"name_equals":"OK","text_contains":"total","state":"checked"}}`},
 	{"find --cursor f2", "AX", `{"mode":"find","cursor":"f2"}`},
 	{"read r1 r2", "AX", `{"mode":"read","refs":["r1","r2"]}`},
 	{"click r41", "AX", `{"mode":"act","actions":[{"type":"click","ref":"r41"}]}`},
-	{`click r41 --until {"type":"state","ref":"r41","state":"checked"}`, "AX", `{"mode":"act","actions":[{"type":"click","ref":"r41"}],"until":{"type":"state","ref":"r41","state":"checked"}}`},
+	{`click r41 --wait {"ref":"r41","state":"checked"}`, "AX", `{"mode":"act","actions":[{"type":"click","ref":"r41"},{"type":"wait","ref":"r41","state":"checked"}]}`},
+	{`act --json {"actions":[{"type":"keypress","keys":["CTRL","O"]}]} --wait {"window":"Open"}`, "AX", `{"mode":"act","actions":[{"type":"keypress","keys":["CTRL","O"]},{"type":"wait","window":"Open"}]}`},
 	{"type r2 hello", "AX", `{"mode":"act","actions":[{"type":"type","ref":"r2","text":"hello"}]}`},
 	{"type hello --window w1", "AX", `{"mode":"act","actions":[{"type":"type","text":"hello"}],"window_ref":"w1"}`},
 	{"key ctrl+s", "AX", `{"mode":"act","actions":[{"type":"keypress","keys":["CTRL","S"]}]}`},
@@ -120,6 +121,33 @@ func TestCLIShorthandsProduceSchemaValidCalls(t *testing.T) {
 	sort.Strings(names)
 	if len(names) > 0 {
 		t.Fatalf("shorthands without a golden case: %v", names)
+	}
+}
+
+// The removed --until flag reaches the core as the until field, which
+// rejects it before any input with the same call written as a wait step.
+func TestCLIUntilIsRejectedWithAWaitHint(t *testing.T) {
+	for _, line := range []string{
+		`click r41 --until {"type":"state","ref":"r41","state":"checked"}`,
+		`observe w1 --until {"type":"title","text":"Saved"}`,
+	} {
+		words := splitCLILine(line)
+		positional, flags, err := parseCLIArgs(words[0], words[1:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, args, err := cliShorthands[words[0]].build(positional, flags)
+		if err != nil {
+			t.Fatalf("%s: %v", line, err)
+		}
+		_, argErr := decodeAXRequest(roundTripJSON(t, args).(map[string]any))
+		if argErr == nil || argErr.code != axCodeInvalidArgument ||
+			!strings.Contains(argErr.hint, `"type":"wait"`) {
+			t.Fatalf("%s: want invalid_argument with a wait hint, got %#v", line, argErr)
+		}
+		if _, hintErr := decodeAXRequest(decodeJSONForTest(t, argErr.hint)); hintErr != nil {
+			t.Fatalf("%s: hint %s does not decode: %s", line, argErr.hint, hintErr.message)
+		}
 	}
 }
 

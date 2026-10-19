@@ -46,7 +46,6 @@ type Record struct {
 	Op           string           `json:"op"`
 	RequestID    string           `json:"request_id,omitempty"`
 	Replayed     bool             `json:"replayed,omitempty"`
-	Until        string           `json:"until,omitempty"`
 	InputEmitted bool             `json:"input_emitted"`
 	Completed    *int             `json:"completed,omitempty"`
 	Requested    *int             `json:"requested,omitempty"`
@@ -161,8 +160,7 @@ func (s *service) dispatchRecord(name string, args map[string]any, options callO
 			return record
 		}
 	}
-	if name == publicToolAX && optionalString(args, "mode") == a11yModeObserve &&
-		args["until"] == nil {
+	if name == publicToolAX && optionalString(args, "mode") == a11yModeObserve {
 		if record, handled := s.observeRecords(args, options.Since); handled {
 			record.Op = op
 			return record
@@ -230,7 +228,6 @@ func recordFromEvidence(name string, result toolCallResult) Record {
 		record.Path, _ = evidence["path"].(string)
 		record.Message, _ = evidence["message"].(string)
 		record.Hint, _ = evidence["hint"].(string)
-		record.Until, _ = evidence["until"].(string)
 		record.InputEmitted, _ = evidence["input_emitted"].(bool)
 		if completed, ok := intEvidence(evidence["completed"]); ok {
 			record.Completed = &completed

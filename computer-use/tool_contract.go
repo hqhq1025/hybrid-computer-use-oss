@@ -36,7 +36,7 @@ const (
 const serverInstructions = "" +
 	"Two tools for the running desktop. AX reads and operates application windows " +
 	"through accessibility: it lists windows, returns controls as rN refs, acts on " +
-	"them, and waits with until. GUI takes full-desktop screenshots and sends pixel " +
+	"them, and waits with wait steps. GUI takes full-desktop screenshots and sends pixel " +
 	"input. Use AX for named controls, values, menus, dialogs, windows, and keys. Use " +
 	"GUI for pixels, canvases, dragging, and controls that AX does not expose; after " +
 	"one targeted AX find misses a visible control, use GUI for it. Send all desktop " +
@@ -156,56 +156,13 @@ func nonBlankString(description string) map[string]any {
 	return property
 }
 
-// a11yPredicateSchema is the until predicate shared by observe, act and each
-// action.
-func a11yPredicateSchema() map[string]any {
-	return map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"required":             []string{"type"},
-		"description":          "Poll one AX predicate until true or timeout_ms; false is a result. selector and title check every window of the app, dialogs and popups included; ref reads that element.",
-		"properties": map[string]any{
-			"type": map[string]any{"type": "string", "enum": []string{"exists", "state", "value", "text", "title"}},
-			"ref":  map[string]any{"type": "string", "pattern": "^r[1-9][0-9]*$"},
-			"selector": map[string]any{
-				"type":                 "object",
-				"additionalProperties": false,
-				"minProperties":        1,
-				"description":          "Exact AX identity fields, ANDed.",
-				"properties": map[string]any{
-					"role":        nonBlankString(""),
-					"name":        nonBlankString(""),
-					"description": nonBlankString(""),
-					"placeholder": nonBlankString(""),
-					"state":       map[string]any{"type": "string", "enum": []string{"checked", "expanded", "selected", "focused"}},
-				},
-			},
-			"state": nonBlankString("state: e.g. checked, selected, expanded."),
-			"value": map[string]any{
-				"type":        []string{"string", "number", "boolean"},
-				"pattern":     nonBlank,
-				"description": "value: expected AX value.",
-			},
-			"match":      map[string]any{"type": "string", "enum": []string{"equals", "contains"}, "description": "value: default equals."},
-			"text":       nonBlankString("text: element text substring; title: substring of any window title of the app."),
-			"negate":     map[string]any{"type": "boolean", "description": "Wait for it to be false; title negate is true once the app has no such window, or has exited."},
-			"timeout_ms": map[string]any{"type": "integer", "minimum": 1, "maximum": maxVerifyTimeout, "description": "Default 5000."},
-			"stable_ms": map[string]any{
-				"type": "integer", "minimum": 0, "maximum": axMaxUntilStableMS,
-				"description": "How long it must stay true; filters flicker.",
-			},
-		},
-	}
-}
-
 // a11yInputSchema is the single flat AX schema. It has no oneOf: which
 // fields belong to which mode or action type is checked by decodeAXRequest,
 // which names the field and shows a corrected call. Keep it under the
 // client compaction budget (TestAXSchemaSurvivesClientCompaction).
 func a11yInputSchema() map[string]any {
-	predicate := map[string]any{"$ref": "#/$defs/predicate"}
 	query := map[string]any{}
-	for _, field := range []string{"role", "name_equals", "name_contains", "text_equals", "text_contains", "state"} {
+	for _, field := range axFindFilters {
 		query[field] = nonBlankString("")
 	}
 	return map[string]any{
@@ -213,8 +170,11 @@ func a11yInputSchema() map[string]any {
 		"additionalProperties": false,
 		"required":             []string{"mode"},
 		// window_ref already names its app.
-		"not":   map[string]any{"required": []string{"app", "window_ref"}},
-		"$defs": map[string]any{"predicate": a11yPredicateSchema()},
+		"not": map[string]any{"required": []string{"app", "window_ref"}},
+		"$defs": map[string]any{"query": map[string]any{
+			"type": "object", "additionalProperties": false, "properties": query,
+			"description": "At least one filter; ANDed, case-insensitive.",
+		}},
 		"properties": map[string]any{
 			"mode": map[string]any{
 				"type": "string", "enum": []string{a11yModeApps, a11yModeObserve, a11yModeFind, a11yModeAct},
@@ -228,16 +188,13 @@ func a11yInputSchema() map[string]any {
 			"scope": map[string]any{"type": "string", "enum": a11yScopeValues, "description": "observe/find; default window."},
 			"observe": map[string]any{
 				"type": "string", "enum": observeValues,
-				"description": "Returned evidence. act and until: default diff; observe: default tree. none only with act or until.",
+				"description": "Returned evidence. act: default diff; observe: default tree. none only with act.",
 			},
 			"root": map[string]any{
 				"type": "string", "pattern": "^(focused|r[1-9][0-9]*)$",
 				"description": "observe: subtree at rN or the focused element.",
 			},
-			"query": map[string]any{
-				"type": "object", "additionalProperties": false, "properties": query,
-				"description": "find: at least one filter; ANDed, case-insensitive.",
-			},
+			"query": map[string]any{"$ref": "#/$defs/query"},
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxAXFindPageSize, "description": "find page size; default 20."},
 			"cursor": map[string]any{
 				"type": "string", "pattern": "^f[1-9][0-9]*$",
@@ -245,7 +202,7 @@ func a11yInputSchema() map[string]any {
 			},
 			"actions": map[string]any{
 				"type": "array", "minItems": 1, "maxItems": a11yBatchMaxActions,
-				"description": "act: ordered actions in one window.",
+				"description": "act: ordered steps; a failed step stops the batch.",
 				"items": map[string]any{
 					"type": "object", "additionalProperties": false, "required": []string{"type"},
 					"properties": map[string]any{
@@ -255,7 +212,10 @@ func a11yInputSchema() map[string]any {
 							"description": "rN element; wN for activate/close. Omit for keys/text to the focused window.",
 						},
 						"title": nonBlankString("activate/close: unique window-title substring, instead of wN."),
-						"text":  map[string]any{"type": "string", "minLength": 1, "maxLength": maxActionText},
+						"text": map[string]any{
+							"type": "string", "minLength": 1, "maxLength": maxActionText,
+							"description": "wait: text in the ref element, or anywhere in the window.",
+						},
 						"keys": map[string]any{
 							"type": "array", "minItems": 1, "maxItems": guiMaxKeys,
 							"items":       map[string]any{"type": "string", "pattern": "^\\S(.*\\S)?$", "maxLength": guiMaxKeyLength},
@@ -264,11 +224,17 @@ func a11yInputSchema() map[string]any {
 						"value":     map[string]any{"type": "string", "maxLength": maxActionText},
 						"direction": map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}},
 						"pages":     map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": maxScrollPages},
-						"until":     predicate,
+						"window":    nonBlankString("wait: a top-level window whose title contains this, on the whole desktop."),
+						"query":     map[string]any{"$ref": "#/$defs/query"},
+						"state":     nonBlankString("wait: ref state, e.g. checked."),
+						"gone":      map[string]any{"type": "boolean", "description": "wait until it is absent."},
+						"timeout_ms": map[string]any{
+							"type": "integer", "minimum": 1, "maximum": maxVerifyTimeout,
+							"description": "wait: default 5000.",
+						},
 					},
 				},
 			},
-			"until": predicate,
 		},
 	}
 }
@@ -411,7 +377,7 @@ func guiInputSchema() map[string]any {
 			fmt.Sprintf(
 				"Visual stillness: default %dms, max %dms. "+
 					"Final screenshot stillness, not semantic success and not extra sleep. "+
-					"After wait, usually omit it. At the cap inspect the screenshot or use AX until.",
+					"After wait, usually omit it. At the cap inspect the screenshot or use an AX wait step.",
 				defaultSettleMS,
 				guiMaxSettleMS,
 			),
@@ -430,17 +396,16 @@ func guiInputSchema() map[string]any {
 // compact the input schema. Clients may truncate descriptions at 1,000 bytes.
 const axToolDescription = "Accessibility for application windows. Modes: " +
 	"apps lists windows (wN, title, app, active). observe returns the window tree with " +
-	"rN refs. find returns matching rN; a truncated result shows the cursor call for the " +
-	"next page. act runs ordered actions in one window, checks them before input, and " +
-	"reports each target's change, windows opened/closed/focused, and a diff. " +
-	"Copy rN/wN exactly from the latest result; stale refs fail and never " +
-	"rebind. keypress/type without ref go to the focused window. activate/close take a " +
-	"title substring or wN. Put close, and any action that opens or replaces a window, " +
-	"last. until waits for a predicate; false is a result, not an error. Errors return " +
-	"code and hint. Examples:\n" +
-	`{"mode":"act","actions":[{"type":"activate","title":"Quarterly report"},{"type":"keypress","keys":["CTRL","S"]}]}` + "\n" +
-	`{"mode":"find","window_ref":"w2","query":{"role":"button","name_contains":"Save"}}` + "\n" +
-	`{"mode":"act","actions":[{"type":"click","ref":"r12"}],"until":{"type":"title","text":"Export"}}`
+	"rN refs. find returns matching rN. act runs ordered steps, checks them before input, " +
+	"stops at the first failed step, and reports each target's change, windows " +
+	"opened/closed/focused, and a diff. Copy rN/wN exactly; stale refs fail. keypress/type " +
+	"without ref go to the focused window. activate/close take a title substring or wN. " +
+	"A wait step sends no input and fails the batch on timeout: window (title, any app), " +
+	"query (as find), ref with value/state/text, or text; gone inverts. After a window " +
+	"wait, keys go to that window. Skip waits the report answers. Errors return code and " +
+	"hint. Examples:\n" +
+	`{"mode":"act","actions":[{"type":"click","ref":"r12"},{"type":"wait","window":"Export"},{"type":"type","text":"q3.csv"},{"type":"keypress","keys":["ENTER"]}]}` + "\n" +
+	`{"mode":"find","window_ref":"w2","query":{"role":"button","name_contains":"Save"}}`
 
 var guiToolDescription = fmt.Sprintf("Full-desktop screenshot and pixel input. "+
 	`{"actions":[{"type":"screenshot"}]} alone observes. Any other batch is checked before `+

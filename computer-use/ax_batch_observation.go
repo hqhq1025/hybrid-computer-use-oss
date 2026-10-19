@@ -9,9 +9,9 @@ func a11yBatchActionObservation(
 	index,
 	count int,
 	final observation,
-	hasPostcondition bool,
+	waitsFollow bool,
 ) observation {
-	if index == count-1 && !hasPostcondition {
+	if index == count-1 && !waitsFollow {
 		// Capture the requested final state in the last action's provider call.
 		return final
 	}
@@ -499,7 +499,7 @@ func (s *service) renderA11yBatchFinalObservation(
 ) toolCallResult {
 	if snapshot == nil {
 		result := textResult(
-			"final_observation_unavailable: AX returned no snapshot after the until check",
+			"final_observation_unavailable: AX returned no snapshot after the wait",
 			true,
 		)
 		result.StructuredContent = map[string]any{

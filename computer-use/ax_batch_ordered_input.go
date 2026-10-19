@@ -18,8 +18,7 @@ func wholeBatchOrderedInputRequest(
 	for index, step := range requests[0].Steps {
 		if step.ActionIndex != index ||
 			actions[index].actionType != "keypress" ||
-			actions[index].targetRef != "" ||
-			actions[index].postcondition != nil {
+			actions[index].targetRef != "" {
 			return nil, false
 		}
 	}
@@ -518,11 +517,7 @@ func (s *service) executeWholeBatchOrderedInput(
 	actions []a11yBatchAction,
 	executionPlan a11yBatchExecutionPlan,
 	obs observation,
-	postcondition map[string]any,
 ) (toolCallResult, bool) {
-	if postcondition != nil {
-		return toolCallResult{}, false
-	}
 	_, available := orderedInputBackend(s.platformBackend())
 	if !available {
 		return toolCallResult{}, false

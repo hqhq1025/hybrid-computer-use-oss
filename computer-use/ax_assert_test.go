@@ -213,31 +213,6 @@ func TestCompletedNegativeAssertionIsAnObservationNotAProtocolError(t *testing.T
 	}
 }
 
-func TestPostconditionFalsePreservesSuccessfulMutationCall(t *testing.T) {
-	action := toolCallResult{
-		Content: []contentItem{{Type: "text", Text: "action delivered"}},
-		StructuredContent: map[string]any{
-			"input_events_emitted": true,
-		},
-	}
-	assertion := assertionNegativeResult(
-		"assert_ax predicate_false: current value is unchecked",
-		"predicate_false",
-		2,
-		0,
-	)
-	merged := mergeA11yPostconditionResult(action, assertion)
-	if merged.IsError {
-		t.Fatalf("false postcondition converted a delivered mutation into a call error")
-	}
-	if merged.StructuredContent["postcondition_verified"] != false ||
-		merged.StructuredContent["preflight_only"] != false ||
-		merged.StructuredContent["evidence_scope"] != "post_action_observation" {
-		t.Fatalf("postcondition evidence is dishonest: %#v",
-			merged.StructuredContent)
-	}
-}
-
 func TestAssertAXRefUsesFullLiveTargetIdentity(t *testing.T) {
 	service := newService()
 	target := &semanticTarget{

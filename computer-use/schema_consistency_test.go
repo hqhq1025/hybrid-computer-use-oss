@@ -33,7 +33,7 @@ var crossFieldRuleCodes = map[string]bool{
 	argumentRuleRefOwnsIdentity:    true,
 	argumentRuleWaitBudget:         true,
 	// The flat AX schema has no oneOf or if/then, so rules that depend on
-	// the value of mode or of an action or until type are declared rules of
+	// the value of mode or of an action type are declared rules of
 	// the AX decoder: which fields a mode or type accepts or requires,
 	// whether a ref must be rN or wN, and exactly-one-of pairs whose
 	// presence depends on the type. Rules the flat schema can express
@@ -56,16 +56,16 @@ var axConsistencySeeds = []string{
 	`{"mode":"apps"}`,
 	`{"mode":"observe","app":"a1"}`,
 	`{"mode":"observe","window_ref":"w1","root":"r1","scope":"content","observe":"full"}`,
-	`{"mode":"observe","window_ref":"w1","observe":"none","until":{"type":"title","text":"Sheet","negate":true,"timeout_ms":1,"stable_ms":0}}`,
-	`{"mode":"observe","until":{"type":"value","ref":"r1","value":"5","match":"contains","timeout_ms":1}}`,
-	`{"mode":"observe","app":"a1","until":{"type":"exists","selector":{"role":"button","name":"Save","state":"focused"},"timeout_ms":1}}`,
-	`{"mode":"observe","app":"a1","until":{"type":"state","ref":"r1","state":"checked","timeout_ms":1}}`,
-	`{"mode":"observe","app":"a1","until":{"type":"text","ref":"r1","text":"Save","timeout_ms":1}}`,
+	`{"mode":"act","actions":[{"type":"wait","window":"Sheet","gone":true,"timeout_ms":1}]}`,
+	`{"mode":"act","actions":[{"type":"wait","ref":"r1","value":"5","timeout_ms":1}]}`,
+	`{"mode":"act","actions":[{"type":"wait","query":{"role":"button","name_contains":"Save","state":"focused"},"timeout_ms":1}]}`,
+	`{"mode":"act","actions":[{"type":"wait","ref":"r1","state":"checked","timeout_ms":1}]}`,
+	`{"mode":"act","window_ref":"w1","actions":[{"type":"wait","text":"Save","timeout_ms":1}]}`,
 	`{"mode":"find","window_ref":"w1","limit":5,"scope":"window","query":{"role":"button","name_contains":"Save","text_equals":"Save","state":"focused"}}`,
 	`{"mode":"find","cursor":"f1","limit":5}`,
-	`{"mode":"act","observe":"none","actions":[{"type":"click","ref":"r1","until":{"type":"exists","ref":"r1","timeout_ms":1}}]}`,
+	`{"mode":"act","observe":"none","actions":[{"type":"click","ref":"r1"},{"type":"wait","ref":"r1","gone":true,"timeout_ms":1}]}`,
 	`{"mode":"act","window_ref":"w1","actions":[{"type":"keypress","keys":["CTRL","S"]},{"type":"type","text":"x"},{"type":"scroll","direction":"down","pages":2}]}`,
-	`{"mode":"act","actions":[{"type":"set_value","ref":"r1","value":"x"},{"type":"type","ref":"r1","text":"y"},{"type":"keypress","ref":"r1","keys":["TAB"]},{"type":"scroll","ref":"r1","direction":"up"}],"until":{"type":"title","text":"Sheet","timeout_ms":1}}`,
+	`{"mode":"act","actions":[{"type":"set_value","ref":"r1","value":"x"},{"type":"type","ref":"r1","text":"y"},{"type":"keypress","ref":"r1","keys":["TAB"]},{"type":"scroll","ref":"r1","direction":"up"},{"type":"wait","window":"Sheet","timeout_ms":1}]}`,
 	`{"mode":"act","actions":[{"type":"activate","ref":"w1"}]}`,
 	`{"mode":"act","actions":[{"type":"close","ref":"w1"}]}`,
 	`{"mode":"act","actions":[{"type":"activate","title":"Sheet"}]}`,

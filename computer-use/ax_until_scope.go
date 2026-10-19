@@ -197,35 +197,3 @@ func predicateAppGone(result toolCallResult) bool {
 	return complete && subject == "app" &&
 		(code == "stale_app_ref" || code == "stale_target")
 }
-
-// recordUntilWindowRef stores the window an until hint should name: the one
-// the predicate read found, else the one other window of the final
-// observation that is modal or has focus.
-func recordUntilWindowRef(
-	structuredContent map[string]any,
-	postcondition,
-	finalObservation toolCallResult,
-) {
-	if structuredContent == nil {
-		return
-	}
-	ref, _ := postcondition.StructuredContent["until_window_ref"].(string)
-	if ref == "" {
-		ref = soleFocusedOtherWindowRef(finalObservation.axProofSnapshot)
-	}
-	if ref != "" {
-		structuredContent["until_window_ref"] = ref
-	}
-}
-
-// untilWindowHint returns the corrected call for an until that did not hold:
-// observe the concrete window that appeared, took focus, or replaced the
-// closed one, when the evidence names exactly one.
-func untilWindowHint(full map[string]any) string {
-	for _, key := range []string{"until_window_ref", "final_observation_window_ref"} {
-		if ref, _ := full[key].(string); isShortAXWindowRef(ref) {
-			return `{"mode":"observe","window_ref":"` + ref + `"}`
-		}
-	}
-	return ""
-}

@@ -148,14 +148,14 @@ func TestPreparationFailureStopsBatchWithoutRecovery(t *testing.T) {
 					action = map[string]any{"type": "keypress", "keys": []any{"ENTER"}}
 					args["window_ref"] = window
 				}
-				args["actions"] = []any{action, map[string]any{"type": "keypress", "keys": []any{"TAB"}}}
-				args["until"] = map[string]any{"type": "title", "text": "Sheet", "timeout_ms": 1}
+				args["actions"] = []any{action, map[string]any{"type": "keypress", "keys": []any{"TAB"}},
+					map[string]any{"type": "wait", "window": "Sheet", "timeout_ms": 1}}
 				result := s.callTool("AX", args)
 				if !result.IsError || len(backend.actionRequests) != 1 || len(backend.observeRequests) != 0 {
 					t.Fatalf("preparation failure continued input or auto-observed: result=%#v calls=%v", result, backend.calls)
 				}
 				facts := publicBatchEvidence(t, result)
-				batch := assertPublicBatchCounts(t, facts, 2, 0)
+				batch := assertPublicBatchCounts(t, facts, 3, 0)
 				if facts[kind+"_preparation"] == nil || facts["mutation_unknown"] != true || facts["input_emitted"] != false || facts["partial_input_possible"] != false || facts["observation_required"] != false || facts["final_observation_returned"] != false {
 					t.Fatalf("lost honest preparation facts: %#v", facts)
 				}

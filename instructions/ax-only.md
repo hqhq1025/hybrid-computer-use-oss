@@ -38,9 +38,9 @@ option. Follow the current tool schema for argument shapes and actions.
 - Batch known actions within one window while later refs and focus should
   remain valid. End the batch at an action that can open, close, replace, or
   navigate a window; `close` is last.
-- Semantic click may activate a selectable item, not merely select it. Put
-  `until` on the earlier action when a later action depends on its result.
-  `until` cannot undo an action already sent.
+- Semantic click may activate a selectable item, not merely select it. When
+  a later action depends on a state that may arrive late, put a `wait` step
+  between them. A `wait` cannot undo an action already sent.
 - Every `act` result starts with an `effect` line per targeted element (the
   fields that changed, `no visible change`, or `unknown` with the reason) and a
   `windows` line (windows opened, closed, or focused, with their `wN`). When
@@ -48,11 +48,14 @@ option. Follow the current tool schema for argument shapes and actions.
   post-action diff and continue from it. Use `observe:"none"` only when readback
   is unnecessary; then the report says `unknown`. A window screenshot is visual evidence,
   not full-desktop control.
-- Put a known final predicate in the batch `until`. To wait without acting,
-  use `observe` with `until`; a false predicate is a result, not an error.
-  A `selector` or `title` predicate checks every window of the application,
-  including a dialog or menu that opens as its own window.
-  Prefer positive next-state conditions to waiting for an old node to vanish.
+- A `wait` step holds until its condition is true, or fails the batch with
+  `wait_timeout` and the current state. Forms: `window` (a window title on
+  the whole desktop), `query` (an element in any window of the application,
+  same fields as `find`), `ref` with `value`, `state`, or `text`, and `text`
+  alone; `gone:true` waits for absence. An `act` with only `wait` steps
+  sends no input. After a `window` wait, keys and text without `ref` go to
+  that window. Prefer waiting for the next state to appear over waiting for
+  an old node to vanish, and skip a wait the report already answers.
 
 ## Recovery And Verification
 
@@ -75,9 +78,9 @@ option. Follow the current tool schema for argument shapes and actions.
 - Combine related read-only shell checks. Prefer structured parsers or APIs
   over bulk clipboard transfer. If pasting is necessary, keep the clipboard
   owner alive; after one focus-verified paste failure, change mechanism.
-- `until` proves only requested AX-visible state. Verify durable files and
+- A `wait` proves only AX-visible state. Verify durable files and
   effective settings through their own state; use visual evidence when the
-  outcome requires it and that evidence is available. An `until` or final
-  observation can finish verification without another call when it directly
+  outcome requires it and that evidence is available. The report, a `wait`,
+  or the final observation can finish verification without another call when it directly
   covers the requirement. Report a hard blocker only after available alternative
   channels cannot meet the original instruction.

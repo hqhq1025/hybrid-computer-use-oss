@@ -205,7 +205,7 @@ func init() {
 }
 
 // withAXTextEvidence puts the AX evidence line first: one JSON object that
-// starts with ok, then code, path, message, hint, until and counts.
+// starts with ok, then code, path, message, hint and counts.
 func withAXTextEvidence(result toolCallResult) toolCallResult {
 	if len(result.StructuredContent) == 0 {
 		return result

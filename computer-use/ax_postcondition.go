@@ -197,144 +197,6 @@ func a11yPostconditionPassed(result toolCallResult) bool {
 	)) == "pass"
 }
 
-func (s *service) stopA11yBatchForActionPostcondition(
-	context *a11yBatchContext,
-	index,
-	count int,
-	action a11yBatchAction,
-	actionEvidence []map[string]any,
-	actionResult,
-	postconditionResult toolCallResult,
-	obs observation,
-	hasBatchPostcondition bool,
-) toolCallResult {
-	classification, underlying :=
-		classifyA11yPostconditionFailure(postconditionResult)
-	stopped := actionResult
-	stopped.IsError = true
-	stopped.Content = append(stopped.Content, contentItem{
-		Type: "text",
-		Text: fmt.Sprintf(
-			"action %d until: %s",
-			index+1,
-			firstLine(resultText(postconditionResult)),
-		),
-	})
-	if stopped.StructuredContent == nil {
-		stopped.StructuredContent = map[string]any{}
-	}
-	stopped.StructuredContent["failure_code"] =
-		"action_" + classification
-	failurePhase := "action_postcondition"
-	if index+1 < count {
-		failurePhase = "between_actions"
-	}
-	stopped.StructuredContent["failure_phase"] = failurePhase
-	stopped.StructuredContent["action_postcondition_failure_code"] =
-		underlying
-	stopped.StructuredContent["action_postcondition_verified"] = false
-	stopped.StructuredContent["retry_same_request"] = false
-	stopped.StructuredContent["task_effect_verified"] = false
-
-	finalObservation := toolCallResult{}
-	if obs.resolvedMode() != observeNone {
-		if postconditionResult.axProofSnapshot != nil {
-			finalObservation = s.renderA11yBatchFinalObservation(
-				postconditionResult.axProofSnapshot,
-				postconditionResult.axProofNotes,
-				obs,
-			)
-		} else {
-			finalObservation = s.a11yBatchFinalObservation(
-				context,
-				obs,
-				action.actionType == "close",
-			)
-		}
-		stopped = mergeA11yBatchFinalObservation(
-			stopped,
-			finalObservation,
-		)
-		recordUntilWindowRef(
-			stopped.StructuredContent,
-			postconditionResult,
-			finalObservation,
-		)
-		finalObservationReturned, _ :=
-			stopped.StructuredContent["final_observation_returned"].(bool)
-		if !finalObservationReturned {
-			stopped = s.recoverA11yBatchObservation(
-				context,
-				stopped,
-				obs,
-			)
-		}
-	}
-	finalObservationReturned, _ :=
-		stopped.StructuredContent["final_observation_returned"].(bool)
-	stopped.StructuredContent["observation_required"] =
-		!finalObservationReturned
-	stopped.StructuredContent["next_identical_observation_required"] =
-		!finalObservationReturned
-	continuationState := "observation_required"
-	continuationRoute := "observe"
-	if classification == "postcondition_not_satisfied" {
-		continuationState = "predicate_false"
-	} else if finalObservationReturned {
-		continuationState = "inspect_current_state"
-	}
-	if finalObservationReturned {
-		continuationRoute = "continue_from_observation"
-	}
-	stopped.StructuredContent["continuation"] = map[string]any{
-		"state":              continuationState,
-		"retry_same_request": false,
-		"route":              continuationRoute,
-	}
-
-	anyInputEmitted, anyPartialPossible, anyMutationUnknown :=
-		batchMutationSummary(actionEvidence)
-	facts := map[string]any{
-		"actions_requested":                    count,
-		"actions_completed_without_call_error": index + 1,
-		"guard_failed_action_index":            index,
-		"guard_failed_action_number":           index + 1,
-		"guard_failed_action_type":             action.actionType,
-		"stopped_before_action_index":          index + 1,
-		"rejected_before_first_action":         false,
-		"partial_sequence":                     index+1 < count,
-		"final_observation_returned":           finalObservationReturned,
-		"actions":                              actionEvidence,
-		"any_input_emitted":                    anyInputEmitted,
-		"partial_input_possible":               anyPartialPossible,
-		"mutation_unknown":                     anyMutationUnknown,
-		"action_postcondition": compactA11yPostconditionEvidence(
-			action.postcondition,
-			postconditionResult,
-		),
-	}
-	if index+1 >= count {
-		facts["stopped_before_action_index"] = nil
-	}
-	if hasBatchPostcondition {
-		facts["postcondition"] = map[string]any{
-			"status": "not_checked",
-		}
-	}
-	return prependA11yBatchSummary(
-		stopped,
-		fmt.Sprintf(
-			"Stopped after action %d/%d (%s): its until did not hold, so %d later "+
-				"action(s) were not sent. Current state follows when available.",
-			index+1,
-			count,
-			action.actionType,
-			count-index-1,
-		),
-		facts,
-	)
-}
-
 // assertionGoal returns the predicate of a published assertion object.
 func assertionGoal(assertion map[string]any) verifyGoal {
 	spec, err := parseA11yAssertionSpec(assertion)
@@ -429,37 +291,6 @@ func (s *service) reconcileA11yActionPostcondition(
 	)
 }
 
-func (s *service) reconcileA11yPostconditionFromFinalObservation(
-	assertion map[string]any,
-	assertionResult,
-	finalObservation toolCallResult,
-) toolCallResult {
-	if !assertionResult.IsError ||
-		assertionResult.StructuredContent == nil ||
-		finalObservation.IsError ||
-		finalObservation.axProofSnapshot == nil {
-		return assertionResult
-	}
-	if !a11yPostconditionNeedsCanonicalReconciliation(
-		assertion,
-		assertionResult,
-	) {
-		return assertionResult
-	}
-	reconciled := s.reconcileA11yPostconditionFromCanonicalSnapshot(
-		assertion,
-		assertionResult,
-		finalObservation.axProofSnapshot,
-		finalObservation.axProofNotes,
-		nil,
-	)
-	if reconciled.StructuredContent != nil &&
-		reconciled.StructuredContent["postcondition_reconciled_by_canonical_observation"] == true {
-		reconciled.StructuredContent["postcondition_recovered_by_final_observation"] = true
-	}
-	return reconciled
-}
-
 func (s *service) reconcileA11yPostconditionFromCanonicalSnapshot(
 	assertion map[string]any,
 	assertionResult toolCallResult,
@@ -513,7 +344,7 @@ func (s *service) reconcileA11yPostconditionFromCanonicalSnapshot(
 	} else {
 		reconciled = assertionNegativeResult(
 			fmt.Sprintf(
-				"until false: %s did not satisfy %s in the "+
+				"wait false: %s did not satisfy %s in the "+
 					"action's fresh observation. Last observation: %s",
 				spec.targetAddress,
 				goal.describe(),
@@ -563,7 +394,7 @@ func (s *service) preflightA11yPostcondition(
 	if spec.assertionType == "window_title_contains" {
 		if strings.TrimSpace(context.windowRef) == "" {
 			return errors.New(
-				"a title until needs the window of the act call",
+				"a title wait needs the window of the act call",
 			)
 		}
 		return nil
@@ -594,11 +425,11 @@ func (s *service) preflightA11yPostcondition(
 	return nil
 }
 
-// runA11yPostcondition checks an act until after its action(s). A ref
-// predicate reads that element. A selector or title predicate reads the
+// runA11yPostcondition checks a predicate after a batch's earlier steps. A
+// ref predicate reads that element. A selector or title predicate reads the
 // application that owns the batch window, starting from that window, so a
 // window the action closed or a dialog it opened does not hide the answer.
-// The window binding is read state only; no input is re-bound.
+// The read never re-binds input.
 func (s *service) runA11yPostcondition(
 	context *a11yBatchContext,
 	assertion map[string]any,
@@ -621,125 +452,6 @@ func (s *service) runA11yPostcondition(
 		readContext.appToken = context.appToken
 	}
 	return s.runA11yAssertion(readContext, assertion, a11yScopeWindow)
-}
-
-func mergeA11yPostconditionResult(
-	actionResult,
-	assertionResult toolCallResult,
-) toolCallResult {
-	if assertionResult.StructuredContent == nil {
-		return actionResult
-	}
-	status := strings.TrimSpace(fmt.Sprint(
-		assertionResult.StructuredContent["assertion_status"],
-	))
-	postconditionText := firstLine(resultText(assertionResult))
-	if !assertionResult.IsError && status != "pass" {
-		postconditionText = "assertion_passed=false retry_same_request=false"
-	}
-	actionResult.Content = append(actionResult.Content, contentItem{
-		Type: "text",
-		Text: "until: " + postconditionText,
-	})
-	if actionResult.StructuredContent == nil {
-		actionResult.StructuredContent = map[string]any{}
-	}
-	actionResult.StructuredContent["postcondition_verified"] =
-		!assertionResult.IsError && status == "pass"
-	if !assertionResult.IsError && status == "pass" {
-		markVerifiedPostconditionEffect(
-			actionResult.StructuredContent,
-			nil,
-		)
-	}
-	if recovered, _ := assertionResult.StructuredContent["postcondition_recovered_by_final_observation"].(bool); recovered {
-		actionResult.StructuredContent["postcondition_recovered_by_final_observation"] = true
-		actionResult.StructuredContent["cause_unattributed"] = true
-	}
-	inputEmitted := axEvidenceReportsInputEmission(
-		actionResult.StructuredContent,
-	)
-	if inputEmitted {
-		actionResult.StructuredContent["input_events_emitted"] = true
-	}
-	if inputEmitted {
-		actionResult.StructuredContent["preflight_only"] = false
-		actionResult.StructuredContent["evidence_scope"] =
-			"post_action_observation"
-	}
-	if assertionResult.IsError {
-		classification, underlying := classifyA11yPostconditionFailure(
-			assertionResult,
-		)
-		actionResult.StructuredContent[axPublicErrorDetailKey] = postconditionText
-		actionResult.IsError = true
-		actionResult.StructuredContent["failure_code"] = classification
-		actionResult.StructuredContent["failure_phase"] = "postcondition"
-		actionResult.StructuredContent["postcondition_failure_code"] = underlying
-		if inputEmitted {
-			actionResult.StructuredContent["input_events_emitted"] = true
-			actionResult.StructuredContent["mutation_unknown"] = true
-			actionResult.StructuredContent["preflight_only"] = false
-			actionResult.StructuredContent["evidence_scope"] =
-				"post_action_observation"
-		}
-	}
-	if inputEmitted || axEvidenceReportsInputEmission(actionResult.StructuredContent) {
-		actionResult.StructuredContent["preflight_only"] = false
-		if unknown, _ := actionResult.StructuredContent["mutation_unknown"].(bool); unknown {
-			actionResult.StructuredContent["evidence_scope"] =
-				"post_action_observation"
-		}
-	}
-	return actionResult
-}
-
-// markVerifiedPostconditionEffect records a passing until after input: the
-// awaited state was read live, so the effect is no longer unknown. The
-// until does not prove that this action caused the state (another action,
-// the app, or the user may have), so the cause stays unattributed.
-func markVerifiedPostconditionEffect(
-	structuredContent map[string]any,
-	actionEvidence map[string]any,
-) {
-	if structuredContent == nil ||
-		structuredContent["task_effect_verified"] == true ||
-		!axEvidenceReportsInputEmission(structuredContent) {
-		return
-	}
-	delete(structuredContent, "effect_unknown")
-	delete(structuredContent, "mutation_unknown")
-	structuredContent["cause_unattributed"] = true
-	if actionEvidence != nil {
-		delete(actionEvidence, "mutation_unknown")
-		actionEvidence["cause_unattributed"] = true
-	}
-}
-
-// a11yBatchEffectVerified reports whether an until verified the outcome of
-// the whole call: the batch until passed, or every action that sent input
-// has an until of its own that passed.
-func a11yBatchEffectVerified(
-	batchUntilPassed bool,
-	actions []map[string]any,
-) bool {
-	if batchUntilPassed {
-		return true
-	}
-	verified := false
-	for _, action := range actions {
-		evidence, _ := action["postcondition"].(map[string]any)
-		if evidence != nil && evidence["verified"] == true {
-			verified = true
-			continue
-		}
-		if axEvidenceReportsInputEmission(action) ||
-			action["partial_input_possible"] == true ||
-			action["mutation_unknown"] == true {
-			return false
-		}
-	}
-	return verified
 }
 
 func classifyA11yPostconditionFailure(
@@ -766,40 +478,4 @@ func classifyA11yPostconditionFailure(
 		}
 	}
 	return "postcondition_unknown", underlying
-}
-
-func compactA11yPostconditionEvidence(
-	assertion map[string]any,
-	result toolCallResult,
-) any {
-	if assertion == nil {
-		return nil
-	}
-	if result.StructuredContent == nil {
-		return map[string]any{"status": "unknown"}
-	}
-	status := strings.TrimSpace(fmt.Sprint(
-		result.StructuredContent["assertion_status"],
-	))
-	if status == "" {
-		status = "unknown"
-	}
-	evidence := map[string]any{
-		"status":   status,
-		"verified": !result.IsError && status == "pass",
-	}
-	if recovered, _ := result.StructuredContent["postcondition_recovered_by_final_observation"].(bool); recovered {
-		evidence["recovered_by_final_observation"] = true
-		evidence["cause_unattributed"] = true
-	}
-	if reconciled, _ := result.StructuredContent["postcondition_reconciled_by_canonical_observation"].(bool); reconciled {
-		evidence["reconciled_by_canonical_observation"] = true
-		evidence["cause_unattributed"] = true
-	}
-	if result.IsError {
-		classification, underlying := classifyA11yPostconditionFailure(result)
-		evidence["failure_code"] = classification
-		evidence["underlying_failure_code"] = underlying
-	}
-	return evidence
 }

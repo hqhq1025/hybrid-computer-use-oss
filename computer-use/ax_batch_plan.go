@@ -31,14 +31,13 @@ const (
 type a11yPlanBoundary string
 
 const (
-	a11yPlanNoBoundary            a11yPlanBoundary = "none"
-	a11yPlanCanonicalBoundary     a11yPlanBoundary = "canonical_action"
-	a11yPlanTargetedBoundary      a11yPlanBoundary = "targeted_action"
-	a11yPlanPostconditionBoundary a11yPlanBoundary = "action_postcondition"
-	a11yPlanWindowBoundary        a11yPlanBoundary = "window_transition"
-	a11yPlanNextActionBoundary    a11yPlanBoundary = "next_action_requires_canonical"
-	a11yPlanBatchGuardBoundary    a11yPlanBoundary = "batch_postcondition"
-	a11yPlanTransactionBoundary   a11yPlanBoundary = "transaction_end"
+	a11yPlanNoBoundary          a11yPlanBoundary = "none"
+	a11yPlanCanonicalBoundary   a11yPlanBoundary = "canonical_action"
+	a11yPlanTargetedBoundary    a11yPlanBoundary = "targeted_action"
+	a11yPlanWaitBoundary        a11yPlanBoundary = "wait"
+	a11yPlanWindowBoundary      a11yPlanBoundary = "window_transition"
+	a11yPlanNextActionBoundary  a11yPlanBoundary = "next_action_requires_canonical"
+	a11yPlanTransactionBoundary a11yPlanBoundary = "transaction_end"
 )
 
 type a11yPlannedStep struct {
@@ -58,7 +57,6 @@ type a11yBatchExecutionPlan struct {
 	initialConsistency    a11yPlanConsistency
 	requiresMutationLease bool
 	finalObservation      string
-	hasBatchPostcondition bool
 	steps                 []a11yPlannedStep
 }
 
@@ -86,8 +84,8 @@ func a11yPlanDefaultBoundary(
 	if action.actionType == "activate" || action.actionType == "close" {
 		return a11yPlanWindowBoundary
 	}
-	if action.postcondition != nil {
-		return a11yPlanPostconditionBoundary
+	if action.actionType == "wait" {
+		return a11yPlanWaitBoundary
 	}
 	if target != a11yPlanNoTarget {
 		return a11yPlanTargetedBoundary
@@ -100,19 +98,17 @@ func a11yPlanOrderedInputEligible(
 	target a11yPlanTargetRequirement,
 ) bool {
 	return action.actionType == "keypress" &&
-		target == a11yPlanNoTarget &&
-		action.postcondition == nil
+		target == a11yPlanNoTarget
 }
 
 // compileA11yBatchExecutionPlan runs only after public normalization, ownership
-// binding, and postcondition preflight. It describes consistency boundaries;
+// binding, and wait preflight. It describes consistency boundaries;
 // providers do not consume it until their batch contract can preserve the same
 // per-action stop and emission evidence as the current path.
 func compileA11yBatchExecutionPlan(
 	context *a11yBatchContext,
 	actions []a11yBatchAction,
 	final observation,
-	batchPostcondition map[string]any,
 ) (a11yBatchExecutionPlan, error) {
 	if context == nil ||
 		strings.TrimSpace(context.windowRef) == "" ||
@@ -133,7 +129,6 @@ func compileA11yBatchExecutionPlan(
 		initialConsistency:    a11yPlanCanonicalWindow,
 		requiresMutationLease: true,
 		finalObservation:      final.resolvedMode(),
-		hasBatchPostcondition: batchPostcondition != nil,
 		steps:                 make([]a11yPlannedStep, 0, len(actions)),
 	}
 
@@ -185,8 +180,6 @@ func compileA11yBatchExecutionPlan(
 		switch {
 		case index < len(plan.steps)-1:
 			step.boundary = a11yPlanNextActionBoundary
-		case batchPostcondition != nil:
-			step.boundary = a11yPlanBatchGuardBoundary
 		default:
 			step.boundary = a11yPlanTransactionBoundary
 		}

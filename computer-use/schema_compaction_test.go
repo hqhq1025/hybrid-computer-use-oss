@@ -481,7 +481,8 @@ func TestAXSchemaSurvivesClientCompaction(t *testing.T) {
 	}
 	properties := visible["properties"].(map[string]any)
 	actionFields := properties["actions"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
-	for _, field := range []string{"type", "ref", "title", "text", "keys", "value", "direction", "pages", "until"} {
+	for _, field := range []string{"type", "ref", "title", "text", "keys", "value", "direction", "pages",
+		"window", "query", "state", "gone", "timeout_ms"} {
 		if _, ok := actionFields[field]; !ok {
 			t.Fatalf("action field %q is not visible after normalization: %v", field, sortedKeys(actionFields))
 		}
@@ -490,11 +491,14 @@ func TestAXSchemaSurvivesClientCompaction(t *testing.T) {
 	if len(types) != len(axActionTypes) {
 		t.Fatalf("action type enum lost values: %v", types)
 	}
-	predicate := visible["$defs"].(map[string]any)["predicate"].(map[string]any)["properties"].(map[string]any)
-	for _, field := range []string{"type", "ref", "selector", "negate", "timeout_ms", "stable_ms"} {
-		if _, ok := predicate[field]; !ok {
-			t.Fatalf("until field %q is not visible: %v", field, sortedKeys(predicate))
+	query := visible["$defs"].(map[string]any)["query"].(map[string]any)["properties"].(map[string]any)
+	for _, field := range axFindFilters {
+		if _, ok := query[field]; !ok {
+			t.Fatalf("query field %q is not visible: %v", field, sortedKeys(query))
 		}
+	}
+	if _, present := properties["until"]; present {
+		t.Fatal("the removed until field is still published")
 	}
 	t.Logf("AX schema: raw=%d normalized=%d budget=%d", len(mustJSON(t, ax.InputSchema)), stages[0].bytes, codexSchemaBudget)
 }

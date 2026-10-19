@@ -353,13 +353,12 @@ func appendAXContinuationText(
 	return result
 }
 
-// renameAXUntilEvidence gives model-visible evidence the public name until
-// for what the code calls a postcondition: keys and failure codes such as
-// batch.action_postcondition or postcondition_unknown would otherwise teach
-// the removed postcondition field.
-func renameAXUntilEvidence(value any) any {
+// renameAXWaitEvidence gives model-visible evidence the public name wait
+// for what the code calls a postcondition: keys such as
+// postcondition_verified would otherwise teach a removed field.
+func renameAXWaitEvidence(value any) any {
 	rename := func(text string) string {
-		return strings.ReplaceAll(text, "postcondition", "until")
+		return strings.ReplaceAll(text, "postcondition", "wait")
 	}
 	// Nested maps can be shared with the internal evidence, which is read
 	// after this call, so every level is copied, never edited in place.
@@ -367,19 +366,19 @@ func renameAXUntilEvidence(value any) any {
 	case map[string]any:
 		copied := make(map[string]any, len(typed))
 		for key, item := range typed {
-			copied[rename(key)] = renameAXUntilEvidence(item)
+			copied[rename(key)] = renameAXWaitEvidence(item)
 		}
 		return copied
 	case []map[string]any:
 		copied := make([]map[string]any, len(typed))
 		for index, item := range typed {
-			copied[index], _ = renameAXUntilEvidence(item).(map[string]any)
+			copied[index], _ = renameAXWaitEvidence(item).(map[string]any)
 		}
 		return copied
 	case []any:
 		copied := make([]any, len(typed))
 		for index, item := range typed {
-			copied[index] = renameAXUntilEvidence(item)
+			copied[index] = renameAXWaitEvidence(item)
 		}
 		return copied
 	case string:
@@ -428,13 +427,13 @@ func prepareAXEvidence(
 		}
 	}
 	if !result.IsError && axEffectVerified(full) {
-		// A verified effect is not also unknown: the until held, the target
+		// A verified effect is not also unknown: a wait held, the target
 		// visibly changed, or the closed window is gone.
 		for _, key := range []string{"effect_unknown", "mutation_unknown", "cause_unattributed"} {
 			delete(compact, key)
 		}
 	}
-	compact, _ = renameAXUntilEvidence(compact).(map[string]any)
+	compact, _ = renameAXWaitEvidence(compact).(map[string]any)
 	for key, value := range axPublicEvidence(full, result.IsError, result.Content) {
 		compact[key] = value
 	}
@@ -451,6 +450,7 @@ func prepareAXEvidence(
 // axEffectVerified reports whether the call's own reads verified its effect.
 func axEffectVerified(full map[string]any) bool {
 	return full["postcondition_verified"] == true ||
+		full["wait_verified"] == true ||
 		full["target_effect_observed"] == true ||
 		full["close_effect_verified"] == true
 }
@@ -530,7 +530,7 @@ func axEvidenceReportsInputEmission(evidence map[string]any) bool {
 
 // axPublicFields are the leading fields of the AX evidence line, in order.
 var axPublicFields = []string{
-	"ok", "code", "path", "message", "hint", "until",
+	"ok", "code", "path", "message", "hint",
 	"input_emitted", "completed", "requested",
 }
 
@@ -538,8 +538,7 @@ var axPublicFields = []string{
 var axPublicHints = map[string]string{
 	axCodeStaleRef:       `{"mode":"find","window_ref":"wN","query":{"name_contains":"..."}}`,
 	axCodeWindowChanged:  `{"mode":"observe","window_ref":"wN"}`,
-	axCodeUntilFailed:    `{"mode":"observe","window_ref":"wN"}`,
-	axCodeUntilUnknown:   `{"mode":"observe","window_ref":"wN"}`,
+	axCodeWaitTimeout:    `{"mode":"observe","window_ref":"wN"}`,
 	axCodeEffectUnknown:  `{"mode":"observe","window_ref":"wN"}`,
 	axCodeAppUnavailable: `{"mode":"apps"}`,
 	axCodeRuntimeError:   `{"mode":"apps"}`,
@@ -554,18 +553,12 @@ func axPublicErrorCode(full map[string]any) string {
 	phase, _ := full["failure_phase"].(string)
 	subject, _ := full["failure_subject"].(string)
 	status, _ := full["assertion_status"].(string)
-	_, hasUntil := full["postcondition"]
-	if _, present := full["action_postcondition_failure_code"]; present {
-		hasUntil = true
-	}
 	switch {
 	case failure == axCodeWindowChanged,
 		failure == "stale_target" && (phase == "between_actions" || subject == "window"):
 		return axCodeWindowChanged
-	case strings.HasSuffix(failure, "postcondition_not_satisfied"):
-		return axCodeUntilFailed
-	case strings.HasSuffix(failure, "postcondition_unknown"):
-		return axCodeUntilUnknown
+	case failure == "wait_timeout":
+		return axCodeWaitTimeout
 	case failure == "effect_unknown":
 		return axCodeEffectUnknown
 	case failure == "ax_app_unavailable" || status == "app_unavailable":
@@ -579,10 +572,6 @@ func axPublicErrorCode(full map[string]any) string {
 		status == "locator_stale", status == "locator_ambiguous",
 		status == "invalid_target":
 		return axCodeStaleRef
-	case failure == "observation_incomplete" && (hasUntil || status != ""):
-		return axCodeUntilUnknown
-	case status == "observation_incomplete", status == "locator_missing":
-		return axCodeUntilUnknown
 	}
 	if axEvidenceReportsInputEmission(full) {
 		if unknown, _ := full["mutation_unknown"].(bool); unknown {
@@ -593,8 +582,8 @@ func axPublicErrorCode(full map[string]any) string {
 }
 
 // axPublicEvidence returns the leading fields of the AX evidence line:
-// ok, the public error code with path, message and hint, the until result,
-// and input and progress counts.
+// ok, the public error code with path, message and hint, and input and
+// progress counts.
 func axPublicEvidence(full map[string]any, isError bool, content []contentItem) map[string]any {
 	public := map[string]any{"ok": !isError}
 	if isError {
@@ -621,9 +610,6 @@ func axPublicEvidence(full map[string]any, isError bool, content []contentItem) 
 			public["message"] = truncateRunes(message, 300)
 		}
 		hint, _ := full[axPublicErrorHintKey].(string)
-		if hint == "" && (code == axCodeUntilFailed || code == axCodeUntilUnknown) {
-			hint = untilWindowHint(full)
-		}
 		if hint == "" {
 			hint = axPublicHints[code]
 		}
@@ -632,22 +618,6 @@ func axPublicEvidence(full map[string]any, isError bool, content []contentItem) 
 		}
 	}
 	batch, _ := full["a11y_batch_result"].(map[string]any)
-	if until, _ := full["until_result"].(string); until != "" {
-		public["until"] = until
-	} else if until := axUntilFromPostcondition(batch["action_postcondition"]); until != "" {
-		public["until"] = until
-	} else if until := axUntilFromPostcondition(batch["postcondition"]); until != "" {
-		public["until"] = until
-	} else if status, _ := full["assertion_status"].(string); status != "" {
-		switch {
-		case status == "pass":
-			public["until"] = "true"
-		case !isError:
-			public["until"] = "false"
-		default:
-			public["until"] = "unknown"
-		}
-	}
 	public["input_emitted"] = axEvidenceReportsInputEmission(full)
 	// Batch counts live in a11y_batch_result, or at the top level on a
 	// stop between actions.
@@ -663,24 +633,4 @@ func axPublicEvidence(full map[string]any, isError bool, content []contentItem) 
 		}
 	}
 	return public
-}
-
-// axUntilFromPostcondition reads compact postcondition evidence as the
-// public until result: "true", "false", "unknown", or "" when not checked.
-func axUntilFromPostcondition(value any) string {
-	evidence, _ := value.(map[string]any)
-	if evidence == nil {
-		return ""
-	}
-	status, _ := evidence["status"].(string)
-	switch {
-	case status == "" || status == "not_checked":
-		return ""
-	case evidence["verified"] == true:
-		return "true"
-	case evidence["failure_code"] == "postcondition_unknown":
-		return "unknown"
-	default:
-		return "false"
-	}
 }

@@ -31,6 +31,8 @@ type reportBackend struct {
 	onAction func(b *reportBackend)
 	// skipReadback makes an action return no snapshot (observe "none").
 	skipReadback bool
+	// loseReadback makes the read after an action fail after input.
+	loseReadback bool
 }
 
 func (b *reportBackend) snapshot(selected reportWindow) *ProviderSnapshot {
@@ -107,6 +109,9 @@ func (b *reportBackend) ResolveAndAct(request ProviderActionRequest) (ProviderAc
 	result := b.read(request.WindowHandle)
 	if b.skipReadback {
 		result = ProviderAccessibilityResult{OK: true, ObservationSkipped: true}
+	}
+	if b.loseReadback {
+		result = ProviderAccessibilityResult{OK: true}
 	}
 	result.Mutation = &ProviderMutationFacts{InputEventsEmitted: true, DesktopStateMutated: true}
 	result.ActionEvidence = &ProviderActionEvidence{InputEmitted: true, Route: "semantic_action"}
@@ -331,5 +336,34 @@ func TestActReportKeepsUncertaintyOfAnUnreportedAction(t *testing.T) {
 	})
 	if result.StructuredContent["target_effect_observed"] == true {
 		t.Fatalf("a keypress effect was counted as observed: %s", resultText(result))
+	}
+}
+
+// Closing a window listed by apps, before any read of its application,
+// still names the closed window instead of reporting unknown.
+func TestActReportNamesAClosedWindowWithoutAPriorRead(t *testing.T) {
+	service, backend := windowScriptService(editorApps(
+		testWindow{testHandleReport, "Report - Editor", true},
+	))
+	window, argErr := service.resolveWindowTitle("Report")
+	if argErr != nil {
+		t.Fatal(argErr)
+	}
+	backend.windowResponse = &ProviderWindowResult{
+		OK: true, Snapshot: &ProviderSnapshot{WindowAbsent: true, ClosedWindowHandle: testHandleReport},
+		Mutation:       &ProviderMutationFacts{InputEventsEmitted: true, DesktopStateMutated: true},
+		ActionEvidence: &ProviderActionEvidence{InputEmitted: true, Route: "native_window_command"},
+	}
+	// The read after the close proves the window is gone.
+	backend.accessibilityResponses = []ProviderAccessibilityResult{{
+		OK: false, Error: "stale_window_ref: source window is gone",
+		Failure:         &ProviderFailure{Code: "stale_window_ref", Phase: "precondition", FactsComplete: true, Subject: "window"},
+		RecoveryContext: &ProviderRecoveryContext{SourceAppStatus: "absent", SourceWindowStatus: "gone", InventoryComplete: true},
+	}}
+	result := service.callTool(publicToolAX, map[string]any{"mode": "act",
+		"actions": []any{map[string]any{"type": "close", "ref": window.ref}}})
+	text := resultText(withAXTextEvidence(prepareAXEvidence(result)))
+	if !strings.Contains(text, `windows: closed `+window.ref+` "Report - Editor"`) {
+		t.Fatalf("closed window not named:\n%s", text)
 	}
 }

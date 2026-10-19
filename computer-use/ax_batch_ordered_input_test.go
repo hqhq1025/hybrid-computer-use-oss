@@ -92,7 +92,7 @@ func TestOrderedBatchPreflightsEntireRequestBeforeNativeDispatch(t *testing.T) {
 		s.backend = backend
 		result := s.a11yBatch([]any{
 			map[string]any{"type": "keypress", "keys": []any{"A"}}, invalid,
-		}, observation{mode: observeNone}, nil, window)
+		}, observation{mode: observeNone}, window)
 
 		if !result.IsError || len(backend.requests) != 0 || len(legacy.calls) != 0 {
 			t.Fatalf("invalid tail reached provider: invalid=%#v result=%#v", invalid, result)
@@ -111,37 +111,38 @@ func TestOrderedBatchCrossWindowTailRejectedBeforeInput(t *testing.T) {
 		map[string]any{"type": "click", "ref": ref},
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
 		map[string]any{"type": "close", "ref": otherWindow},
-	}, observation{mode: observeNone}, nil, "")
+	}, observation{mode: observeNone}, "")
 	if !result.IsError || len(backend.requests) != 0 || len(legacy.calls) != 0 {
 		t.Fatalf("cross-window batch reached provider: %#v", result)
 	}
 }
 
-func TestOrderedBatchGuardKeepsExistingAssertionPath(t *testing.T) {
-	for _, perAction := range []bool{false, true} {
+// A batch with a wait step runs action by action, so the wait polls between
+// actions and the final observation shows the awaited state.
+func TestOrderedBatchWithAWaitKeepsThePerActionPath(t *testing.T) {
+	for _, between := range []bool{false, true} {
 		s, _, window, _ := orderedInputTestService(t)
 		legacy := &recordingPlatformBackend{accessibilityResponse: &ProviderAccessibilityResult{
 			OK: true, Snapshot: mixedOrderedInputBatchTestSnapshot(),
 			Mutation: &ProviderMutationFacts{InputEventsEmitted: true},
-		}, windowResponse: &ProviderWindowResult{
-			OK: true, AppName: "LibreOffice", AppPID: 10, WindowTitles: []string{"Document"},
 		}}
 		backend := &orderedInputRecordingBackend{recordingPlatformBackend: legacy}
 		s.backend = backend
-		guard := map[string]any{"type": "window_title_contains", "text": "Document", "exists": true, "timeout_ms": 1}
-		action := map[string]any{"type": "keypress", "keys": []any{"ENTER"}}
-		batchGuard := guard
-		if perAction {
-			action["until"] = map[string]any{"type": "title", "text": "Document", "timeout_ms": 1.0}
-			batchGuard = nil
+		actions := []any{
+			map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
+			map[string]any{"type": "wait", "query": map[string]any{"role": "button", "name_contains": "Sav"}, "timeout_ms": 1.0},
 		}
-		result := s.a11yBatch([]any{action}, observation{mode: observeDiff}, batchGuard, window)
-		if result.IsError || len(backend.requests) != 0 || len(legacy.actionRequests) != 1 || len(legacy.observeRequests) == 0 {
-			t.Fatalf("guarded batch left assertion path: perAction=%t result=%#v calls=%#v", perAction, result, legacy.calls)
+		if between {
+			actions = append(actions, map[string]any{"type": "keypress", "keys": []any{"TAB"}})
+		}
+		result := s.a11yBatch(actions, observation{mode: observeDiff}, window)
+		if result.IsError || len(backend.requests) != 0 || len(legacy.actionRequests) != len(actions)-1 {
+			t.Fatalf("batch with a wait left the per-action path: between=%t result=%s calls=%#v",
+				between, resultText(result), legacy.calls)
 		}
 		facts := result.StructuredContent["a11y_batch_result"].(map[string]any)
-		if facts["final_observation_phase"] != "after_postcondition" || facts["final_observation_returned"] != true {
-			t.Fatalf("guarded batch did not observe after its predicate: %#v", facts)
+		if !between && (facts["final_observation_phase"] != "after_wait" || facts["final_observation_returned"] != true) {
+			t.Fatalf("a trailing wait did not come before the final observation: %#v", facts)
 		}
 	}
 }
@@ -158,7 +159,7 @@ func TestOrderedBatchOptionalFinalObservationFailure(t *testing.T) {
 		if tail {
 			actions = append(actions, map[string]any{"type": "type", "text": "must not run"})
 		}
-		result := s.a11yBatch(actions, observation{mode: observeNone}, nil, window)
+		result := s.a11yBatch(actions, observation{mode: observeNone}, window)
 		facts := result.StructuredContent["a11y_batch_result"].(map[string]any)
 		if result.IsError != tail || len(backend.requests) != 1 || len(legacy.calls) != 0 ||
 			facts["actions_completed_without_call_error"] != 1 || facts["final_observation_returned"] != false ||

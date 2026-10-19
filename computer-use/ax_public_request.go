@@ -23,8 +23,7 @@ const (
 	axCodeInvalidArgument  = "invalid_argument"
 	axCodeStaleRef         = "stale_ref"
 	axCodeWindowChanged    = "window_changed"
-	axCodeUntilFailed      = "until_failed"
-	axCodeUntilUnknown     = "until_unknown"
+	axCodeWaitTimeout      = "wait_timeout"
 	axCodeEffectUnknown    = "effect_unknown"
 	axCodeAppUnavailable   = "app_unavailable"
 	axCodeRuntimeError     = "runtime_error"
@@ -33,13 +32,21 @@ const (
 	axCodeNoFocusedWindow  = "no_focused_window"
 	a11yModeApps           = "apps"
 	axDefaultFindPageSize  = 20
-	axDefaultUntilTimeout  = 5000
+	axDefaultWaitTimeout   = 5000
 	axMaxUntilStableMS     = 5000
 	axPublicErrorCodeKey   = "public_error_code"
 	axPublicErrorPathKey   = "public_error_path"
 	axPublicErrorHintKey   = "public_error_hint"
 	axPublicErrorDetailKey = "public_error_message"
 )
+
+// axPublicErrorCodes is the complete list of public AX error codes. The
+// documentation and the instructions list the same codes.
+var axPublicErrorCodes = []string{
+	axCodeInvalidArgument, axCodeStaleRef, axCodeWindowChanged, axCodeWaitTimeout,
+	axCodeEffectUnknown, axCodeAppUnavailable, axCodeRuntimeError,
+	axCodeAmbiguousWindow, axCodeWindowNotFound, axCodeNoFocusedWindow,
+}
 
 // axArgError is a rejected argument. It is returned before any input.
 // rule names the cross-field rule a schema-valid call broke; it is empty
@@ -65,7 +72,7 @@ const (
 	axRuleRequiredForType = "ax_required_for_action_type"
 	axRuleOneOf           = "ax_exactly_one_of"
 	axRuleRefKind         = "ax_ref_kind_for_action_type"
-	axRuleObserveNone     = "ax_observe_none_needs_until"
+	axRuleObserveNone     = "ax_observe_none"
 	axRuleFindFilterPair  = "ax_find_filter_pair"
 	axRuleValueMatch      = "ax_value_match"
 	axRuleBlankValue      = "ax_blank_value"
@@ -106,7 +113,6 @@ type axRequest struct {
 	limit     int
 	cursor    string
 	actions   []a11yBatchAction
-	until     map[string]any
 }
 
 var (
@@ -118,17 +124,19 @@ var (
 
 var axModeFields = map[string][]string{
 	a11yModeApps:    {"mode"},
-	a11yModeObserve: {"mode", "app", "window_ref", "scope", "observe", "root", "until"},
+	a11yModeObserve: {"mode", "app", "window_ref", "scope", "observe", "root"},
 	a11yModeFind:    {"mode", "app", "window_ref", "scope", "query", "limit", "cursor"},
-	a11yModeAct:     {"mode", "window_ref", "actions", "observe", "until"},
+	a11yModeAct:     {"mode", "window_ref", "actions", "observe"},
 }
 
 var axActionTypes = []string{
-	"click", "type", "keypress", "set_value", "scroll", "activate", "close",
+	"click", "type", "keypress", "set_value", "scroll", "activate", "close", "wait",
 }
 
-// axActionFields lists the fields each action type accepts besides type and
-// until.
+// axFindFilters are the query fields shared by find and a wait step.
+var axFindFilters = []string{"role", "name_equals", "name_contains", "text_equals", "text_contains", "state"}
+
+// axActionFields lists the fields each action type accepts besides type.
 var axActionFields = map[string][]string{
 	"click":     {"ref"},
 	"type":      {"ref", "text"},
@@ -137,18 +145,21 @@ var axActionFields = map[string][]string{
 	"scroll":    {"ref", "direction", "pages"},
 	"activate":  {"ref", "title"},
 	"close":     {"ref", "title"},
+	"wait":      {"window", "query", "ref", "value", "state", "text", "gone", "timeout_ms"},
 }
 
 // axRenamedFields maps field names from earlier interfaces, and names models
 // commonly write, to the current field.
 var axRenamedFields = map[string]string{
-	"action":        "type",
-	"target":        "ref",
-	"postcondition": "until",
-	"assertion":     "until",
-	"key":           "keys",
-	"app_ref":       "app",
+	"action":  "type",
+	"target":  "ref",
+	"key":     "keys",
+	"app_ref": "app",
 }
+
+// axRemovedWaitFields name the predicate fields of earlier interfaces. A call
+// that uses one is rejected with the equivalent call written with wait steps.
+var axRemovedWaitFields = []string{"until", "postcondition", "assertion"}
 
 // axDecodeHook, when set by a test, is called once per decodeAXRequest.
 var axDecodeHook func()
@@ -176,14 +187,17 @@ func decodeAXCall(args map[string]any) (*axRequest, *axArgError) {
 	if !ok || !containsString([]string{a11yModeApps, a11yModeObserve, a11yModeFind, a11yModeAct}, mode) {
 		if mode == "assert_ax" {
 			return nil, axInvalid("mode",
-				`mode "assert_ax" was removed; use observe with until`,
-				`{"mode":"observe","window_ref":"w1","until":{"type":"exists","ref":"r1"}}`)
+				`mode "assert_ax" was removed; wait with an act call that has only wait steps`,
+				`{"mode":"act","actions":[{"type":"wait","ref":"r1"}]}`)
 		}
 		err := axInvalid("mode", "mode must be apps, observe, find, or act; got "+
 			compactJSON(rawMode), `{"mode":"apps"}`)
 		if lower := strings.ToLower(mode); lower != mode && axModeFields[lower] != nil {
 			err.hint, err.fix = "", []axEdit{axSet("mode", lower)}
 		}
+		return nil, err
+	}
+	if err := axRejectRemovedUntil(args); err != nil {
 		return nil, err
 	}
 	if err := axCheckFields(args, axModeFields[mode], "", "mode "+strconv.Quote(mode)); err != nil {
@@ -217,19 +231,13 @@ func decodeAXCall(args map[string]any) (*axRequest, *axArgError) {
 		}
 		return nil, err
 	}
-	if raw, present := args["until"]; present {
-		if request.until, err = decodeAXPredicate(raw, "until"); err != nil {
-			return nil, err
-		}
-	}
 	switch mode {
 	case a11yModeObserve:
-		if request.observe == observeNone && request.until == nil {
-			return nil, axInvalid("observe", `observe "none" returns nothing without until`,
+		if request.observe == observeNone {
+			return nil, axInvalid("observe", `observe "none" returns nothing; to wait without input, send act with only wait steps`,
 				"").withRule(axRuleObserveNone).withFix(axRemove("observe"))
 		}
-		if request.app == "" && request.windowRef == "" &&
-			(request.until == nil || !isShortAXRef(optionalString(axUntilTarget(request.until), "ref"))) {
+		if request.app == "" && request.windowRef == "" {
 			return nil, axInvalid("app", "observe needs app or window_ref",
 				"").withRule(axRuleRequiredForMode).withFix(axSet("window_ref", "w1"))
 		}
@@ -283,38 +291,46 @@ func decodeAXFind(args map[string]any, request *axRequest) *axArgError {
 		return axInvalid("query", "find requires query",
 			"").withRule(axRuleRequiredForMode).withFix(axSet("query", map[string]any{"name_contains": "Save"}))
 	}
-	query, ok := raw.(map[string]any)
-	if !ok {
-		return axInvalid("query", "query must be an object", `{"name_contains":"Save"}`)
-	}
-	filters := []string{"role", "name_equals", "name_contains", "text_equals", "text_contains", "state"}
-	if err := axCheckFields(query, filters, "query", "query"); err != nil {
-		for _, field := range []string{"name", "text"} {
-			if err.path == "query."+field {
-				err.fix = []axEdit{axSet("query."+field+"_contains", query[field]), axRemove(err.path)}
-			}
-		}
+	query, err := decodeAXQuery(raw, "query")
+	if err != nil {
 		return err
 	}
+	request.query = query
+	return nil
+}
+
+// decodeAXQuery checks a find query; a wait step uses the same fields.
+func decodeAXQuery(raw any, path string) (map[string]any, *axArgError) {
+	query, ok := raw.(map[string]any)
+	if !ok {
+		return nil, axInvalid(path, "query must be an object", `{"name_contains":"Save"}`)
+	}
+	if err := axCheckFields(query, axFindFilters, path, "query"); err != nil {
+		for _, field := range []string{"name", "text"} {
+			if err.path == path+"."+field {
+				err.fix = []axEdit{axSet(path+"."+field+"_contains", query[field]), axRemove(err.path)}
+			}
+		}
+		return nil, err
+	}
 	if len(query) == 0 {
-		return axInvalid("query", "query needs at least one filter: "+strings.Join(filters, ", "),
+		return nil, axInvalid(path, "query needs at least one filter: "+strings.Join(axFindFilters, ", "),
 			`{"name_contains":"Save"}`).withRule(axRuleRequiredForMode)
 	}
-	for _, field := range filters {
-		if _, err := axOptionalString(query, field, "query", true); err != nil {
-			return err
+	for _, field := range axFindFilters {
+		if _, err := axOptionalString(query, field, path, true); err != nil {
+			return nil, err
 		}
 	}
 	for _, pair := range [][2]string{{"name_equals", "name_contains"}, {"text_equals", "text_contains"}} {
 		if _, first := query[pair[0]]; first {
 			if _, second := query[pair[1]]; second {
-				return axInvalid("query."+pair[1], "use "+pair[0]+" or "+pair[1]+", not both", "").
-					withRule(axRuleFindFilterPair).withFix(axRemove("query." + pair[1]))
+				return nil, axInvalid(path+"."+pair[1], "use "+pair[0]+" or "+pair[1]+", not both", "").
+					withRule(axRuleFindFilterPair).withFix(axRemove(path + "." + pair[1]))
 			}
 		}
 	}
-	request.query = query
-	return nil
+	return query, nil
 }
 
 func decodeAXActions(raw any) ([]a11yBatchAction, *axArgError) {
@@ -343,9 +359,9 @@ func decodeAXActions(raw any) ([]a11yBatchAction, *axArgError) {
 		if err != nil {
 			return nil, err
 		}
-		if action.actionType == "close" && index != len(items)-1 {
-			return nil, axInvalid(path, "close must be the last action; a closed window cannot take later input", "").
-				withRule(argumentRuleCloseNotLast).withFix(axSet("actions", items[:index+1]))
+		if index > 0 && actions[index-1].actionType == "close" && action.actionType != "wait" {
+			return nil, axInvalid(path, "a closed window cannot take later input; after close, wait for the window to be gone first",
+				`{"type":"wait","window":"window title","gone":true}`).withRule(argumentRuleCloseNotLast)
 		}
 		totalText += len([]rune(action.text)) + len([]rune(action.value))
 		if totalText > a11yBatchMaxText {
@@ -379,7 +395,7 @@ func decodeAXAction(object map[string]any, path string) (a11yBatchAction, *axArg
 		return action, axInvalid(path+".type", message, axActionShapeHint(object))
 	}
 	action.actionType = actionType
-	allowed := append([]string{"type", "until"}, axActionFields[actionType]...)
+	allowed := append([]string{"type"}, axActionFields[actionType]...)
 	if err := axCheckFields(object, allowed, path, actionType); err != nil {
 		_, hasRef := object["ref"]
 		if err.path == path+".window_ref" && !hasRef && (actionType == "activate" || actionType == "close") {
@@ -392,6 +408,15 @@ func decodeAXAction(object map[string]any, path string) (a11yBatchAction, *axArg
 			err.hint = axActionShapeHint(object)
 		}
 		return action, err.withRule(axRuleFieldForType)
+	}
+	if actionType == "wait" {
+		wait, err := decodeAXWait(object, path)
+		if err != nil {
+			return action, err
+		}
+		action.wait = wait
+		action.targetRef = wait.ref
+		return action, nil
 	}
 	var err *axArgError
 	refPattern := axElementRefPattern
@@ -471,11 +496,6 @@ func decodeAXAction(object map[string]any, path string) (a11yBatchAction, *axArg
 		}
 		action.title = title
 	}
-	if raw, present := object["until"]; present {
-		if action.postcondition, err = decodeAXPredicate(raw, path+".until"); err != nil {
-			return action, err
-		}
-	}
 	return action, nil
 }
 
@@ -504,189 +524,6 @@ func decodeAXKeys(object map[string]any, path string) (string, *axArgError) {
 		keys = append(keys, key)
 	}
 	return strings.Join(keys, "+"), nil
-}
-
-// decodeAXPredicate converts a public until predicate into the internal
-// assertion object that the polling code evaluates.
-func decodeAXPredicate(raw any, path string) (map[string]any, *axArgError) {
-	object, ok := raw.(map[string]any)
-	example := `{"type":"exists","ref":"r1"}`
-	if !ok {
-		return nil, axInvalid(path, "until must be an object", example)
-	}
-	fields := []string{"type", "ref", "selector", "state", "value", "match", "text", "negate", "timeout_ms", "stable_ms"}
-	if err := axCheckFields(object, fields, path, "until"); err != nil {
-		return nil, err
-	}
-	rawType := object["type"]
-	kind, _ := rawType.(string)
-	kinds := []string{"exists", "state", "value", "text", "title"}
-	if !containsString(kinds, kind) {
-		return nil, axInvalid(path+".type", "until.type must be one of "+strings.Join(kinds, ", "), example)
-	}
-	perType := map[string][]string{
-		"exists": {"ref", "selector"},
-		"state":  {"ref", "selector", "state"},
-		"value":  {"ref", "selector", "value", "match"},
-		"text":   {"ref", "selector", "text"},
-		"title":  {"text"},
-	}
-	common := []string{"type", "negate", "timeout_ms", "stable_ms"}
-	if err := axCheckFields(object, append(common, perType[kind]...), path, "until type "+strconv.Quote(kind)); err != nil {
-		return nil, err.withRule(axRuleFieldForType)
-	}
-	negate := false
-	if rawNegate, present := object["negate"]; present {
-		value, ok := rawNegate.(bool)
-		if !ok {
-			return nil, axInvalid(path+".negate", "negate must be true or false", "").withFix(axRemove(path + ".negate"))
-		}
-		negate = value
-	}
-	assertion := map[string]any{}
-	if rawTimeout, present := object["timeout_ms"]; present {
-		timeout, ok := axInteger(rawTimeout)
-		if !ok || timeout < 1 || timeout > maxVerifyTimeout {
-			return nil, axInvalid(path+".timeout_ms", fmt.Sprintf("timeout_ms must be an integer from 1 to %d", maxVerifyTimeout), "").
-				withFix(axNumberEdit(path+".timeout_ms", rawTimeout, 1, maxVerifyTimeout, true))
-		}
-		assertion["timeout_ms"] = timeout
-	}
-	if rawStable, present := object["stable_ms"]; present {
-		stable, ok := axInteger(rawStable)
-		if !ok || stable < 0 || stable > axMaxUntilStableMS {
-			return nil, axInvalid(path+".stable_ms", fmt.Sprintf("stable_ms must be an integer from 0 to %d", axMaxUntilStableMS), "").
-				withFix(axNumberEdit(path+".stable_ms", rawStable, 0, axMaxUntilStableMS, true))
-		}
-		assertion["stable_ms"] = stable
-	}
-	if kind == "title" {
-		text, err := axRequiredText(object, "text", path, `{"type":"title","text":"Saved"}`)
-		if err != nil {
-			return nil, err.withRule(axRuleRequiredForType)
-		}
-		assertion["type"] = "window_title_contains"
-		assertion["text"] = text
-		assertion["exists"] = !negate
-		return assertion, nil
-	}
-	target, err := decodeAXPredicateTarget(object, path, kind)
-	if err != nil {
-		return nil, err
-	}
-	assertion["target"] = target
-	switch kind {
-	case "exists":
-		assertion["type"] = "exists"
-		assertion["value"] = !negate
-	case "state":
-		state, err := axRequiredText(object, "state", path, `{"type":"state","ref":"r1","state":"checked"}`)
-		if err != nil {
-			return nil, err.withRule(axRuleRequiredForType)
-		}
-		assertion["type"] = "state"
-		assertion["state"] = state
-		assertion["value"] = !negate
-	case "value":
-		value, present := object["value"]
-		valid := present
-		switch typed := value.(type) {
-		case string:
-			valid = valid && strings.TrimSpace(typed) != ""
-		case bool:
-		case json.Number:
-			_, numErr := typed.Float64()
-			valid = valid && numErr == nil
-		case float64:
-			valid = valid && !math.IsNaN(typed) && !math.IsInf(typed, 0)
-		case int:
-		default:
-			valid = false
-		}
-		if !valid {
-			return nil, axInvalid(path+".value", "value needs a non-blank string, a number, or a boolean",
-				`{"type":"value","ref":"r1","value":"14"}`).withRule(axRuleRequiredForType)
-		}
-		assertion["type"] = "value"
-		assertion["value"] = value
-		if rawMatch, present := object["match"]; present {
-			match, ok := rawMatch.(string)
-			if !ok || (match != "equals" && match != "contains") {
-				return nil, axInvalid(path+".match", `match must be "equals" or "contains"`, "").withFix(axRemove(path + ".match"))
-			}
-			if _, isString := value.(string); match == "contains" && !isString {
-				return nil, axInvalid(path+".match", `match "contains" needs a string value`, "").
-					withRule(axRuleValueMatch).withFix(axRemove(path + ".match"))
-			}
-			assertion["match"] = match
-		}
-		if negate {
-			assertion["negate"] = true
-		}
-	case "text":
-		text, err := axRequiredText(object, "text", path, `{"type":"text","ref":"r1","text":"Done"}`)
-		if err != nil {
-			return nil, err.withRule(axRuleRequiredForType)
-		}
-		assertion["type"] = "text_contains"
-		assertion["text"] = text
-		if negate {
-			assertion["negate"] = true
-		}
-	}
-	return assertion, nil
-}
-
-func decodeAXPredicateTarget(object map[string]any, path, kind string) (map[string]any, *axArgError) {
-	ref, hasRef := object["ref"]
-	selector, hasSelector := object["selector"]
-	if hasRef == hasSelector {
-		fix := axSet(path+".ref", "r1")
-		if hasRef {
-			fix = axRemove(path + ".selector")
-		}
-		return nil, axInvalid(path, "until type "+strconv.Quote(kind)+" needs exactly one of ref (rN) or selector",
-			"").withRule(axRuleOneOf).withFix(fix)
-	}
-	if hasRef {
-		text, ok := ref.(string)
-		if !ok || !axElementRefPattern.MatchString(text) {
-			message := "ref must be an element ref rN copied from observe or find"
-			if ok && axWindowRefPattern.MatchString(text) {
-				message = `ref must be an element rN; for a window use {"type":"title","text":"..."}`
-			}
-			return nil, axInvalid(path+".ref", message, "").withFix(axRemove(path + ".ref"))
-		}
-		return map[string]any{"ref": text}, nil
-	}
-	fields, ok := selector.(map[string]any)
-	if !ok || len(fields) == 0 {
-		return nil, axInvalid(path+".selector", "selector must be an object with at least one of role, name, description, placeholder, state",
-			`{"role":"dialog","name":"Print"}`)
-	}
-	allowed := []string{"role", "name", "description", "placeholder", "state"}
-	if err := axCheckFields(fields, allowed, path+".selector", "selector"); err != nil {
-		return nil, err
-	}
-	for _, field := range allowed {
-		value, present := fields[field]
-		if !present {
-			continue
-		}
-		text, ok := value.(string)
-		if !ok || strings.TrimSpace(text) == "" {
-			return nil, axInvalid(path+".selector."+field, field+" must be a non-blank string", "").
-				withFix(axRemove(path + ".selector." + field))
-		}
-		if field == "state" && !publicSelectorStateWords[text] {
-			return nil, axInvalid(path+".selector.state", "selector state must be checked, expanded, selected, or focused", "").
-				withFix(axRemove(path + ".selector.state"))
-		}
-	}
-	if _, err := a11ySelectorAddress(fields); err != nil {
-		return nil, axInvalid(path+".selector", "selector "+err.Error(), `{"role":"dialog","name":"Print"}`)
-	}
-	return map[string]any{"selector": fields}, nil
 }
 
 // axActionShapeHint rewrites an action written with another interface's
@@ -810,18 +647,6 @@ func axOptionalString(object map[string]any, field, path string, nonBlank bool) 
 	return text, nil
 }
 
-func axRequiredText(object map[string]any, field, path, hint string) (string, *axArgError) {
-	text, err := axOptionalString(object, field, path, true)
-	if err != nil {
-		err.hint = hint
-		return "", err
-	}
-	if text == "" {
-		return "", axInvalid(axJoinPath(path, field), field+" is required", hint)
-	}
-	return text, nil
-}
-
 func axOptionalPattern(object map[string]any, field, path string, pattern *regexp.Regexp, shape string) (string, *axArgError) {
 	raw, present := object[field]
 	if !present {
@@ -894,11 +719,6 @@ func axNumber(raw any) (float64, bool) {
 		return value, err == nil && !math.IsNaN(value) && !math.IsInf(value, 0)
 	}
 	return 0, false
-}
-
-func axUntilTarget(assertion map[string]any) map[string]any {
-	target, _ := assertion["target"].(map[string]any)
-	return target
 }
 
 // axArgErrorResult renders a rejected call. Nothing was sent.

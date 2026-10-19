@@ -31,9 +31,9 @@ func TestA11yBatchSourceKeepsExecutionContract(t *testing.T) {
 	source := mainGoSource(t)
 	for _, fragment := range []string{
 		`a11yBatchActionObservation(`,
-		`if index == count-1 && !hasPostcondition`,
-		`postcondition != nil || action.postcondition != nil`,
-		`postcondition != nil || actionPostconditionChecked`,
+		`if index == count-1 && !waitsFollow`,
+		`index < len(actions)-1 && index == lastInput`,
+		`s.runAXWait(context, action.wait)`,
 		`s.executeA11yBatchAction(`,
 		`"observation_required"] = true`,
 	} {
@@ -45,10 +45,7 @@ func TestA11yBatchSourceKeepsExecutionContract(t *testing.T) {
 
 func TestDecodeAXActionsAcceptsFlatShapes(t *testing.T) {
 	actions, err := decodeAXActions([]any{
-		map[string]any{
-			"type": "click", "ref": "r7",
-			"until": map[string]any{"type": "state", "ref": "r7", "state": "selected"},
-		},
+		map[string]any{"type": "click", "ref": "r7"},
 		map[string]any{"type": "keypress", "keys": []any{"CTRL", "L"}},
 		map[string]any{"type": "type", "ref": "r8", "text": "Lovelace"},
 		map[string]any{"type": "set_value", "ref": "r9", "value": ""},
@@ -58,10 +55,6 @@ func TestDecodeAXActionsAcceptsFlatShapes(t *testing.T) {
 	})
 	if err != nil || len(actions) != 7 {
 		t.Fatalf("valid batch rejected: %#v %v", actions, err)
-	}
-	if actions[0].postcondition == nil || actions[0].postcondition["type"] != "state" ||
-		actions[0].postcondition["value"] != true {
-		t.Fatalf("action until not decoded: %#v", actions[0].postcondition)
 	}
 	if actions[1].key != "CTRL+L" || actions[2].targetRef != "r8" ||
 		actions[4].pages != 2.5 || actions[5].title != "Report" ||
@@ -89,10 +82,10 @@ func TestDecodeAXActionsRejectsWithPathAndHint(t *testing.T) {
 			"actions[0].ref", "wN is only for activate and close"},
 		"rN on close": {[]any{map[string]any{"type": "close", "ref": "r1"}},
 			"actions[0].ref", "rN is an element"},
-		"close not last": {[]any{
+		"input after close": {[]any{
 			map[string]any{"type": "close", "ref": "w1"},
 			map[string]any{"type": "click", "ref": "r1"},
-		}, "actions[0]", "close must be the last action"},
+		}, "actions[1]", "a closed window cannot take later input"},
 		"activate both": {[]any{map[string]any{"type": "activate", "ref": "w1", "title": "x"}},
 			"actions[0]", "exactly one of ref (wN) or title"},
 		"activate neither": {[]any{map[string]any{"type": "activate"}},
@@ -109,8 +102,24 @@ func TestDecodeAXActionsRejectsWithPathAndHint(t *testing.T) {
 			"actions[0].intent", "click does not accept"},
 		"index target": {[]any{map[string]any{"type": "click", "index": 7.0}},
 			"actions[0].index", "click does not accept"},
-		"until not object": {[]any{map[string]any{"type": "click", "ref": "r1", "until": "selected"}},
-			"actions[0].until", "until must be an object"},
+		"wait without subject": {[]any{map[string]any{"type": "wait", "gone": true}},
+			"actions[0]", "exactly one of window, query, ref, or text"},
+		"wait two subjects": {[]any{map[string]any{"type": "wait", "window": "x", "ref": "r1"}},
+			"actions[0]", "exactly one of window, query, ref, or text"},
+		"wait value without ref": {[]any{map[string]any{"type": "wait", "window": "x", "value": "1"}},
+			"actions[0].value", "add ref"},
+		"wait two qualifiers": {[]any{map[string]any{"type": "wait", "ref": "r1", "value": "1", "state": "checked"}},
+			"actions[0]", "one of value, state, or text"},
+		"wait wN ref": {[]any{map[string]any{"type": "wait", "ref": "w1"}},
+			"actions[0].ref", `"window":"title"`},
+		"wait query field": {[]any{map[string]any{"type": "wait", "query": map[string]any{"name": "Save"}}},
+			"actions[0].query.name", "query does not accept"},
+		"wait timeout": {[]any{map[string]any{"type": "wait", "window": "x", "timeout_ms": 0.0}},
+			"actions[0].timeout_ms", "from 1 to 60000"},
+		"wait gone string": {[]any{map[string]any{"type": "wait", "window": "x", "gone": "yes"}},
+			"actions[0].gone", "true or false"},
+		"wait value number": {[]any{map[string]any{"type": "wait", "ref": "r1", "value": 14.0}},
+			"actions[0].value", "non-blank string"},
 		"per-action observe": {[]any{map[string]any{"type": "keypress", "keys": []any{"TAB"}, "observe": "none"}},
 			"actions[0].observe", "keypress does not accept"},
 		"type case": {[]any{map[string]any{"type": "Click", "ref": "r1"}},
@@ -199,7 +208,7 @@ func TestRefOwnedBatchDerivesOneWindowAndKeyboardInheritance(t *testing.T) {
 	}
 }
 
-func TestActionPostconditionsArePreflightedBeforeFirstInput(t *testing.T) {
+func TestWaitRefsArePreflightedBeforeFirstInput(t *testing.T) {
 	service, _, _, elementRef := sheetBatchService(t)
 	backend := &recordingPlatformBackend{}
 	service.backend = backend
@@ -207,204 +216,25 @@ func TestActionPostconditionsArePreflightedBeforeFirstInput(t *testing.T) {
 	result := service.a11yBatch(
 		[]any{
 			map[string]any{"type": "click", "ref": elementRef},
-			map[string]any{
-				"type": "keypress",
-				"keys": []any{"ENTER"},
-				"until": map[string]any{
-					"type": "state", "ref": "r999999", "state": "selected",
-				},
-			},
+			map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
+			map[string]any{"type": "wait", "ref": "r999999", "state": "selected"},
 		},
 		observation{},
-		nil,
 		"",
 	)
 	if !result.IsError ||
 		result.StructuredContent["action_attempted"] != false {
-		t.Fatalf("invalid action guard must fail before input: %#v", result)
+		t.Fatalf("an unknown wait ref must fail before input: %#v", result)
 	}
 	if len(backend.calls) != 0 {
 		t.Fatalf("preflight failure reached provider: %#v", backend.calls)
 	}
 	if !strings.Contains(
 		resultText(result),
-		"actions[1].until",
+		"actions[2].ref",
 	) {
-		t.Fatalf("preflight error did not identify action guard: %q",
+		t.Fatalf("preflight error did not name the wait step: %q",
 			resultText(result))
-	}
-}
-
-func TestUnknownActionPostconditionRecoversCurrentWindowAfterSourceDisappears(
-	t *testing.T,
-) {
-	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
-	current := editorFormSnapshot()
-	current.App = appDescriptor{
-		Name:              "Editor",
-		ProviderBusName:   ":1.84",
-		ProcessGeneration: "pid:10:start:100",
-	}
-	current.WindowTitle = "Document"
-	current.WindowHandle = "w2:11111111111111111111111111111111"
-	current.SnapshotID = "current"
-	backend := &recordingPlatformBackend{
-		accessibilityResponses: []ProviderAccessibilityResult{
-			{
-				OK:    false,
-				Error: "stale_window_ref: source dialog is gone",
-				Failure: &ProviderFailure{
-					Code:          "stale_window_ref",
-					Phase:         "precondition",
-					FactsComplete: true,
-					Subject:       "window",
-				},
-				RecoveryContext: &ProviderRecoveryContext{
-					SourceAppStatus:    "alive",
-					SourceWindowStatus: "gone",
-					InventoryComplete:  true,
-				},
-			},
-			{
-				OK:       true,
-				Snapshot: current,
-			},
-		},
-	}
-	service.backend = backend
-	context := &a11yBatchContext{
-		appRef:       appRef,
-		windowRef:    sourceWindowRef,
-		appToken:     appRef,
-		windowHandle: "w2:0123456789abcdef0123456789abcdef",
-	}
-	postcondition := toolCallResult{
-		Content: []contentItem{{
-			Type: "text",
-			Text: "assert_ax observation_incomplete",
-		}},
-		IsError: true,
-		StructuredContent: map[string]any{
-			"assertion_status": "unknown",
-			"failure_code":     "observation_incomplete",
-		},
-	}
-	actionResult := toolCallResult{
-		StructuredContent: map[string]any{
-			"input_events_emitted": true,
-		},
-	}
-	action := a11yBatchAction{
-		actionType: "click",
-		postcondition: map[string]any{
-			"type": "state",
-			"target": map[string]any{
-				"ref": "r1",
-			},
-			"state": "selected",
-			"value": true,
-		},
-	}
-	actionEvidence := []map[string]any{
-		batchActionEvidenceEntry(0, "click", actionResult),
-	}
-
-	result := service.stopA11yBatchForActionPostcondition(
-		context,
-		0,
-		2,
-		action,
-		actionEvidence,
-		actionResult,
-		postcondition,
-		observation{mode: observeDiff},
-		false,
-	)
-	if !result.IsError {
-		t.Fatalf("unknown action postcondition must remain a failed batch: %#v",
-			result)
-	}
-	for key, expected := range map[string]any{
-		"failure_code":                        "action_postcondition_unknown",
-		"failure_phase":                       "between_actions",
-		"final_observation_returned":          true,
-		"observation_required":                false,
-		"next_identical_observation_required": false,
-		"recovery_observation_attempted":      true,
-		"recovery_observation_returned":       true,
-		"cause_unattributed":                  true,
-	} {
-		if result.StructuredContent[key] != expected {
-			t.Fatalf("%s=%#v want %#v in %#v",
-				key, result.StructuredContent[key], expected,
-				result.StructuredContent)
-		}
-	}
-	continuation := result.StructuredContent["continuation"].(map[string]any)
-	if continuation["state"] != "inspect_current_state" ||
-		continuation["route"] != "continue_from_observation" ||
-		continuation["retry_same_request"] != false {
-		t.Fatalf("recovered continuation=%#v", continuation)
-	}
-	if len(backend.observeRequests) != 2 {
-		t.Fatalf("observe calls=%d, want 2", len(backend.observeRequests))
-	}
-	if backend.observeRequests[0].WindowHandle != context.windowHandle ||
-		backend.observeRequests[1].WindowHandle != "" {
-		t.Fatalf("unexpected recovery observation targets: %#v",
-			backend.observeRequests)
-	}
-	if text := resultText(result); !strings.Contains(text, `button "Save"`) ||
-		!strings.Contains(text, "Fresh current state after an uncertain mutation") {
-		t.Fatalf("fresh recovery observation missing: %q", text)
-	}
-}
-
-func TestUnknownActionPostconditionRequiresObservationWhenNoneReturned(t *testing.T) {
-	service := newService()
-	postcondition := toolCallResult{
-		Content: []contentItem{{
-			Type: "text",
-			Text: "assertion unavailable",
-		}},
-		IsError: true,
-		StructuredContent: map[string]any{
-			"assertion_status": "unknown",
-			"failure_code":     "runtime_timeout",
-		},
-	}
-	actionResult := toolCallResult{
-		StructuredContent: map[string]any{
-			"input_events_emitted": true,
-		},
-	}
-	action := a11yBatchAction{
-		actionType:    "click",
-		postcondition: map[string]any{"type": "exists"},
-	}
-	actionEvidence := []map[string]any{
-		batchActionEvidenceEntry(0, "click", actionResult),
-	}
-
-	result := service.stopA11yBatchForActionPostcondition(
-		&a11yBatchContext{windowRef: "w1"},
-		0,
-		1,
-		action,
-		actionEvidence,
-		actionResult,
-		postcondition,
-		observation{mode: observeNone},
-		false,
-	)
-	if result.StructuredContent["failure_phase"] != "action_postcondition" ||
-		result.StructuredContent["observation_required"] != true {
-		t.Fatalf("unknown final guard evidence=%#v", result.StructuredContent)
-	}
-	continuation := result.StructuredContent["continuation"].(map[string]any)
-	if continuation["state"] != "observation_required" ||
-		continuation["route"] != "observe" {
-		t.Fatalf("unknown guard continuation=%#v", continuation)
 	}
 }
 
@@ -570,7 +400,6 @@ func TestBatchStopsWhenLogicalWindowChangesOnSameNativeHandle(t *testing.T) {
 func (s *service) a11yBatch(
 	rawActions any,
 	obs observation,
-	postcondition map[string]any,
 	windowRef string,
 ) toolCallResult {
 	actions, argErr := decodeAXActions(rawActions)
@@ -581,5 +410,5 @@ func (s *service) a11yBatch(
 		}
 		return axArgErrorResult(argErr, requested)
 	}
-	return s.a11yBatchDecoded(actions, obs, postcondition, windowRef)
+	return s.a11yBatchDecoded(actions, obs, windowRef)
 }

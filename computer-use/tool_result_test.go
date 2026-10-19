@@ -186,7 +186,7 @@ func TestGUISuccessDoesNotAddStaticEvidencePrefix(t *testing.T) {
 func TestBatchErrorKeepsRecoveredNoInputObservation(t *testing.T) {
 	source := mainGoSource(t)
 	for _, fragment := range []string{
-		"if !finalObservationReturned {",
+		"if !finalObservationReturned && !preparationFailed {",
 		`result.StructuredContent["observation_required"] = true`,
 		"A fresh independent current-state ",
 		"observation follows. The failed action emitted no input ",

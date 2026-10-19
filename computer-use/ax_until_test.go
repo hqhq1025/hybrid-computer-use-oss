@@ -31,141 +31,6 @@ func publicLine(t *testing.T, result toolCallResult) string {
 	return visible.Content[0].Text
 }
 
-func TestUntilOnBatchPassesAndReportsTrue(t *testing.T) {
-	s, backend, window := untilTitleService(t, "Saved - Sheet")
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "act", "window_ref": window,
-		"actions": []any{map[string]any{"type": "keypress", "keys": []any{"CTRL", "S"}}},
-		"until":   map[string]any{"type": "title", "text": "saved", "timeout_ms": 1.0},
-	})
-	if result.IsError || len(backend.actionRequests) != 1 {
-		t.Fatalf("batch until: %s", resultText(result))
-	}
-	if line := publicLine(t, result); !strings.HasPrefix(line, `{"ok":true,"until":"true","input_emitted":true,"completed":1,"requested":1`) {
-		t.Fatalf("evidence line %s", line)
-	}
-}
-
-// A batch until checks the state after every action ran. When it stays
-// false that is a result: nothing was skipped, and the model decides.
-func TestUntilOnBatchThatStaysFalseIsAResult(t *testing.T) {
-	s, backend, window := untilTitleService(t, "Sheet")
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "act", "window_ref": window,
-		"actions": []any{map[string]any{"type": "keypress", "keys": []any{"CTRL", "S"}}},
-		"until":   map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0},
-	})
-	if result.IsError || len(backend.actionRequests) != 1 {
-		t.Fatalf("batch until false must be a result: %s", resultText(result))
-	}
-	if line := publicLine(t, result); !strings.HasPrefix(line, `{"ok":true,"until":"false","input_emitted":true,"completed":1,"requested":1`) {
-		t.Fatalf("evidence line %s", line)
-	}
-}
-
-// Full-e 8ba5ae7a #8: click r58 with an until on its checked state passed,
-// yet the call still said effect_unknown and mutation_unknown. A verified
-// until is the effect evidence. The public line follows the act report rule:
-// a verified effect is not also unknown or unattributed.
-func TestVerifiedUntilClearsEffectUnknown(t *testing.T) {
-	for _, call := range []map[string]any{
-		{"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"},
-			"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0}}}},
-		{"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"}}},
-			"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0}},
-	} {
-		s, backend, window := untilTitleService(t, "Saved - Sheet")
-		// The action's own readback saw no AX change, which marks the
-		// effect unknown before the until runs.
-		backend.accessibilityResponse.Mutation.MutationUnknown = true
-		call["mode"], call["window_ref"], call["observe"] = "act", window, "none"
-		result := s.callTool(publicToolAX, call)
-		line := publicLine(t, result)
-		if result.IsError || !strings.HasPrefix(line, `{"ok":true,`) ||
-			!strings.Contains(line, `"until_verified":true`) ||
-			strings.Contains(line, `"effect_unknown"`) || strings.Contains(line, `"mutation_unknown"`) ||
-			strings.Contains(line, `"cause_unattributed"`) {
-			t.Fatalf("verified until must clear effect_unknown, mutation_unknown and cause_unattributed: %s", line)
-		}
-	}
-	// One action without an until leaves the call's effect unknown.
-	s, backend, window := untilTitleService(t, "Saved - Sheet")
-	backend.accessibilityResponse.Mutation.MutationUnknown = true
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "act", "window_ref": window, "observe": "none",
-		"actions": []any{
-			map[string]any{"type": "keypress", "keys": []any{"ENTER"},
-				"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0}},
-			map[string]any{"type": "keypress", "keys": []any{"TAB"}},
-		},
-	})
-	if line := publicLine(t, result); !strings.Contains(line, `"mutation_unknown":true`) {
-		t.Fatalf("an unchecked action must keep the call's mutation unknown: %s", line)
-	}
-}
-
-func TestUntilOnActionGatesTheNextAction(t *testing.T) {
-	s, backend, window := untilTitleService(t, "Sheet")
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "act", "window_ref": window,
-		"actions": []any{
-			map[string]any{"type": "keypress", "keys": []any{"ENTER"},
-				"until": map[string]any{"type": "title", "text": "Dialog", "timeout_ms": 1.0}},
-			map[string]any{"type": "type", "text": "must not run"},
-		},
-	})
-	if !result.IsError || len(backend.actionRequests) != 1 {
-		t.Fatalf("a false action until must stop before the next action: requests=%d %s",
-			len(backend.actionRequests), resultText(result))
-	}
-	line := publicLine(t, result)
-	if !strings.HasPrefix(line, `{"ok":false,"code":"until_failed"`) ||
-		!strings.Contains(line, `"completed":1,"requested":2`) {
-		t.Fatalf("evidence line %s", line)
-	}
-}
-
-func TestObserveUntilFalseIsAResultNotAnError(t *testing.T) {
-	s, backend, window := untilTitleService(t, "Sheet")
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "observe", "window_ref": window, "observe": "none",
-		"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0},
-	})
-	if result.IsError || len(backend.actionRequests) != 0 {
-		t.Fatalf("observe until false must be a result: %s", resultText(result))
-	}
-	if line := publicLine(t, result); !strings.HasPrefix(line, `{"ok":true,"until":"false","input_emitted":false`) {
-		t.Fatalf("evidence line %s", line)
-	}
-}
-
-func TestObserveUntilTrueReturnsCurrentState(t *testing.T) {
-	s, _, window := untilTitleService(t, "Saved - Sheet")
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "observe", "window_ref": window, "observe": "tree",
-		"until": map[string]any{"type": "title", "text": "Saved", "timeout_ms": 1.0},
-	})
-	if result.IsError {
-		t.Fatalf("observe until: %s", resultText(result))
-	}
-	text := resultText(withAXTextEvidence(prepareAXEvidence(result)))
-	if !strings.HasPrefix(text, `{"ok":true,"until":"true"`) || !strings.Contains(text, "PASS:") ||
-		!strings.Contains(text, `"Document"`) {
-		t.Fatalf("observe until must return the check and the current tree: %s", text)
-	}
-}
-
-func TestObserveUntilNegateWaitsForAbsence(t *testing.T) {
-	s, _, window := untilTitleService(t, "Sheet")
-	result := s.callTool(publicToolAX, map[string]any{
-		"mode": "observe", "window_ref": window, "observe": "none",
-		"until": map[string]any{"type": "title", "text": "Saving", "negate": true, "timeout_ms": 1.0},
-	})
-	if result.IsError || !strings.HasPrefix(publicLine(t, result), `{"ok":true,"until":"true"`) {
-		t.Fatalf("negated title predicate: %s", resultText(result))
-	}
-}
-
 // A truncated find prints the exact call that returns the next page, and
 // that call works.
 func TestTruncatedFindPrintsTheNextPageCall(t *testing.T) {
@@ -198,8 +63,7 @@ func TestEveryPublicErrorCodeHasAHint(t *testing.T) {
 		axCodeInvalidArgument: {axPublicErrorCodeKey: axCodeInvalidArgument, axPublicErrorHintKey: `{"mode":"apps"}`},
 		axCodeStaleRef:        {"failure_code": "stale_element_ref"},
 		axCodeWindowChanged:   {"failure_code": "stale_target", "failure_phase": "between_actions"},
-		axCodeUntilFailed:     {"failure_code": "action_postcondition_not_satisfied"},
-		axCodeUntilUnknown:    {"failure_code": "postcondition_unknown"},
+		axCodeWaitTimeout:     {"failure_code": "wait_timeout"},
 		axCodeEffectUnknown:   {"failure_code": "effect_unknown", "input_events_emitted": true},
 		axCodeAppUnavailable:  {"failure_code": "ax_app_unavailable"},
 		axCodeRuntimeError:    {"failure_code": "runtime_timeout"},
@@ -217,24 +81,6 @@ func TestEveryPublicErrorCodeHasAHint(t *testing.T) {
 		if public["ok"] != false || public["message"] != "detail" {
 			t.Fatalf("%s: %#v", code, public)
 		}
-	}
-}
-
-// An exists predicate whose target never appears is false, a result; the
-// model should not read it as "could not check".
-func TestUntilExistsMissingTargetIsFalseNotUnknown(t *testing.T) {
-	service := newServiceWithBackend(&recordingPlatformBackend{
-		accessibilityResponse: &ProviderAccessibilityResult{OK: true, Snapshot: editorFormSnapshot()},
-	})
-	result := service.callTool(publicToolAX, map[string]any{
-		"mode": "observe", "app": "Editor", "observe": "none",
-		"until": map[string]any{"type": "exists", "selector": map[string]any{"role": "dialog"}, "timeout_ms": 1.0},
-	})
-	if result.IsError {
-		t.Fatalf("missing exists target must be a false result: %s", resultText(result))
-	}
-	if line := publicLine(t, result); !strings.HasPrefix(line, `{"ok":true,"until":"false"`) {
-		t.Fatalf("evidence line %s", line)
 	}
 }
 

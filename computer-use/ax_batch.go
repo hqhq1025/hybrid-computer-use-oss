@@ -8,15 +8,16 @@ import (
 )
 
 type a11yBatchAction struct {
-	actionType    string
-	targetRef     string
-	direction     string
-	pages         float64
-	text          string
-	key           string
-	value         string
-	title         string
-	postcondition map[string]any
+	actionType string
+	targetRef  string
+	direction  string
+	pages      float64
+	text       string
+	key        string
+	value      string
+	title      string
+	// wait is set for a wait step, which sends no input.
+	wait *axWait
 }
 
 type a11yBatchContext struct {
@@ -408,10 +409,12 @@ func withAXLifecycleFailure(result toolCallResult, err error) toolCallResult {
 func (s *service) a11yBatchDecoded(
 	actions []a11yBatchAction,
 	obs observation,
-	postcondition map[string]any,
 	windowRef string,
 ) toolCallResult {
 	requested := len(actions)
+	if a11yBatchOnlyWaits(actions) {
+		return s.a11yWaitOnly(actions, obs, windowRef)
+	}
 	bindingNotes := []string{}
 	for index := range actions {
 		if actions[index].title == "" {
@@ -438,7 +441,7 @@ func (s *service) a11yBatchDecoded(
 			"bound_window: %s %s (%s, focused at preflight)",
 			focus.ref, strconv.Quote(focus.title), focus.appName))
 	}
-	result := s.a11yBatchBound(actions, obs, postcondition, windowRef, focus, requested)
+	result := s.a11yBatchBound(actions, obs, windowRef, focus, requested)
 	if len(bindingNotes) > 0 {
 		at := 0
 		if len(result.Content) > 0 && isActReportText(result.Content[0].Text) {
@@ -449,6 +452,16 @@ func (s *service) a11yBatchDecoded(
 			append([]contentItem{notes}, result.Content[at:]...)...)
 	}
 	return result
+}
+
+// a11yBatchHasInputRef reports whether an input action names a ref.
+func a11yBatchHasInputRef(actions []a11yBatchAction) bool {
+	for _, action := range actions {
+		if action.actionType != "wait" && action.targetRef != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func a11yBatchHasRef(actions []a11yBatchAction) bool {
@@ -464,20 +477,18 @@ func a11yBatchHasRef(actions []a11yBatchAction) bool {
 func (s *service) a11yBatchBound(
 	actions []a11yBatchAction,
 	obs observation,
-	postcondition map[string]any,
 	windowRef string,
 	focus *axDesktopWindow,
 	requested int,
 ) toolCallResult {
 	trace := newActReportTrace(obs)
-	result := s.a11yBatchRun(actions, obs, postcondition, windowRef, focus, requested, trace)
+	result := s.a11yBatchRun(actions, obs, windowRef, focus, requested, trace)
 	return s.withActReport(result, actions, trace)
 }
 
 func (s *service) a11yBatchRun(
 	actions []a11yBatchAction,
 	obs observation,
-	postcondition map[string]any,
 	windowRef string,
 	focus *axDesktopWindow,
 	requested int,
@@ -497,50 +508,37 @@ func (s *service) a11yBatchRun(
 	}
 	context.report = trace
 	trace.bind(s, context)
-	if postcondition != nil {
-		if err := s.preflightA11yPostcondition(context, postcondition); err != nil {
-			return a11yBatchPreflightError(
-				fmt.Errorf("until: %w", err), requested,
-			)
-		}
-	}
+	lastInput := -1
 	for index, action := range actions {
-		if action.postcondition == nil {
+		if action.actionType != "wait" {
+			lastInput = index
 			continue
 		}
-		if err := s.preflightA11yPostcondition(
-			context,
-			action.postcondition,
-		); err != nil {
-			return a11yBatchPreflightError(
-				fmt.Errorf(
-					"actions[%d].until: %w",
-					index,
-					err,
-				),
-				requested,
-			)
+		if action.wait.ref == "" {
+			continue
+		}
+		if err := s.preflightA11yWaitRef(context, action.wait.ref); err != nil {
+			return a11yBatchPreflightError(fmt.Errorf("actions[%d].ref: %w", index, err), requested)
 		}
 	}
 
-	executionPlan, err := compileA11yBatchExecutionPlan(context, actions, obs, postcondition)
+	executionPlan, err := compileA11yBatchExecutionPlan(context, actions, obs)
 	if err != nil {
 		return a11yBatchPreflightError(err, requested)
 	}
 	orderedRuns := map[int]ProviderOrderedInputRequest{}
-	// The existing assertion path owns predicate identity and reconciliation.
-	// Keep guarded batches there until it supports pre-input identity capture
-	// across internal ordered-run snapshot commits.
-	guarded := postcondition != nil || context.boundByFocus
+	// Wait steps poll between actions on the per-action path; the ordered
+	// provider path runs keys back to back.
+	guarded := context.boundByFocus || lastInput < len(actions)-1
 	for _, action := range actions {
-		guarded = guarded || action.postcondition != nil
+		guarded = guarded || action.actionType == "wait"
 	}
 	if _, available := orderedInputBackend(s.platformBackend()); available && !guarded {
 		requests, err := providerOrderedInputRequestsFromPlan(context, executionPlan, actions)
 		if err != nil {
 			return a11yBatchPreflightError(err, requested)
 		}
-		if result, used := s.executeWholeBatchOrderedInput(context, actions, executionPlan, obs, postcondition); used {
+		if result, used := s.executeWholeBatchOrderedInput(context, actions, executionPlan, obs); used {
 			return result
 		}
 		for _, request := range requests {
@@ -548,13 +546,31 @@ func (s *service) a11yBatchRun(
 		}
 	}
 	actionEvidence := make([]map[string]any, 0, len(actions))
+	waitNotes := []string{}
 	for index := 0; index < len(actions); index++ {
 		action := actions[index]
+		if action.actionType == "wait" {
+			// A wait step between actions: it sends no input.
+			trace.recordBefore(s, index)
+			waitResult := s.runAXWait(context, action.wait)
+			actionEvidence = append(actionEvidence, axWaitEvidenceEntry(index, waitResult))
+			if !a11yPostconditionPassed(waitResult) {
+				return s.stopA11yBatchAtWait(context, actions, index, waitResult, actionEvidence, waitNotes, obs)
+			}
+			waitNotes = append(waitNotes, firstLine(resultText(waitResult)))
+			s.rebindAfterWindowWait(context, action.wait, waitResult)
+			if index < len(actions)-1 && actions[index+1].actionType != "wait" {
+				if stopped, changed := s.a11yBatchContinuityStop(context, actions, index, actionEvidence, obs); changed {
+					return stopped
+				}
+			}
+			continue
+		}
 		actionObservation := a11yBatchActionObservation(
 			index,
 			len(actions),
 			obs,
-			postcondition != nil || action.postcondition != nil,
+			index < len(actions)-1 && index == lastInput,
 		)
 		windowAction := action.actionType == "activate" ||
 			action.actionType == "close"
@@ -601,8 +617,15 @@ func (s *service) a11yBatchRun(
 			}
 			actionEntry = batchActionEvidenceEntry(index, action.actionType, result)
 		}
-		actionPostconditionResult := toolCallResult{}
-		actionPostconditionChecked := false
+		if result.IsError && index+1 < len(actions) && actions[index+1].actionType == "wait" &&
+			axReadbackOnlyFailure(result) {
+			// The input was sent and only the read after it failed, for
+			// example because the window closed or the application exited.
+			// The wait that follows is the check the caller asked for, so it
+			// decides instead of this read.
+			result.IsError = false
+			actionEntry["call_error"] = false
+		}
 		if result.IsError {
 			actionEvidence = append(actionEvidence, actionEntry)
 			anyInputEmitted, anyPartialPossible, anyMutationUnknown :=
@@ -621,11 +644,6 @@ func (s *service) a11yBatchRun(
 				"actions":                              actionEvidence,
 				"any_input_emitted":                    anyInputEmitted,
 				"partial_input_possible":               anyPartialPossible,
-			}
-			if postcondition != nil {
-				facts["postcondition"] = map[string]any{
-					"status": "not_checked",
-				}
 			}
 			if result.StructuredContent == nil {
 				result.StructuredContent = map[string]any{}
@@ -653,7 +671,7 @@ func (s *service) a11yBatchRun(
 				"observe fresh state before recovery."
 			if preparationFailed {
 				observationSummary = "Preparation may have changed state or may complete later. " +
-					"Stop; no recovery observation, until or later action was attempted."
+					"Stop; no recovery observation, wait or later action was attempted."
 			}
 			if finalObservationReturned {
 				observationSummary = "A fresh current-state observation follows. " +
@@ -676,180 +694,49 @@ func (s *service) a11yBatchRun(
 				facts,
 			)
 		}
-		if action.postcondition != nil {
-			actionPostconditionResult = s.runA11yPostcondition(
-				context,
-				action.postcondition,
-			)
-			if a11yPostconditionNeedsCanonicalReconciliation(
-				action.postcondition,
-				actionPostconditionResult,
-			) {
-				actionPostconditionResult = s.reconcileA11yActionPostcondition(
-					context,
-					action.postcondition,
-					actionPostconditionResult,
-				)
-			}
-			actionPostconditionChecked = true
-			actionEntry["postcondition"] = compactA11yPostconditionEvidence(
-				action.postcondition,
-				actionPostconditionResult,
-			)
-			actionEvidence = append(actionEvidence, actionEntry)
-			if !a11yPostconditionPassed(actionPostconditionResult) {
-				return s.stopA11yBatchForActionPostcondition(
-					context,
-					index,
-					len(actions),
-					action,
-					actionEvidence,
-					result,
-					actionPostconditionResult,
-					obs,
-					postcondition != nil,
-				)
-			}
-			result.StructuredContent["postcondition_verified"] = true
-			markVerifiedPostconditionEffect(
-				result.StructuredContent,
-				actionEntry,
-			)
-		} else if !orderedRun {
+		if !orderedRun {
 			actionEvidence = append(actionEvidence, actionEntry)
 		}
-		if index < len(actions)-1 {
-			continuity := s.a11yBatchWindowContinuity(context)
-			if continuity == a11yWindowSame {
-				continue
+		if index < lastInput && actions[index+1].actionType != "wait" {
+			if stopped, changed := s.a11yBatchContinuityStop(context, actions, index, actionEvidence, obs); changed {
+				return stopped
 			}
-			anyInputEmitted, anyPartialPossible, anyMutationUnknown :=
-				batchMutationSummary(
-					actionEvidence,
-				)
-			failureCode := "stale_target"
-			messageCode := "batch_window_changed"
-			if continuity == a11yWindowUnknown {
-				failureCode = "observation_incomplete"
-				messageCode = "batch_window_unknown"
-			}
-			stopped := textResult(
-				fmt.Sprintf(
-					"%s: action %d/%d completed, but the logical window is %s "+
-						"before action %d. The remaining actions were not attempted; "+
-						"observe current state first.",
-					messageCode, index+1, len(actions), continuity, index+2,
-				),
-				true,
-			)
-			stopped.StructuredContent = map[string]any{
-				"failure_code":                         failureCode,
-				"failure_phase":                        "between_actions",
-				"window_continuity":                    string(continuity),
-				"actions_requested":                    len(actions),
-				"actions_completed_without_call_error": index + 1,
-				"stopped_before_action_index":          index + 1,
-				"rejected_before_first_action":         false,
-				"partial_sequence":                     true,
-				"final_observation_returned":           false,
-				"actions":                              actionEvidence,
-				"any_input_emitted":                    anyInputEmitted,
-				"input_events_emitted":                 anyInputEmitted,
-				"partial_input_possible":               anyPartialPossible,
-				"mutation_unknown":                     anyMutationUnknown || anyInputEmitted || anyPartialPossible,
-				"observation_required":                 true,
-			}
-			if postcondition != nil {
-				stopped.StructuredContent["postcondition"] = map[string]any{
-					"status": "not_checked",
-				}
-			}
-			return s.recoverA11yBatchObservation(context, stopped, obs)
+			continue
 		}
-		if index == len(actions)-1 {
+		if index < lastInput {
+			continue
+		}
+		if index == lastInput {
 			result = compactAXActionContent(result)
-			postconditionResult := toolCallResult{}
-			if postcondition != nil {
-				postconditionResult = s.runA11yPostcondition(
-					context,
-					postcondition,
-				)
+			// Waits after the last action run before the final observation,
+			// which then shows the state they waited for.
+			for next := index + 1; next < len(actions); next++ {
+				trace.recordBefore(s, next)
+				waitResult := s.runAXWait(context, actions[next].wait)
+				actionEvidence = append(actionEvidence, axWaitEvidenceEntry(next, waitResult))
+				if !a11yPostconditionPassed(waitResult) {
+					return s.stopA11yBatchAtWait(context, actions, next, waitResult, actionEvidence, waitNotes, obs)
+				}
+				waitNotes = append(waitNotes, firstLine(resultText(waitResult)))
+				s.rebindAfterWindowWait(context, actions[next].wait, waitResult)
 			}
-			finalObservation := toolCallResult{}
-			captureFinalAfterPostcondition :=
-				(postcondition != nil || actionPostconditionChecked) &&
-					obs.resolvedMode() != observeNone
-			if captureFinalAfterPostcondition {
-				observationProof := postconditionResult
-				if postcondition == nil {
-					observationProof = actionPostconditionResult
-				}
-				postconditionVerified :=
-					a11yPostconditionPassed(observationProof)
-				if action.actionType == "close" && postconditionVerified {
-					finalObservation = closedWindowFinalObservation(
-						context,
-						obs,
-					)
-				} else if observationProof.axProofSnapshot != nil &&
-					obs.resolvedMode() == observeDiff {
-					finalObservation = s.renderA11yBatchFinalObservation(
-						observationProof.axProofSnapshot,
-						observationProof.axProofNotes,
-						obs,
-					)
-					if finalObservation.StructuredContent == nil {
-						finalObservation.StructuredContent = map[string]any{}
-					}
-					finalObservation.StructuredContent["final_observation_reused_postcondition_snapshot"] = true
-				} else {
-					finalObservation = s.a11yBatchFinalObservation(
-						context,
-						obs,
-						action.actionType == "close",
-					)
-				}
-				if postcondition != nil {
-					postconditionResult = s.reconcileA11yPostconditionFromFinalObservation(
-						postcondition,
-						postconditionResult,
-						finalObservation,
-					)
-				}
+			if index < len(actions)-1 && obs.resolvedMode() != observeNone &&
+				action.actionType != "close" {
+				result = mergeA11yBatchFinalObservation(result,
+					s.a11yBatchFinalObservation(context, obs, true))
 			}
-			if postcondition != nil {
-				result = mergeA11yPostconditionResult(
-					result,
-					postconditionResult,
-				)
-				recordUntilWindowRef(
-					result.StructuredContent,
-					postconditionResult,
-					finalObservation,
-				)
-				if a11yPostconditionPassed(postconditionResult) {
-					// The batch until verifies the state after every action.
-					for _, entry := range actionEvidence {
-						markVerifiedPostconditionEffect(
-							result.StructuredContent,
-							entry,
-						)
-					}
-				}
+			if index < len(actions)-1 {
+				// The waits after the last input held: the awaited state
+				// was read live, which answers a read that failed after the
+				// input (for example, the window closed or the app exited).
+				result.StructuredContent["wait_verified"] = true
+				axClearReadbackFailure(result.StructuredContent)
 			}
-			if captureFinalAfterPostcondition {
-				result = mergeA11yBatchFinalObservation(
-					result,
-					finalObservation,
+			if len(waitNotes) > 0 {
+				result.Content = append(
+					[]contentItem{{Type: "text", Text: strings.Join(waitNotes, "\n")}},
+					result.Content...,
 				)
-				if action.actionType == "close" &&
-					result.StructuredContent["target_window_absent"] == true &&
-					len(actionEvidence) > 0 {
-					clearVerifiedCloseUncertainty(
-						result.StructuredContent,
-						actionEvidence[len(actionEvidence)-1],
-					)
-				}
 			}
 			if obs.resolvedMode() != observeNone && !windowAction {
 				if required, _ :=
@@ -860,15 +747,6 @@ func (s *service) a11yBatchRun(
 						obs,
 					)
 				}
-			}
-			// A missing final observation leaves the effect unknown only
-			// when no until read it.
-			if a11yBatchEffectVerified(
-				postcondition != nil &&
-					a11yPostconditionPassed(postconditionResult),
-				actionEvidence,
-			) {
-				markVerifiedPostconditionEffect(result.StructuredContent, nil)
 			}
 			finalObservationReturned := obs.resolvedMode() != observeNone
 			if value, ok := result.StructuredContent["final_observation_returned"].(bool); ok {
@@ -902,14 +780,8 @@ func (s *service) a11yBatchRun(
 				"next_identical_observation_required":  nextIdenticalObservationRequired,
 				"actions":                              actionEvidence,
 			}
-			if postcondition != nil || actionPostconditionChecked {
-				facts["final_observation_phase"] = "after_postcondition"
-			}
-			if postcondition != nil {
-				facts["postcondition"] = compactA11yPostconditionEvidence(
-					postcondition,
-					postconditionResult,
-				)
+			if index < len(actions)-1 {
+				facts["final_observation_phase"] = "after_wait"
 			} else {
 				facts["final_observation_action_index"] = index
 			}

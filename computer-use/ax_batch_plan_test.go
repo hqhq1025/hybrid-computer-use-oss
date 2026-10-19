@@ -21,7 +21,6 @@ func TestA11yBatchPlanGroupsOnlyUntargetedKeypresses(t *testing.T) {
 			{actionType: "keypress", key: "A"},
 		},
 		observation{mode: observeDiff},
-		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +56,6 @@ func TestA11yBatchPlanSeparatesRunsAtCanonicalActions(t *testing.T) {
 			{actionType: "keypress", key: "TAB"},
 		},
 		observation{mode: observeNone},
-		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -86,13 +84,9 @@ func TestA11yBatchPlanSeparatesRunsAtCanonicalActions(t *testing.T) {
 }
 
 func TestA11yBatchPlanKeepsEffectSensitiveActionsOnFullPath(t *testing.T) {
-	guard := map[string]any{
-		"type":  "exists",
-		"value": true,
-	}
 	actions := []a11yBatchAction{
 		{actionType: "keypress", targetRef: "r1", key: "ENTER"},
-		{actionType: "keypress", key: "TAB", postcondition: guard},
+		{actionType: "wait", wait: &axWait{window: "Done"}},
 		{actionType: "type", text: "literal"},
 		{actionType: "scroll", direction: "down"},
 		{actionType: "activate", targetRef: "w1"},
@@ -101,7 +95,6 @@ func TestA11yBatchPlanKeepsEffectSensitiveActionsOnFullPath(t *testing.T) {
 		testA11yBatchPlanContext(),
 		actions,
 		observation{mode: observeScreenshot},
-		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +108,7 @@ func TestA11yBatchPlanKeepsEffectSensitiveActionsOnFullPath(t *testing.T) {
 	}
 	if plan.steps[0].target != a11yPlanElementTarget ||
 		plan.steps[0].boundary != a11yPlanTargetedBoundary ||
-		plan.steps[1].boundary != a11yPlanPostconditionBoundary ||
+		plan.steps[1].boundary != a11yPlanWaitBoundary ||
 		plan.steps[2].boundary != a11yPlanCanonicalBoundary ||
 		plan.steps[3].boundary != a11yPlanCanonicalBoundary ||
 		plan.steps[4].target != a11yPlanWindowTarget ||
@@ -124,20 +117,22 @@ func TestA11yBatchPlanKeepsEffectSensitiveActionsOnFullPath(t *testing.T) {
 	}
 }
 
-func TestA11yBatchPlanEndsOrderedRunAtBatchPostcondition(t *testing.T) {
+func TestA11yBatchPlanEndsOrderedRunAtAWait(t *testing.T) {
 	plan, err := compileA11yBatchExecutionPlan(
 		testA11yBatchPlanContext(),
-		[]a11yBatchAction{{actionType: "keypress", key: "ENTER"}},
+		[]a11yBatchAction{
+			{actionType: "keypress", key: "ENTER"},
+			{actionType: "wait", wait: &axWait{window: "Done"}},
+		},
 		observation{mode: observeDiff},
-		map[string]any{"type": "exists"},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.hasBatchPostcondition ||
-		plan.steps[0].boundary != a11yPlanBatchGuardBoundary ||
-		plan.steps[0].postConsistency != a11yPlanCanonicalWindow {
-		t.Fatalf("batch postcondition did not close the ordered run: %#v", plan)
+	if plan.steps[0].boundary != a11yPlanNextActionBoundary ||
+		plan.steps[0].postConsistency != a11yPlanCanonicalWindow ||
+		plan.steps[1].executionClass != a11yPlanSingleAction {
+		t.Fatalf("a wait did not close the ordered run: %#v", plan)
 	}
 }
 
@@ -175,7 +170,6 @@ func TestA11yBatchPlanRejectsUnboundOrMalformedInput(t *testing.T) {
 				test.context,
 				test.actions,
 				observation{},
-				nil,
 			)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error=%v, want substring %q", err, test.want)

@@ -33,8 +33,7 @@ type publicError struct {
 
 var publicErrorCodes = map[string]publicError{
 	axCodeInvalidArgument: {2, "no", "fix the argument named by path; hint is a corrected call"},
-	axCodeUntilFailed:     {3, "maybe", "observe again; completed counts the actions that ran"},
-	axCodeUntilUnknown:    {3, "maybe", "observe again; the predicate could not be read"},
+	axCodeWaitTimeout:     {3, "maybe", "observe again; completed counts the steps that ran and the message says what the wait saw"},
 	axCodeStaleRef:        {4, "no", "observe or find again and use the new ref; refs never rebind"},
 	axCodeGUIFrameStale:   {4, "no", "take a new GUI screenshot and plan coordinates from it"},
 	axCodeWindowChanged:   {5, "maybe", "observe before retrying; do not repeat the batch blindly"},

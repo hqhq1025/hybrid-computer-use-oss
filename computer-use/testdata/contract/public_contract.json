@@ -9,7 +9,7 @@
             "listChanged": false
           }
         },
-        "instructions": "Two tools for the running desktop. AX reads and operates application windows through accessibility: it lists windows, returns controls as rN refs, acts on them, and waits with until. GUI takes full-desktop screenshots and sends pixel input. Use AX for named controls, values, menus, dialogs, windows, and keys. Use GUI for pixels, canvases, dragging, and controls that AX does not expose; after one targeted AX find misses a visible control, use GUI for it. Send all desktop input (window activation, keys, text, mouse) through these tools, not shell input utilities or scripted accessibility calls: the tools check the target window before input and report what changed, and outside input makes their refs and diffs stale. After GUI input, read AX again before reusing refs.",
+        "instructions": "Two tools for the running desktop. AX reads and operates application windows through accessibility: it lists windows, returns controls as rN refs, acts on them, and waits with wait steps. GUI takes full-desktop screenshots and sends pixel input. Use AX for named controls, values, menus, dialogs, windows, and keys. Use GUI for pixels, canvases, dragging, and controls that AX does not expose; after one targeted AX find misses a visible control, use GUI for it. Send all desktop input (window activation, keys, text, mouse) through these tools, not shell input utilities or scripted accessibility calls: the tools check the target window before input and report what changed, and outside input makes their refs and diffs stale. After GUI input, read AX again before reusing refs.",
         "protocolVersion": "2025-03-26",
         "serverInfo": {
           "name": "computer-use",
@@ -26,7 +26,7 @@
             "listChanged": false
           }
         },
-        "instructions": "Two tools for the running desktop. AX reads and operates application windows through accessibility: it lists windows, returns controls as rN refs, acts on them, and waits with until. GUI takes full-desktop screenshots and sends pixel input. Use AX for named controls, values, menus, dialogs, windows, and keys. Use GUI for pixels, canvases, dragging, and controls that AX does not expose; after one targeted AX find misses a visible control, use GUI for it. Send all desktop input (window activation, keys, text, mouse) through these tools, not shell input utilities or scripted accessibility calls: the tools check the target window before input and report what changed, and outside input makes their refs and diffs stale. After GUI input, read AX again before reusing refs.",
+        "instructions": "Two tools for the running desktop. AX reads and operates application windows through accessibility: it lists windows, returns controls as rN refs, acts on them, and waits with wait steps. GUI takes full-desktop screenshots and sends pixel input. Use AX for named controls, values, menus, dialogs, windows, and keys. Use GUI for pixels, canvases, dragging, and controls that AX does not expose; after one targeted AX find misses a visible control, use GUI for it. Send all desktop input (window activation, keys, text, mouse) through these tools, not shell input utilities or scripted accessibility calls: the tools check the target window before input and report what changed, and outside input makes their refs and diffs stale. After GUI input, read AX again before reusing refs.",
         "protocolVersion": "2025-06-18",
         "serverInfo": {
           "name": "computer-use",
@@ -46,107 +46,38 @@
             "openWorldHint": false,
             "title": "Accessibility"
           },
-          "description": "Accessibility for application windows. Modes: apps lists windows (wN, title, app, active). observe returns the window tree with rN refs. find returns matching rN; a truncated result shows the cursor call for the next page. act runs ordered actions in one window, checks them before input, and reports each target's change, windows opened/closed/focused, and a diff. Copy rN/wN exactly from the latest result; stale refs fail and never rebind. keypress/type without ref go to the focused window. activate/close take a title substring or wN. Put close, and any action that opens or replaces a window, last. until waits for a predicate; false is a result, not an error. Errors return code and hint. Examples:\n{\"mode\":\"act\",\"actions\":[{\"type\":\"activate\",\"title\":\"Quarterly report\"},{\"type\":\"keypress\",\"keys\":[\"CTRL\",\"S\"]}]}\n{\"mode\":\"find\",\"window_ref\":\"w2\",\"query\":{\"role\":\"button\",\"name_contains\":\"Save\"}}\n{\"mode\":\"act\",\"actions\":[{\"type\":\"click\",\"ref\":\"r12\"}],\"until\":{\"type\":\"title\",\"text\":\"Export\"}}",
+          "description": "Accessibility for application windows. Modes: apps lists windows (wN, title, app, active). observe returns the window tree with rN refs. find returns matching rN. act runs ordered steps, checks them before input, stops at the first failed step, and reports each target's change, windows opened/closed/focused, and a diff. Copy rN/wN exactly; stale refs fail. keypress/type without ref go to the focused window. activate/close take a title substring or wN. A wait step sends no input and fails the batch on timeout: window (title, any app), query (as find), ref with value/state/text, or text; gone inverts. After a window wait, keys go to that window. Skip waits the report answers. Errors return code and hint. Examples:\n{\"mode\":\"act\",\"actions\":[{\"type\":\"click\",\"ref\":\"r12\"},{\"type\":\"wait\",\"window\":\"Export\"},{\"type\":\"type\",\"text\":\"q3.csv\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}\n{\"mode\":\"find\",\"window_ref\":\"w2\",\"query\":{\"role\":\"button\",\"name_contains\":\"Save\"}}",
           "inputSchema": {
             "$defs": {
-              "predicate": {
+              "query": {
                 "additionalProperties": false,
-                "description": "Poll one AX predicate until true or timeout_ms; false is a result. selector and title check every window of the app, dialogs and popups included; ref reads that element.",
+                "description": "At least one filter; ANDed, case-insensitive.",
                 "properties": {
-                  "match": {
-                    "description": "value: default equals.",
-                    "enum": [
-                      "equals",
-                      "contains"
-                    ],
+                  "name_contains": {
+                    "pattern": "\\S",
                     "type": "string"
                   },
-                  "negate": {
-                    "description": "Wait for it to be false; title negate is true once the app has no such window, or has exited.",
-                    "type": "boolean"
-                  },
-                  "ref": {
-                    "pattern": "^r[1-9][0-9]*$",
+                  "name_equals": {
+                    "pattern": "\\S",
                     "type": "string"
                   },
-                  "selector": {
-                    "additionalProperties": false,
-                    "description": "Exact AX identity fields, ANDed.",
-                    "minProperties": 1,
-                    "properties": {
-                      "description": {
-                        "pattern": "\\S",
-                        "type": "string"
-                      },
-                      "name": {
-                        "pattern": "\\S",
-                        "type": "string"
-                      },
-                      "placeholder": {
-                        "pattern": "\\S",
-                        "type": "string"
-                      },
-                      "role": {
-                        "pattern": "\\S",
-                        "type": "string"
-                      },
-                      "state": {
-                        "enum": [
-                          "checked",
-                          "expanded",
-                          "selected",
-                          "focused"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "stable_ms": {
-                    "description": "How long it must stay true; filters flicker.",
-                    "maximum": 5000,
-                    "minimum": 0,
-                    "type": "integer"
+                  "role": {
+                    "pattern": "\\S",
+                    "type": "string"
                   },
                   "state": {
-                    "description": "state: e.g. checked, selected, expanded.",
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "text": {
-                    "description": "text: element text substring; title: substring of any window title of the app.",
+                  "text_contains": {
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "timeout_ms": {
-                    "description": "Default 5000.",
-                    "maximum": 60000,
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "type": {
-                    "enum": [
-                      "exists",
-                      "state",
-                      "value",
-                      "text",
-                      "title"
-                    ],
-                    "type": "string"
-                  },
-                  "value": {
-                    "description": "value: expected AX value.",
+                  "text_equals": {
                     "pattern": "\\S",
-                    "type": [
-                      "string",
-                      "number",
-                      "boolean"
-                    ]
+                    "type": "string"
                   }
                 },
-                "required": [
-                  "type"
-                ],
                 "type": "object"
               }
             },
@@ -159,7 +90,7 @@
             },
             "properties": {
               "actions": {
-                "description": "act: ordered actions in one window.",
+                "description": "act: ordered steps; a failed step stops the batch.",
                 "items": {
                   "additionalProperties": false,
                   "properties": {
@@ -171,6 +102,10 @@
                         "right"
                       ],
                       "type": "string"
+                    },
+                    "gone": {
+                      "description": "wait until it is absent.",
+                      "type": "boolean"
                     },
                     "keys": {
                       "description": "One chord, e.g. [\"CTRL\",\"S\"].",
@@ -188,15 +123,30 @@
                       "maximum": 100,
                       "type": "number"
                     },
+                    "query": {
+                      "$ref": "#/$defs/query"
+                    },
                     "ref": {
                       "description": "rN element; wN for activate/close. Omit for keys/text to the focused window.",
                       "pattern": "^[rw][1-9][0-9]*$",
                       "type": "string"
                     },
+                    "state": {
+                      "description": "wait: ref state, e.g. checked.",
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "text": {
+                      "description": "wait: text in the ref element, or anywhere in the window.",
                       "maxLength": 10000,
                       "minLength": 1,
                       "type": "string"
+                    },
+                    "timeout_ms": {
+                      "description": "wait: default 5000.",
+                      "maximum": 60000,
+                      "minimum": 1,
+                      "type": "integer"
                     },
                     "title": {
                       "description": "activate/close: unique window-title substring, instead of wN.",
@@ -211,15 +161,18 @@
                         "set_value",
                         "scroll",
                         "activate",
-                        "close"
+                        "close",
+                        "wait"
                       ],
                       "type": "string"
                     },
-                    "until": {
-                      "$ref": "#/$defs/predicate"
-                    },
                     "value": {
                       "maxLength": 10000,
+                      "type": "string"
+                    },
+                    "window": {
+                      "description": "wait: a top-level window whose title contains this, on the whole desktop.",
+                      "pattern": "\\S",
                       "type": "string"
                     }
                   },
@@ -259,7 +212,7 @@
                 "type": "string"
               },
               "observe": {
-                "description": "Returned evidence. act and until: default diff; observe: default tree. none only with act or until.",
+                "description": "Returned evidence. act: default diff; observe: default tree. none only with act.",
                 "enum": [
                   "diff",
                   "tree",
@@ -270,35 +223,7 @@
                 "type": "string"
               },
               "query": {
-                "additionalProperties": false,
-                "description": "find: at least one filter; ANDed, case-insensitive.",
-                "properties": {
-                  "name_contains": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "name_equals": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "role": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "state": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "text_contains": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "text_equals": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/$defs/query"
               },
               "root": {
                 "description": "observe: subtree at rN or the focused element.",
@@ -312,9 +237,6 @@
                   "content"
                 ],
                 "type": "string"
-              },
-              "until": {
-                "$ref": "#/$defs/predicate"
               },
               "window_ref": {
                 "description": "observe/find: window to read. act: omit when actions have refs, which name the window; it only sends ref-less keys/text to wN instead of the focused window.",
@@ -698,7 +620,7 @@
                     "type": "array"
                   },
                   "settle_ms": {
-                    "description": "Visual stillness: default 800ms, max 3000ms. Final screenshot stillness, not semantic success and not extra sleep. After wait, usually omit it. At the cap inspect the screenshot or use AX until.",
+                    "description": "Visual stillness: default 800ms, max 3000ms. Final screenshot stillness, not semantic success and not extra sleep. After wait, usually omit it. At the cap inspect the screenshot or use an AX wait step.",
                     "maximum": 3000,
                     "minimum": 0,
                     "type": "integer"
@@ -793,7 +715,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"mode\",\"message\":\"mode \\\"assert_ax\\\" was removed; use observe with until\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"w1\\\",\\\"until\\\":{\\\"type\\\":\\\"exists\\\",\\\"ref\\\":\\\"r1\\\"}}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"mode\",\"message\":\"mode \\\"assert_ax\\\" was removed; wait with an act call that has only wait steps\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"wait\\\",\\\"ref\\\":\\\"r1\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -815,7 +737,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"bogus\",\"message\":\"mode \\\"observe\\\" does not accept \\\"bogus\\\"; accepted: mode, app, window_ref, scope, observe, root, until\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"w1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"bogus\",\"message\":\"mode \\\"observe\\\" does not accept \\\"bogus\\\"; accepted: mode, app, window_ref, scope, observe, root\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"w1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1000,7 +922,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"mode \\\"act\\\" does not accept \\\"app\\\"; accepted: mode, window_ref, actions, observe, until\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"app\",\"message\":\"mode \\\"act\\\" does not accept \\\"app\\\"; accepted: mode, window_ref, actions, observe\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1027,7 +949,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].type\",\"message\":\"type must be one of click, type, keypress, set_value, scroll, activate, close; got \\\"bogus\\\"\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0].type\",\"message\":\"type must be one of click, type, keypress, set_value, scroll, activate, close, wait; got \\\"bogus\\\"\",\"hint\":\"{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":1,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1141,7 +1063,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"close must be the last action; a closed window cannot take later input\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"close\\\",\\\"ref\\\":\\\"w1\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":2,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[1]\",\"message\":\"a closed window cannot take later input; after close, wait for the window to be gone first\",\"hint\":\"{\\\"type\\\":\\\"wait\\\",\\\"window\\\":\\\"window title\\\",\\\"gone\\\":true}\",\"input_emitted\":false,\"completed\":0,\"requested\":2,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1428,7 +1350,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"until.type\",\"message\":\"until.type must be one of exists, state, value, text, title\",\"hint\":\"{\\\"type\\\":\\\"exists\\\",\\\"ref\\\":\\\"r1\\\"}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"until\",\"message\":\"\\\"until\\\" was removed; wait with a step of type \\\"wait\\\" in act actions, at the point in the order where the batch should wait\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"click\\\",\\\"ref\\\":\\\"r1\\\"},{\\\"type\\\":\\\"wait\\\",\\\"window\\\":\\\"title\\\"}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],
@@ -1455,11 +1377,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"until_unknown\",\"message\":\"until false: no window title containing \\\"Saved\\\" satisfied the requested appear predicate within 1ms.\",\"hint\":\"{\\\"mode\\\":\\\"observe\\\",\\\"window_ref\\\":\\\"wN\\\"}\",\"until\":\"unknown\",\"input_emitted\":false,\"assertion_sampled_live_ui\":false,\"evidence_scope\":\"runtime_poll\",\"preflight_only\":false}",
-              "type": "text"
-            },
-            {
-              "text": "until false: no window title containing \"Saved\" satisfied the requested appear predicate within 1ms.\nLast AX application lookup: desktop unavailable in contract test\n",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"until\",\"message\":\"\\\"until\\\" was removed; wait with a step of type \\\"wait\\\" in act actions, at the point in the order where the batch should wait\",\"hint\":\"{\\\"mode\\\":\\\"act\\\",\\\"actions\\\":[{\\\"type\\\":\\\"wait\\\",\\\"window\\\":\\\"Saved\\\",\\\"timeout_ms\\\":1}]}\",\"input_emitted\":false,\"completed\":0,\"requested\":0,\"batch\":{\"rejected_before_first_action\":true},\"preflight_only\":true}",
               "type": "text"
             }
           ],

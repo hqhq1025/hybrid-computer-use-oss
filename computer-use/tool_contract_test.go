@@ -481,7 +481,7 @@ func TestPublicModelContractDoesNotRecommendLegacyMutationTargets(t *testing.T) 
 	}
 	for _, required := range []string{
 		"Copy rN/wN exactly",
-		"stale refs fail and never rebind",
+		"stale refs fail",
 		"activate/close take a title substring or wN",
 	} {
 		if !strings.Contains(publicContract, required) {

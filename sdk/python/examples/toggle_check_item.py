@@ -2,7 +2,7 @@
 
     python3 toggle_check_item.py WINDOW_TITLE MENU ITEM
 
-Every click waits with until for the next menu level, so the script never
+Every click has a wait step for the next menu level, so the script never
 acts on a menu that has not opened. A ref that went stale is never
 retried blindly: find runs again.
 """
@@ -18,7 +18,7 @@ window = next(w for w in d.apps().windows if title.lower() in w.title.lower())
 
 def open_item():
     top = d.find(window.ref, role="menu", name=menu).matches[0]
-    d.click(top.ref, until={"type": "exists", "selector": {"name": item}})
+    d.click(top.ref, wait={"query": {"name_equals": item}})
     return d.find(window.ref, name=item).matches[0]
 
 

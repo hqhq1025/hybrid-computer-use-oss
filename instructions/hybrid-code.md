@@ -12,8 +12,8 @@ the same as the `AX` and `GUI` tools, and every call returns one JSON record.
   only what the next decision needs.
 - Use single calls while you are still exploring an unfamiliar window: each
   result shows what to do next.
-- Never script blind input. Each action that should change state carries
-  `until`, or the script reads the state before it continues.
+- Never script blind input. Each action that should change state is followed
+  by a `wait` step, or the script reads the state before it continues.
 
 ## Calls And Records
 
@@ -23,14 +23,16 @@ d = hcu.connect()
 w = next(x.ref for x in d.apps().windows if "Report" in x.title)
 for el in d.find_all(w, role="button"):        # follows next_cursor
     print(el.ref, el.name, el.states)
-d.click("r12", until={"type": "state", "ref": "r12", "state": "checked"})
+d.click("r12", wait={"ref": "r12", "state": "checked"})  # click, then wait
+d.wait({"window": "Export"})                    # wait without input
 values = d.read(["r31", "r32"]).read          # live value and states, no tree
 ```
 
 ```bash
 computer-use apps --json
 computer-use find w1 --role button --name-has Save --json
-computer-use click r12 --until '{"type":"title","text":"Saved"}'; echo $?
+computer-use click r12 --wait '{"window":"Saved"}'; echo $?
+computer-use wait '{"window":"Export","gone":true}
 ```
 
 - Refs (`aN`, `wN`, `rN`) stay valid across commands and scripts. Copy them
@@ -51,12 +53,13 @@ computer-use click r12 --until '{"type":"title","text":"Saved"}'; echo $?
   `replayed: true`, and no input is sent twice. When you resend by hand, pass
   the same `request_id`.
 - Errors are exceptions named after the code, such as `hcu.StaleRef` and
-  `hcu.UntilFailed`. They carry `code`, `hint`, `input_emitted`, and
+  `hcu.WaitTimeout`. They carry `code`, `hint`, `input_emitted`, and
   `completed`. On the command line the exit status says the same thing:
-  0 success, 2 bad argument, 3 `until` failed or unknown, 4 stale ref or
+  0 success, 2 bad argument, 3 a `wait` step timed out, 4 stale ref or
   stale screenshot, 5 effect unknown, 6 window or application not found,
   10 runtime error, 64 bad command line. Codes 2, 4, and 6 sent no input.
-- A false `until` on a read is a result (`until: "false"`), not an error.
+- A `wait` step that does not hold stops the call with `wait_timeout`; its
+  message says what the wait saw. `completed` counts the steps that ran.
 
 ## Do Not
 

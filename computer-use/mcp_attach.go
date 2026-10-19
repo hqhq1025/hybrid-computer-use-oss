@@ -91,7 +91,19 @@ func callMayEmitInput(name string, args map[string]any) bool {
 		}
 		return false
 	case publicToolAX:
-		return optionalString(args, "mode") == a11yModeAct
+		if optionalString(args, "mode") != a11yModeAct {
+			return false
+		}
+		// An act of only wait steps sends no input; it is the read that
+		// observe with until was before wait steps replaced it.
+		actions, _ := args["actions"].([]any)
+		for _, item := range actions {
+			action, _ := item.(map[string]any)
+			if kind, _ := action["type"].(string); kind != "wait" {
+				return true
+			}
+		}
+		return len(actions) == 0
 	default:
 		return false
 	}

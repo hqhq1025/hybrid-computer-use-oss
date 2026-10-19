@@ -83,7 +83,7 @@ func TestIdenticalSnapshotSeparatesStillBusyFromTrimmedAway(t *testing.T) {
 	if len(notes) != 1 || !strings.Contains(notes[0], "not proof your last action failed") {
 		t.Fatalf("an unchanged tree is weak evidence, never proof, got %v", notes)
 	}
-	if !strings.Contains(notes[0], "AX observe and until") ||
+	if !strings.Contains(notes[0], "an AX wait step") ||
 		strings.Contains(notes[0], "`verify`") {
 		t.Fatalf("continuity guidance leaked the hidden legacy assertion tool: %v", notes)
 	}

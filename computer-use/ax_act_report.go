@@ -26,9 +26,10 @@ const (
 
 // actReportTrace records the cached snapshots an act batch passes through.
 type actReportTrace struct {
-	appToken  string
-	windowRef string
-	observe   string
+	appToken    string
+	windowRef   string
+	windowTitle string
+	observe     string
 	// start is the snapshot before any input; before[i] the snapshot just
 	// before action i ran.
 	start  *appSnapshot
@@ -46,6 +47,9 @@ func (t *actReportTrace) bind(s *service, context *a11yBatchContext) {
 	t.appToken = context.appToken
 	t.windowRef = context.windowRef
 	t.start = s.currentSnapshot(context.appToken)
+	if entry, err := s.windowRefRegistry.Resolve(context.windowRef, ""); err == nil {
+		t.windowTitle = entry.ProviderWindowName
+	}
 }
 
 func (t *actReportTrace) recordBefore(s *service, index int) {
@@ -97,6 +101,9 @@ func (s *service) withActReport(
 	// action keeps the call's uncertainty.
 	verified := completed == len(actions)
 	for index, action := range actions {
+		if action.actionType == "wait" {
+			continue
+		}
 		if !isShortAXRef(action.targetRef) {
 			verified = false
 			continue
@@ -348,14 +355,14 @@ func (s *service) actWindowsLine(trace *actReportTrace, result toolCallResult) s
 		result.StructuredContent["close_effect_verified"] == true
 	final := s.currentSnapshot(trace.appToken)
 	before := axReportWindows(trace.start)
-	if final == nil || final == trace.start {
-		if closedBound && trace.windowRef != "" {
-			title := ""
-			if trace.start != nil {
-				title = trace.start.WindowTitle
-			}
-			return axReportWindowsPrefix + "closed " + trace.windowRef + " " + strconv.Quote(axReportClip(title))
+	if closedBound && trace.windowRef != "" && (final == nil || final == trace.start || trace.start == nil) {
+		title := trace.windowTitle
+		if trace.start != nil && trace.start.WindowHandle != "" {
+			title = trace.start.WindowTitle
 		}
+		return axReportWindowsPrefix + "closed " + trace.windowRef + " " + strconv.Quote(axReportClip(title))
+	}
+	if final == nil || final == trace.start {
 		reason := "no read after the actions"
 		if trace.observe == observeNone {
 			reason = `observe "none" skipped the read`
@@ -363,7 +370,7 @@ func (s *service) actWindowsLine(trace *actReportTrace, result toolCallResult) s
 		return axReportWindowsPrefix + "unknown (" + reason + ")"
 	}
 	if trace.start == nil {
-		return axReportWindowsPrefix + "unknown (no read of this application before the actions)"
+		return axReportWindowsPrefix + "unknown (no current read of this application before the actions)"
 	}
 	after := axReportWindows(final)
 	beforeByKey := map[string]axReportWindow{}

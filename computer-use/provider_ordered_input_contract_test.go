@@ -602,7 +602,6 @@ func TestProviderOrderedInputRequestsCompileOnlyPlannedRuns(t *testing.T) {
 		context,
 		actions,
 		observation{mode: observeDiff},
-		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -650,7 +649,6 @@ func TestProviderOrderedInputRequestsFallBackWithoutWindowIdentity(t *testing.T)
 		context,
 		actions,
 		observation{},
-		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -767,7 +765,6 @@ func TestA11yMixedBatchExecutesEveryPlannedOrderedInputRun(t *testing.T) {
 		map[string]any{"type": "keypress", "keys": []any{"TAB"}},
 	},
 		observation{mode: observeNone},
-		nil,
 		"",
 	)
 	if result.IsError {
@@ -855,7 +852,6 @@ func TestA11yMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 		map[string]any{"type": "type", "text": "not-run"},
 	},
 		observation{mode: observeNone},
-		nil,
 		"",
 	)
 	if !result.IsError {
@@ -897,7 +893,6 @@ func TestA11yWholeOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 		map[string]any{"type": "keypress", "keys": []any{"B"}},
 	},
 		observation{mode: observeNone},
-		nil,
 		windowRef,
 	)
 	if !result.IsError {
@@ -940,7 +935,6 @@ func TestA11yMixedOrderedTransportFailurePreservesUncertainty(t *testing.T) {
 		map[string]any{"type": "type", "text": "not-run"},
 	},
 		observation{mode: observeNone},
-		nil,
 		"",
 	)
 	if !result.IsError {
@@ -980,7 +974,6 @@ func TestA11yBatchUsesOrderedBackendForWholeUntargetedKeypressRun(t *testing.T) 
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
 	},
 		observation{mode: observeNone},
-		nil,
 		windowRef,
 	)
 	if result.IsError {
@@ -1038,7 +1031,6 @@ func TestA11yWholeOrderedInputRecoversCurrentWindowAfterCompletedInput(t *testin
 		map[string]any{"type": "keypress", "keys": []any{"SUPER", "F"}},
 	},
 		observation{mode: observeDiff},
-		nil,
 		windowRef,
 	)
 	if result.IsError {
@@ -1121,7 +1113,6 @@ func TestA11yWholeOrderedInputKeepsUncertaintyWhenRecoveryFails(t *testing.T) {
 		map[string]any{"type": "keypress", "keys": []any{"SUPER", "F"}},
 	},
 		observation{mode: observeDiff},
-		nil,
 		windowRef,
 	)
 	if !result.IsError ||
@@ -1199,7 +1190,6 @@ func TestA11yBatchPreservesOrderedPartialEmissionWithoutLegacyRetry(t *testing.T
 		map[string]any{"type": "keypress", "keys": []any{"C"}},
 	},
 		observation{mode: observeNone},
-		nil,
 		windowRef,
 	)
 	if !result.IsError {

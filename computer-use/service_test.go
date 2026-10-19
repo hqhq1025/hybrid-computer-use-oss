@@ -227,16 +227,15 @@ func TestCallToolAppliesAXImagePolicyAtSharedOutputBoundary(t *testing.T) {
 func TestInvalidStructuredAssertionFailsBeforeFreshUIRead(t *testing.T) {
 	service := newService()
 	result := service.callTool(publicToolAX, map[string]any{
-		"mode": "observe",
-		"app":  "Editor",
-		"until": map[string]any{
-			"type":     "exists",
-			"selector": map[string]any{"role:document": "document"},
-		},
+		"mode": "act",
+		"actions": []any{map[string]any{
+			"type":  "wait",
+			"query": map[string]any{"role:document": "document"},
+		}},
 	})
 	if !result.IsError ||
-		!strings.Contains(resultText(result), "selector does not accept") ||
-		result.StructuredContent[axPublicErrorPathKey] != "until.selector.role:document" {
+		!strings.Contains(resultText(result), "query does not accept") ||
+		result.StructuredContent[axPublicErrorPathKey] != "actions[0].query.role:document" {
 		t.Fatalf("invalid structured assertion must fail clearly: %#v", result)
 	}
 	for key, want := range map[string]any{

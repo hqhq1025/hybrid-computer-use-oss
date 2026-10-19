@@ -248,11 +248,6 @@ func assertionEvidenceScope(result toolCallResult) string {
 // application shows such a window, so it is never narrowed to the window a
 // batch acted in; that window is often the one the action closed or the one a
 // new dialog covers.
-//
-// Each poll names the application by name, never by process: an aN is read
-// through the name it was listed under. The application may have been closed
-// and launched again during the wait, or run as several processes with one
-// name; a process-bound read would never see the new window.
 func (s *service) verifyWindowTitle(
 	app,
 	titleSubstring string,
@@ -293,39 +288,20 @@ func (s *service) verifyWindowTitleWithProbe(
 			Operation: axServiceWindowList,
 			App:       app,
 		}
-		name := ""
-		if isShortAXAppRef(app) {
-			name = s.appRefRegistry.DisplayName(app)
-		}
-		var response *ProviderWindowResult
-		var err error
-		if name != "" {
-			byName := operation
-			byName.App = name
-			response, err = probe(
-				providerWindowListRequestFromOperation(byName),
+		// Closing an application's last window can retire its aN before this
+		// poll; the read then names the same exact process.
+		if err := s.bindPredicateAppIdentity(&operation); err != nil {
+			return a11yAssertionResult(
+				"wait: application target: "+err.Error(),
+				true,
+				"invalid_target",
+				attempts,
+				stableMS,
 			)
 		}
-		if name == "" || (err == nil && !response.OK) {
-			// Without a recorded name, or when the name no longer resolves,
-			// read the exact process the aN named. Closing an application's
-			// last window can retire its aN before this poll; a complete
-			// inventory without that process then proves absence. Providers
-			// whose name lookup fails for a missing app (macOS, Windows) rely
-			// on this read.
-			if bindErr := s.bindPredicateAppIdentity(&operation); bindErr != nil {
-				return a11yAssertionResult(
-					"until: application target: "+bindErr.Error(),
-					true,
-					"invalid_target",
-					attempts,
-					stableMS,
-				)
-			}
-			response, err = probe(
-				providerWindowListRequestFromOperation(operation),
-			)
-		}
+		response, err := probe(
+			providerWindowListRequestFromOperation(operation),
+		)
 		matched := []string{}
 		if err != nil {
 			lastError = err.Error()
@@ -400,7 +376,7 @@ func (s *service) verifyWindowTitleWithProbe(
 				expectation = "disappear"
 			}
 			text := fmt.Sprintf(
-				"until false: no window title containing %q satisfied the "+
+				"wait false: no window title containing %q satisfied the "+
 					"requested %s predicate within %dms.",
 				titleSubstring,
 				expectation,
@@ -653,7 +629,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 ) toolCallResult {
 	if target == nil {
 		return a11yAssertionResult(
-			"until: the ref has no live target identity.",
+			"wait: the ref has no live target identity.",
 			true, "invalid_target", 0, stableMS,
 		)
 	}
@@ -677,7 +653,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 		}
 		if err := s.bindRuntimeAppIdentity(&operation); err != nil {
 			return a11yAssertionResult(
-				"until: "+err.Error(),
+				"wait: "+err.Error(),
 				true, "invalid_target", attempt, stableMS,
 			)
 		}
@@ -768,7 +744,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 				response.FailureCode == "semantic_target_invalid" {
 				result := a11yAssertionResult(
 					fmt.Sprintf(
-						"until %s: %s",
+						"wait %s: %s",
 						lastStatus,
 						firstLine(lookupErr.Error()),
 					),
@@ -840,7 +816,7 @@ func (s *service) verifyResolvedAXRefWithProbes(
 		}
 		if !time.Now().Before(deadline) {
 			text := fmt.Sprintf(
-				"until %s: %s did not satisfy %s within %dms. Last observation: %s",
+				"wait %s: %s did not satisfy %s within %dms. Last observation: %s",
 				lastStatus,
 				displayRef,
 				goal.describe(),
@@ -863,50 +839,6 @@ func (s *service) verifyResolvedAXRefWithProbes(
 		}
 		time.Sleep(400 * time.Millisecond)
 	}
-}
-
-// closestSelectorCandidates lists, as the tree renders them, the elements
-// nearest to a selector that matched nothing: same role with a name that
-// contains or is contained in the requested name, then any role with such a
-// name. A selector name matches exactly, so `menuitem "Paragraph"` misses
-// `menuitem "Paragraph..."`; naming the candidate lets the caller fix the
-// selector without reading the tree again.
-func closestSelectorCandidates(selector string, limit int, groups ...[]elementRecord) []string {
-	role, name, hasName, _ := parseSelector(selector)
-	want := strings.ToLower(normalizedSemanticWhitespace(name))
-	if !hasName || len([]rune(want)) < 2 {
-		return nil
-	}
-	sameRole, otherRole := []string{}, []string{}
-	seen := map[string]bool{}
-	for _, records := range groups {
-		for index := range records {
-			record := &records[index]
-			have := strings.ToLower(normalizedSemanticWhitespace(record.Name))
-			if have == "" || !(strings.Contains(have, want) || strings.Contains(want, have)) {
-				continue
-			}
-			shown := string(canonicalRoleDescriptor(ontologyProviderRole(record), nil).ModelRole)
-			if shown == "" || shown == string(RoleGeneric) {
-				shown = canonicalRole(record)
-			}
-			line := renderElementReference(shown, record.Name)
-			if seen[line] {
-				continue
-			}
-			seen[line] = true
-			if selectorRoleMatches(record, role) {
-				sameRole = append(sameRole, line)
-			} else {
-				otherRole = append(otherRole, line)
-			}
-		}
-	}
-	out := append(sameRole, otherRole...)
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out
 }
 
 func (g verifyGoal) isNegativeExistenceOnly() bool {
@@ -947,7 +879,7 @@ func (s *service) verify(
 		return textResult("Missing required argument: app", true)
 	}
 	if strings.TrimSpace(selector) == "" {
-		return textResult("until requires ref or selector.", true)
+		return textResult("wait requires ref or selector.", true)
 	}
 	if strings.TrimSpace(displaySelector) == "" {
 		displaySelector = selector
@@ -955,17 +887,17 @@ func (s *service) verify(
 	if numericElementIndex(selector) {
 		if s.hasPendingFailedObservation(app) {
 			return textResult(
-				"until cannot reuse an element index after a stale-reference failure; "+
+				"wait cannot reuse an element index after a stale-reference failure; "+
 					"observe or find again and use a newly returned rN.", true)
 		}
 		if s.currentSnapshot(app) == nil {
 			return textResult(
-				"until cannot use an element index without a current snapshot; "+
+				"wait cannot use an element index without a current snapshot; "+
 					"observe or find first.", true)
 		}
 	} else if _, err := semanticTargetFromAddress(selector); err != nil {
 		result := textResult(
-			"until selector invalid: "+err.Error(), true)
+			"wait selector invalid: "+err.Error(), true)
 		result.StructuredContent = map[string]any{
 			"assertion_status":     "locator_invalid",
 			"task_effect_verified": false,
@@ -973,8 +905,34 @@ func (s *service) verify(
 		return result
 	}
 	if goal.empty() {
-		return textResult("until needs a predicate.", true)
+		return textResult("wait needs a predicate.", true)
 	}
+	lookup := func(snapshot *appSnapshot) (*elementRecord, error) {
+		return lookupElementFor(snapshot, selector, "", "wait")
+	}
+	return s.verifyLookup(app, lookup, displaySelector, selectorHint(selector),
+		numericElementIndex(selector), goal, timeoutMS, stableMS, scope, targetWindowHandle...)
+}
+
+// axElementLookup finds the one element a predicate tests in a snapshot.
+type axElementLookup func(*appSnapshot) (*elementRecord, error)
+
+// verifyLookup polls the application that owns the read window until goal
+// holds for the element lookup finds, or timeoutMS passes. A selector until
+// and a wait step with a find query share it; only the lookup differs.
+// numeric marks an element-index lookup, which is never searched in other
+// windows. hint names what to list as the closest elements on a miss.
+func (s *service) verifyLookup(
+	app string,
+	lookup axElementLookup,
+	displaySelector, hint string,
+	numeric bool,
+	goal verifyGoal,
+	timeoutMS,
+	stableMS int,
+	scope string,
+	targetWindowHandle ...string,
+) toolCallResult {
 	if timeoutMS <= 0 {
 		timeoutMS = 5000
 	}
@@ -991,7 +949,6 @@ func (s *service) verify(
 	var firstCount int
 	var trueSince time.Time
 	stableObserved := ""
-	closest := []string{}
 	for attempt := 1; ; attempt++ {
 		request := axServiceRequest{
 			Operation:         axServiceObserve,
@@ -1046,27 +1003,18 @@ func (s *service) verify(
 				snapshot.WindowHandle,
 				scopedCanonicalElementCount(snapshot)
 		}
-		record, lookupErr := lookupElementFor(
-			read.lookup,
-			selector,
-			"",
-			"until",
-		)
+		record, lookupErr := lookup(read.lookup)
 		incomplete := false
-		if record == nil && !numericElementIndex(selector) &&
+		if record == nil && !numeric &&
 			!strings.Contains(strings.ToLower(fmt.Sprint(lookupErr)), "ambiguous") {
 			// The bound window has no match: the effect may be a dialog
 			// or popup in another window of the application.
 			others, complete := s.readOtherWindows(read)
-			if otherRecord, otherErr := lookupElementFor(others, selector, "", "until"); otherRecord != nil ||
+			if otherRecord, otherErr := lookup(others); otherRecord != nil ||
 				strings.Contains(strings.ToLower(fmt.Sprint(otherErr)), "ambiguous") {
 				record, lookupErr = otherRecord, otherErr
 			}
 			incomplete = !complete && record == nil
-			if record == nil {
-				closest = closestSelectorCandidates(selector, 3,
-					read.lookup.Elements, others.Elements)
-			}
 		}
 		ok, observed := goal.check(record, lookupErr)
 		if incomplete {
@@ -1079,14 +1027,14 @@ func (s *service) verify(
 		attempts = append(attempts, fmt.Sprintf("attempt %d at +%dms — %s",
 			attempt, timeoutMS-int(time.Until(deadline).Milliseconds()), observed))
 		if attempt == 1 && lookupErr != nil &&
-			(numericElementIndex(selector) || selectorAmbiguous) {
+			(numeric || selectorAmbiguous) {
 			status := "locator_stale"
 			if selectorAmbiguous {
 				status = "locator_ambiguous"
 			}
 			result := a11yAssertionResult(
 				fmt.Sprintf(
-					"until %s: %s\nThis locator did not identify one "+
+					"wait %s: %s\nThis locator did not identify one "+
 						"current element, so polling it would not establish the "+
 						"requested predicate. Obtain a fresh ref or use a more "+
 						"specific structured selector.",
@@ -1132,14 +1080,9 @@ func (s *service) verify(
 		// Sample before checking the deadline so even the smallest budget gets
 		// one complete live-state evaluation.
 		if !time.Now().Before(deadline) {
-			e := &toolError{tool: "until", summary: fmt.Sprintf(
+			e := &toolError{tool: "wait", summary: fmt.Sprintf(
 				"expected %s %s, and it did not become true within %dms.",
 				displaySelector, goal.describe(), timeoutMS)}
-			if record == nil && len(closest) > 0 {
-				// The first line is what the model sees of a failed until,
-				// so a near miss in role or name spelling goes there.
-				e.summary += " closest: " + strings.Join(closest, ", ")
-			}
 			e.add("Selector", strconv.Quote(displaySelector))
 			e.add("Snapshot", snapshotAge(snapshot))
 			// Report whether the UI changed during the wait. This separates
@@ -1185,7 +1128,7 @@ func (s *service) verify(
 			// better test. When the UI did change, the candidate list is more
 			// useful than that advice.
 			if selectorAmbiguous {
-				e.next = "the selector remained ambiguous throughout the wait, so until " +
+				e.next = "the selector remained ambiguous throughout the wait, so the wait " +
 					"never identified one element to test. Use a fresh rN ref or a selector " +
 					"copied from the current tree with enough role, name, and predicates to " +
 					"match exactly one element. This failure does not prove " +
@@ -1199,9 +1142,9 @@ func (s *service) verify(
 					"heading you expect on the next screen, or the address bar's " +
 					"value changing. The unchanged AX tree does not attribute the " +
 					"cause of this timeout."
-			} else if hint := closestElements(snapshot, selectorHint(selector), 5); len(hint) > 0 {
+			} else if closest := closestElements(snapshot, hint, 5); len(closest) > 0 {
 				e.log = append(e.log, "  closest elements currently in the tree:")
-				for _, line := range hint {
+				for _, line := range closest {
 					e.log = append(e.log, "  "+line)
 				}
 				e.next = "the element never appeared. The closest things actually in the tree are listed above — if one of them is what you meant, retry with its selector. Otherwise the target may be absent or the app may expose it under a different A11y name. This assertion does not attribute the cause."

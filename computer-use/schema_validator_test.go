@@ -84,12 +84,12 @@ func TestAXDecoderAcceptedCallsPassTheSchema(t *testing.T) {
 		`{"mode":"apps"}`,
 		`{"mode":"observe","app":"a1"}`,
 		`{"mode":"observe","window_ref":"w1","root":"focused","observe":"full","scope":"content"}`,
-		`{"mode":"observe","window_ref":"w1","observe":"none","until":{"type":"title","text":"Saved","negate":true,"timeout_ms":100,"stable_ms":50}}`,
-		`{"mode":"observe","until":{"type":"value","ref":"r3","value":5}}`,
-		`{"mode":"observe","app":"x","until":{"type":"exists","selector":{"role":"dialog","name":"Print","state":"focused"}}}`,
+		`{"mode":"act","actions":[{"type":"wait","window":"Saved","gone":true,"timeout_ms":100}]}`,
+		`{"mode":"act","actions":[{"type":"wait","ref":"r3","value":"5"}]}`,
+		`{"mode":"act","window_ref":"w1","actions":[{"type":"wait","query":{"role":"dialog","name_contains":"Print","state":"focused"}}]}`,
 		`{"mode":"find","window_ref":"w1","limit":50,"query":{"role":"button","name_contains":"Save"}}`,
 		`{"mode":"find","cursor":"f2","limit":10}`,
-		`{"mode":"act","observe":"tree","window_ref":"w1","actions":[{"type":"click","ref":"r1"}],"until":{"type":"state","ref":"r1","state":"checked"}}`,
+		`{"mode":"act","observe":"tree","window_ref":"w1","actions":[{"type":"click","ref":"r1"},{"type":"wait","ref":"r1","state":"checked"},{"type":"wait","text":"Done","gone":true}]}`,
 		`{"mode":"act","actions":[{"type":"activate","title":"Report"},{"type":"keypress","keys":["CTRL","S"]},{"type":"type","text":"x"},{"type":"scroll","direction":"down","pages":0.5},{"type":"set_value","ref":"r2","value":""},{"type":"close","ref":"w2"}]}`,
 		`{"mode":"act","actions":[{"ref":"r103","type":"click"}]}`,
 	} {
@@ -108,7 +108,7 @@ func TestSchemaRejectionHappensBeforeAnyProviderCall(t *testing.T) {
 	for _, tc := range []struct{ tool, args string }{
 		{"AX", `{"mode":"act","actions":[{"ref":"r1","action":"press"}]}`},
 		{"AX", `{"mode":"observe","app":"x","observe":"Diff"}`},
-		{"AX", `{"mode":"observe","app":"x","until":{"type":"exists","ref":"r1","negate":"yes"}}`},
+		{"AX", `{"mode":"act","actions":[{"type":"wait","ref":"r1","gone":"yes"}]}`},
 		{"GUI", `{"actions":[{"type":"click","x":1,"y":1,"delay":3}]}`},
 		{"GUI", `{"actions":[{"type":"wait"}],"settle_ms":"800"}`},
 	} {

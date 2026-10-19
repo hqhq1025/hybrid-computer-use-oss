@@ -23,7 +23,10 @@ type axDesktopWindow struct {
 
 // axWindowInventory is one complete listing of top-level windows.
 type axWindowInventory struct {
-	windows        []axDesktopWindow
+	windows []axDesktopWindow
+	// titles holds every input-target window title, including windows
+	// without a ref, so a title wait never misses one.
+	titles         []string
 	infrastructure []string
 	text           string
 }
@@ -62,6 +65,7 @@ func (s *service) listDesktopWindows() (*axWindowInventory, toolCallResult) {
 			if !window.InputTarget {
 				continue
 			}
+			inventory.titles = append(inventory.titles, window.Title)
 			ref := s.windowRefRegistry.Acquire(
 				appIdentity,
 				window.Handle,
