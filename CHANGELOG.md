@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- AX act results start with an effect line and a windows line, and return a
+  diff when it is shorter than the tree. On the paper OSWorld 1.0 harness
+  (20-task panel, GPT-5.4, two rounds), the median input per solved task is about 0.6 of
+  v0.14 with the same steps; scores are within one task of v0.14.
+- `until` is replaced by ordered `wait` steps inside an act batch. The
+  computer-use daemon serves the same core to the CLI and to the `hcu_sdk`
+  Python module, which includes a PTC adapter.
+- GUI results start with the same JSON evidence line and public error codes
+  as AX. On Linux, a GUI click is rejected as stale only when the window
+  under its point changed after the screenshot.
+- On Linux, an unchanged window's AX tree is reused across calls by evidence
+  (no UI event, same fingerprint, visible content re-read) instead of a
+  10-second age limit, within a 64 MB cache. A Calc observe drops from about
+  550 ms to about 195 ms on a real desktop.
+- Internal identifiers use `ax` instead of `a11y`; wire names and MCP output
+  are unchanged. Long functions are split into named, tested steps.
+- Model guidance says to start GUI applications from the shell with
+  `setsid -f`, because some agent shells kill the process group of each
+  command when it returns.
 - Remove project fork identity from lineage metadata, use neutral native
   application identifiers, and check submission addresses without embedding
   operator endpoints. Preserve third-party attribution.
