@@ -25,6 +25,7 @@ class OperationTimer:
         self.started = time.monotonic()
         self.last = self.started
         self.phases = {}
+        self.notes = {}
 
     def lap(self, name):
         now = time.monotonic()
@@ -53,6 +54,12 @@ def lap(name):
         _current.lap(name)
 
 
+def note(name, value):
+    """Attach a small diagnostic value to the current timing record."""
+    if _current is not None:
+        _current.notes[name] = value
+
+
 def finish(operation, request_id=""):
     global _current
     timer, _current = _current, None
@@ -67,6 +74,7 @@ def finish(operation, request_id=""):
         "diagnostic": json.dumps({
             "startedMonotonic": round(timer.started, 4),
             "totalMs": round(total * 1000, 1),
+            "notes": timer.notes,
             "phasesMs": {
                 name: round(value * 1000, 1)
                 for name, value in timer.phases.items()

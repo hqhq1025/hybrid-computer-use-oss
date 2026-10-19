@@ -94,12 +94,16 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, prune=True,
                 max_rendered_chars=MAX_RENDERED_CHARS,
                 deadline_seconds=TREE_DEADLINE_SECONDS,
-                focus_probe=None):
+                focus_probe=None, content_probe=None):
     """Render one window subtree; return ``(records, lines, annotations)``.
 
     ``focus_probe``, when given, is a FocusProbe that records the first
     FOCUSED node in the order find_first() would visit, from state sets this
     walk reads anyway; see FocusProbe.
+
+    ``content_probe``, when given, is a tree_reuse.ContentProbe that records
+    the frame and state set of every kept node and the cells read from
+    self-managed tables, from values this walk reads anyway.
     """
     records = []
     lines = []
@@ -385,6 +389,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                                              record.get("nameHash", ""))
                            if indexer is not None else len(records))
         records.append(record)
+        if content_probe is not None:
+            content_probe.add_node(node, facts)
 
         rendered = render_element_line(record, render_depth, boxes=boxes)
         lines.append(rendered)
@@ -441,6 +447,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 # container refuses enumeration.
                 indexer=indexer,
                 annotations=annotations,
+                content_probe=content_probe,
             )
             if rendered == 0:
                 # If cell addressing fails too, say so, so the model does not

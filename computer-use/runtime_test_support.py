@@ -259,6 +259,9 @@ class FakeStateSet:
     def contains(self, state):
         return state in self._states
 
+    def get_states(self):
+        return list(self._states)
+
 
 class FakeSpan:
     def __init__(self, start, end):
@@ -389,7 +392,8 @@ class FakeAtspiText:
 
     @staticmethod
     def get_text(iface, start, end):
-        return iface.text[start:end]
+        # AT-SPI reads to the end of the text when end is -1.
+        return iface.text[start:] if end == -1 else iface.text[start:end]
 
     @staticmethod
     def get_caret_offset(iface):

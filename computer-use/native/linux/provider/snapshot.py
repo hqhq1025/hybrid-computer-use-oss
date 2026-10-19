@@ -1,6 +1,7 @@
 """Application and full-desktop snapshot construction."""
 
 import hashlib
+import pickle
 import time
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -27,7 +28,12 @@ from .foundation import (
 )
 
 from .ax_snapshot import FocusProbe, render_tree
-from .tree_reuse import RecordingIndexer, TreeReuseCache, window_fingerprint
+from .tree_reuse import (
+    ContentProbe,
+    RecordingIndexer,
+    TreeReuseCache,
+    window_fingerprint,
+)
 from . import ui_events
 
 from .x11_windows import (
@@ -56,7 +62,7 @@ from .atspi_inventory import (
     resolve_app_identity,
 )
 from .primitives import quoted
-from .phase_timing import lap
+from .phase_timing import lap, note
 from .tree_walk import find_first
 from .window_diagnostics import (
     foreign_foreground_note,
@@ -211,6 +217,30 @@ TREES = TreeReuseCache(ui_events.MONITOR)
 TRANSIENT_OMISSIONS = ("time", "render_error", "provider_probe_error")
 
 
+def note_reuse_decision(bus, key=None, known_refs=None):
+    """Record why the last lookup did or did not reuse a tree (timing only)."""
+    monitor = TREES.monitor
+    last_event = monitor.last_event_at(bus)
+    note("treeReuse", {
+        "decision": TREES.last_decision,
+        "probeMs": (
+            None if TREES.last_probe_seconds is None
+            else round(TREES.last_probe_seconds * 1000, 1)),
+        "entries": len(TREES),
+        "cacheKB": TREES.size_bytes // 1024,
+        "key": [str(part) for part in (key or ())[3:6]],
+        "knownRefs": len(known_refs or {}),
+        "monitorActive": monitor.active,
+        "events": monitor.mark(bus),
+        "lastEventAgeMs": (
+            None if last_event is None
+            else round((monitor.clock() - last_event) * 1000)),
+        "registeredAgeMs": (
+            None if monitor.registered_at is None
+            else round((monitor.clock() - monitor.registered_at) * 1000)),
+    })
+
+
 def walk_is_reusable(annotations):
     for item in annotations or []:
         if item.get("kind") != "provider_omission":
@@ -348,14 +378,20 @@ def build_snapshot(
         if reuse_tree
         else None
     )
+    if reuse_tree:
+        note_reuse_decision(app_bus, reuse_key, known_refs)
     if cached is not None:
-        records, lines, annotations = deepcopy(cached[0])
+        # The tree is stored pickled: unpickling gives each request its own
+        # copy, faster than deepcopy, and the pickle length is the entry's
+        # size for the cache budget.
+        records, lines, annotations = pickle.loads(cached[0])
         focus_probe = cached[1]
         lap("snapshot.reuse_tree")
     else:
         walk = TREES.begin_walk(app_bus)
         indexer = RecordingIndexer(known_refs)
         focus_probe = FocusProbe()
+        content_probe = ContentProbe(text_limit)
         records, lines, annotations = render_tree(
             window,
             bounds,
@@ -367,16 +403,18 @@ def build_snapshot(
             boxes=boxes,
             indexer=indexer,
             focus_probe=focus_probe,
+            content_probe=content_probe,
         )
         if walk is not None and walk_is_reusable(annotations):
             try:
-                stored = deepcopy((records, lines, annotations))
+                stored = pickle.dumps(
+                    (records, lines, annotations), pickle.HIGHEST_PROTOCOL)
             except Exception:
                 stored = None
             if stored is not None:
                 TREES.store(
                     reuse_key, fingerprint, walk, indexer.calls,
-                    (stored, focus_probe),
+                    (stored, focus_probe), len(stored), content_probe,
                 )
         lap("snapshot.render_tree")
     pid = node_pid(app)

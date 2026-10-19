@@ -75,14 +75,19 @@ def visible_cell_range(node):
 def render_visible_cells(
     node, depth, path, window_bounds, records, lines,
     text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, indexer=None,
-    boxes=False, annotations=None,
+    boxes=False, annotations=None, content_probe=None,
 ):
     """Render the cells in a self-managed table's viewport; return the count.
 
     This replaces child enumeration once should_enumerate_children() refuses
     it: enumeration would walk the roughly 1.07 billion children a Calc sheet
     reports, whereas (row, col) addressing is an O(1) lookup in Calc.
+
+    ``content_probe``, when given, receives the viewport span and every cell
+    text read here, so that tree reuse can later detect cell changes that
+    LibreOffice reports without events (see tree_reuse.ContentProbe).
     """
+    reads = []
     def record_omission(reason, count=1):
         if annotations is None:
             return
@@ -94,6 +99,8 @@ def render_visible_cells(
         })
 
     span = visible_cell_range(node)
+    if content_probe is not None:
+        content_probe.add_table(node, span, reads)
     if span is None:
         record_omission("visible_cell_range_unavailable")
         return 0
@@ -118,6 +125,7 @@ def render_visible_cells(
             probed += 1
             cell = safe(lambda r=row, c=col: Atspi.Table.get_accessible_at(table, r, c))
             if cell is None:
+                reads.append(None)
                 missing += 1
                 continue
             # Read text only, without falling back to numeric_value: Calc's
@@ -127,6 +135,7 @@ def render_visible_cells(
             value, text_complete = text_value_with_status(
                 cell, text_limit=text_limit
             )
+            reads.append((value, text_complete))
             if not text_complete:
                 text_unavailable += 1
                 continue

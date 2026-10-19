@@ -89,6 +89,17 @@ class EventMonitor:
         except Exception:
             bus = None
         self.record(bus)
+        # When an application leaves the desktop, the registry announces it
+        # with a children-changed event from the registry's own bus name; the
+        # departed application is the event's child. Count it as an event of
+        # that application too, so that state cached for it is dropped.
+        try:
+            if str(event.type).startswith("object:children-changed"):
+                child_bus = event.any_data.app.bus_name
+                if child_bus and child_bus != bus:
+                    self.record(child_bus)
+        except Exception:
+            pass
 
     def record(self, bus):
         """Count one event from ``bus``; None means the source is unknown."""
