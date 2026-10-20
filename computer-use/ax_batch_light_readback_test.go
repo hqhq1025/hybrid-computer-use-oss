@@ -106,6 +106,7 @@ func TestLightReadbackOnlyBetweenRefLessInputs(t *testing.T) {
 func TestKeyBatchUsesRootOnlyReadsBetweenActions(t *testing.T) {
 	s, backend := rootOnlyService(t, false, reportMain())
 	window, _ := reportObserve(t, s)
+	wantElements := len(s.currentSnapshot("Editor").Elements)
 	result := s.callTool(publicToolAX, map[string]any{
 		"mode": "act", "window_ref": window, "actions": keys("a", "b", "c", "d", "e"),
 	})
@@ -118,7 +119,7 @@ func TestKeyBatchUsesRootOnlyReadsBetweenActions(t *testing.T) {
 		t.Fatalf("root-only reads %d, full reads %d", backend.rootOnlyReads, backend.fullReads)
 	}
 	// The full ref map survives the root-only reads.
-	if snapshot := s.currentSnapshot("Editor"); snapshot == nil || len(snapshot.Elements) != 4 {
+	if snapshot := s.currentSnapshot("Editor"); snapshot == nil || snapshot.lightReadback || len(snapshot.Elements) != wantElements {
 		t.Fatalf("final snapshot is not a full read: %#v", snapshot)
 	}
 }
