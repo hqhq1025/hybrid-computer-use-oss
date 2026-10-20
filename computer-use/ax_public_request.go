@@ -405,6 +405,11 @@ func decodeAXAction(object map[string]any, path string) (axBatchAction, *axArgEr
 		return action, axInvalid(path+".type", message, axActionShapeHint(object))
 	}
 	action.actionType = actionType
+	aliased, aliasErr := axNormalizeTextAlias(object, actionType, path)
+	if aliasErr != nil {
+		return action, aliasErr
+	}
+	object = aliased
 	allowed := append([]string{"type"}, axActionFields[actionType]...)
 	if err := axCheckFields(object, allowed, path, actionType); err != nil {
 		_, hasRef := object["ref"]

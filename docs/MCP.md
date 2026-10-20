@@ -288,6 +288,10 @@ application aN -> top-level window wN -> element rN
   still accepts an `aN`, a name, an app id or a PID.
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
+- The decoder accepts `type.value` as `type.text` and non-empty
+  `set_value.text` as `set_value.value`. Supplying both fields is rejected
+  before input. The published schema continues to advertise the canonical
+  field names. Ref, window, and selection validation remain unchanged.
 - `act` accepts up to 64 ordered steps. The sum of all wait timeouts must
   not exceed 60 seconds; an omitted timeout counts as 5 seconds. This bounds
   waiting only, not total call duration. Argument errors reject the whole
