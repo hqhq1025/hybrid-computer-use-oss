@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Deliver new AX refs even when the provider tree is unchanged. Match find
+  roles and states to the rendered tree, explain content-scope expansion,
+  and return bounded current candidates on failed finds and waits.
+- Expose visible drop-down controls through AX and add `select` for text,
+  items, and cell ranges. Verify the exact selection and report uncertain
+  partial effects when readback disagrees with the requested range.
 - Fit GUI screenshots into 1366 x 768 and map input coordinates back to the
   native desktop using the exact delivered width and height. This aligns
   screenshot pixels with the GPT-5.4 high-detail image used in validation.

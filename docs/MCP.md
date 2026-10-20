@@ -318,7 +318,21 @@ application aN -> top-level window wN -> element rN
   `[select] selected 4 cells A2:B3`; it fails with `effect_unknown` when it
   cannot read back what it asked for. On Linux, text across paragraphs is
   selected with the caret at the start of `rA` and `ctrl+shift+Down`, because
-  AT-SPI selects inside one object only.
+  AT-SPI selects inside one object only. A shifted or oversized selection,
+  or a cell set that differs from the requested range, fails with
+  `effect_unknown`; the result reports possible partial input.
+
+Observe and find with `scope:"content"` use the whole window when a dialog
+or a window has no unique content area. The result states why the scope
+expanded. Find and query waits accept the roles and states shown in the tree.
+A zero-result find lists at most five nearby candidates; these suggestions
+do not change the query or perform input. Wait timeouts put current window
+refs and nearby elements before diagnostic detail. A failed latest window
+read remains an incomplete observation and never proves that a window closed.
+
+An unchanged-tree response requires the delivered refs to match as well as
+the provider state. Reissued refs cause a fresh tree delivery. An explicit
+`observe:"full"` continues to return the tree on the first request.
 - The removed `until` field, and its older spellings `postcondition` and
   `assertion`, are rejected before any input. The hint is the same call
   rewritten with `wait` steps.

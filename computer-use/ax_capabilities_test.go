@@ -72,4 +72,3 @@ func TestSelectRequestCarriesRangeEndAcrossProviderWire(t *testing.T) {
 		t.Fatal("select without a target was accepted")
 	}
 }
-

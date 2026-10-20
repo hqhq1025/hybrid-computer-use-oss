@@ -94,6 +94,8 @@ and whether input was sent. Next step by code:
   its window with `{"mode":"act","actions":[{"type":"wait","window":"..."}]}`;
   otherwise use GUI for it.
 - `runtime_error`: retry once; if it repeats, use another channel.
+- A zero-result find or a timed-out wait may list nearby elements or window
+  refs. Check those suggestions against the intended target before retrying.
 - `gui_frame_stale`: the window under a GUI coordinate changed after its
   screenshot, so nothing was sent. Plan again from the returned screenshot.
 
