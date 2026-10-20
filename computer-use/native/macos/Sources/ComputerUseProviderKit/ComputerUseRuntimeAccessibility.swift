@@ -16,6 +16,7 @@ extension ComputerUseRuntimeBridge {
         tool: String,
         operation: [String: Any]
     ) throws -> [String: Any] {
+        try validateMacAccessibilityCapability(tool: tool, operation: operation)
         let relativeReadback = RelativeReadbackDiagnostic.requested(tool: tool, operation: operation)
         defer { relativeReadback?.emit() }
         let timingEnabled = diagnosticPhaseTimingEnabled(operation: operation)
@@ -144,6 +145,15 @@ extension ComputerUseRuntimeBridge {
                     value: string(operation["value"])
                 )
                 executedRoute = dispatch.route
+                readbackSampled = true
+                readbackVerified = true
+            case "select":
+                try service.selectText(
+                    app: app,
+                    elementIndex: try requiredElementIndex(elementIndex),
+                    text: string(operation["text"])
+                )
+                executedRoute = "ax.attribute.selected_text_range.set"
                 readbackSampled = true
                 readbackVerified = true
             case "increment", "decrement":

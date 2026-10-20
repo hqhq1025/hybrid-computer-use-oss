@@ -141,7 +141,7 @@ internal sealed partial class UiaProvider
                         ExpandCollapseState.Expanded,
                 false),
             "has-click-action" => ElementActionMatches(element, "invoke") ||
-                ElementActionMatches(element, "select") ||
+                element.Patterns.SelectionItem.PatternOrDefault is not null ||
                 ElementActionMatches(element, "toggle"),
             _ => false,
         };
@@ -155,7 +155,9 @@ internal sealed partial class UiaProvider
         {
             "invoke" => element.Patterns.Invoke.PatternOrDefault is not null,
             "toggle" => element.Patterns.Toggle.PatternOrDefault is not null,
-            "select" => element.Patterns.SelectionItem.PatternOrDefault is not null,
+            "select" => element.Patterns.SelectionItem.PatternOrDefault is not null ||
+                element.Patterns.Text.PatternOrDefault is { } text &&
+                text.SupportedTextSelection != SupportedTextSelection.None,
             "expand" or "collapse" =>
                 element.Patterns.ExpandCollapse.PatternOrDefault is not null,
             "scrollintoview" =>

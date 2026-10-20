@@ -105,7 +105,7 @@ extension ProviderRequestValidator {
             value,
             path: path,
             allowed: [
-                "selector", "locatorKind", "allowProviderRebind",
+                "selector", "locatorKind", "allowProviderRebind", "editTarget",
                 "windowHandle", "providerBusName", "providerObjectPath",
                 "processGeneration", "providerWindowBusName",
                 "providerWindowObjectPath",
@@ -116,6 +116,7 @@ extension ProviderRequestValidator {
                 "role", "name", "hasName", "predicates",
             ]
         )
+        try validateEditTarget(value["editTarget"], path: "\(path).editTarget")
         try validateIntegerArray(value["runtimeId"], path: "\(path).runtimeId")
         if let aliases = value["runtimeAliases"] as? [Any] {
             for (index, alias) in aliases.enumerated() {
@@ -175,9 +176,10 @@ extension ProviderRequestValidator {
                 "name", "controlType", "localizedControlType", "className",
                 "value", "nativeWindowHandle", "frame", "actions", "states",
                 "description", "textAttributes", "placeholder", "relations",
-                "relationReadComplete", "nameSource",
+                "relationReadComplete", "nameSource", "editTarget",
             ]
         )
+        try validateEditTarget(value["editTarget"], path: "\(path).editTarget")
         try validateIntegerArray(value["runtimeId"], path: "\(path).runtimeId")
         if let aliases = value["runtimeAliases"] as? [Any] {
             for (index, alias) in aliases.enumerated() {
@@ -194,6 +196,15 @@ extension ProviderRequestValidator {
             path: "\(path).frame",
             allowed: ["x", "y", "width", "height"]
         )
+    }
+
+    private static func validateEditTarget(_ raw: Any?, path: String) throws {
+        guard let value = try optionalObject(raw, path: path) else { return }
+        let fields: Set<String> = ["providerBusName", "providerObjectPath", "processGeneration"]
+        try rejectUnknown(value, path: path, allowed: fields)
+        for field in fields.sorted() {
+            try requireNonblankString(value[field], path: "\(path).\(field)")
+        }
     }
 
     private static func validateIntegerArray(_ raw: Any?, path: String) throws {

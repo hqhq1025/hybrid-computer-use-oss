@@ -13,6 +13,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../ComputerUse.Windows.Runtime/UiaSelectionPolicy.cs"
+      Link="UiaSelectionPolicy.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/UiaSemanticWindowPredicate.cs"
       Link="UiaSemanticWindowPredicate.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/LogicalWindowBoundary.cs"

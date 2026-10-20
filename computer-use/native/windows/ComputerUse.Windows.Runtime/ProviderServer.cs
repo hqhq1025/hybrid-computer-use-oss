@@ -50,6 +50,7 @@ internal sealed partial class ProviderServer : IDisposable
                         RequiredPayload(request, "observe"));
                     break;
                 case "resolve_and_act":
+                    ValidateWindowsActionCapabilities(RequiredPayload(request, "action"));
                     response["accessibility"] = _uia.ResolveAndAct(
                         RequiredPayload(request, "action"));
                     break;
@@ -62,6 +63,7 @@ internal sealed partial class ProviderServer : IDisposable
                         RequiredPayload(request, "window_list"));
                     break;
                 case "window_action":
+                    ValidateWindowsActionCapabilities(RequiredPayload(request, "window_action"));
                     response["window"] = _uia.ActOnWindow(
                         RequiredPayload(request, "window_action"));
                     break;

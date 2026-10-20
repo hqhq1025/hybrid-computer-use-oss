@@ -16,6 +16,50 @@ private func envelope(
     ]
 }
 
+@Test func selectWirePreservesTextAndRangeEnd() async throws {
+    let inputs: [[String: Any]] = [[:], ["text": "😀中文"], ["to_target": ["providerObjectPath": "end"]]]
+    for input in inputs {
+        let request = envelope(operation: "resolve_and_act", payloadName: "action", payload: [
+            "protocol_version": 2, "intent": "select", "app": "TextEdit",
+            "target": ["providerObjectPath": "start"], "input": input,
+        ])
+        try ProviderRequestValidator.validate(request)
+        var dispatched: [[String: Any]] = []
+        let server = ProviderV2Server(
+            transport: ProviderLineTransport(inputDescriptor: -1, outputDescriptor: -1),
+            executeRuntime: { operation in
+                dispatched.append(operation)
+                return ["ok": true, "observationSkipped": true]
+            }
+        )
+        _ = await server.handle(line: String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self))
+        let operation = try #require(dispatched.first)
+        #expect(operation["tool"] as? String == "select")
+        for (key, value) in input {
+            #expect(NSDictionary(dictionary: [key: operation[key]!]).isEqual(to: [key: value]))
+        }
+    }
+}
+
+@Test func malformedSelectionAndEditorIdentityAreRejected() {
+    let inputs: [[String: Any]] = [["text": 3], ["text": "a", "to_target": [:]], ["to_target": "r2"], ["offset": 2]]
+    for input in inputs {
+        let request = envelope(operation: "resolve_and_act", payloadName: "action", payload: [
+            "protocol_version": 2, "intent": "select", "app": "TextEdit",
+            "target": ["providerObjectPath": "start"], "input": input,
+        ])
+        #expect(throws: (any Error).self) { try ProviderRequestValidator.validate(request) }
+    }
+    let identities: [[String: Any]] = [[:], ["providerBusName": "mac:1"], ["providerBusName": "mac:1", "providerObjectPath": "edit", "processGeneration": "1", "name": "text"]]
+    for identity in identities {
+        let request = envelope(operation: "resolve_and_act", payloadName: "action", payload: [
+            "protocol_version": 2, "intent": "set_value", "app": "TextEdit",
+            "target": ["editTarget": identity], "input": ["value": "abc"],
+        ])
+        #expect(throws: (any Error).self) { try ProviderRequestValidator.validate(request) }
+    }
+}
+
 @Test
 func allSevenProviderOperationsAreAccepted() throws {
     let identity: [String: Any] = [
@@ -160,6 +204,16 @@ func orderedInputRequiresContiguousStepsAndCanonicalBoundary() throws {
                 payload: noBoundary
             )
         )
+    }
+}
+
+@Test func orderedInputAcceptsCurrent64ActionLimit() throws {
+    var payload = orderedInputValidationPayload()
+    payload["steps"] = (0..<64).map { ["action_index": $0, "key": "RIGHT"] as [String: Any] }
+    try ProviderRequestValidator.validate(envelope(operation: "ordered_input", payloadName: "ordered_input", payload: payload))
+    payload["steps"] = (0..<65).map { ["action_index": $0, "key": "RIGHT"] as [String: Any] }
+    #expect(throws: (any Error).self) {
+        try ProviderRequestValidator.validate(envelope(operation: "ordered_input", payloadName: "ordered_input", payload: payload))
     }
 }
 

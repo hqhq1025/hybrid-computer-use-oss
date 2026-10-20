@@ -333,7 +333,9 @@ internal sealed partial class UiaProvider
         AddAction(actions, toggle is not null, "toggle");
         AddAction(
             actions,
-            selectionItem is not null,
+            selectionItem is not null || textPattern is not null &&
+                Safe(() => textPattern.SupportedTextSelection !=
+                    FlaUI.Core.Definitions.SupportedTextSelection.None, false),
             "select");
         AddAction(
             actions,
