@@ -180,7 +180,7 @@ class SelectTests(AtspiPatchedTestCase):
         self.assertTrue(self.evidence["readback_verified"])
 
     def test_shifted_selection_is_reported_as_read_back(self):
-        """Impress moved a 0..5 selection to 1..5; the note must say so."""
+        """A shifted provider selection must not claim the requested effect."""
         _doc, (para,) = self._paragraphs("First bullet line")
 
         class ShiftingApi(_TextApi):
@@ -189,11 +189,14 @@ class SelectTests(AtspiPatchedTestCase):
                 iface.selection = (max(start, 1), end)
                 return True
 
-        with mock.patch.object(runtime.Atspi, "Text", ShiftingApi):
-            runtime.perform_select({"text": "First"}, None, para, {}, None,
-                                   self.notes, self.evidence)
-        self.assertEqual(self.notes,
-                         ['[select] selected 1..5 "irst" (asked 0..5)'])
+        with mock.patch.object(runtime.Atspi, "Text", ShiftingApi), \
+                mock.patch.object(runtime, "time", _FakeClock()):
+            with self.assertRaises(runtime.OperationFailure) as caught:
+                runtime.perform_select({"text": "First"}, None, para, {}, None,
+                                       self.notes, self.evidence)
+        self.assertIn("read back [(1, 5)]", str(caught.exception))
+        self.assertTrue(caught.exception.input_events_emitted)
+        self.assertFalse(self.evidence.get("readback_verified", False))
 
     def test_ambiguous_substring_is_rejected_before_input(self):
         _doc, (para,) = self._paragraphs("a b a")
@@ -286,6 +289,10 @@ class SelectTests(AtspiPatchedTestCase):
             @staticmethod
             def get_n_selected_children(container):
                 return len(selected)
+
+            @staticmethod
+            def get_selected_child(container, index):
+                return container.children[selected[index]]
 
         with mock.patch.object(runtime.Atspi, "Table", TableApi, create=True), \
                 mock.patch.object(runtime.Atspi, "Selection", SelectionApi, create=True):
