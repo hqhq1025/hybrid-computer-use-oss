@@ -350,7 +350,7 @@ func typedAXCapabilities(record *elementRecord, role CanonicalRole) AXCapabiliti
 	if record != nil && record.SetValueSupported != nil {
 		capabilities.SetValue = *record.SetValueSupported
 	} else {
-		roleImpliesSetValue := role == "slider" || role == "spinbutton" || role == "combobox"
+		roleImpliesSetValue := role == "slider" || role == "spinbutton"
 		if record != nil && strings.HasPrefix(record.ProviderBusName, "uia3:") {
 			roleImpliesSetValue = false
 		}

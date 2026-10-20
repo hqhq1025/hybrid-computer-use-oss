@@ -6,8 +6,10 @@ from .foundation import (
     Atspi,
     Gdk,
     MAX_SCROLL_PAGES,
+    OperationFailure,
     has_editable_text_iface,
     has_text_iface,
+    node_role,
     safe,
     state_contains,
 )
@@ -20,6 +22,37 @@ from .input_primitives import (
 )
 
 from .tree_walk import iter_all
+from .ax_records import combo_edit_target, combo_edit_identity
+
+
+def resolve_combo_editor(element, record):
+    """Keep click on the toggle; bind text editing to its recorded partner."""
+    if record is None:
+        return element, False
+    expected = record.get("editTarget")
+    projected = (record.get("controlType") == "combo box"
+                 and node_role(element) == "toggle button")
+    if not projected and expected is None:
+        if (record.get("controlType") == "combo box"
+                and not state_contains(element, Atspi.StateType.EDITABLE)):
+            raise OperationFailure(
+                "This combobox has no verified text editor; click it and select "
+                "an option. No text input was emitted.",
+                failure_code="unsupported_action", failure_phase="precondition",
+                input_events_emitted=False, failure_subject="element")
+        return element, False
+    editor = combo_edit_target(element)
+    identity = combo_edit_identity(editor)
+    if expected is None or identity != expected:
+        raise OperationFailure(
+            "The combobox has no unique unchanged editable partner; no text "
+            "input was emitted. Refresh AX observe/find, or click the combobox "
+            "and select an option.",
+            failure_code="stale_element_ref" if expected else "unsupported_action",
+            failure_phase="precondition", input_events_emitted=False,
+            failure_subject="element")
+    return editor, True
+
 
 KEY_ALIASES = {
     "return": "Return",
@@ -369,13 +402,13 @@ def insert_text_outcome_on_node(node, text):
     before = len(before_text)
     offset = max(0, min(offset, before))
 
-    if not safe(
-        lambda: Atspi.EditableText.insert_text(editable, offset, payload, len(payload)),
+    accepted = safe(
+        # AT-SPI positions count characters; insert_text length counts UTF-8
+        # bytes. A character count silently truncates multibyte input.
+        lambda: Atspi.EditableText.insert_text(
+            editable, offset, payload, len(payload.encode("utf-8"))),
         False,
-    ):
-        if selection_deleted:
-            return "effect_unknown", before, before, True
-        return "no_change", before, before, False
+    )
     # Neither insert_text's return value nor the character count can be
     # trusted: the wrong control can return True, and wrong text can keep the
     # same length. Read the full content back and check the exact insertion.
@@ -387,7 +420,9 @@ def insert_text_outcome_on_node(node, text):
         return "verified", before, len(after_text), True
     if after_text != before_text:
         return "effect_unknown", before, len(after_text), True
-    return "no_change", before, len(after_text), True
+    if selection_deleted:
+        return "effect_unknown", before, len(after_text), True
+    return "no_change", before, len(after_text), bool(accepted)
 
 
 def focus_target_element(window, element, element_record, what, timeout=1.0):
@@ -455,11 +490,10 @@ def set_element_value_outcome(node, value):
             payload = str(value)
             text_iface = safe(node.get_text_iface)
             before = read_all_text(text_iface)
-            if not safe(
+            safe(
                 lambda: Atspi.EditableText.set_text_contents(editable, payload),
                 False,
-            ):
-                return "no_change"
+            )
             # Like insert_text, set_text_contents returns True for controls
             # that ignore the write. Only an exact readback of the requested
             # value counts as verified; any other value must not be described

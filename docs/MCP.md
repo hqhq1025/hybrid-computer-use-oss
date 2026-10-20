@@ -288,6 +288,10 @@ application aN -> top-level window wN -> element rN
   still accepts an `aN`, a name, an app id or a PID.
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
+- An explicit `act observe:"tree"` returns the complete final window tree;
+  `full` also returns its screenshot. These requests have the same meaning
+  after a mutation, an ordered input sequence, or a final wait. Evidence is
+  captured after the wait finishes. The default remains compact `diff`.
 - The decoder accepts `type.value` as `type.text` and non-empty
   `set_value.text` as `set_value.value`. Supplying both fields is rejected
   before input. The published schema continues to advertise the canonical
@@ -386,12 +390,27 @@ References describe current state; they are not durable selectors. Every
 mutation resolves its reference against the live accessibility tree again and
 rejects stale or cross-window targets before any input.
 
+On Linux, a visible composite drop-down can represent both a list toggle and
+an editable field. A click addresses the toggle; text editing addresses a
+unique editable partner in that same control and verifies its value there.
+The editing capability and partner identity must still be valid before input.
+A list-only control does not become editable merely because its displayed
+role is `combobox`. Missing, ambiguous, or replaced editing targets do not
+receive synthesized keyboard input through the toggle.
+
 Every AX result starts with one JSON line: `ok`, and on failure `code`,
 `path`, `message` and `hint` (a corrected call), then `input_emitted`,
 `completed` and `requested`. The codes are `invalid_argument`, `stale_ref`,
 `window_changed`, `wait_timeout`, `effect_unknown`, `app_unavailable`,
 `runtime_error`, `ambiguous_window`, `window_not_found` and
 `no_focused_window`.
+
+Recovery follows the concrete failure, `input_emitted`, `completed`, and
+`retry_same_request`. A coordinate ownership failure requests a new GUI
+screenshot; refreshing an AX ref does not establish that the point belongs
+to its window. A window-change hint uses an available current window ref or
+requests a GUI screenshot for an anonymous popup. It does not invent a
+window title or instruct the caller to repeat already completed steps.
 
 `GUI` takes an ordered `actions` array: screenshot, pointer, drag, scroll,
 keyboard, text and wait actions. A screenshot establishes a private layout

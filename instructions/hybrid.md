@@ -78,8 +78,11 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
 
 ## When Something Fails
 
-Every AX and GUI error starts with a `code`, a `hint` with a corrected call,
-and whether input was sent. Next step by code:
+Every AX and GUI error starts with a `code`, a recovery `hint`,
+and whether input was sent. Read `failure_code`, `input_emitted`,
+`completed`, and `retry_same_request` when present. If input was sent or
+`completed` is nonzero, inspect state and send only what remains.
+Never repeat the request when `retry_same_request=false`. Next step by code:
 
 - `invalid_argument`: nothing was sent. Fix the field named in `path` as the
   hint shows. The control is not missing.
@@ -98,7 +101,11 @@ and whether input was sent. Next step by code:
 - `app_unavailable`: if the application is still starting, wait once for
   its window with `{"mode":"act","actions":[{"type":"wait","window":"..."}]}`;
   otherwise use GUI for it.
-- `runtime_error`: retry once; if it repeats, use another channel.
+- `runtime_error`: use the specific failure reason. For a temporary read
+  failure, retry the read once unless the result forbids retrying. Inspect
+  current state before retrying input. For `coordinate_target_unverified`,
+  take a GUI screenshot and inspect covering windows and the target;
+  refreshing refs alone does not fix screen-point ownership.
 - A zero-result find or a timed-out wait may list nearby elements or window
   refs. Check those suggestions against the intended target before retrying.
 - `gui_frame_stale`: the window under a GUI coordinate changed after its

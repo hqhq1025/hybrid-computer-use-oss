@@ -679,7 +679,6 @@ func (s *service) actionResult(app string, request axServiceRequest) toolCallRes
 	var deliveredLines []string
 	treeWasReturned := false
 	fullTreeReturned := false
-	treeReferenceOnly := false
 	compactActionObservation := false
 	observationRequired := false
 	switch (observation{mode: request.Observe}).resolvedMode() {
@@ -693,36 +692,16 @@ func (s *service) actionResult(app string, request axServiceRequest) toolCallRes
 		response, treeWasReturned = renderAXScreenshotObservation(snapshot, notes)
 		observationRequired = !treeWasReturned
 	case observeTree:
-		if providerCoverageSummary(
-			snapshot.Annotations,
-		).AcquisitionIncomplete == 0 &&
-			(s.observations.lastFullTree[deliveredTreeKey(snapshot)] ||
-				s.deliveredStateMatches(snapshot)) {
-			deliveredLines = repeatedTreeReferenceLines(snapshot)
-			response = snapshot.withoutScreenshot().resultWithTreeOverride(
-				notes, deliveredLines)
-			treeReferenceOnly = true
-		} else {
-			response = snapshot.withoutScreenshot().resultWithNotes(notes)
-			fullTreeReturned = true
-		}
+		response = snapshot.withoutScreenshot().resultWithNotes(notes)
+		fullTreeReturned = true
 		treeWasReturned = true
 		if response.StructuredContent == nil {
 			response.StructuredContent = map[string]any{}
 		}
 		response.StructuredContent["final_observation_kind"] = "tree"
 	case observeFull:
-		if providerCoverageSummary(
-			snapshot.Annotations,
-		).AcquisitionIncomplete == 0 &&
-			s.observations.lastFullTree[deliveredTreeKey(snapshot)] {
-			deliveredLines = repeatedTreeReferenceLines(snapshot)
-			response = snapshot.resultWithTreeOverride(notes, deliveredLines)
-			treeReferenceOnly = true
-		} else {
-			response = snapshot.resultWithNotes(notes)
-			fullTreeReturned = true
-		}
+		response = snapshot.resultWithNotes(notes)
+		fullTreeReturned = true
 		treeWasReturned = true
 		if response.StructuredContent == nil {
 			response.StructuredContent = map[string]any{}
@@ -756,7 +735,7 @@ func (s *service) actionResult(app string, request axServiceRequest) toolCallRes
 		response.StructuredContent = map[string]any{}
 	}
 	response.StructuredContent["full_tree_returned"] = fullTreeReturned
-	response.StructuredContent["tree_reference_only"] = treeReferenceOnly
+	response.StructuredContent["tree_reference_only"] = false
 	response.StructuredContent["final_observation_returned"] = treeWasReturned
 	if (observation{mode: request.Observe}).resolvedMode() == observeScreenshot {
 		response.StructuredContent["screenshot_returned"] = treeWasReturned

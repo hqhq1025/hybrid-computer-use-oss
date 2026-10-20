@@ -188,7 +188,7 @@ func axInputSchema() map[string]any {
 			"scope": map[string]any{"type": "string", "enum": axScopeValues, "description": "observe/find; default window."},
 			"observe": map[string]any{
 				"type": "string", "enum": observeValues,
-				"description": "Returned evidence. act: default diff; observe: default tree. none only with act.",
+				"description": "Returned evidence. act: default diff; explicit tree returns the complete window tree, full adds its screenshot. observe: default tree. none only with act.",
 			},
 			"root": map[string]any{
 				"type": "string", "pattern": "^(focused|r[1-9][0-9]*)$",

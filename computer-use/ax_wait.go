@@ -1120,16 +1120,17 @@ func (s *service) axBatchContinuityStop(
 		failureCode = "observation_incomplete"
 		messageCode = "batch_window_unknown"
 	}
+	recovery, hint := s.axBatchContinuityRecovery(context)
 	stopped := textResult(
 		fmt.Sprintf(
 			"%s: step %d/%d completed, but the logical window is %s "+
-				"before step %d. The remaining steps were not attempted. "+
-				"To continue in a window the step opened, add a wait for it by title before the next step.",
-			messageCode, index+1, len(actions), continuity, index+2,
+				"before step %d. The remaining steps were not attempted. %s",
+			messageCode, index+1, len(actions), continuity, index+2, recovery,
 		),
 		true,
 	)
 	stopped.StructuredContent = map[string]any{
+		axPublicErrorHintKey:                   hint,
 		"failure_code":                         failureCode,
 		"failure_phase":                        "between_actions",
 		"window_continuity":                    string(continuity),
@@ -1145,8 +1146,28 @@ func (s *service) axBatchContinuityStop(
 		"partial_input_possible":               anyPartialPossible,
 		"mutation_unknown":                     anyMutationUnknown || anyInputEmitted || anyPartialPossible,
 		"observation_required":                 true,
+		"retry_same_request":                   false,
 	}
 	return s.recoverAXBatchObservation(context, stopped, obs), true
+}
+
+// Use the read that detected the change. A popup need not have a title or
+// an addressable window, and closing a dialog can reveal an existing window.
+func (s *service) axBatchContinuityRecovery(context *axBatchContext) (string, string) {
+	var snapshot *appSnapshot
+	if s != nil && context != nil {
+		snapshot = s.currentSnapshot(context.appToken)
+	}
+	if snapshot == nil || snapshot.WindowAbsent {
+		return "List current windows, inspect the intended window, then send only the remaining actions.", `{"mode":"apps"}`
+	}
+	if ref := snapshot.publicWindowRef; ref != "" {
+		if entry, err := s.windowRefRegistry.Resolve(ref, ""); err == nil && entry.WindowHandle == snapshot.WindowHandle {
+			return "The latest read shows " + ref + ". Observe that window before sending only the remaining actions.",
+				axHintJSON(map[string]any{"mode": "observe", "window_ref": ref})
+		}
+	}
+	return "The latest window has no usable wN. Use GUI screenshot to inspect the window or popup before replanning the remaining actions.", guiScreenshotCall
 }
 
 // axWaitOnly runs an act call whose steps are all waits. It sends no

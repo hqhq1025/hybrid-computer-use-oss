@@ -167,6 +167,18 @@ $PY -m hcu.osworld.setup_canary --benchmark-version v1 \
 healthy guest. `--run-evaluator` also scores the untouched setup state, which
 is usually 0.
 
+Before starting an agent, `run_task` also probes the MCP transport from the
+rendered client configuration, including its command, arguments and environment.
+It checks the negotiated protocol and tool list, then calls AX apps, observe
+and find for enabled accessibility channels, and GUI screenshot for GUI.
+The probe has a 90-second limit and uses no model calls. A tool error or
+missing required response evidence stops preparation.
+
+An empty desktop can pass discovery without exercising observe or find;
+the report records those checks as skipped. For candidate evaluation, also
+run these reads against a known open fixture window and require every check
+to pass. A setup canary alone does not verify the MCP response contract.
+
 ## Run one task
 
 ```bash

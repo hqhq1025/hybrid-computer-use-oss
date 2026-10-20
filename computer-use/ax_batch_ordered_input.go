@@ -537,11 +537,10 @@ func (s *service) executeWholeBatchOrderedInput(
 	if !eligible {
 		return toolCallResult{}, false
 	}
-	includeScreenshot := obs.resolvedMode() == observeScreenshot
 	execution := s.executePlannedOrderedInputRun(
 		context,
 		*request,
-		includeScreenshot,
+		*obs.resolvedScreenshot(),
 	)
 	nativeResult := execution.nativeResult
 

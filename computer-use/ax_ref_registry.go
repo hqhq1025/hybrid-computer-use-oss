@@ -96,6 +96,7 @@ func (registry *AppRefRegistry) clone() *AppRefRegistry {
 }
 
 type AXRefEntry struct {
+	EditTarget                      *axRelationTarget
 	Ref                             string
 	IdentityKey                     string
 	LocatorKind                     AXLocatorKind
@@ -1318,6 +1319,9 @@ func (registry *RefRegistry) AcquireNode(
 		)
 		if existingRef := registry.byIdentity[key]; existingRef != "" {
 			entry := registry.entries[existingRef]
+			if entry != nil && node.SourceRecord != nil && !sameComboEditTarget(entry.EditTarget, node.SourceRecord.EditTarget) {
+				registry.MarkSuperseded(existingRef, "composite control editing target changed")
+			}
 			providerChanged := completeProviderIdentityChanged(
 				entry,
 				node.ProviderBusName,
@@ -1393,9 +1397,19 @@ func (registry *RefRegistry) AcquireNode(
 			// the evidence needed to reject an unsafe rebind.
 			return ref
 		}
+		if node.SourceRecord != nil {
+			entry.EditTarget = node.SourceRecord.EditTarget
+		}
 		registry.BindRuntimePaths(ref, node.RuntimeID, node.RuntimeIDAliases)
 	}
 	return ref
+}
+
+func sameComboEditTarget(left, right *axRelationTarget) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func (registry *RefRegistry) MarkStale(ref, reason string) {

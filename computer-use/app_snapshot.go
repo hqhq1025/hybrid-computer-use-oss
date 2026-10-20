@@ -85,6 +85,7 @@ type elementRecord struct {
 	Frame                           *frame                        `json:"frame,omitempty"`
 	Actions                         []string                      `json:"actions,omitempty"`
 	SetValueSupported               *bool                         `json:"setValue,omitempty"`
+	EditTarget                      *axRelationTarget             `json:"editTarget,omitempty"`
 	States                          string                        `json:"states,omitempty"`
 	Description                     string                        `json:"description,omitempty"`
 	TextAttributes                  map[string]string             `json:"textAttributes,omitempty"`

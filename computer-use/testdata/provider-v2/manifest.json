@@ -18,6 +18,7 @@
     {"name": "observe-apps", "direction": "request", "file": "observe-apps.request.json"},
     {"name": "observe", "direction": "request", "file": "observe.request.json"},
     {"name": "resolve-and-act", "direction": "request", "file": "resolve-and-act.request.json"},
+    {"name": "combo-edit", "direction": "request", "file": "combo-edit.request.json"},
     {"name": "desktop-batch", "direction": "request", "file": "desktop-batch.request.json"},
     {"name": "window-list", "direction": "request", "file": "window-list.request.json"},
     {"name": "window-action", "direction": "request", "file": "window-action.request.json"},

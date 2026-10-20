@@ -296,11 +296,10 @@ func (s *service) axBatchFinalObservation(
 	if context == nil || obs.resolvedMode() == observeNone {
 		return toolCallResult{}
 	}
-	includeScreenshot := obs.resolvedMode() == observeScreenshot
 	request := axServiceRequest{
 		Operation:          axServiceObserve,
 		App:                context.appToken,
-		IncludeScreenshot:  &includeScreenshot,
+		IncludeScreenshot:  obs.resolvedScreenshot(),
 		TargetWindowHandle: context.windowHandle,
 		SourceRef:          context.windowRef,
 		Scope:              axScopeWindow,
@@ -379,11 +378,10 @@ func (s *service) recoverAXBatchObservation(
 		sourceRef = ""
 	}
 
-	includeScreenshot := obs.resolvedMode() == observeScreenshot
 	request := axServiceRequest{
 		Operation:          axServiceObserve,
 		App:                context.appToken,
-		IncludeScreenshot:  &includeScreenshot,
+		IncludeScreenshot:  obs.resolvedScreenshot(),
 		TargetWindowHandle: targetWindowHandle,
 		SourceRef:          sourceRef,
 		Scope:              axScopeWindow,
@@ -548,8 +546,26 @@ func (s *service) renderAXBatchFinalObservation(
 		return result
 	}
 
-	result, deliveredLines, treeReturned, compact, fullTree :=
-		s.renderAXDiffOrCompactObservation(snapshot, notes)
+	var result toolCallResult
+	var deliveredLines []string
+	var treeReturned, compact, fullTree bool
+	if mode := obs.resolvedMode(); mode == observeTree || mode == observeFull {
+		// Explicit evidence requests include the whole current working tree,
+		// even when focus or a previously delivered baseline could shorten it.
+		if mode == observeTree {
+			result = snapshot.withoutScreenshot().resultWithNotes(notes)
+		} else {
+			result = snapshot.resultWithNotes(notes)
+		}
+		treeReturned, fullTree = true, true
+		if result.StructuredContent == nil {
+			result.StructuredContent = map[string]any{}
+		}
+		result.StructuredContent["final_observation_kind"] = mode
+	} else {
+		result, deliveredLines, treeReturned, compact, fullTree =
+			s.renderAXDiffOrCompactObservation(snapshot, notes)
+	}
 	if !treeReturned {
 		return result
 	}

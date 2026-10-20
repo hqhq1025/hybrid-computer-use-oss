@@ -606,10 +606,17 @@ func axPublicEvidence(full map[string]any, isError bool, content []contentItem) 
 				break
 			}
 		}
+		coordinateUnverified := full["failure_code"] == "coordinate_target_unverified"
+		if coordinateUnverified {
+			message = "Screen-point ownership could not be verified. Use GUI screenshot to inspect covering windows and the target; refreshing refs alone does not fix ownership. Check completed and current state before sending remaining actions. " + message
+		}
 		if message = firstLine(strings.TrimSpace(message)); message != "" {
 			public["message"] = truncateRunes(message, 300)
 		}
 		hint, _ := full[axPublicErrorHintKey].(string)
+		if coordinateUnverified {
+			hint = guiScreenshotCall
+		}
 		if hint == "" {
 			hint = axPublicHints[code]
 		}

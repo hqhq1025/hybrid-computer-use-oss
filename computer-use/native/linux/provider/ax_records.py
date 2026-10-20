@@ -7,6 +7,8 @@ from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
     DEFAULT_TEXT_LIMIT,
     NodeFacts,
+    has_editable_text_iface,
+    has_text_iface,
     limit_text,
     node_name,
     node_pid,
@@ -15,6 +17,7 @@ from .foundation import (
     provider_bus_name,
     provider_object_path,
     safe,
+    state_contains,
 )
 from .primitives import name_fingerprint
 from .ax_node_properties import (
@@ -164,6 +167,44 @@ def gtk_combo_partner(node, role):
         elif sibling_role != "text":
             return None
     return combo
+
+
+def combo_edit_target(toggle):
+    """Find the unique displayed editor in a projected combo control.
+
+    List-only combos can retain an unmapped text sibling that still reports
+    EDITABLE and EditableText. It is a placeholder, not the displayed control.
+    """
+    if gtk_combo_partner(toggle, node_role(toggle)) is None:
+        return None
+    parent = safe(lambda: toggle.get_parent())
+    count = int(safe(lambda: parent.get_child_count(), 0) or 0)
+    candidates = []
+    for index in range(count):
+        child = safe(lambda i=index: parent.get_child_at_index(i))
+        if child is None or node_role(child) != "text":
+            continue
+        if (state_contains(child, Atspi.StateType.EDITABLE)
+                and state_contains(child, Atspi.StateType.SHOWING)
+                and not state_contains(child, Atspi.StateType.DEFUNCT)
+                and has_editable_text_iface(child) and has_text_iface(child)
+                and provider_bus_name(child) == provider_bus_name(toggle)
+                and node_pid(child) == node_pid(toggle)
+                and provider_object_path(safe(lambda: child.get_parent()))
+                == provider_object_path(parent)):
+            candidates.append(child)
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def combo_edit_identity(node):
+    if node is None:
+        return None
+    identity = {
+        "providerBusName": provider_bus_name(node),
+        "providerObjectPath": provider_object_path(node),
+        "processGeneration": process_generation(node_pid(node)),
+    }
+    return identity if all(identity.values()) else None
 
 
 def combo_label(combo, toggle):
@@ -356,6 +397,13 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
         "relationReadComplete": relations_complete,
         "nameSource": name_source,
     }
+    if combo is not None:
+        editor = combo_edit_target(node)
+        identity = combo_edit_identity(editor)
+        record["setValue"] = identity is not None
+        if identity is not None:
+            record["editTarget"] = identity
+            record["value"] = element_value(editor, text_limit=text_limit)
     # When the name is truncated, also store a hash of the full name.
     #
     # Identity checks compare the live full name, which never equals the

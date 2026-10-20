@@ -218,7 +218,7 @@
                 "type": "string"
               },
               "observe": {
-                "description": "Returned evidence. act: default diff; observe: default tree. none only with act.",
+                "description": "Returned evidence. act: default diff; explicit tree returns the complete window tree, full adds its screenshot. observe: default tree. none only with act.",
                 "enum": [
                   "diff",
                   "tree",

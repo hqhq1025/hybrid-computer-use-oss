@@ -458,6 +458,14 @@ func validAccessibilityOperation(operation AccessibilityOperation) bool {
 }
 
 func validateProviderActionRequest(request ProviderActionRequest) error {
+	if request.Target != nil && request.Target.EditTarget != nil {
+		identity := request.Target.EditTarget
+		if strings.TrimSpace(identity.ProviderBusName) == "" ||
+			strings.TrimSpace(identity.ProviderObjectPath) == "" ||
+			strings.TrimSpace(identity.ProcessGeneration) == "" || identity.Role != "" || identity.Name != "" {
+			return errors.New("provider editTarget requires exactly one complete provider identity")
+		}
+	}
 	if err := validateProviderProtocolVersion(request.ProtocolVersion); err != nil {
 		return err
 	}

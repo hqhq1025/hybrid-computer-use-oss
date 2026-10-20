@@ -13,6 +13,7 @@ readme = "README.md"
 dependencies = [
   "docker>=7",
   "requests>=2.31",
+  "tomli>=2; python_version < '3.11'",
   "urllib3>=2",
 ]
 

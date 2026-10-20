@@ -114,8 +114,8 @@ def gui_settle_note(result):
     if result.get("skipped"):
         if result.get("reason") == "observation_only":
             return (
-                "No quiescence polling was needed for this read-only batch; the "
-                "explicit before/after visual comparison was still performed."
+                "This read-only batch returned one current screenshot without "
+                "quiescence polling or a before/after visual comparison."
             )
         if result.get("reason") == "no_input_actions":
             return (

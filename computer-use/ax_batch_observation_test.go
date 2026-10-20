@@ -128,6 +128,14 @@ func TestFinalObservationContinuationRequiresCompleteGoneSourceAndSameApp(t *tes
 }
 
 func TestFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T) {
+	for _, mode := range []string{observeScreenshot, observeTree, observeFull} {
+		t.Run(mode, func(t *testing.T) {
+			testFinalObservationFollowsVerifiedTransientWindowClosure(t, mode)
+		})
+	}
+}
+
+func testFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T, mode string) {
 	service, appRef, sourceWindowRef, _ := sheetBatchService(t)
 	backend := &recordingPlatformBackend{
 		accessibilityResponses: []ProviderAccessibilityResult{
@@ -162,6 +170,11 @@ func TestFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T) {
 					WindowHandle:        "w2:11111111111111111111111111111111",
 					ScreenshotPNGBase64: "current-image",
 					ScreenshotMimeType:  "image/png",
+					TreeLines:           []string{`0 frame "Current document"`, ` 1 push button "Current action"`},
+					Elements: []elementRecord{
+						{Index: 0, RuntimeID: []int{0}, ControlType: "frame", Name: "Current document"},
+						{Index: 1, RuntimeID: []int{0, 0}, ControlType: "push button", Name: "Current action"},
+					},
 				},
 			},
 		},
@@ -175,7 +188,7 @@ func TestFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T) {
 	}
 	result := service.axBatchFinalObservation(
 		context,
-		observation{mode: observeScreenshot},
+		observation{mode: mode},
 		false,
 	)
 	if result.IsError ||
@@ -187,6 +200,21 @@ func TestFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T) {
 	}
 	if len(backend.observeRequests) != 2 {
 		t.Fatalf("observe calls=%d, want 2", len(backend.observeRequests))
+	}
+	if mode == observeTree || mode == observeFull {
+		if !strings.Contains(resultText(result), `button "Current action"`) {
+			t.Fatalf("replacement window tree missing: %s", resultText(result))
+		}
+	}
+	if mode == observeFull || mode == observeScreenshot {
+		foundImage := false
+		for _, item := range result.Content {
+			foundImage = foundImage || item.Type == "image" && item.Data == "current-image"
+		}
+		if !foundImage || backend.observeRequests[1].Observation.IncludeScreenshot == nil ||
+			!*backend.observeRequests[1].Observation.IncludeScreenshot {
+			t.Fatal("replacement window final screenshot not requested or returned")
+		}
 	}
 	if backend.observeRequests[0].WindowHandle != context.windowHandle ||
 		backend.observeRequests[1].WindowHandle !=

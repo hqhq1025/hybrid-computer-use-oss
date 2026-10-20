@@ -149,6 +149,7 @@ func providerTargetFromOperation(
 		return nil
 	}
 	return &ProviderSemanticTarget{
+		EditTarget:                      target.EditTarget,
 		Selector:                        target.Selector,
 		LocatorKind:                     target.LocatorKind,
 		AllowProviderRebind:             target.AllowProviderRebind,

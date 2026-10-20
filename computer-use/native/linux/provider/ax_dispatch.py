@@ -25,6 +25,7 @@ from .ax_actions import (
     focus_target_element,
     insert_text_outcome_on_node,
     parse_key,
+    resolve_combo_editor,
     scroll_element,
     send_key,
     send_text,
@@ -1018,13 +1019,15 @@ def _perform_scroll(
 def _perform_type(
     action_input, window, element, element_record, notes, action_evidence
 ):
+    element, combo_editor = resolve_combo_editor(element, element_record)
     # A caller-supplied element_index is a real target, not a hint. Focus and
     # verify that exact node before any keyboard fallback.
     if element_record is not None:
-        focus_target_element(
-            window, element, element_record, "targeted type_text")
-        action_evidence["window_focus_verified"] = True
-        action_evidence["target_focus_verified"] = True
+        if not combo_editor:
+            focus_target_element(
+                window, element, element_record, "targeted type_text")
+            action_evidence["window_focus_verified"] = True
+            action_evidence["target_focus_verified"] = True
         (
             write_outcome,
             before_chars,
@@ -1071,6 +1074,14 @@ def _perform_type(
             )
         )
     else:
+        if combo_editor:
+            raise OperationFailure(
+                "The combobox editor did not confirm the text insertion; "
+                "keyboard fallback was not attempted.",
+                failure_code="effect_unknown" if semantic_input_emitted else "unsupported_action",
+                failure_phase="readback" if semantic_input_emitted else "precondition",
+                input_events_emitted=semantic_input_emitted,
+                failure_subject="element")
         if element_record is None:
             require_window_focus(window, "type")
             action_evidence["window_focus_verified"] = True
@@ -1136,6 +1147,7 @@ def _perform_set_value(
 ):
     if element is None:
         raise RuntimeError("unknown target ref")
+    element, combo_editor = resolve_combo_editor(element, element_record)
     value = action_input.get("value", "")
     value_outcome = set_element_value_outcome(element, value)
     if value_outcome == "effect_unknown":
@@ -1152,6 +1164,12 @@ def _perform_set_value(
             failure_subject="element",
         )
     if value_outcome != "verified":
+        if combo_editor:
+            raise OperationFailure(
+                "The combobox editor did not confirm the value write; keyboard "
+                "fallback was not attempted. Read the control before retrying.",
+                failure_code="effect_unknown", failure_phase="readback",
+                input_events_emitted=True, failure_subject="element")
         # A refused semantic write does not mean the control is read-only:
         # Blink text inputs, for example, implement neither the AT-SPI
         # Value nor the EditableText interface. As click and type_text do,

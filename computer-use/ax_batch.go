@@ -599,7 +599,7 @@ func (s *service) axBatchRun(
 		if orderedRun {
 			runEnd := index + len(request.Steps) - 1
 			execution := s.executePlannedOrderedInputRun(context, request,
-				runEnd == len(actions)-1 && obs.resolvedMode() == observeScreenshot)
+				runEnd == len(actions)-1 && *obs.resolvedScreenshot())
 			result = execution.result
 			runEvidence := orderedInputActionEvidence(actions[index:runEnd+1], execution.nativeResult)
 			actionEvidence = append(actionEvidence, runEvidence...)

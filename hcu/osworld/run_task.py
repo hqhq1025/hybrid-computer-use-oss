@@ -86,6 +86,7 @@ from hcu.osworld.runtime import (
     align_guest_run_clock,
     install_guest_runtime,
     public_mcp_probe_script,
+    public_mcp_probe_config,
     validate_guest_current_date,
     validate_provider_mount_isolation,
 )
@@ -822,8 +823,9 @@ def prepare_guest(run: TaskRun, env: DesktopEnv) -> str:
             "/usr/bin/python3",
             "-c",
             public_mcp_probe_script(),
-            GUEST_MCP,
-            json.dumps(run.mcp_public_tools),
+            json.dumps(public_mcp_probe_config(
+                run.config_path.read_text(), args.agent, run.mcp_public_tools,
+            )),
         ],
         timeout=180,
     )

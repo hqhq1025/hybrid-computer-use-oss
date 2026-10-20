@@ -58,6 +58,7 @@ type ProviderTargetCandidate struct {
 }
 
 type ProviderSemanticTarget struct {
+	EditTarget                      *axRelationTarget         `json:"editTarget,omitempty"`
 	Selector                        string                    `json:"selector"`
 	LocatorKind                     AXLocatorKind             `json:"locatorKind,omitempty"`
 	AllowProviderRebind             bool                      `json:"allowProviderRebind,omitempty"`

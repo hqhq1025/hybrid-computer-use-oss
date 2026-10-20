@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Route edits of composite Linux drop-downs to their verified editable
+  partner, while keeping clicks on the list toggle. Reject missing,
+  ambiguous, or replaced editing targets before input.
+- Send the UTF-8 byte length to AT-SPI text insertion, preserving Chinese,
+  emoji and combining characters while retaining character-based offsets.
+- Honor explicit AX tree/full evidence after final waits and ordered input
+  sequences; full includes the final screenshot. Keep compact diff as the
+  default and preserve failed-batch prefixes.
+- Return executable recovery hints for coordinate ownership failures,
+  anonymous popups, and returns to an existing window. Align the operating
+  guide with input and completed-prefix evidence instead of blind retries.
+- Probe enabled AX/GUI calls through the selected client transport before
+  launching a task, and record skipped window reads when no window exists.
+  The evaluation canary also validates AX on a known desktop window.
+- Correct the provider's internal screenshot-only description: it captures
+  one frame without comparing before/after pixels.
 - Accept up to 64 AX actions and reject calls whose wait timeouts total more
   than 60 seconds. Accept unambiguous `type.value` and `set_value.text`
   aliases; conflicting fields still reject the whole batch before input.

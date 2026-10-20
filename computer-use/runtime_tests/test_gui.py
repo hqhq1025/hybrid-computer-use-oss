@@ -88,6 +88,9 @@ class GUICapturePipelineTests(unittest.TestCase):
         self.encoder.assert_called_once_with(mock.sentinel.before)
         self.pixels.assert_not_called()
         self.wait.assert_not_called()
+        self.assertIsNone(response["quiescent"])
+        self.assertIsNone(response["changed_since_before"])
+        self.assertIn("without quiescence polling or a before/after visual comparison", response["text"])
 
     def test_success_encodes_only_final_frame_after_pixel_bracket(self):
         response = self.click()

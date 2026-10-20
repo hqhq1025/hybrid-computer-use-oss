@@ -91,6 +91,7 @@ EXPECTED_WINDOW_FIELDS = {
 }
 FRAME_FIELDS = {"x", "y", "width", "height"}
 TARGET_FIELDS = {
+    "editTarget",
     "selector",
     "locatorKind",
     "allowProviderRebind",
@@ -348,6 +349,11 @@ def _validate_target(value, path):
         return
     target = _strict_object(value, path, TARGET_FIELDS, ("selector", "hasName"))
     _non_empty_string(target["selector"], path + ".selector")
+    if "editTarget" in target:
+        fields = {"providerBusName", "providerObjectPath", "processGeneration"}
+        identity = _strict_object(target["editTarget"], path + ".editTarget", fields, fields)
+        for field in fields:
+            _non_empty_string(identity[field], path + ".editTarget." + field)
     if not isinstance(target["hasName"], bool):
         raise ProviderRequestError(
             "invalid_provider_request",

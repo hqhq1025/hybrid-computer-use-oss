@@ -87,6 +87,7 @@ func semanticTargetFromRefEntry(entry *AXRefEntry) (*semanticTarget, error) {
 		entry.WindowHandle,
 	)
 	target.LocatorKind = entry.LocatorKind
+	target.EditTarget = entry.EditTarget
 	target.ProviderBusName = entry.ProviderBusName
 	target.ProviderObjectPath = entry.ProviderObjectPath
 	target.ProcessGeneration = entry.ProcessGeneration

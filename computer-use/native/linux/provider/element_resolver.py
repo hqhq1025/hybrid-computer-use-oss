@@ -1190,6 +1190,13 @@ def _unique_semantic_match(
 def _live_node_for_semantic_match(app, target, locator, record, matched_bounds):
     """Return the live node of the match, checking rebind lineage first."""
     allow_provider_rebind = locator.allow_provider_rebind
+    if target.get("editTarget") is not None and target["editTarget"] != record.get("editTarget"):
+        raise OperationFailure(
+            "stale_element_ref reason=composite_edit_target_replaced; no input "
+            "was emitted. Refresh AX observe/find and use the new ref.",
+            failure_code="stale_element_ref", failure_phase="precondition",
+            input_events_emitted=False, failure_subject="element",
+        )
     provider_requested = locator.provider_requested
     if allow_provider_rebind and provider_requested:
         permitted_paths = [target.get("runtimeId") or []]

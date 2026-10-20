@@ -216,6 +216,7 @@ type semanticTargetPredicate struct {
 }
 
 type semanticTarget struct {
+	EditTarget                      *axRelationTarget         `json:"editTarget,omitempty"`
 	Selector                        string                    `json:"selector"`
 	LocatorKind                     AXLocatorKind             `json:"locatorKind,omitempty"`
 	AllowProviderRebind             bool                      `json:"allowProviderRebind,omitempty"`
