@@ -51,9 +51,12 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
     private func executeSynchronousThrowing(
         _ operation: [String: Any]
     ) throws -> [String: Any] {
-        let priorIdentity = service.activeAppIdentity
-        service.activeAppIdentity = try runtimeAppIdentity(operation)
-        defer { service.activeAppIdentity = priorIdentity }
+        try service.withAppIdentity(runtimeAppIdentity(operation)) {
+            try executeSynchronousBound(operation)
+        }
+    }
+
+    private func executeSynchronousBound(_ operation: [String: Any]) throws -> [String: Any] {
         let context = Thread.current.threadDictionary
         context["computer-use.liveness.request"] =
             string(operation["_diagnostic_request_id"])
@@ -86,19 +89,7 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
         let tool = string(operation["tool"])
         switch tool {
         case "list_apps":
-            let apps = AppDiscovery.runningApps().map { app in
-                [
-                    "name": app.name,
-                    "bundleIdentifier": app.bundleIdentifier ?? "",
-                    "pid": Int(app.pid),
-                    "providerBusName": "mac:\(app.pid)",
-                    "processGeneration": macProcessGeneration(pid: app.pid),
-                    "displayText": app.bundleIdentifier.map {
-                        "\(app.name) — \($0)"
-                    } ?? app.name,
-                    "inputCapable": true,
-                ] as [String: Any]
-            }
+            let apps = try macApplicationListing(AppDiscovery.runningApps())
             return [
                 "ok": true,
                 "text": apps.compactMap { $0["displayText"] as? String }
@@ -218,6 +209,36 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
         }
         service.rememberNativeWindowIdentity(snapshot)
         return snapshot
+    }
+}
+
+func macApplicationListing(
+    _ apps: [RunningAppDescriptor],
+    inputCapable: (RunningAppDescriptor) -> Bool = { $0.runningApplication.activationPolicy != .prohibited },
+    windows: (RunningAppDescriptor) throws -> [[String: Any]] = { app in
+        let inventory = axWindowInventory(pid: app.pid)
+        guard inventory.complete else {
+            throw ComputerUseError.stateUnavailable("The window inventory for \(app.name) is incomplete. Missing windows cannot be treated as closed.")
+        }
+        guard let records = try windowInventorySnapshot(app: app, windows: inventory.windows)["windows"] as? [[String: Any]] else {
+            throw ComputerUseError.stateUnavailable("The window inventory could not be encoded completely.")
+        }
+        return records
+    }
+) throws -> [[String: Any]] {
+    try apps.map { app in
+        let capable = inputCapable(app)
+        let records = capable ? try windows(app) : []
+        return [
+            "name": app.name,
+            "bundleIdentifier": app.bundleIdentifier ?? "",
+            "pid": Int(app.pid),
+            "providerBusName": "mac:\(app.pid)",
+            "processGeneration": macProcessGeneration(pid: app.pid),
+            "displayText": app.bundleIdentifier.map { "\(app.name) — \($0)" } ?? app.name,
+            "inputCapable": capable,
+            "windows": appListingWindows(records),
+        ]
     }
 }
 

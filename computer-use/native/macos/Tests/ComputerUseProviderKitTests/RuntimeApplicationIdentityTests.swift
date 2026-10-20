@@ -77,15 +77,27 @@ private func runtimeIdentity(generation: String? = nil) -> [String: Any] {
 
 @Test func requestAppBindingRestoresAfterSuccessAndFailure() async {
     let bridge = ComputerUseRuntimeBridge()
-    // list_apps performs no AX reads, so this checks successful request cleanup
-    // without depending on desktop permissions in CI.
-    let success = await bridge.execute(["tool": "list_apps", "appIdentity": runtimeIdentity()])
-    #expect(success["ok"] as? Bool == true)
+    let success = bridge.service.withAppIdentity(runtimeIdentity()) {
+        #expect(bridge.service.activeAppIdentity != nil)
+        return true
+    }
+    #expect(success)
+    #expect(bridge.service.activeAppIdentity == nil)
+    do {
+        try bridge.service.withAppIdentity(runtimeIdentity()) {
+            #expect(bridge.service.activeAppIdentity != nil)
+            throw ComputerUseError.stateUnavailable("capture failed")
+        }
+    } catch {}
     #expect(bridge.service.activeAppIdentity == nil)
     let failure = await bridge.execute(["tool": "select", "app": "a1", "appIdentity": runtimeIdentity(generation: "old-process")])
     #expect(failure["ok"] as? Bool == false)
     #expect(bridge.service.activeAppIdentity == nil)
-    let unbound = await bridge.execute(["tool": "list_apps"])
-    #expect(unbound["ok"] as? Bool == true)
+    var discovered: [String] = []
+    _ = try? resolveRuntimeApplication(query: "TextEdit", identity: bridge.service.activeAppIdentity, resolveByName: { name in
+        discovered.append(name)
+        return runtimeIdentityApp()
+    })
+    #expect(discovered == ["TextEdit"])
     #expect(bridge.service.activeAppIdentity == nil)
 }

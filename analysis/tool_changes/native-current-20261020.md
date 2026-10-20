@@ -99,7 +99,18 @@ operations, and service snapshot refreshes now share a request-scoped identity.
 They resolve the bound PID and process generation without name fallback.
 The binding is restored after the synchronous request. Five regressions cover
 short app refs, stale process rejection, discovery, and binding cleanup.
-This follow-up requires a fresh native CI run and desktop smoke.
+CI run `39421333133` passed all five jobs after the identity fix. The cpu001
+Mac desktop then passed ref-owned activation, Unicode selection, complete
+selection, duplicate rejection, scaled screenshots, and a 64-key batch.
+
+An expanded desktop check exposed a second integration gap: native app
+discovery omitted window records that the Go window-wait path consumes.
+App discovery now includes window titles and identities. Failed enumeration
+or title reads fail explicitly, so missing evidence cannot prove a window
+closed. Unknown or ambiguous native handles do not receive executable refs.
+Window identity paths match observation, and active state uses actual focus.
+These changes and their regressions are confined to the macOS provider.
+Final desktop window-wait validation and native CI are pending.
 
 Combined checks and native execution remain pending. The user excludes the
 personal MacBook Pro; testing uses isolated cpu001 VM overlays and native CI.
