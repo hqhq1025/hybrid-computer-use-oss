@@ -5,7 +5,7 @@ import Foundation
 
 extension ComputerUseRuntimeBridge {
     func listWindows(_ operation: [String: Any]) throws -> [String: Any] {
-        let app = try AppDiscovery.resolve(try requiredString(operation, "app"))
+        let app = try resolveRuntimeApplication(query: requiredString(operation, "app"), identity: runtimeAppIdentity(operation))
         try validateRequestedIdentity(operation, app: app)
         let windows = axWindows(pid: app.pid)
         let titles = windows.compactMap(axTitle)
@@ -23,7 +23,7 @@ extension ComputerUseRuntimeBridge {
         operation: [String: Any]
     ) throws -> [String: Any] {
         let query = try requiredString(operation, "app")
-        let app = try AppDiscovery.resolve(query)
+        let app = try resolveRuntimeApplication(query: query, identity: runtimeAppIdentity(operation))
         try validateRequestedIdentity(operation, app: app)
         let changeWake = AXChangeWake(pid: app.pid)
         let requestedTitle = runtimeWindowTitle(operation)

@@ -85,6 +85,22 @@ generation. Runner unit tests mocked other desktop_env modules but omitted
 the new file_source import. They now mock that import too. These changes
 preserve product identity validation and scoring assertions.
 
+CI run `39418544534` passed all five jobs after those fixture fixes.
+Windows VM smoke then passed ten native MCP checks, including Unicode edits,
+exact text selection, input-free rejections, scaled coordinate clicks, and a
+64-action GUI batch. UIA and Win32 confirmed the selected list item; the
+WinForms application's cached selection did not update. Platform documentation
+records this application-callback limitation.
+
+The macOS VM built the complete native package, but real ref-owned actions
+exposed another contract gap: the provider treated `a1` as an app name instead
+of resolving the supplied process identity. Accessibility actions, window
+operations, and service snapshot refreshes now share a request-scoped identity.
+They resolve the bound PID and process generation without name fallback.
+The binding is restored after the synchronous request. Five regressions cover
+short app refs, stale process rejection, discovery, and binding cleanup.
+This follow-up requires a fresh native CI run and desktop smoke.
+
 Combined checks and native execution remain pending. The user excludes the
 personal MacBook Pro; testing uses isolated cpu001 VM overlays and native CI.
 Native CI builds and tests are distinct from interactive desktop tests. No new

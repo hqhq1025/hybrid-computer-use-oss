@@ -268,7 +268,7 @@ extension ComputerUseService {
         if let snapshot = snapshotsByApp[query.lowercased()] {
             return snapshot
         }
-        guard let app = try? AppDiscovery.resolve(query) else {
+        guard let app = try? resolveRuntimeApplication(query: query, identity: activeAppIdentity) else {
             return nil
         }
         return snapshotsByApp[app.name.lowercased()]
@@ -287,7 +287,7 @@ extension ComputerUseService {
         fallbackWindow: AXUIElement? = nil,
         expectedWindowHandle: String? = nil
     ) throws -> AppSnapshot {
-        let app = try AppDiscovery.resolve(query)
+        let app = try resolveRuntimeApplication(query: query, identity: activeAppIdentity)
         let snapshot = try SnapshotBuilder.build(
             for: app,
             textLimit: textLimit,
@@ -297,6 +297,10 @@ extension ComputerUseService {
             fallbackWindow: fallbackWindow,
             expectedWindowHandle: expectedWindowHandle
         )
+        if let identity = activeAppIdentity {
+            _ = try resolveRuntimeApplication(query: query, identity: identity)
+            try validateRequestedIdentity(["appIdentity": identity], app: snapshot.app)
+        }
 
         let keys = Set([
             query.lowercased(),

@@ -32,7 +32,7 @@ extension ComputerUseRuntimeBridge {
         }
 
         let app = try requiredString(operation, "app")
-        let appDescriptor = try AppDiscovery.resolve(app)
+        let appDescriptor = try resolveRuntimeApplication(query: app, identity: try runtimeAppIdentity(operation))
         try validateRequestedIdentity(operation, app: appDescriptor)
         recordTiming("app_resolution")
         let expectedWindowHandle = string(operation["targetWindowHandle"])

@@ -51,6 +51,9 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
     private func executeSynchronousThrowing(
         _ operation: [String: Any]
     ) throws -> [String: Any] {
+        let priorIdentity = service.activeAppIdentity
+        service.activeAppIdentity = try runtimeAppIdentity(operation)
+        defer { service.activeAppIdentity = priorIdentity }
         let context = Thread.current.threadDictionary
         context["computer-use.liveness.request"] =
             string(operation["_diagnostic_request_id"])
@@ -216,6 +219,26 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
         service.rememberNativeWindowIdentity(snapshot)
         return snapshot
     }
+}
+
+func runtimeAppIdentity(_ operation: [String: Any]) throws -> [String: Any]? {
+    guard let raw = operation["appIdentity"] else { return nil }
+    guard let identity = raw as? [String: Any] else {
+        throw ComputerUseError.invalidArguments("appIdentity must be an identity object.")
+    }
+    return identity
+}
+
+func resolveRuntimeApplication(
+    query: String,
+    identity: [String: Any]?,
+    resolveByName: (String) throws -> RunningAppDescriptor = AppDiscovery.resolve,
+    resolveBoundApp: ([String: Any]) throws -> RunningAppDescriptor = { try resolveOrderedInputApp($0) }
+) throws -> RunningAppDescriptor {
+    guard let identity else { return try resolveByName(query) }
+    let app = try resolveBoundApp(identity)
+    try validateRequestedIdentity(["appIdentity": identity], app: app)
+    return app
 }
 
 let accessibilityReadTimeout: TimeInterval = 8

@@ -27,6 +27,11 @@ Both providers reject cross-element ranges before input. Duplicate or missing
 text also fails before selection. After a selection write, failed readback
 reports that input may have changed the selection; do not retry blindly.
 
+Windows selection readback proves the UIA selection state. It does not prove
+that an application received a selection-change callback or updated its own
+cached selection. Verify the resulting application state before relying on
+that callback. A native WinForms ListBox test exposed this distinction.
+
 The Linux composite-control `editTarget` identity has no native mapping on
 these providers. They validate its wire format and reject its use before input.
 Use a current ref for the native editable field. Ordinary native field editing
