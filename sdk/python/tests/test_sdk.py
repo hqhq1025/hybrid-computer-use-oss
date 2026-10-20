@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import hcu_sdk as hcu  # noqa: E402
 from hcu_sdk import ptc  # noqa: E402
+from test_ptc import PTCAdapterTests, PTCMessagesTests  # noqa: E402,F401
 
 
 def recording_transport(calls):
@@ -165,6 +166,22 @@ class SDKAgainstDaemon(unittest.TestCase):
         buttons, acted = asyncio.run(container())
         self.assertTrue(buttons and acted.ok and acted.request_id)
         self.assertGreaterEqual(counter["n"], 3)
+
+    def test_ptc_event_replay_against_daemon(self):
+        forwarder = ptc.Forwarder(self.desktop)
+        self.desktop.apps()
+        tree = self.desktop.observe("w1")
+        button = next(e for e in tree.elements if e.role == "button" and e.ref)
+        block = {"type": "tool_use", "id": "toolu_live_repeat", "name": "hcu_ax",
+                 "input": {"mode": "act", "actions": [{"type": "click", "ref": button.ref}]}}
+        first = forwarder(block)
+        repeated = forwarder(block)
+        record = json.loads(first["content"])
+        self.assertEqual(first, repeated)
+        self.assertTrue(record["ok"] and record["request_id"].startswith("ptc-"))
+        # The shared daemon can recover the same input by its generated id too.
+        raw = self.desktop.call("AX", block["input"], request_id=record["request_id"])
+        self.assertTrue(raw.replayed)
 
 
 if __name__ == "__main__":

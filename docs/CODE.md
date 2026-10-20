@@ -186,11 +186,43 @@ name `hcu`.
 - `tool_definitions(d.schema())` returns `hcu_ax` and `hcu_gui` client tool
   definitions built from the live schema, with local `$ref` inlined and the
   records options added. `hcu_ax` sets `allowed_callers:
-  ["code_execution_20260120"]`; `hcu_gui` stays direct, so screenshots reach
-  the model as images, unless `gui_from_code=True`.
-- `forward(tool_use, desktop)` is the harness side: it sends one `tool_use`
-  block (with or without `caller`) to the guest daemon and returns the
-  `tool_result` whose content is the records JSON string.
+  ["code_execution_20260120"]`; `hcu_gui` stays direct unless
+  `gui_from_code=True`. Code callers receive a records JSON string.
+- Keep one `Forwarder(desktop, image_reader=...)` for the API conversation.
+  It uses `Desktop.call`, including daemon-instance and cache-only retry
+  checks. Input gets a request ID when none was supplied. Repeated
+  `tool_use.id` values return the retained outcome without another desktop
+  call. Reusing an event ID with different arguments fails before input.
+- Events remain in memory for the forwarder's lifetime. The default limit
+  is 1,000 events; reaching it refuses new events rather than evicting old
+  ones. A new API conversation needs a new forwarder. This state is not
+  durable: do not replay pending input with a new forwarder after a harness
+  restart. Distinct event IDs are new calls, even with identical arguments.
+- `forward(tool_use, desktop)` retains the same ledger on the supplied
+  Desktop as a convenience. Use the explicit Forwarder for image delivery.
+- Direct calls with screenshots return a text block containing records and
+  image blocks containing the screenshot bytes. Configure an explicit
+  `image_reader(path)` returning `(media_type, bytes)`. The adapter accepts
+  PNG/JPEG images of at most 5 MiB each; it never reads guest paths implicitly.
+  `local_image_reader(output_dir)` reads only regular PNG/JPEG files beneath
+  that configured POSIX directory and rejects symlinks. For a remote guest,
+  provide a bounded reader over your existing guest connection. A path on the
+  guest is not a file in the cloud code-execution container.
+- Image retrieval failure returns `delivery_error` and outer `is_error:true`
+  while retaining the original input and partial-completion facts. Retrying
+  the same event can retrieve its image again but never repeats the input.
+  Code callers receive JSON only; use a direct GUI observation to show an
+  image to the model. Allowing GUI from code does not itself display images.
+- Core errors remain records JSON so code can inspect `ok`, `code`, and input
+  evidence. An uncertain transport failure after attempted input returns
+  `effect_unknown` with `input_emitted:null`; it does not assert no input.
+- `sdk/python/examples/ptc_messages.py` shows a bounded Messages continuation
+  loop. It preserves assistant blocks, returns every tool result, and reuses
+  the response container ID. At its round limit, `ContinuationLimit.request`
+  retains the completed tool results for resumption with the same Forwarder.
+  Configure the API client without automatic
+  retries for unknown API outcomes. The example has fake-client tests, not
+  live Anthropic validation. It is separate from Codex code mode below.
 
 `allowed_callers` is not a security boundary. Code in the container can call
 every tool its caller list allows; argument validation, ref resolution,
