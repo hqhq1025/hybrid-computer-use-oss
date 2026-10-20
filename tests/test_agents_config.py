@@ -56,6 +56,7 @@ def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch, version)
     # Import the real staging path without loading the VM or task assets.
     dependencies = {
         "hcu.osworld.task_loader": {"load_task_config": None},
+        "desktop_env.file_source": {"configure": None},
         "desktop_env.cache": {"run_scoped_cache_dir": None},
         "desktop_env.desktop_env": {"DesktopEnv": None},
     }

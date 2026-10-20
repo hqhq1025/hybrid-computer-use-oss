@@ -84,6 +84,7 @@ def runner(monkeypatch):
     # Isolate imports and forbid runtime entry points; only phase accounting
     # and result sealing run against local test doubles.
     for name, attribute in [
+        ("desktop_env.file_source", "configure"),
         ("desktop_env.cache", "run_scoped_cache_dir"),
         ("desktop_env.desktop_env", "DesktopEnv"),
         ("hcu.osworld.task_loader", "load_task_config"),

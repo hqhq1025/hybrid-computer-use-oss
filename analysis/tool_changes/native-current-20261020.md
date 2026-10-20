@@ -71,8 +71,19 @@ Initial checks on Linux passed:
 The first combined `make test` passed Go checks and all 607 Linux provider
 tests. Runner tests stopped with 2 failures and 18 errors because the selected
 external OSWorld checkout lacks this repository's installed overlay API
-(`desktop_env.file_source.configure`). Those failures do not validate the
-runner; a compatible isolated overlay is required before repeating that step.
+(`desktop_env.file_source.configure`). An isolated compatible overlay then
+passed 360 runner tests with 28 skips. Go transport race tests also passed.
+
+Native CI run `39416860159` passed both platform jobs: macOS ran 348 tests,
+built its native package, and passed the MCP smoke; Windows passed native
+protocol and policy tests, built its package, and passed the MCP smoke.
+
+Two baseline CI failures also exposed missing test isolation. Combo fixtures
+use PID 4242 but consulted the host's real process generation. The local host
+happened to have that PID; CI did not. The fixture now supplies a fixed process
+generation. Runner unit tests mocked other desktop_env modules but omitted
+the new file_source import. They now mock that import too. These changes
+preserve product identity validation and scoring assertions.
 
 Combined checks and native execution remain pending. The user excludes the
 personal MacBook Pro; testing uses isolated cpu001 VM overlays and native CI.

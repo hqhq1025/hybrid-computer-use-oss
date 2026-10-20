@@ -8,6 +8,8 @@ from types import SimpleNamespace
 class ComboEditTests(AtspiPatchedTestCase):
     def setUp(self):
         super().setUp()
+        # Fake nodes must not depend on whether their PID exists on the host.
+        mock.patch.object(runtime, "process_generation", return_value="fixture-generation").start()
         self.focus = mock.patch.object(runtime, "focus_target_element").start()
         self.key = mock.patch.object(runtime, "send_key").start()
         self.text = mock.patch.object(runtime, "send_text").start()
