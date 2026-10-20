@@ -1,6 +1,22 @@
 @testable import ComputerUseProviderKit
 import Testing
 
+@Test func unsupportedSelectionStopsBeforeAppDiscovery() async {
+    let bridge = ComputerUseRuntimeBridge()
+    let operations: [[String: Any]] = [
+        ["tool": "select", "to_target": ["providerObjectPath": "end"]],
+        ["tool": "set_value", "semanticTarget": ["editTarget": ["providerObjectPath": "editor"]]],
+    ]
+    for operation in operations {
+        // No app is supplied: entering app discovery would produce a different failure.
+        let result = await bridge.execute(operation)
+        #expect(result["failureCode"] as? String == "capability_unsupported")
+        #expect(result["failurePhase"] as? String == "precondition")
+        #expect(result["input_events_emitted"] as? Bool == false)
+        #expect(result["mutation_unknown"] as? Bool == false)
+    }
+}
+
 @Test
 func providerResetFailureRequestsSidecarRestart() {
     let result = runtimeFailureResult(

@@ -68,6 +68,7 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
   mkdir -p "${swift_output}"
   provider_swift_sources=(
     "${runtime_root}/Sources/ComputerUseProviderKit/AXChangeWake.swift"
+    "${runtime_root}/Sources/ComputerUseProviderKit/AXTextSelection.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/AccessibilityAXReading.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/AccessibilitySnapshot.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/AccessibilityTraversalPath.swift"
@@ -88,6 +89,7 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     "${runtime_root}/Sources/ComputerUseProviderKit/ComputerUseServiceOperations.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ComputerUseServicePointerInput.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ComputerUseServiceTextInput.swift"
+    "${runtime_root}/Sources/ComputerUseProviderKit/ComputerUseServiceTextSelection.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/DesktopInputRuntime.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/DesktopRuntime.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/Errors.swift"

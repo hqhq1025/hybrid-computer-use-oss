@@ -301,8 +301,19 @@ internal sealed partial class ProviderServer
                 "providerWindowProcessGeneration", "providerWindowRole",
                 "providerWindowName", "providerRoleAliases",
                 "providerIdentityScope", "automationId", "runtimeId", "runtimeAliases",
-                "role", "name", "hasName", "predicates"),
+                "role", "name", "hasName", "predicates", "editTarget"),
             path);
+        var editTarget = OptionalObject(value["editTarget"], $"{path}.editTarget");
+        if (editTarget is not null)
+        {
+            RejectUnknownFields(editTarget,
+                Fields("providerBusName", "providerObjectPath", "processGeneration"),
+                $"{path}.editTarget");
+            foreach (var field in new[] { "providerBusName", "providerObjectPath", "processGeneration" })
+            {
+                RequireNonEmptyString(editTarget, field, $"{path}.editTarget");
+            }
+        }
         ValidateOptionalString(value, "selector", path);
         ValidateOptionalString(value, "locatorKind", path);
         ValidateOptionalBoolean(value, "allowProviderRebind", path);

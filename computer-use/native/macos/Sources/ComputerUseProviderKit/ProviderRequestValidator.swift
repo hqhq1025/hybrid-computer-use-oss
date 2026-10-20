@@ -28,6 +28,7 @@ public enum ProviderRequestValidator {
         "type",
         "keypress",
         "set_value",
+        "select",
         "increment",
         "decrement",
     ]
@@ -138,8 +139,8 @@ public enum ProviderRequestValidator {
             )
         }
         guard let steps = payload["steps"] as? [Any],
-              !steps.isEmpty, steps.count <= 30 else {
-            throw invalid("\(path).steps must contain between 1 and 30 actions")
+              !steps.isEmpty, steps.count <= 64 else {
+            throw invalid("\(path).steps must contain between 1 and 64 actions")
         }
         var priorIndex: Int?
         for (position, rawStep) in steps.enumerated() {
@@ -299,6 +300,20 @@ public enum ProviderRequestValidator {
             try validateInput(input, path: "\(path).input", allowed: ["value"])
             guard input?["value"] is String else {
                 throw invalid("\(path).input.value is required")
+            }
+        case "select":
+            guard hasTarget else {
+                throw invalid("\(path).select requires an exact target")
+            }
+            try validateInput(input, path: "\(path).input", allowed: ["text", "to_target"])
+            if let text = input?["text"], !(text is String) {
+                throw invalid("\(path).input.text must be a string")
+            }
+            if input?["to_target"] != nil {
+                try validateTarget(input?["to_target"], path: "\(path).input.to_target")
+                if let text = input?["text"] as? String, !text.isEmpty {
+                    throw invalid("\(path).select cannot combine text and to_target")
+                }
             }
         case "increment", "decrement":
             guard hasTarget else {

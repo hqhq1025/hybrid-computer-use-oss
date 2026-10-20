@@ -445,6 +445,17 @@ func nearestFocusedEditableTarget<Node>(
 
 public final class ComputerUseService {
     var snapshotsByApp: [String: AppSnapshot] = [:]
+    // ProviderV2Server awaits requests serially. The synchronous request owns
+    // this binding, including captures
+    // performed inside service actions. Never rediscover a bound app by name.
+    var activeAppIdentity: [String: Any]?
+
+    func withAppIdentity<T>(_ identity: [String: Any]?, operation: () throws -> T) rethrows -> T {
+        let previous = activeAppIdentity
+        activeAppIdentity = identity
+        defer { activeAppIdentity = previous }
+        return try operation()
+    }
     var nativeWindowHandles: Set<String> = []
 
     public init() {}

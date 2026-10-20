@@ -3,6 +3,11 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ComputerUse.Windows.Runtime;
 
+SelectionTests.Run();
+if (args is ["--selection-contract"])
+{
+    return 0;
+}
 ExactFocusSettlementTests.Run();
 FocusPreparationTests.Run();
 LogicalWindowBoundaryTests.Run();

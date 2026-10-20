@@ -5,16 +5,20 @@ import Foundation
 
 extension ComputerUseRuntimeBridge {
     func listWindows(_ operation: [String: Any]) throws -> [String: Any] {
-        let app = try AppDiscovery.resolve(try requiredString(operation, "app"))
+        let app = try resolveRuntimeApplication(query: requiredString(operation, "app"), identity: runtimeAppIdentity(operation))
         try validateRequestedIdentity(operation, app: app)
-        let windows = axWindows(pid: app.pid)
-        let titles = windows.compactMap(axTitle)
+        let inventory = axWindowInventory(pid: app.pid)
+        guard inventory.complete else {
+            throw ComputerUseError.stateUnavailable("The application window inventory is incomplete; no window absence can be verified.")
+        }
+        let windows = inventory.windows
+        let titles = try windows.map(inventoryWindowTitle)
         return [
             "ok": true,
             "appName": app.name,
             "appPid": Int(app.pid),
             "windowTitles": titles,
-            "snapshot": windowInventorySnapshot(app: app, windows: windows),
+            "snapshot": try windowInventorySnapshot(app: app, windows: windows),
         ]
     }
 
@@ -23,7 +27,7 @@ extension ComputerUseRuntimeBridge {
         operation: [String: Any]
     ) throws -> [String: Any] {
         let query = try requiredString(operation, "app")
-        let app = try AppDiscovery.resolve(query)
+        let app = try resolveRuntimeApplication(query: query, identity: runtimeAppIdentity(operation))
         try validateRequestedIdentity(operation, app: app)
         let changeWake = AXChangeWake(pid: app.pid)
         let requestedTitle = runtimeWindowTitle(operation)
@@ -225,7 +229,7 @@ func windowActionFinalObservation(
     }
 }
 
-private func focusedAXWindowHandle(pid: pid_t) -> String? {
+func focusedAXWindowHandle(pid: pid_t) -> String? {
     let appElement = AXUIElementCreateApplication(pid)
     let systemWide = AXUIElementCreateSystemWide()
     guard let window = strictFocusedAXWindow(
@@ -242,6 +246,7 @@ func axWindowInventory(
     pid: pid_t
 ) -> (windows: [AXUIElement], complete: Bool) {
     let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 0.25)
     var value: CFTypeRef?
     let status = AXUIElementCopyAttributeValue(
         app,

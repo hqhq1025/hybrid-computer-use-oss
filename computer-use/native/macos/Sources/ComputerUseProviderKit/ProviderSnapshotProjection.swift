@@ -170,23 +170,16 @@ func validateRequestedWindow(
 func windowInventorySnapshot(
     app: RunningAppDescriptor,
     windows: [AXUIElement]
-) -> [String: Any] {
+) throws -> [String: Any] {
     let generation = macProcessGeneration(pid: app.pid)
-    let active = app.runningApplication.isActive
-    let records = windows.enumerated().map { index, window -> [String: Any] in
-        let windowID = windowNumber(window) ?? CGWindowID(index + 1)
-        return [
-            "title": axTitle(window) ?? "",
-            "role": "window",
-            "handle": macWindowHandle(pid: app.pid, windowID: windowID),
-            "providerBusName": "mac:\(app.pid)",
-            "providerObjectPath": "window:\(windowID)",
-            "providerProcessGeneration": generation,
-            "selected": index == 0,
-            "active": active && index == 0,
-            "modal": axBool(window, attribute: kAXModalAttribute as String),
-            "showing": true,
-        ]
+    let focusedHandle = app.runningApplication.isActive ? focusedAXWindowHandle(pid: app.pid) : nil
+    let records = try windows.map { window -> [String: Any] in
+        AXUIElementSetMessagingTimeout(window, 0.25)
+        return macWindowInventoryRecord(
+            pid: app.pid, generation: generation, windowID: windowNumber(window),
+            title: try inventoryWindowTitle(window), focusedHandle: focusedHandle,
+            modal: axBool(window, attribute: kAXModalAttribute as String)
+        )
     }
     return [
         "app": [
@@ -205,10 +198,58 @@ func windowInventorySnapshot(
     ]
 }
 
+func inventoryWindowTitle(_ window: AXUIElement) throws -> String {
+    var value: CFTypeRef?
+    let status = AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &value)
+    return try completeWindowTitle(status: status, value: value)
+}
+
+func completeWindowTitle(status: AXError, value: CFTypeRef?) throws -> String {
+    if status == .attributeUnsupported || status == .noValue { return "" }
+    if status == .success {
+        if value == nil { return "" }
+        if let title = value as? String { return title }
+    }
+    throw ComputerUseError.stateUnavailable("A window title could not be read completely (AX \(status.rawValue)); missing titles cannot prove that a window closed.")
+}
+
+func macWindowInventoryRecord(
+    pid: pid_t, generation: String, windowID: CGWindowID?, title: String,
+    focusedHandle: String?, modal: Bool
+) -> [String: Any] {
+    // No native ID means no executable handle; keep the title for honest waits.
+    let handle = windowID.flatMap { $0 == 0 ? nil : macWindowHandle(pid: pid, windowID: $0) } ?? ""
+    let active = !handle.isEmpty && focusedHandle == handle
+    return [
+        "title": title, "role": "window", "handle": handle,
+        "providerBusName": "mac:\(pid)",
+        "providerObjectPath": handle.isEmpty ? "" : "window:\(handle)",
+        "providerProcessGeneration": generation,
+        "selected": active, "active": active, "modal": modal, "showing": true,
+    ]
+}
+
+func appListingWindows(_ records: [[String: Any]]) -> [[String: Any]] {
+    let handleCounts = records.reduce(into: [String: Int]()) { counts, record in
+        counts[string(record["handle"]), default: 0] += 1
+    }
+    return records.map { record in
+        let handle = string(record["handle"])
+        return [
+            "title": string(record["title"]), "role": string(record["role"]),
+            "handle": handleCounts[handle] == 1 ? handle : "",
+            "providerBusName": string(record["providerBusName"]),
+            "providerObjectPath": string(record["providerObjectPath"]),
+            "processGeneration": string(record["providerProcessGeneration"]),
+            "active": bool(record["active"]), "inputTarget": true,
+        ]
+    }
+}
+
 func windowNumber(_ window: AXUIElement) -> CGWindowID? {
     var identifier: CGWindowID = 0
     let result = AXUIElementGetWindow(window, &identifier)
-    return result == .success ? identifier : nil
+    return result == .success && identifier != 0 ? identifier : nil
 }
 
 private func axBool(_ element: AXUIElement, attribute: String) -> Bool {

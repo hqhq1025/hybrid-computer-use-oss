@@ -92,6 +92,29 @@ internal sealed partial class UiaProvider
         {
             switch (intent)
             {
+                case "select":
+                    var verifySelection = PrepareSelection(element, input,
+                        out var emitSelection, out route);
+                    EnsureTargetLogicalWindow(element, process, selectedWindow);
+                    mutationAttempted = true;
+                    emitSelection();
+                    inputEmitted = true;
+                    readbackSampled = true;
+                    try
+                    {
+                        readbackVerified = verifySelection();
+                    }
+                    catch
+                    {
+                        readbackVerified = false;
+                    }
+                    if (readbackVerified != true)
+                    {
+                        throw new ProviderFailureException("readback_mismatch", "readback",
+                            "UIA accepted select but the complete selection did not match; selection may have changed.",
+                            inputEventsEmitted: true);
+                    }
+                    break;
                 case "click":
                 var clickMethod = OptionalString(input, "click_method", "auto");
                 if (TryInvoke(

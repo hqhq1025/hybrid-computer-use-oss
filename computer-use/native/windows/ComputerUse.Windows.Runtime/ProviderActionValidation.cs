@@ -72,9 +72,41 @@ internal sealed partial class ProviderServer
                         "Provider set_value value is required.");
                 }
                 break;
+            case "select":
+                RequireTargetAndInput(hasTarget, input, "select", Fields("text", "to_target"));
+                var selection = (JsonObject)input!;
+                ValidateOptionalString(selection, "text", "action.input");
+                ValidateTarget(selection["to_target"], "action.input.to_target");
+                if (!string.IsNullOrEmpty(StringValue(selection, "text")) &&
+                    selection["to_target"] is not null)
+                {
+                    throw InvalidRequest("Provider select accepts text or to_target, not both.");
+                }
+                break;
             default:
                 throw InvalidRequest(
                     $"Unsupported provider accessibility intent {intent}.");
+        }
+    }
+
+    internal static void ValidateWindowsActionCapabilities(JsonObject payload)
+    {
+        // The Windows projection never issues editable-partner identities.
+        // Accept the shared wire shape, but do not silently write its owner.
+        if (payload["target"]?["editTarget"] is not null)
+        {
+            throw new ProviderFailureException(
+                "capability_unsupported", "precondition",
+                "Windows does not issue editable-partner targets; observe and target the editable UIA control directly.",
+                inputEventsEmitted: false);
+        }
+        if (StringValue(payload, "intent") == "select" &&
+            payload["input"]?["to_target"] is not null)
+        {
+            throw new ProviderFailureException(
+                "capability_unsupported", "precondition",
+                "Windows cannot verify selection across two targets; select text within one UIA text control instead.",
+                inputEventsEmitted: false);
         }
     }
 

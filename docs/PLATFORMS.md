@@ -13,6 +13,34 @@ selection parameter is exposed to the model.
 The macOS and Windows integration is experimental. The OSWorld harness uses
 Linux guests; native providers are for controlling a local desktop.
 
+## AX selection and editable controls
+
+The shared AX interface accepts `select`; native capabilities determine which
+ranges can be selected and verified.
+
+| Provider | Implemented selection | Readback |
+| --- | --- | --- |
+| macOS | All text or one unique text match within one element with a writable AX selection range | Exact UTF-16 range, selected text, and unchanged source text |
+| Windows | All text or one unique match in a UIA TextPattern control; one SelectionItem | Complete selection, text range endpoints and text, or the selected item |
+
+Both providers reject cross-element ranges before input. Duplicate or missing
+text also fails before selection. After a selection write, failed readback
+reports that input may have changed the selection; do not retry blindly.
+
+Windows selection readback proves the UIA selection state. It does not prove
+that an application received a selection-change callback or updated its own
+cached selection. Verify the resulting application state before relying on
+that callback. A native WinForms ListBox test exposed this distinction.
+
+The Linux composite-control `editTarget` identity has no native mapping on
+these providers. They validate its wire format and reject its use before input.
+Use a current ref for the native editable field. Ordinary native field editing
+continues through each provider's existing text and value interfaces.
+
+GUI image scaling and coordinate mapping remain in the existing platform
+capture and input paths. These paths check layout before coordinate input.
+macOS ordered keyboard input accepts up to 64 steps, matching the Go core.
+
 ## macOS
 
 Install Go 1.22+, Swift 6.2+ and the macOS SDK, then from the repository root:
@@ -36,6 +64,16 @@ grant permissions to the new bundle rather than assuming an old grant applies.
 The provider uses a private local socket and retains native object identity
 within its process generation. A reset invalidates that continuity. Do not
 reuse refs from an earlier MCP session or retry an uncertain mutation blindly.
+
+App discovery includes window titles and identities for AX window waits.
+Incomplete enumeration or failed title reads return an error, so missing
+evidence cannot prove that a window closed. Windows without a unique native
+handle remain visible by title but do not receive actionable window refs.
+
+Closing the last document can remove the window before final capture. If the
+provider cannot verify the result, it reports `effect_unknown` and stops the
+batch. This does not establish that the close failed; inspect the current
+desktop before deciding what to do next.
 
 Some window and input operations use Apple's private SkyLight SPI from the
 installed macOS system framework. No Apple framework is bundled. These
