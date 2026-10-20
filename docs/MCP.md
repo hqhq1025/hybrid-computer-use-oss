@@ -337,6 +337,20 @@ do not change the query or perform input. Wait timeouts put current window
 refs and nearby elements before diagnostic detail. A failed latest window
 read remains an incomplete observation and never proves that a window closed.
 
+Find matches include a `text` excerpt when their role's value is absent from
+the rendered fields, as with paragraphs and cells. The excerpt contains at
+most 80 Unicode code points, plus an ellipsis when clipped. Clipped excerpts
+also carry `text_truncated=true`. Text already displayed in a name, property,
+or matched-text field is not repeated. Excerpts are display-only and do not
+change canonical text, selectors, refs, or the response budget.
+
+Removed diff lines omit refs and addressability markers because those lines
+describe prior state. Their absent refs appear separately in `absent_refs`.
+Three or more consecutive absent refs use an inclusive range: `r40..r43`
+means `r40`, `r41`, `r42`, and `r43`. A gap or a ref still present in the
+current snapshot breaks the range. Absence from this snapshot does not by
+itself prove that the object was destroyed.
+
 An unchanged-tree response requires the delivered refs to match as well as
 the provider state. Reissued refs cause a fresh tree delivery. An explicit
 `observe:"full"` continues to return the tree on the first request.

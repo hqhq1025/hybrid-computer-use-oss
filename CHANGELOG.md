@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Include a bounded text excerpt in AX find matches when the rendered fields
+  omit the value. Removed diff nodes omit addressability markers, and
+  consecutive absent refs use inclusive ranges. Explicit full reads still
+  return the complete working tree immediately.
 - Deliver new AX refs even when the provider tree is unchanged. Match find
   roles and states to the rendered tree, explain content-scope expansion,
   and return bounded current candidates on failed finds and waits.

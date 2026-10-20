@@ -471,15 +471,6 @@ func axSubtreeContainsChanged(node *AXNode, changed map[string]AXDiffKind) bool 
 	return false
 }
 
-func renderAXNodeLabelWithoutRef(node *AXNode) string {
-	if node == nil {
-		return ""
-	}
-	clone := *node
-	clone.Ref = ""
-	return renderAXNodeLabel(&clone)
-}
-
 func renderAXCurrentChangeBranch(
 	lines *[]string,
 	node *AXNode,
@@ -727,6 +718,34 @@ func compactAbsentRefs(changes []AXDiffChange, after *AXSnapshotV1) []string {
 	return refs
 }
 
+// joinAXRefRuns joins sorted refs and writes three or more consecutive refs
+// as rA..rB, which includes both endpoints and every ref between them.
+func joinAXRefRuns(refs []string) string {
+	parts := make([]string, 0, len(refs))
+	for index := 0; index < len(refs); {
+		start, ok := parseMonotonicAXRef(refs[index])
+		end := index
+		for ok && end+1 < len(refs) {
+			next, nextOK := parseMonotonicAXRef(refs[end+1])
+			if !nextOK || next != start+uint64(end+1-index) {
+				break
+			}
+			end++
+		}
+		if end-index >= 2 {
+			parts = append(parts, refs[index]+".."+refs[end])
+		} else {
+			parts = append(parts, refs[index:end+1]...)
+		}
+		index = end + 1
+	}
+	return strings.Join(parts, ", ")
+}
+
+// renderAXRemovedChunks lists nodes that are gone. A removed line carries
+// neither its old ref nor an addressability marker: the node cannot be a
+// target any more, its old refs are listed once in absent_refs, and the
+// parent context names the parent without asserting anything about its ref.
 func renderAXRemovedChunks(
 	lines *[]string,
 	changes []AXDiffChange,
@@ -815,19 +834,19 @@ func renderAXRemovedChunks(
 		}
 		*lines = append(
 			*lines,
-			" - "+context+renderAXNodeLabelWithoutRef(group.parent)+":",
+			" - "+context+renderAXNodeIdentityLabel(group.parent)+":",
 		)
 		for _, node := range group.nodes {
 			*lines = append(
 				*lines,
-				"  - <removed> "+renderAXNodeLabelWithoutRef(node),
+				"  - <removed> "+renderAXNodeIdentityLabel(node),
 			)
 		}
 	}
 	for _, node := range rootRemoved {
 		*lines = append(
 			*lines,
-			" - <removed> "+renderAXNodeLabelWithoutRef(node),
+			" - <removed> "+renderAXNodeIdentityLabel(node),
 		)
 	}
 }
@@ -907,7 +926,7 @@ func renderAXChangedChunks(
 		if len(absent) > 0 {
 			lines = append(
 				lines,
-				" absent_refs: ["+strings.Join(absent, ", ")+"]",
+				" absent_refs: ["+joinAXRefRuns(absent)+"]",
 				" absent_ref_status: absent_from_current_snapshot",
 			)
 		}

@@ -36,6 +36,10 @@ func findDisplayNode(source *AXNode) *AXNode {
 		{"name", &node.Name}, {"value", &node.Properties.Value},
 		{"description", &node.Properties.Description}, {"placeholder", &node.Properties.Placeholder},
 	} {
+		if field.name == "value" && !roleExposesWorkingValue(node.Role) {
+			// The renderer does not show this value; findMatchText does.
+			continue
+		}
 		if value, clipped := findDisplayExcerpt(*field.value, 256); clipped {
 			*field.value = value
 			omitted = append(omitted, field.name)
@@ -73,6 +77,12 @@ func findMatchUnit(snapshot *AXSnapshotV1, record elementRecord, ordinal int) st
 			out.WriteString(" matched_text_truncated=true")
 		}
 		out.WriteByte('\n')
+	} else if text, clipped, ok := findMatchText(node); ok {
+		fmt.Fprintf(&out, "  text=%q", text)
+		if clipped {
+			out.WriteString(" text_truncated=true")
+		}
+		out.WriteByte('\n')
 	}
 	if node != nil && node.Ref != "" {
 		// The flat action field: {"type":"click","ref":"rN"}.
@@ -88,6 +98,41 @@ func findMatchUnit(snapshot *AXSnapshotV1, record elementRecord, ordinal int) st
 		fmt.Fprintf(&out, " - match=%d addressable=false reason=%s\n", ordinal, reason)
 	}
 	return out.String()
+}
+
+// maxFindTextRunes bounds the text shown for a match whose role carries
+// text the tree does not render.
+const maxFindTextRunes = 80
+
+// findMatchText supplies text for roles whose value the tree omits. Compare
+// the excerpt with displayed fields: a clipped or suppressed description
+// cannot establish that the model already received the text.
+func findMatchText(node *AXNode) (string, bool, bool) {
+	if node == nil || roleExposesWorkingValue(node.Role) {
+		return "", false, false
+	}
+	value := strings.TrimSpace(strings.ToValidUTF8(node.Properties.Value, "\uFFFD"))
+	if comparableTreeText(value) == "" {
+		return "", false, false
+	}
+	text, clipped := shortenAtWord(value, maxFindTextRunes)
+	shown := text
+	if clipped {
+		shown = strings.TrimSuffix(shown, "…")
+	}
+	display := findDisplayNode(node)
+	visible := []string{display.Name}
+	for _, property := range renderAXProperties(display, AXRenderOptions{}) {
+		if property[0] == "/description" || property[0] == "/placeholder" {
+			visible = append(visible, property[1])
+		}
+	}
+	for _, field := range visible {
+		if strings.Contains(comparableTreeText(field), comparableTreeText(shown)) {
+			return "", false, false
+		}
+	}
+	return text, clipped, true
 }
 
 // Exercise the same content cap and evidence serialization as MCP, including the

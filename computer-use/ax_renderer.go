@@ -119,6 +119,24 @@ func renderAXNodeLabel(node *AXNode) string {
 	if node == nil {
 		return "generic"
 	}
+	label := renderAXNodeIdentityLabel(node)
+	if node.Ref != "" {
+		label += " [ref=" + node.Ref + "]"
+	} else if node.AddressabilityEvaluated &&
+		axNodeNeedsAddressabilityMarker(node) {
+		label += " [addressable=false]"
+	} else if axNodeNeedsAddressabilityMarker(node) {
+		label += " [addressable=unknown]"
+	}
+	return label
+}
+
+// renderAXNodeIdentityLabel renders role, name, states and visibility,
+// without the ref or the addressability marker.
+func renderAXNodeIdentityLabel(node *AXNode) string {
+	if node == nil {
+		return "generic"
+	}
 	label := string(node.Role)
 	if label == "" {
 		label = string(RoleGeneric)
@@ -138,14 +156,6 @@ func renderAXNodeLabel(node *AXNode) string {
 		case evidence.State == "offscreen" && evidence.Reason == "focus_geometry_override":
 			label += " [visibility=offscreen reason=focus_geometry_override]"
 		}
-	}
-	if node.Ref != "" {
-		label += " [ref=" + node.Ref + "]"
-	} else if node.AddressabilityEvaluated &&
-		axNodeNeedsAddressabilityMarker(node) {
-		label += " [addressable=false]"
-	} else if axNodeNeedsAddressabilityMarker(node) {
-		label += " [addressable=unknown]"
 	}
 	return label
 }
