@@ -162,14 +162,45 @@ Real desktop smoke passed in fresh isolated containers:
   and `lo-final-a1/` in that same directory. Earlier failed diagnostic roots
   preserve the two additional defects and fixture setup corrections.
 
-The authorized two-round comparison remains pending against main `9dfaf36`.
-Use the same 20-task panel, GPT-5.4 xhigh,
-100 successful responses, 5,400-second timeout, official/original evaluator,
-no Judge, and two overlapping rounds of 20 tasks, total concurrency 40.
-Use new run roots and the new image tag. Preserve old runs and images.
+The authorized comparison completed against main `9dfaf36`. The implementation
+commit is `f847d1a`; both run manifests bind that source and the candidate image.
+The fixed 20-task panel used GPT-5.4 xhigh, 100 successful responses per task,
+a 5,400-second timeout, official/original evaluator, no Judge, and overlapping
+rounds of 20 tasks, total concurrency 40. Both rounds passed setup/GUI,
+actual Codex child AX, and live budget checks before model execution.
 
-Disposition: implementation validation passed; integrate into main under
-the user's explicit authorization and evaluate the frozen candidate.
-No formal release version is assigned; status remains testing until the
-two-round report records the result. The image was rebuilt during prefreeze
-smoke fixes; no model run used those intermediate builds.
+Run IDs are `hcu-paper-ax-bugfix-main-panel20-20261020T1002Z-r1` and `-r2`.
+Their roots are under `/datadrive2/results/`. Both sealed successfully with
+RAW 19/20 and 20/20, 39/40 normal full scores, zero budget truncations and zero
+task-level errors. All owned task containers and proxies were cleaned up.
+
+Compared with the baseline's 40 attempts, mean responses rose 9.8%, input
+tokens 38.9%, estimated cost 36.1%, and Task Agent time 2.4%. The paired
+median cost on 19 common fully solved tasks rose 4.0%. AX errors were
+34/710 versus 29/639. This bundle did not demonstrate an efficiency or
+overall error-rate gain.
+
+All 176 successful explicit act tree requests returned the actual tree,
+without compact substitution or unchanged-tree notices. The baseline had
+29 successful explicit tree/full calls return focused/diff. No act full
+request occurred in the new panel; its screenshot fix is validated by
+the desktop smoke. The positive composite Find/Replace editing path also
+has desktop evidence, rather than demonstrated use in this panel.
+
+The sole RAW0 was a434992a in round 1. The final file had correct text,
+size and colors, but two identical-format text runs instead of the
+evaluator's expected one. Preserve the official score; do not relabel it
+Judge PASS. The earlier same-task baseline failure was a different color
+mismatch. The audit found no evidence to attribute this result to the
+new editing-target or explicit-observation mechanisms.
+
+The report and exact metric definitions are in
+`/datadrive2/hcu-eval/bugfix-eval-20261020/final-report.md`, alongside the
+call audit, failure audit, full-attempt statistics and execution report.
+
+Disposition: keep the validated fixes on main under the user's authorization.
+Status remains testing in the release namespace; no formal product version
+is assigned. A separate follow-up should examine unnecessary full-tree requests
+and selection-recovery long tails. The image was rebuilt during prefreeze
+smoke fixes; no model run used those intermediate builds. After freezing
+`f847d1a`, source behavior, image and run configuration remained unchanged.
