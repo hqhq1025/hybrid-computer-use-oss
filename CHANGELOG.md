@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fit GUI screenshots into 1366 x 768 and map input coordinates back to the
+  native desktop using the exact delivered width and height. This aligns
+  screenshot pixels with the GPT-5.4 high-detail image used in validation.
+- Update base and hybrid instructions to stop after sufficient evidence,
+  bound application discovery, and save/close/reopen documents when a needed
+  property requires direct file editing. The combined changes have not yet
+  received a new model evaluation; separate candidate results are not a
+  combined performance measurement.
 - AX act results start with an effect line and a windows line, and return a
   diff when it is shorter than the tree. On the paper OSWorld 1.0 harness
   (20-task panel, GPT-5.4, two rounds), the median input per solved task is about 0.6 of
