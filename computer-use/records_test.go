@@ -162,20 +162,20 @@ func TestRequestIDRunsACallOnce(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		first, _, _ = shared.replayOnce("id-1", "key", run)
+		first, _, _ = shared.replayOnce("id-1", "key", false, run)
 	}()
 	<-started
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		second, replayed, _ = shared.replayOnce("id-1", "key", func() any { runs++; return nil })
+		second, replayed, _ = shared.replayOnce("id-1", "key", true, func() any { runs++; return nil })
 	}()
 	close(release)
 	wg.Wait()
 	if runs != 1 || !replayed || first.(Record).InputEmitted != second.(Record).InputEmitted {
 		t.Fatalf("runs=%d replayed=%t", runs, replayed)
 	}
-	if _, _, err := shared.replayOnce("id-1", "other", run); err == nil {
+	if _, _, err := shared.replayOnce("id-1", "other", true, run); err == nil {
 		t.Fatal("the same request_id with another call must be rejected")
 	}
 }

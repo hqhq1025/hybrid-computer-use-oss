@@ -88,6 +88,7 @@ const (
 
 // errRequestIDReused reports a request_id sent again with a different call.
 var errRequestIDReused = errors.New("request_id was already used for a different call; use a new request_id for a new call")
+var errReplayUnavailable = errors.New("original request result is unavailable; input may have run; automatic replay stopped")
 
 // replayOnce runs a call at most once per request_id. A repeated id with the
 // same key waits for the first call and returns its stored response, with
@@ -95,8 +96,9 @@ var errRequestIDReused = errors.New("request_id was already used for a different
 // The store is desktop state, so a client that lost its connection and
 // reconnects on a new session still collects its result. It must be called
 // without holding the desktop lock: run takes that lock itself, and a
-// duplicate waits for the first call outside it.
-func (d *desktopShared) replayOnce(id, key string, run func() any) (any, bool, error) {
+// duplicate waits for the first call outside it. replayOnly refuses an
+// absent result instead of treating an evicted request as fresh input.
+func (d *desktopShared) replayOnce(id, key string, replayOnly bool, run func() any) (any, bool, error) {
 	if len(id) > requestIDMaxLength {
 		return nil, false, fmt.Errorf("request_id is limited to %d characters", requestIDMaxLength)
 	}
@@ -109,9 +111,16 @@ func (d *desktopShared) replayOnce(id, key string, run func() any) (any, bool, e
 		}
 		<-stored.done
 		d.requestMu.Lock()
-		response := d.requestResults[id].response
+		completed, available := d.requestResults[id]
 		d.requestMu.Unlock()
-		return response, true, nil
+		if !available || completed.done != stored.done {
+			return nil, false, errReplayUnavailable
+		}
+		return completed.response, true, nil
+	}
+	if replayOnly {
+		d.requestMu.Unlock()
+		return nil, false, errReplayUnavailable
 	}
 	entry := storedRequest{key: key, done: make(chan struct{}), created: time.Now()}
 	d.requestResults[id] = entry
@@ -129,6 +138,11 @@ func (d *desktopShared) replayOnce(id, key string, run func() any) (any, bool, e
 
 func (d *desktopShared) pruneRequestResults(now time.Time) {
 	for id, stored := range d.requestResults {
+		select {
+		case <-stored.done:
+		default:
+			continue
+		}
 		if now.Sub(stored.created) > requestResultTTL {
 			delete(d.requestResults, id)
 		}
@@ -137,9 +151,17 @@ func (d *desktopShared) pruneRequestResults(now time.Time) {
 		oldestID := ""
 		var oldest time.Time
 		for id, stored := range d.requestResults {
+			select {
+			case <-stored.done:
+			default:
+				continue
+			}
 			if oldestID == "" || stored.created.Before(oldest) {
 				oldestID, oldest = id, stored.created
 			}
+		}
+		if oldestID == "" {
+			break
 		}
 		delete(d.requestResults, oldestID)
 	}

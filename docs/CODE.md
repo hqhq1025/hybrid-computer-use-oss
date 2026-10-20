@@ -154,15 +154,29 @@ name `hcu`.
 - Records are dicts with attribute access. `ok:false` raises `HcuError`; the
   subclass is named after the code (`hcu.StaleRef`).
 - `act` and GUI input get a fresh `request_id`; after a dropped connection
-  the SDK reconnects and resends with the same id. Deduplication requires the
-  same daemon and an entry still in its replay cache. Automatic retry across
-  daemon restart can repeat input; use `retries=0` when that risk is unacceptable.
+  the SDK binds any automatic retry to the original daemon instance. A new
+  daemon stops the retry before desktop input and raises
+  `TransportEffectUnknown`; `input_emitted=None` means the original effect is
+  unknown. The socket protocol carries this binding outside AX/GUI arguments.
+- Automatic input retries set `replay_only`: the daemon may return a cached
+  result or wait for the original in-flight call, but cannot start a new call.
+  A missing or expired replay entry raises `TransportEffectUnknown`. This can
+  stop recovery even when the first request never reached the daemon; the SDK
+  cannot distinguish that case from a completed call whose result was lost.
 - `AsyncDesktop` has the same methods as coroutines, over the socket or any
   async transport (`hcu.ptc_transport(hcu_ax, hcu_gui)` in a PTC container).
 - A shared `SocketTransport` serializes the complete request and response,
   including connection setup and hello. Responses must match their request
   IDs. A failed hello, EOF, or invalid response clears the connection state.
   Invalid responses raise a protocol error without an automatic retry.
+- Legacy daemons without an instance ID do not support automatic input replay.
+  Custom transports remain callable, but a dropped mutation is not retried
+  unless the transport raises `TransportClosed(..., retry_safe=True)`. That
+  flag requires the transport to guarantee that identical params cannot
+  repeat input, including after restart. Reads still retry on a dropped link.
+- CLI calls do not reconnect and resend automatically. Manually running a new
+  CLI command with the same request ID after daemon restart is a new call,
+  not a durable replay guarantee.
 - Examples: `sdk/python/examples/` (read a sheet, check a menu item, save as).
 
 ## Programmatic tool calling

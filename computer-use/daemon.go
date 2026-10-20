@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,7 +24,7 @@ import (
 //
 // Wire format: one JSON-RPC 2.0 message per line, in both directions.
 //
-//	hello  {client_version?, session?}          -> {version, contract_version, session, desktop}
+//	hello  {client_version?, session?}          -> {version, contract_version, session, desktop, instance_id}
 //	call   {tool, args, format?, request_id?, since?} -> Record (format records)
 //	                                            or {content, isError} (format text)
 //	schema {}                                   -> describeContract()
@@ -40,6 +42,7 @@ const defaultDaemonIdleTimeout = 30 * time.Minute
 // daemon is one running server.
 type daemon struct {
 	socket      string
+	instanceID  string
 	desktop     *desktopState
 	environment string
 	// display is the DISPLAY (or WAYLAND_DISPLAY) the daemon serves.
@@ -156,11 +159,18 @@ func prepareSocketPath(path string) error {
 }
 
 func newDaemon(socket string, desktop *desktopState, environment []string, idle time.Duration) *daemon {
+	// Replay results live only in this instance. Never substitute a PID or
+	// timestamp if random identity generation fails.
+	var identity [16]byte
+	if _, err := rand.Read(identity[:]); err != nil {
+		panic(fmt.Sprintf("cannot generate daemon instance identity: %v", err))
+	}
 	if idle <= 0 {
 		idle = defaultDaemonIdleTimeout
 	}
 	server := &daemon{
 		socket:      socket,
+		instanceID:  hex.EncodeToString(identity[:]),
 		desktop:     desktop,
 		environment: desktopFingerprint(environment),
 		display:     environmentDisplay(environment),
@@ -473,6 +483,7 @@ func (d *daemon) handleRequest(line []byte, sessionName *string) map[string]any 
 			"session":          *sessionName,
 			"desktop":          d.environment,
 			"pid":              os.Getpid(),
+			"instance_id":      d.instanceID,
 		})
 	case "schema":
 		return jsonRPCResult(id, describeContract())
@@ -496,7 +507,30 @@ func (d *daemon) handleRequest(line []byte, sessionName *string) map[string]any 
 		}()
 		return jsonRPCResult(id, map[string]any{})
 	case "call":
-		return jsonRPCResult(id, d.call(d.session(*sessionName), params))
+		if replay, present := params["replay_only"]; present {
+			only, ok := replay.(bool)
+			if !ok {
+				return jsonRPCError(id, -32602, "replay_only must be a boolean")
+			}
+			requestID, _ := params["request_id"].(string)
+			if only && (params["daemon_instance"] == nil || strings.TrimSpace(requestID) == "") {
+				return jsonRPCError(id, -32602, "replay_only requires daemon_instance and a nonempty request_id")
+			}
+		}
+		if binding, present := params["daemon_instance"]; present {
+			instance, ok := binding.(string)
+			if !ok || instance == "" {
+				return jsonRPCError(id, -32602, "daemon_instance must be a nonempty string")
+			}
+			if instance != d.instanceID {
+				return jsonRPCError(id, daemonErrorInstance, "daemon instance changed; input from the previous instance may have run; request was not sent to the desktop")
+			}
+		}
+		result := d.call(d.session(*sessionName), params)
+		if err, ok := result.(error); ok && errors.Is(err, errReplayUnavailable) {
+			return jsonRPCError(id, daemonErrorReplayUnavailable, err.Error())
+		}
+		return jsonRPCResult(id, result)
 	case "mcp":
 		message, _ := params["message"].(map[string]any)
 		if message == nil {
@@ -519,6 +553,8 @@ func (d *daemon) handleRequest(line []byte, sessionName *string) map[string]any 
 }
 
 const daemonErrorEnvironment = -32010
+const daemonErrorInstance = -32011
+const daemonErrorReplayUnavailable = -32012
 
 // textCallResponse is a text-format call over the socket: the model-facing
 // result plus its public error code, which the CLI maps to an exit status.
@@ -579,8 +615,12 @@ func (d *daemon) call(svc *service, params map[string]any) any {
 		return run()
 	}
 	key := publicName + "\x00" + compactJSON(args) + "\x00" + format + "\x00" + options.Since
-	response, replayed, err := d.desktop.shared.replayOnce(options.RequestID, key, run)
+	replayOnly, _ := params["replay_only"].(bool)
+	response, replayed, err := d.desktop.shared.replayOnce(options.RequestID, key, replayOnly, run)
 	if err != nil {
+		if errors.Is(err, errReplayUnavailable) {
+			return err
+		}
 		return Record{OK: false, Op: recordOp(publicName, args), RequestID: options.RequestID,
 			Code: axCodeInvalidArgument, Path: "request_id", Message: err.Error(),
 			TimingMS: map[string]int64{}}
