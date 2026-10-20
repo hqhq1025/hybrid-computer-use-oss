@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import hcu_sdk as hcu  # noqa: E402
 from hcu_sdk import ptc  # noqa: E402
 from test_ptc import PTCAdapterTests, PTCMessagesTests  # noqa: E402,F401
+from test_async_cancellation import AsyncCancellationTests, EventLoopTests  # noqa: E402,F401
+from test_code import CodeTests  # noqa: E402,F401
 
 
 def recording_transport(calls):
@@ -94,6 +96,56 @@ class SDKAgainstDaemon(unittest.TestCase):
         acted = self.desktop.click(button.ref)
         self.assertTrue(acted.ok and acted.request_id and acted.input_emitted)
         self.assertIn("provider", acted.timing_ms)
+
+    def test_discovery_accepts_published_names(self):
+        window = self.desktop.apps().windows[0].ref
+        tree = self.desktop.observe(window_ref=window)
+        button = next(e for e in tree.elements if e.role == "button" and e.ref)
+        found = self.desktop.find(window_ref=window, role="button", name_equals=button.name)
+        self.assertIn(button.ref, [m.ref for m in found.matches])
+        shorthand = self.desktop.find(window, role="button", name=button.name)
+        self.assertEqual([m.ref for m in found.matches], [m.ref for m in shorthand.matches])
+        found = self.desktop.find(window_ref=window, name_contains=button.name)
+        self.assertIn(button.ref, [m.ref for m in found.matches])
+        all_matches = self.desktop.find_all(window_ref=window, role="button", page_size=1)
+        self.assertIn(button.ref, [m.ref for m in all_matches])
+
+    def test_unknown_find_fields_reach_core_validation(self):
+        with self.assertRaises(hcu.InvalidArgument) as caught:
+            self.desktop.find("w1", unsupported_filter="value")
+        self.assertIn("unsupported_filter", str(caught.exception))
+        self.assertFalse(caught.exception.input_emitted)
+        with self.assertRaises(hcu.InvalidArgument):
+            self.desktop.find("w1", role="button", limit=0)
+
+    def test_discovery_conflicts_fail_without_transport(self):
+        calls = []
+        d = hcu.Desktop(recording_transport(calls))
+        conflicts = [
+            lambda: d.observe("w1", window_ref="w2"),
+            lambda: d.observe(app="example", window_ref="w1"),
+            lambda: d.find("w1", app="example"),
+            lambda: d.find("w1", name="Save", name_equals="Other"),
+            lambda: d.find("w1", name_equals="Save", name="Other"),
+            lambda: d.find(cursor="f1", role="button"),
+            lambda: d.find(cursor="f1", window_ref="w1"),
+            lambda: d.find(cursor="f1", scope="content"),
+        ]
+        for conflict in conflicts:
+            with self.subTest(call=conflict), self.assertRaises(TypeError):
+                conflict()
+        self.assertEqual(calls, [])
+
+    def test_async_discovery_uses_same_names(self):
+        async def exercise():
+            d = hcu.AsyncDesktop(self.desktop.transport)
+            tree = await d.observe(window_ref="w1")
+            button = next(e for e in tree.elements if e.role == "button" and e.ref)
+            found = await d.find(window_ref="w1", name_equals=button.name)
+            self.assertIn(button.ref, [m.ref for m in found.matches])
+            all_matches = await d.find_all(window_ref="w1", role="button", page_size=1)
+            self.assertIn(button.ref, [m.ref for m in all_matches])
+        asyncio.run(exercise())
 
     def test_request_id_is_reused_on_retry(self):
         tree = self.desktop.observe("w1")

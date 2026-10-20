@@ -2,9 +2,9 @@
 
 One core implements the contract. MCP, the daemon socket, the command line,
 the Python SDK and the programmatic tool calling (PTC) adapter are transports
-over the same `callTool`. None of them validates arguments, resolves refs or
-decides what an error means; they only build arguments and print or return
-the core's result.
+over the same `callTool`. Adapters construct requests and reject ambiguous
+client arguments. The core validates desktop requests, resolves refs, and
+defines operation errors. Adapters print or return the core's result.
 
 ```text
  MCP stdio      CLI          hcu_sdk (sync/async)    PTC forwarder
@@ -153,6 +153,13 @@ name `hcu`.
   build argument dicts.
 - Records are dicts with attribute access. `ok:false` raises `HcuError`; the
   subclass is named after the code (`hcu.StaleRef`).
+- `observe` and `find` accept a positional `target`, or one named `window_ref`
+  or `app`. Do not combine these target forms. `find` accepts the published
+  query names, including `name_equals`, `name_contains`, `text_equals`, and
+  `text_contains`. The shorthand names `name`, `name_has`, `text`, and
+  `text_has` remain accepted. Supplying both names for one field is an error.
+  Unknown query fields reach the core's normal argument error, not a Python
+  `KeyError`. A cursor cannot be combined with a target, scope, or query.
 - `act` and GUI input get a fresh `request_id`; after a dropped connection
   the SDK binds any automatic retry to the original daemon instance. A new
   daemon stops the retry before desktop input and raises
@@ -165,6 +172,19 @@ name `hcu`.
   cannot distinguish that case from a completed call whose result was lost.
 - `AsyncDesktop` has the same methods as coroutines, over the socket or any
   async transport (`hcu.ptc_transport(hcu_ax, hcu_gui)` in a PTC container).
+- One `AsyncDesktop` queues transport calls before submitting work. Cancelling
+  a queued call prevents it from being submitted. A running call settles its
+  transport before cancellation returns, including after repeated cancellation.
+  `CallCancelled` subclasses `asyncio.CancelledError` and retains `request_id`,
+  `record`, `transport_error`, and `input_emitted` (`None` when unknown).
+  Cancellation does not undo input. Inspect the record before continuing;
+  do not rerun the cancelled code cell automatically.
+- A synchronous transport runs in a worker thread. Cancelling its asyncio
+  caller cannot stop that thread, so cancellation may wait for its configured
+  transport timeout. A lost connection can leave remote effects unknown even
+  after the local thread finishes. Custom async transports must settle their
+  own work before returning or raising; detached background work is outside
+  this guarantee. Share one `AsyncDesktop` per active Python event loop.
 - A shared `SocketTransport` serializes the complete request and response,
   including connection setup and hello. Responses must match their request
   IDs. A failed hello, EOF, or invalid response clears the connection state.
@@ -178,6 +198,78 @@ name `hcu`.
   CLI command with the same request ID after daemon restart is a new call,
   not a durable replay guarantee.
 - Examples: `sdk/python/examples/` (read a sheet, check a menu item, save as).
+
+The live schema describes the wire request. Helpers flatten find query fields:
+
+```python
+tree = d.observe(window_ref=window_ref)
+matches = d.find(window_ref=window_ref, role="button", name_contains="Save")
+```
+
+SDK actions default to `observe="none"`. Request `observe="diff"` when the
+next decision needs the resulting window state. A screenshot record contains
+a file path; the host must deliver the image bytes to the model. When the
+path is already known, code can read and display it in the same code cell.
+Neither a Python loop nor an entire code cell is an atomic desktop batch.
+Use `act(actions=[...])` or `gui(actions=[...])` for known ordered actions.
+
+## Python code executors and OpenGCUA
+
+`hcu_sdk.code.CodeDesktop` extends `AsyncDesktop` for an existing Python
+executor. It does not execute model code or add desktop tools. Configure a
+synchronous `output(event)` sink and, for images, a synchronous
+`image_reader(path)` returning `(media_type, bytes)`. No image file is read
+implicitly. `hcu_sdk.ptc.local_image_reader(output_dir)` provides a bounded
+local reader; remote desktops need their own explicit reader.
+
+Successful calls return records without automatically displaying them.
+`await d.emit(value)` displays selected text or JSON. `await d.emit_image(record)`
+reads the existing `screen.image` and sends PNG/JPEG bytes to the sink; it
+does not repeat the desktop call. The sink must send actual image content to
+the model and preserve the delivered pixel coordinates.
+
+```python
+frame = await d.screenshot()
+await d.emit({"screen": frame.screen})
+await d.emit_image(frame)
+```
+
+HCU errors and cancelled calls automatically publish complete error events
+before raising, even if model code catches the exception. Events retain the
+core record, partial input, and unknown effects. If the sink fails, the
+original exception remains authoritative and its `output_error` attribute
+describes the failed delivery. Image retrieval failures raise `OutputError`
+with the original record. Neither failure retries desktop input.
+
+`sdk/python/examples/open_gcua_worker.py` injects this adapter into OpenGCUA's
+existing `CodeExecutor`. The example was tested against upstream `ae34bba`
+and uses private bootstrap hooks, not a supported plugin interface. The
+host and worker require Python 3.11+ and Pillow. Configure these variables:
+
+| Variable | Value |
+| --- | --- |
+| `OPEN_GCUA_RUNTIME_DIR` | `<OpenGCUA>/packages/harness/runtime` |
+| `PYTHONPATH` | Include `<HCU>/sdk/python` |
+| `HCU_SOCKET` | Existing desktop daemon socket |
+| `HCU_SESSION` | Unique session for the task |
+| `HCU_OUTPUT_ROOT` | Daemon screenshot directory visible to the worker |
+
+Set `CodeExecutor(runtime_path=...)` to the example file and configure its
+normal work and image directories. Model code receives `d`, `emit`,
+`emit_image`, `hcu`, and `asyncio`. The host binds each presentation's
+`screenshot_index` to its file and delivers the image without resizing.
+Use HCU instructions with screenshot-pixel coordinates. The original Mac
+prompt describes `device`/`ui` and normalized coordinates and is incompatible.
+
+Create one executor per isolated task. The example rejects the upstream
+task/context reset operations; start a new executor and session instead.
+Persistent variables do not keep stale HCU refs valid. This executes trusted
+Python and is not a security sandbox. Tests cover the real upstream worker
+with controlled transport and with a real Docker desktop. The desktop test
+used a read-only CPython 3.11.13 and Pillow 11.3.0 overlay because the existing
+image has Python 3.10. Three cells verified persistent state, AX input and
+independent GTK readback, image events, and caught error evidence. No model
+evaluation of this adapter has been run.
 
 ## Programmatic tool calling
 
