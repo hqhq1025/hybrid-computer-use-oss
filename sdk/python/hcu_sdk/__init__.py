@@ -3,7 +3,8 @@
 This module is a thin client. The computer-use core (Go) is the only
 implementation of the contract: it validates arguments, resolves refs,
 checks windows before input and renders results. This module sends calls
-and returns the core's records; it validates nothing itself.
+and returns the core's records. Helpers reject ambiguous Python arguments;
+the core validates the desktop request.
 
     import hcu_sdk as hcu
     d = hcu.connect()                       # starts the daemon if needed
@@ -38,7 +39,7 @@ import time
 import uuid
 
 __all__ = [
-    "AsyncDesktop", "Desktop", "HcuError", "Record", "SocketTransport",
+    "AsyncDesktop", "CallCancelled", "Desktop", "HcuError", "Record", "SocketTransport",
     "TransportClosed", "TransportEffectUnknown", "connect", "error_class", "ptc_transport",
 ]
 
@@ -367,8 +368,18 @@ def _keys(chord):
     return [part.strip().upper() for part in chord.split("+")]
 
 
-_FIND_FIELDS = {"role": "role", "name": "name_equals", "name_has": "name_contains",
-                "text": "text_equals", "text_has": "text_contains", "state": "state"}
+_FIND_FIELDS = {"name": "name_equals", "name_has": "name_contains",
+                "text": "text_equals", "text_has": "text_contains"}
+
+
+def _discovery_args(mode, target, window_ref, app):
+    if sum(value is not None for value in (target, window_ref, app)) > 1:
+        raise TypeError("use exactly one of target, window_ref, or app")
+    args = _target({"mode": mode}, target)
+    for key, value in (("window_ref", window_ref), ("app", app)):
+        if value is not None:
+            args[key] = value
+    return args
 
 
 class _Builders:
@@ -379,8 +390,9 @@ class _Builders:
     def apps(self):
         return self.call("AX", {"mode": "apps"})
 
-    def observe(self, target, root=None, scope=None, observe=None, since=None):
-        args = _target({"mode": "observe"}, target)
+    def observe(self, target=None, root=None, scope=None, observe=None, since=None,
+                *, window_ref=None, app=None):
+        args = _discovery_args("observe", target, window_ref, app)
         for key, value in (("root", root), ("scope", scope), ("observe", observe)):
             if value is not None:
                 args[key] = value
@@ -395,16 +407,24 @@ class _Builders:
             args["window_ref"] = window_ref
         return self.call("AX", args)
 
-    def find(self, target=None, limit=None, cursor=None, scope=None, **query):
-        args = {"mode": "find"}
-        if cursor:
+    def find(self, target=None, limit=None, cursor=None, scope=None,
+             *, window_ref=None, app=None, **query):
+        args = _discovery_args("find", target, window_ref, app)
+        if cursor is not None:
+            if any(value is not None for value in (target, window_ref, app, scope)) or query:
+                raise TypeError("cursor cannot be combined with a target, scope, or query")
             args["cursor"] = cursor
         else:
-            _target(args, target)
-            args["query"] = {_FIND_FIELDS[key]: value for key, value in query.items()}
-            if scope:
+            fields = {}
+            for key, value in query.items():
+                canonical = _FIND_FIELDS.get(key, key)
+                if canonical in fields:
+                    raise TypeError("multiple values for find query field %s" % canonical)
+                fields[canonical] = value
+            args["query"] = fields
+            if scope is not None:
                 args["scope"] = scope
-        if limit:
+        if limit is not None:
             args["limit"] = limit
         return self.call("AX", args)
 
@@ -530,7 +550,7 @@ class Desktop(_Builders):
     def schema(self):
         return Record.wrap(self.transport("schema", {}))
 
-    def find_all(self, target, page_size=50, **query):
+    def find_all(self, target=None, page_size=50, **query):
         """Every match of a find, following next_cursor page by page."""
         page = self.find(target, limit=page_size, **query)
         while True:
@@ -552,6 +572,20 @@ class Desktop(_Builders):
         self.close()
 
 
+class CallCancelled(asyncio.CancelledError):
+    """A cancelled SDK call; input_emitted is None when its effect is unknown."""
+
+    code = "cancelled"
+
+    def __init__(self, request_id, input_emitted, record=None, transport_error=None):
+        super().__init__("call cancelled; input effect %s" % (
+            "unknown" if input_emitted is None else "reported: %s" % input_emitted))
+        self.request_id = request_id
+        self.input_emitted = input_emitted
+        self.record = Record.wrap(record) if record is not None else None
+        self.transport_error = transport_error
+
+
 class AsyncDesktop(_Builders):
     """The same methods as coroutines, over an async transport (or a sync
     one, which then runs in a worker thread)."""
@@ -559,32 +593,124 @@ class AsyncDesktop(_Builders):
     def __init__(self, transport=None, retries=2):
         self.transport = transport or SocketTransport()
         self.retries = retries
+        self._loop = None
+        self._send_lock = None
+
+    def _gate(self):
+        loop = asyncio.get_running_loop()
+        if self._loop is not loop:
+            if self._loop is not None and not self._loop.is_closed():
+                raise RuntimeError("AsyncDesktop cannot be shared across live event loops")
+            self._loop = loop
+            self._send_lock = asyncio.Lock()
+        return self._send_lock
 
     async def _send(self, method, params):
-        if asyncio.iscoroutinefunction(self.transport):
-            return await self.transport(method, params)
-        result = await asyncio.get_running_loop().run_in_executor(
-            None, self.transport, method, params)
-        if asyncio.iscoroutine(result):
-            return await result
-        return result
+        gate = self._gate()
+        try:
+            await gate.acquire()
+        except asyncio.CancelledError as error:
+            # No worker or async transport has been submitted for this call.
+            raise CallCancelled(params.get("request_id"), False) from error
+        try:
+            cancel_requested = threading.Event()
+            not_sent = object()
+
+            def send_sync():
+                if isinstance(self.transport, SocketTransport):
+                    # Other Desktop instances may share this socket. Check
+                    # cancellation after its queue, before starting the call.
+                    with self.transport._lock:
+                        if cancel_requested.is_set():
+                            return not_sent
+                        return self.transport(method, params)
+                if cancel_requested.is_set():
+                    return not_sent
+                return self.transport(method, params)
+
+            if (asyncio.iscoroutinefunction(self.transport)
+                    or asyncio.iscoroutinefunction(getattr(self.transport, "__call__", None))):
+                pending = asyncio.create_task(self.transport(method, params))
+            else:
+                # Keep the executor Future directly. A cell runner may cancel
+                # every Task; an intermediate Task would lose the worker when
+                # cancelled even though that thread could still emit input.
+                pending = asyncio.get_running_loop().run_in_executor(
+                    None, send_sync)
+            try:
+                result = await asyncio.shield(pending)
+                while asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                    pending = asyncio.ensure_future(result)
+                    result = await asyncio.shield(pending)
+                return result
+            except asyncio.CancelledError as cancelled:
+                cancel_requested.set()
+                # Thread cancellation cannot stop input. Keep the gate until
+                # transport completion, even if the caller cancels repeatedly.
+                # Async transports follow the same rule: they must settle their
+                # own side effects before returning or raising.
+                record, transport_error, result = None, None, None
+                while True:
+                    while not pending.done():
+                        try:
+                            await asyncio.shield(pending)
+                        except asyncio.CancelledError:
+                            pass
+                        except BaseException:
+                            break
+                    try:
+                        result = pending.result()
+                        if asyncio.isfuture(result):
+                            pending = result
+                            continue
+                        if isinstance(result, dict):
+                            record = result
+                        elif asyncio.iscoroutine(result):
+                            result.close()
+                    except BaseException as error:
+                        transport_error = error
+                        if isinstance(getattr(error, "record", None), dict):
+                            record = error.record
+                    break
+                emitted = None
+                if (result is not_sent or method != "call"
+                        or not _may_emit_input(params["tool"], params["args"])):
+                    emitted = False
+                elif record is not None and type(record.get("input_emitted")) is bool:
+                    emitted = record["input_emitted"]
+                raise CallCancelled(params.get("request_id"), emitted,
+                                    record, transport_error) from cancelled
+        finally:
+            gate.release()
 
     async def call(self, tool, args, request_id=None, since=None):
         params = _call_params(tool, args, request_id, since)
-        for attempt in range(self.retries + 1):
-            try:
-                raw = await self._send("call", params)
-                return _raise_for(Record.wrap(raw))
-            except TransportClosed as error:
-                _check_retry(error, tool, args, params)
-                if attempt == self.retries:
-                    raise
-                await asyncio.sleep(0.2 * (attempt + 1))
+        previous_attempt_unknown = False
+        try:
+            for attempt in range(self.retries + 1):
+                try:
+                    raw = await self._send("call", params)
+                    return _raise_for(Record.wrap(raw))
+                except TransportClosed as error:
+                    previous_attempt_unknown = _may_emit_input(tool, args)
+                    _check_retry(error, tool, args, params)
+                    if attempt == self.retries:
+                        raise
+                    await asyncio.sleep(0.2 * (attempt + 1))
+        except CallCancelled as error:
+            if previous_attempt_unknown and error.record is None and error.input_emitted is False:
+                raise CallCancelled(params.get("request_id"), None,
+                                    transport_error=error.transport_error) from error
+            raise
+        except asyncio.CancelledError as error:
+            # Cancellation during retry backoff does not begin another attempt.
+            emitted = None if _may_emit_input(tool, args) else False
+            raise CallCancelled(params.get("request_id"), emitted) from error
 
     async def schema(self):
         return Record.wrap(await self._send("schema", {}))
 
-    async def find_all(self, target, page_size=50, **query):
+    async def find_all(self, target=None, page_size=50, **query):
         page = await self.find(target, limit=page_size, **query)
         matches = list(page.matches or [])
         while (page.page or {}).get("next_cursor"):

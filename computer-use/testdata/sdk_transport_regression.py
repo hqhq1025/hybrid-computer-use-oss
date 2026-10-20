@@ -163,9 +163,13 @@ class WireTests(unittest.TestCase):
 
         async def run():
             asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=count))
-            desktop = hcu.AsyncDesktop(simultaneous_call, retries=0)
+            # Each AsyncDesktop queues its own calls before worker submission.
+            # Separate clients retain eight simultaneous workers against the
+            # same SocketTransport, which owns framing and response IDs.
+            desktops = [hcu.AsyncDesktop(simultaneous_call, retries=0) for _ in range(count)]
             records = await asyncio.gather(*(
-                desktop.call("AX", {"tag": str(index)}) for index in range(count)))
+                desktop.call("AX", {"tag": str(index)})
+                for index, desktop in enumerate(desktops)))
             return [record.tag for record in records]
 
         try:
