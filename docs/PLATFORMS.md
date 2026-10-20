@@ -65,6 +65,16 @@ The provider uses a private local socket and retains native object identity
 within its process generation. A reset invalidates that continuity. Do not
 reuse refs from an earlier MCP session or retry an uncertain mutation blindly.
 
+App discovery includes window titles and identities for AX window waits.
+Incomplete enumeration or failed title reads return an error, so missing
+evidence cannot prove that a window closed. Windows without a unique native
+handle remain visible by title but do not receive actionable window refs.
+
+Closing the last document can remove the window before final capture. If the
+provider cannot verify the result, it reports `effect_unknown` and stops the
+batch. This does not establish that the close failed; inspect the current
+desktop before deciding what to do next.
+
 Some window and input operations use Apple's private SkyLight SPI from the
 installed macOS system framework. No Apple framework is bundled. These
 interfaces are not a public compatibility contract and can change between

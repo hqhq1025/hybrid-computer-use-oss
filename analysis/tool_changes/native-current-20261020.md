@@ -110,15 +110,29 @@ or title reads fail explicitly, so missing evidence cannot prove a window
 closed. Unknown or ambiguous native handles do not receive executable refs.
 Window identity paths match observation, and active state uses actual focus.
 These changes and their regressions are confined to the macOS provider.
-Final desktop window-wait validation and native CI are pending.
+The final cpu001 Mac build passed real MCP window-exists and independent
+window-gone waits, plus activation, Unicode selection, complete selection,
+duplicate rejection, a 1365 by 768 screenshot, and a 64-key batch. Closing
+the last document returned `effect_unknown` because final capture could not
+verify the vanished window. The subsequent fresh app listing and independent
+gone wait succeeded. The close itself is not counted as a success.
 
-Combined checks and native execution remain pending. The user excludes the
-personal MacBook Pro; testing uses isolated cpu001 VM overlays and native CI.
-Native CI builds and tests are distinct from interactive desktop tests. No new
-model evaluation is scheduled by this change.
+The Mac VM used a preauthorized test bundle. This verifies runtime behavior,
+not first-install permission UI. Its CLT toolchain built the native package;
+its SwiftPM manifest failed to link against PackageDescription. Native unit
+tests instead passed in the Xcode 26.2 CI environment. The base disk reported
+APFS startup warnings; successful desktop tests do not establish disk health.
+Strict window inventory reads can fail if an application is unresponsive;
+this candidate has no multi-application latency measurements.
+
+All desktop testing used isolated cpu001 VM overlays; the personal MacBook Pro
+was excluded. Native CI builds and tests are distinct from interactive desktop
+tests. No new model evaluation was scheduled. Full evidence and SDK/CLI audit
+reports are at `/datadrive2/hcu-eval/native-current-20261020/report.md`.
 
 ## Disposition
 
-Testing and publication status will be recorded after validation. No formal
-product release, live Mac installation, or live Windows installation has
-been changed.
+Code review passed at `a4b7829`, including invalid and duplicate native-window
+identity handling. The user authorized merging PR #2 after review and checks.
+Final CI and merge status are recorded in that PR. This change does not assign
+a formal product release or update a user's installed Mac or Windows package.
