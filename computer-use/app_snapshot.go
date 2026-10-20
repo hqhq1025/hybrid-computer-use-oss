@@ -180,6 +180,7 @@ type appSnapshot struct {
 	serializerOmitted         int
 	serializerBranches        int
 	scope                     string
+	scopeFallback             string
 	scopeRoot                 *elementRecord
 	scopedCanonicalCount      int
 	observationRoot           *elementRecord
@@ -262,6 +263,8 @@ func (s *appSnapshot) renderedText() string {
 			canonicalRole(s.scopeRoot),
 			s.scopeRoot.Name,
 		))
+	} else if line := s.scopeFallbackLine(); line != "" {
+		lines = append(lines, line)
 	}
 	if s.observationRoot != nil {
 		lines = append(lines, fmt.Sprintf(

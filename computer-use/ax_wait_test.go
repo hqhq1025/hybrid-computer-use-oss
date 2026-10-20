@@ -195,7 +195,8 @@ func TestWaitWindowGone(t *testing.T) {
 			t.Fatalf("closed window: %s", line)
 		}
 		if !closes && (!strings.HasPrefix(line, `{"ok":false,"code":"wait_timeout","path":"actions[0]"`) ||
-			!strings.Contains(line, `still open: \"Print\"`) || !strings.Contains(line, `"hint":"{\"mode\":\"apps\"}"`)) {
+			!strings.Contains(line, `still open: w1 \"Print\"`) ||
+			!strings.Contains(line, `"hint":"{\"mode\":\"observe\",\"window_ref\":\"w1\"}"`)) {
 			t.Fatalf("open window: %s", line)
 		}
 	}

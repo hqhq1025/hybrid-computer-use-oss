@@ -181,7 +181,8 @@ func (s *service) findMatches(
 		if !recordInAXScope(snapshot, &record) {
 			continue
 		}
-		if recordMatchesFind(
+		if queryRecordMatches(
+			snapshot,
 			&record,
 			role,
 			name,
@@ -227,16 +228,10 @@ func (s *service) find(
 			snapshot.WindowTitle,
 			strconv.Quote(query),
 		)
-		hintFrom := name
-		if hintFrom == "" {
-			hintFrom = text
+		if line := snapshot.scopeFallbackLine(); line != "" {
+			out.WriteString(line + "\n")
 		}
-		if near := closestElements(snapshot, hintFrom, 3); len(near) > 0 {
-			out.WriteString("closest:\n")
-			for _, line := range near {
-				out.WriteString("- " + strings.TrimSpace(line) + "\n")
-			}
-		}
+		out.WriteString(s.findZeroMatchText(snapshot, newAXNearQuery(role, name, text, state)))
 		response := withFailedActionContinuity(
 			snapshot.textWithNotes(out.String(), notes),
 			followsFailedAction,

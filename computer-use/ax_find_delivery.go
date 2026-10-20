@@ -226,6 +226,12 @@ func newFindPageBuilder(
 	if titleClipped || queryClipped {
 		header += " header_excerpt=true"
 	}
+	if line := snapshot.scopeFallbackLine(); line != "" {
+		header = fmt.Sprintf("window: %q\n%s\nmatches: %d query=%q", title, line, len(matched), queryText)
+		if titleClipped || queryClipped {
+			header += " header_excerpt=true"
+		}
+	}
 	diagnostics := ""
 	for _, note := range modelFacingAXNotes(notes) {
 		diagnostics += "Note: " + note + "\n"

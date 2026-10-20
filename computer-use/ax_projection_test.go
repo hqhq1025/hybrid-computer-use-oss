@@ -92,36 +92,49 @@ func TestContentScopeUsesFocusToDisambiguateTopLevelRoots(t *testing.T) {
 	}
 }
 
-func TestContentScopeFailsClosedWithoutUniqueRoot(t *testing.T) {
-	for name, snapshot := range map[string]*appSnapshot{
-		"none": {
-			TreeLines: []string{"\t0 frame \"Settings\"", "\t\t1 push button \"OK\""},
-			Elements: []elementRecord{
-				{Index: 0, RuntimeID: []int{}, ControlType: "frame", Name: "Settings"},
-				{Index: 1, RuntimeID: []int{0}, ControlType: "push button", Name: "OK"},
-			},
-		},
-		"ambiguous": {
-			TreeLines: []string{
-				"\t0 frame \"Split\"",
-				"\t\t1 document web \"Left\"",
-				"\t\t2 document web \"Right\"",
-			},
-			Elements: []elementRecord{
-				{Index: 0, RuntimeID: []int{}, ControlType: "frame", Name: "Split"},
-				{Index: 1, RuntimeID: []int{0}, ControlType: "document web", Name: "Left"},
-				{Index: 2, RuntimeID: []int{1}, ControlType: "document web", Name: "Right"},
-			},
-		},
+// A window without exactly one content area is read whole, and the read
+// says why it is wider than asked: a dialog is all content, a settings
+// window has no document, and two documents without focus in either have
+// no single one. Recorded runs failed 12 content finds on dialogs.
+func TestContentScopeReadsTheWindowWithoutOneContentArea(t *testing.T) {
+	for name, test := range map[string]struct {
+		snapshot *appSnapshot
+		reason   string
+	}{
+		"dialog with a preview": {&appSnapshot{Elements: []elementRecord{
+			{Index: 0, RuntimeID: []int{}, ControlType: "dialog", Name: "Paragraph"},
+			{Index: 1, RuntimeID: []int{0}, ControlType: "spin button", Name: "Above paragraph"},
+			{Index: 2, RuntimeID: []int{1}, ControlType: "drawing area", Name: "Example"},
+		}}, "a dialog has no separate content area"},
+		"no content area": {&appSnapshot{Elements: []elementRecord{
+			{Index: 0, RuntimeID: []int{}, ControlType: "frame", Name: "Settings"},
+			{Index: 1, RuntimeID: []int{0}, ControlType: "push button", Name: "OK"},
+		}}, "no document, page, or canvas area"},
+		"ambiguous": {&appSnapshot{Elements: []elementRecord{
+			{Index: 0, RuntimeID: []int{}, ControlType: "frame", Name: "Split"},
+			{Index: 1, RuntimeID: []int{0}, ControlType: "document web", Name: "Left"},
+			{Index: 2, RuntimeID: []int{1}, ControlType: "document web", Name: "Right"},
+		}}, "2 content areas"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := applyAXScope(snapshot, axScopeContent)
-			if err == nil {
-				t.Fatal("content scope must fail closed")
+			if err := applyAXScope(test.snapshot, axScopeContent); err != nil {
+				t.Fatalf("content scope failed instead of reading the window: %v", err)
 			}
-			if !strings.Contains(err.Error(), `scope="content"`) ||
-				!strings.Contains(err.Error(), `scope="window"`) {
-				t.Fatalf("scope error is not actionable: %v", err)
+			if test.snapshot.scopeRoot != nil ||
+				scopedCanonicalElementCount(test.snapshot) != len(test.snapshot.Elements) {
+				t.Fatalf("content read did not cover the window: %#v", test.snapshot.scopeRoot)
+			}
+			for _, record := range test.snapshot.Elements {
+				if !recordInAXScope(test.snapshot, &record) {
+					t.Fatalf("%s is outside the read", record.Name)
+				}
+			}
+			line := test.snapshot.scopeFallbackLine()
+			if !strings.HasPrefix(line, "scope: window (") || !strings.Contains(line, test.reason) {
+				t.Fatalf("fallback line %q lacks %q", line, test.reason)
+			}
+			if !strings.Contains(test.snapshot.renderedText(), line) {
+				t.Fatalf("observe text lacks the fallback line:\n%s", test.snapshot.renderedText())
 			}
 		})
 	}

@@ -168,15 +168,26 @@ func contentRootCandidatesDescription(roots []*elementRecord) string {
 	return strings.Join(parts, "; ")
 }
 
+// contentScopeWindowRoles are top-level roles whose whole window is
+// content: a dialog has no menu bar, toolbars, or side panels to strip, and
+// a preview or canvas inside it is one control among its fields, not its
+// content area.
+var contentScopeWindowRoles = map[string]bool{
+	"dialog": true, "alert": true, "file chooser": true,
+	"color chooser": true, "font chooser": true,
+}
+
+// selectContentScopeRoot returns the one content area of the window, or an
+// error that says in one clause why the window has none.
 func selectContentScopeRoot(snapshot *appSnapshot) (*elementRecord, error) {
+	if root := windowRootRecord(snapshot); root != nil &&
+		contentScopeWindowRoles[strings.ToLower(strings.TrimSpace(root.ControlType))] {
+		return nil, fmt.Errorf("a %s has no separate content area", strings.ToLower(root.ControlType))
+	}
 	roots := topLevelContentRoots(snapshot)
 	switch len(roots) {
 	case 0:
-		return nil, errors.New(
-			`scope="content" found no top-level content-plane accessibility node. ` +
-				`Use scope="window" to inspect the complete application window or GUI ` +
-				`when the required content is not exposed through accessibility`,
-		)
+		return nil, errors.New("this window has no document, page, or canvas area")
 	case 1:
 		return roots[0], nil
 	}
@@ -193,23 +204,29 @@ func selectContentScopeRoot(snapshot *appSnapshot) (*elementRecord, error) {
 			return matches[0], nil
 		}
 	}
+	return nil, fmt.Errorf("%d content areas and focus is in none of them: %s",
+		len(roots), contentRootCandidatesDescription(roots))
+}
 
-	focus := "no canonical element reports focus"
-	if focused != nil {
-		focus = fmt.Sprintf(
-			"focus is on %d %s %q outside a unique content root",
-			focused.Index,
-			canonicalRole(focused),
-			focused.Name,
-		)
+// windowRootRecord returns the record of the window itself: the record
+// with the shortest runtime path, which every other record descends from.
+func windowRootRecord(snapshot *appSnapshot) *elementRecord {
+	if snapshot == nil || len(snapshot.Elements) == 0 {
+		return nil
 	}
-	return nil, fmt.Errorf(
-		`scope="content" is ambiguous: %d top-level content-plane nodes are visible and %s. `+
-			`Candidates: %s. Use scope="window" to choose the intended surface`,
-		len(roots),
-		focus,
-		contentRootCandidatesDescription(roots),
-	)
+	root := &snapshot.Elements[0]
+	for index := range snapshot.Elements {
+		if len(snapshot.Elements[index].RuntimeID) < len(root.RuntimeID) {
+			root = &snapshot.Elements[index]
+		}
+	}
+	for index := range snapshot.Elements {
+		record := &snapshot.Elements[index]
+		if record != root && !runtimePathContains(root.RuntimeID, record.RuntimeID) {
+			return nil
+		}
+	}
+	return root
 }
 
 func recordInAXScope(snapshot *appSnapshot, record *elementRecord) bool {
@@ -375,12 +392,18 @@ func validContentRevision(value string) bool {
 	return true
 }
 
+// applyAXScope selects the records a read covers. scope "content" narrows
+// it to the window's one content area. A window without exactly one, such
+// as a dialog or a settings page, is read whole: the content the caller
+// wanted is then somewhere in the window, and scopeFallback says why the
+// read is wider than asked.
 func applyAXScope(snapshot *appSnapshot, scope string) error {
 	if snapshot == nil {
 		return errors.New("cannot apply accessibility scope to a nil snapshot")
 	}
 	scope = normalizedAXScope(scope)
 	snapshot.scope = scope
+	snapshot.scopeFallback = ""
 	snapshot.scopeRoot = nil
 	snapshot.scopedCanonicalCount = len(snapshot.Elements)
 	snapshot.contentRoot = nil
@@ -388,10 +411,11 @@ func applyAXScope(snapshot *appSnapshot, scope string) error {
 	snapshot.contentRevision = ""
 	root, err := selectContentScopeRoot(snapshot)
 	if err != nil {
-		if scope == axScopeWindow {
-			return nil
+		if scope == axScopeContent {
+			snapshot.scope = axScopeWindow
+			snapshot.scopeFallback = err.Error()
 		}
-		return err
+		return nil
 	}
 	count := len(recordsUnderRoot(snapshot, root))
 	snapshot.contentRoot = root
@@ -403,6 +427,15 @@ func applyAXScope(snapshot *appSnapshot, scope string) error {
 	snapshot.scopeRoot = root
 	snapshot.scopedCanonicalCount = count
 	return nil
+}
+
+// scopeFallbackLine is the one line a content read that covers the whole
+// window starts with.
+func (s *appSnapshot) scopeFallbackLine() string {
+	if s == nil || s.scopeFallback == "" {
+		return ""
+	}
+	return "scope: window (" + s.scopeFallback + ")"
 }
 
 func recordByIndex(snapshot *appSnapshot, index int) *elementRecord {

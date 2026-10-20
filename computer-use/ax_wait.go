@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -426,7 +427,7 @@ func axOrderedCall(call map[string]any) string {
 func (s *service) runAXWait(context *axBatchContext, wait *axWait) toolCallResult {
 	switch {
 	case wait.window != "":
-		return s.waitForDesktopWindow(wait)
+		return s.waitForDesktopWindow(context, wait)
 	case wait.query != nil:
 		return s.waitForQuery(context, wait)
 	case wait.ref != "":
@@ -439,12 +440,10 @@ func (s *service) runAXWait(context *axBatchContext, wait *axWait) toolCallResul
 // waitForDesktopWindow polls the top-level windows of the whole desktop:
 // a window may belong to another process, and an application that exits and
 // starts again has a new one.
-func (s *service) waitForDesktopWindow(wait *axWait) toolCallResult {
+func (s *service) waitForDesktopWindow(context *axBatchContext, wait *axWait) toolCallResult {
 	deadline := time.Now().Add(time.Duration(wait.timeoutMS) * time.Millisecond)
 	attempts := 0
-	lastTitles := []string{}
 	lastError := ""
-	sampled := false
 	for {
 		attempts++
 		inventory, failure := s.listDesktopWindows()
@@ -454,8 +453,6 @@ func (s *service) waitForDesktopWindow(wait *axWait) toolCallResult {
 			lastError = firstLine(resultText(failure))
 		} else {
 			lastError = ""
-			sampled = true
-			lastTitles = append(lastTitles[:0], inventory.titles...)
 			for _, title := range inventory.titles {
 				if containsFold(title, wait.window) {
 					titleMatches++
@@ -469,7 +466,7 @@ func (s *service) waitForDesktopWindow(wait *axWait) toolCallResult {
 		}
 		holds := titleMatches > 0
 		if wait.gone {
-			holds = !holds && lastError == ""
+			holds = !holds && inventory != nil
 		}
 		if holds {
 			text := "wait: no window title contains " + strconv.Quote(wait.window)
@@ -490,46 +487,139 @@ func (s *service) waitForDesktopWindow(wait *axWait) toolCallResult {
 			return result
 		}
 		if !time.Now().Before(deadline) {
-			text := fmt.Sprintf("wait_timeout: after %dms ", wait.timeoutMS)
-			if wait.gone {
-				titles := []string{}
-				for _, title := range lastTitles {
-					if containsFold(title, wait.window) {
-						titles = append(titles, strconv.Quote(title))
-					}
-				}
-				text += "these windows are still open: " + strings.Join(titles, ", ")
-			} else {
-				text += "no window title contains " + strconv.Quote(wait.window)
-			}
-			if lastError != "" {
-				text += "; the window list could not be read: " + lastError
-			} else {
-				text += "; windows: " + axQuotedList(lastTitles, 8)
-			}
-			result := axAssertionResult(text, !sampled || lastError != "", "predicate_false", attempts, 0)
-			if lastError != "" {
-				result.StructuredContent["assertion_status"] = "observation_incomplete"
-			}
-			return result
+			return s.windowWaitTimeout(context, wait, inventory, lastError, attempts)
 		}
 		time.Sleep(axWaitPollInterval)
 	}
 }
 
-func axQuotedList(values []string, limit int) string {
-	quoted := []string{}
-	for index, value := range values {
-		if index == limit {
-			quoted = append(quoted, fmt.Sprintf("and %d more", len(values)-limit))
+// windowWaitTimeout reports a window wait that did not hold. The message
+// leads with the windows that are there now, each with its wN, focus
+// first; when a title is close to the awaited one, the hint is the same
+// wait for that title. The batch application's windows come before other
+// applications', since the wait most often follows input to that
+// application.
+func (s *service) windowWaitTimeout(
+	context *axBatchContext, wait *axWait, inventory *axWindowInventory, readError string, attempts int,
+) toolCallResult {
+	head := fmt.Sprintf("wait_timeout: after %dms ", wait.timeoutMS)
+	if inventory == nil || readError != "" {
+		result := axAssertionResult(head+"the window list could not be read: "+readError, true,
+			"observation_incomplete", attempts, 0)
+		return result
+	}
+	if wait.gone {
+		still := []string{}
+		for _, window := range inventory.windows {
+			if containsFold(window.title, wait.window) {
+				still = append(still, window.ref+" "+strconv.Quote(window.title))
+			}
+		}
+		if len(still) == 0 {
+			// Only windows without a wN are still there.
+			still = append(still, strconv.Quote(wait.window)+" (no wN)")
+		}
+		head += "still open: " + strings.Join(still, ", ")
+	} else {
+		head += "no window title contains " + strconv.Quote(wait.window)
+	}
+	appRef := ""
+	if context != nil {
+		appRef = context.appRef
+	}
+	listed := axWaitWindowList(inventory, appRef, wait.window,
+		axPublicMessageRunes-len([]rune(head))-len("; windows: "))
+	result := axAssertionResult(head+"; windows: "+listed, false, "predicate_false", attempts, 0)
+	for _, window := range inventory.windows {
+		if window.active {
+			result.StructuredContent["focused_window_ref"] = window.ref
+		}
+	}
+	if !wait.gone {
+		if near := axNearestWindowTitle(inventory, wait.window); near != "" {
+			corrected := map[string]any{"type": "wait", "window": near}
+			if wait.timeoutMS != axDefaultWaitTimeout {
+				corrected["timeout_ms"] = wait.timeoutMS
+			}
+			result.StructuredContent["wait_hint"] = axHintJSON(corrected)
+		}
+	}
+	return result
+}
+
+// axWaitWindowList names the windows of a listing as wN "title", the
+// focused one first and marked, then the windows of appRef, then the rest;
+// untitled windows are left out. It stops before budget runes.
+func axWaitWindowList(inventory *axWindowInventory, appRef, wanted string, budget int) string {
+	windows := append([]axDesktopWindow(nil), inventory.windows...)
+	rank := func(window axDesktopWindow) int {
+		switch {
+		case window.active:
+			return 0
+		case appRef != "" && window.appRef == appRef:
+			return 1
+		case axWordOverlap(axSignificantWords(wanted), window.title) > 0:
+			return 2
+		}
+		return 3
+	}
+	sort.SliceStable(windows, func(i, j int) bool { return rank(windows[i]) < rank(windows[j]) })
+	parts := []string{}
+	for _, window := range windows {
+		if strings.TrimSpace(window.title) == "" {
+			continue
+		}
+		entry := window.ref + " " + strconv.Quote(axReportClip(window.title))
+		if window.active {
+			entry += " (focused)"
+		}
+		if len(parts) == axWaitListedWindows ||
+			len([]rune(strings.Join(append(parts, entry, "..."), ", "))) > budget {
+			parts = append(parts, "...")
 			break
 		}
-		quoted = append(quoted, strconv.Quote(value))
+		parts = append(parts, entry)
 	}
-	if len(quoted) == 0 {
-		return "none"
+	if len(parts) == 0 {
+		return "none with a title"
 	}
-	return strings.Join(quoted, ", ")
+	return strings.Join(parts, ", ")
+}
+
+const axWaitListedWindows = 4
+
+// axNearestWindowTitle returns the title of the one window whose title is
+// close to wanted but does not contain it: "Find and Replace" for "Find &
+// Replace", "Move/Copy Sheet" for "Move or Copy Sheet". It returns "" when
+// no title or several titles are close.
+func axNearestWindowTitle(inventory *axWindowInventory, wanted string) string {
+	words := axSignificantWords(wanted)
+	if len(words) == 0 {
+		return ""
+	}
+	best, bestScore, ties := "", 0.0, 0
+	for _, window := range inventory.windows {
+		title := strings.TrimSpace(window.title)
+		if title == "" {
+			continue
+		}
+		score := axWordOverlap(words, title)
+		// A title that only shares one generic word ("Settings") is not
+		// close to a three-word title.
+		if score < 0.5 || (len(words) > 1 && score*float64(len(words)) < 2) {
+			continue
+		}
+		switch {
+		case score > bestScore:
+			best, bestScore, ties = title, score, 1
+		case score == bestScore && title != best:
+			ties++
+		}
+	}
+	if ties != 1 {
+		return ""
+	}
+	return best
 }
 
 // waitForQuery polls every visible window of the batch application with
@@ -547,13 +637,15 @@ func (s *service) waitForQuery(context *axBatchContext, wait *axWait) toolCallRe
 		text = optionalString(query, "text_equals")
 	}
 	role, state := optionalString(query, "role"), optionalString(query, "state")
+	seen := &axWaitSeen{}
 	lookup := func(snapshot *appSnapshot) (*elementRecord, error) {
 		if snapshot == nil {
 			return nil, nil
 		}
+		seen.add(snapshot)
 		for index := range snapshot.Elements {
 			record := snapshot.Elements[index]
-			if recordMatchesFind(&record, role, name, text, state, nameExact, textExact) {
+			if queryRecordMatches(snapshot, &record, role, name, text, state, nameExact, textExact) {
 				// The first match answers "appeared"; a wait does not act,
 				// so several matches are not ambiguous.
 				return &record, nil
@@ -562,17 +654,20 @@ func (s *service) waitForQuery(context *axBatchContext, wait *axWait) toolCallRe
 		return nil, nil
 	}
 	exists := !wait.gone
-	return s.waitOnApplication(context, lookup, axWaitQueryText(query), firstNonEmpty(name, text),
+	result := s.waitOnApplication(context, lookup, axWaitQueryText(query), firstNonEmpty(name, text),
 		verifyGoal{exists: &exists}, wait.timeoutMS)
+	return seen.explainTimeout(result, wait, newAXNearQuery(role, name, text, state), context)
 }
 
 // waitForText polls the batch window for an element whose name,
 // description, value, or placeholder contains the text.
 func (s *service) waitForText(context *axBatchContext, wait *axWait) toolCallResult {
+	seen := &axWaitSeen{}
 	lookup := func(snapshot *appSnapshot) (*elementRecord, error) {
 		if snapshot == nil {
 			return nil, nil
 		}
+		seen.add(snapshot)
 		for index := range snapshot.Elements {
 			record := snapshot.Elements[index]
 			if recordMatchesFind(&record, "", "", wait.text, "", false, false) {
@@ -582,9 +677,168 @@ func (s *service) waitForText(context *axBatchContext, wait *axWait) toolCallRes
 		return nil, nil
 	}
 	exists := !wait.gone
-	return s.waitOnApplication(context, lookup, "text "+strconv.Quote(wait.text), wait.text,
+	result := s.waitOnApplication(context, lookup, "text "+strconv.Quote(wait.text), wait.text,
 		verifyGoal{exists: &exists}, wait.timeoutMS)
+	return seen.explainTimeout(result, wait, newAXNearQuery("", "", wait.text, ""), context)
 }
+
+// axWaitSeen keeps the reads of the last poll of an element wait: the
+// batch window, then the application's other windows when the batch
+// window had no match.
+type axWaitSeen struct {
+	reads []*appSnapshot
+}
+
+func (seen *axWaitSeen) add(snapshot *appSnapshot) {
+	if snapshot.axSnapshot != nil {
+		// The batch window is read first in every poll.
+		seen.reads = seen.reads[:0]
+	}
+	seen.reads = append(seen.reads, snapshot)
+}
+
+// explainTimeout rewrites the first line of an element wait that timed out
+// as the elements closest to the query: role, name, and ref when the read
+// issued one, in the order of the ranking. A candidate that differs only
+// in its role spelling becomes the corrected wait. The rest of the text,
+// the poll log, stays.
+func (seen *axWaitSeen) explainTimeout(
+	result toolCallResult, wait *axWait, query axNearQuery, context *axBatchContext,
+) toolCallResult {
+	status, _ := result.StructuredContent["assertion_status"].(string)
+	if wait.gone || axPostconditionPassed(result) || len(result.Content) == 0 ||
+		(status != "predicate_false" && status != "observation_incomplete") {
+		return result
+	}
+	candidates := []axNearCandidate{}
+	owner := map[*elementRecord]*appSnapshot{}
+	for _, snapshot := range seen.reads {
+		for _, candidate := range axNearElements(snapshot, query, 3) {
+			owner[candidate.record] = snapshot
+			candidates = append(candidates, candidate)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
+	subject := strings.TrimPrefix(axWaitSubject(wait), "element ")
+	where := ""
+	if context != nil && context.windowRef != "" {
+		where = " in " + context.windowRef + " or its app's other windows"
+	}
+	line := fmt.Sprintf("wait_timeout: after %dms nothing matches %s%s", wait.timeoutMS, subject, where)
+	if status == "observation_incomplete" {
+		line += " (a window of the app could not be read)"
+	}
+	if len(candidates) == 0 {
+		line += "; nothing close either"
+	}
+	listed := 0
+	for _, candidate := range candidates {
+		label := axNearLabel(owner[candidate.record], candidate.record)
+		separator := ", "
+		if listed == 0 {
+			separator = "; closest: "
+		}
+		if len([]rune(line+separator+label)) > axPublicMessageRunes {
+			break
+		}
+		line += separator + label
+		listed++
+		if listed == 3 {
+			break
+		}
+	}
+	// The poll log and the generic advice of the shared timeout text are
+	// replaced by the candidates; whether the window changed during the
+	// wait stays, in its short form.
+	text := line
+	for _, detail := range strings.Split(result.Content[0].Text, "\n") {
+		for _, prefix := range []string{"Window changed:", "Tree changed:", "Nothing changed:"} {
+			if strings.HasPrefix(detail, prefix) {
+				detail, _, _ = strings.Cut(detail, " —")
+				text += "\n" + strings.Join(strings.Fields(detail), " ")
+			}
+		}
+	}
+	result.Content[0].Text = text
+	if len(candidates) > 0 && candidates[0].sameWords && wait.query != nil {
+		best := candidates[0].record
+		if corrected := axQueryFor(owner[best], best, wait.query); corrected != nil {
+			hint := map[string]any{"type": "wait", "query": corrected}
+			if wait.timeoutMS != axDefaultWaitTimeout {
+				hint["timeout_ms"] = wait.timeoutMS
+			}
+			result.StructuredContent["wait_hint"] = axHintJSON(hint)
+		}
+	}
+	return result
+}
+
+// axQueryFor returns query changed as little as possible to match record:
+// the role as the tree shows it, and a name or text filter that no longer
+// matches replaced by the record's name. It returns nil when no such query
+// matches.
+func axQueryFor(snapshot *appSnapshot, record *elementRecord, query map[string]any) map[string]any {
+	corrected := map[string]any{}
+	for key, value := range query {
+		corrected[key] = value
+	}
+	if _, present := corrected["role"]; present {
+		role := axRenderedRole(snapshot, record)
+		if role == "" {
+			role = canonicalRole(record)
+		}
+		corrected["role"] = role
+	}
+	for _, field := range []string{"name_contains", "name_equals", "text_contains", "text_equals"} {
+		value, present := corrected[field].(string)
+		if !present {
+			continue
+		}
+		matches := map[string]bool{
+			"name_contains": containsFold(record.Name, value),
+			"name_equals":   strings.EqualFold(strings.TrimSpace(record.Name), strings.TrimSpace(value)),
+		}
+		if strings.HasPrefix(field, "text_") {
+			_, _, matched := matchedFindTextField(record, value, field == "text_equals")
+			matches[field] = matched
+		}
+		if !matches[field] {
+			if strings.TrimSpace(record.Name) == "" {
+				return nil
+			}
+			delete(corrected, field)
+			corrected["name_contains"] = record.Name
+		}
+	}
+	name, _ := corrected["name_contains"].(string)
+	_, nameExact := corrected["name_equals"]
+	if nameExact {
+		name, _ = corrected["name_equals"].(string)
+	}
+	text, _ := corrected["text_contains"].(string)
+	_, textExact := corrected["text_equals"]
+	if textExact {
+		text, _ = corrected["text_equals"].(string)
+	}
+	role, _ := corrected["role"].(string)
+	state, _ := corrected["state"].(string)
+	if !queryRecordMatches(snapshot, record, role, name, text, state, nameExact, textExact) {
+		return nil
+	}
+	return corrected
+}
+
+// axWaitSubject names what an element wait waited for.
+func axWaitSubject(wait *axWait) string {
+	if wait.query != nil {
+		return axWaitQueryText(wait.query)
+	}
+	return "text " + strconv.Quote(wait.text)
+}
+
+// axPublicMessageRunes is the length at which the evidence line cuts an
+// error message (axPublicEvidence).
+const axPublicMessageRunes = 300
 
 func (s *service) waitOnApplication(
 	context *axBatchContext,
@@ -777,7 +1031,7 @@ func (s *service) stopAXBatchAtWait(
 	}
 	detail := strings.TrimSpace(strings.TrimPrefix(resultText(waitResult), firstLine(resultText(waitResult))))
 	unreadable := waitResult.IsError
-	if unreadable {
+	if unreadable && !strings.Contains(message, "could not be read") {
 		message += " (the state could not be read completely while waiting)"
 	}
 	stopped := textResult(message, true)
@@ -792,9 +1046,15 @@ func (s *service) stopAXBatchAtWait(
 		hint = `{"mode":"observe","window_ref":"` + ref + `"}`
 	}
 	if wait := actions[index].wait; wait != nil && wait.window != "" {
-		// A window wait reads the whole desktop; the window list is the
-		// state to check next.
+		// The message lists the windows; the focused one is where the
+		// application went instead.
 		hint = `{"mode":"apps"}`
+		if ref, _ := waitResult.StructuredContent["focused_window_ref"].(string); ref != "" {
+			hint = `{"mode":"observe","window_ref":"` + ref + `"}`
+		}
+	}
+	if corrected, _ := waitResult.StructuredContent["wait_hint"].(string); corrected != "" {
+		hint = corrected
 	}
 	stopped.StructuredContent = map[string]any{
 		axPublicErrorCodeKey:     axCodeWaitTimeout,
