@@ -349,7 +349,7 @@ func decodeAXActions(raw any) ([]axBatchAction, *axArgError) {
 			withFix(axSet("actions", items[:axBatchMaxActions]))
 	}
 	actions := make([]axBatchAction, 0, len(items))
-	totalText := 0
+	totalText, totalWait := 0, 0
 	for index, item := range items {
 		path := fmt.Sprintf("actions[%d]", index)
 		object, ok := item.(map[string]any)
@@ -367,6 +367,15 @@ func decodeAXActions(raw any) ([]axBatchAction, *axArgError) {
 		totalText += len([]rune(action.text)) + len([]rune(action.value))
 		if totalText > axBatchMaxText {
 			return nil, axInvalid(path, fmt.Sprintf("text and value together are limited to %d characters per call", axBatchMaxText), "").withRule(argumentRuleTextBudget)
+		}
+		if action.wait != nil {
+			totalWait += action.wait.timeoutMS
+			if totalWait > maxVerifyTimeout {
+				return nil, axInvalid(path, fmt.Sprintf(
+					"wait steps of one act may wait %d ms in total (a wait without timeout_ms counts %d); send the steps from here in a second call",
+					maxVerifyTimeout, axDefaultWaitTimeout), "").
+					withRule(argumentRuleWaitBudget).withFix(axSet("actions", items[:index]))
+			}
 		}
 		actions = append(actions, action)
 	}

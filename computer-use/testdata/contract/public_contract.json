@@ -90,7 +90,7 @@
             },
             "properties": {
               "actions": {
-                "description": "act: ordered steps; a failed step stops the batch.",
+                "description": "act: ordered steps; a failed step stops the batch. Wait timeouts total at most 60000 ms; an omitted timeout counts as 5000 ms.",
                 "items": {
                   "additionalProperties": false,
                   "properties": {
@@ -187,7 +187,7 @@
                   ],
                   "type": "object"
                 },
-                "maxItems": 32,
+                "maxItems": 64,
                 "minItems": 1,
                 "type": "array"
               },

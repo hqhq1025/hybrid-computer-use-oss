@@ -21,7 +21,7 @@ const (
 	guiMaxTextLength   = 10000
 	guiMaxTotalWait    = 20
 	guiMaxSettleMS     = 3000
-	axBatchMaxActions  = 32
+	axBatchMaxActions  = 64
 	axBatchMaxText     = 20000
 	maxClickCount      = 10
 	maxScrollPages     = 100
@@ -202,7 +202,7 @@ func axInputSchema() map[string]any {
 			},
 			"actions": map[string]any{
 				"type": "array", "minItems": 1, "maxItems": axBatchMaxActions,
-				"description": "act: ordered steps; a failed step stops the batch.",
+				"description": "act: ordered steps; a failed step stops the batch. Wait timeouts total at most 60000 ms; an omitted timeout counts as 5000 ms.",
 				"items": map[string]any{
 					"type": "object", "additionalProperties": false, "required": []string{"type"},
 					"properties": map[string]any{

@@ -288,7 +288,10 @@ application aN -> top-level window wN -> element rN
   still accepts an `aN`, a name, an app id or a PID.
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
-- `act` runs ordered steps: actions
+- `act` accepts up to 64 ordered steps. The sum of all wait timeouts must
+  not exceed 60 seconds; an omitted timeout counts as 5 seconds. This bounds
+  waiting only, not total call duration. Argument errors reject the whole
+  batch before input. `act` runs ordered steps: actions
   `{type, ref|title, text|keys|value|direction|pages|to_ref}` and `wait` steps. The
   `rN` or `wN` refs name the window, so an `act` call with refs needs no
   `window_ref`; `window_ref` only sends ref-less `keypress` and `type` to a

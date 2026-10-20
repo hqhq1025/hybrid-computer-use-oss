@@ -50,7 +50,7 @@ func TestArgumentErrorsSelectTheIntendedBranch(t *testing.T) {
 			[]string{"scroll_y must not be 0"}},
 		{"AX", `{"mode":"ACT"}`, "/mode", []string{`mode "ACT" is unsupported`}},
 		{"AX", `{"mode":"observe","app":"x","actions":[]}`, "/actions",
-			[]string{"actions must contain 1 to 32 items"}},
+			[]string{"actions must contain 1 to 64 items"}},
 		{"AX", `{"mode":"observe","window_ref":7}`, "/window_ref",
 			[]string{"window_ref must be a string, not a number"}},
 		{"AX", `{"mode":"act","actions":[{"type":"click","ref":"r1","target":"r1"}]}`, "/actions/0",

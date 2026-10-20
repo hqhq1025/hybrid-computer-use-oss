@@ -54,7 +54,8 @@ var axBadCalls = []string{
 	`{"mode":"act"}`,
 	`{"mode":"act","actions":{"type":"click","ref":"r1"}}`,
 	`{"mode":"act","actions":[]}`,
-	`{"mode":"act","actions":[` + strings.TrimSuffix(strings.Repeat(`{"type":"keypress","keys":["TAB"]},`, 33), ",") + `]}`,
+	`{"mode":"act","actions":[` + strings.TrimSuffix(strings.Repeat(`{"type":"keypress","keys":["TAB"]},`, axBatchMaxActions+1), ",") + `]}`,
+	`{"mode":"act","actions":[{"type":"wait","window":"A","timeout_ms":40000},{"type":"wait","window":"B","timeout_ms":30000}]}`,
 	`{"mode":"act","actions":["click r1"]}`,
 	`{"mode":"act","actions":[{"type":"close","ref":"w3"},{"type":"close","ref":"w2"}]}`,
 	`{"mode":"act","actions":[{"type":"type","text":"` + strings.Repeat("a", 8000) + `"},{"type":"type","text":"` +
