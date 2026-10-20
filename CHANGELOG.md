@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Accept up to 64 AX actions and reject calls whose wait timeouts total more
+  than 60 seconds. Accept unambiguous `type.value` and `set_value.text`
+  aliases; conflicting fields still reject the whole batch before input.
+- Read only the window root between eligible untargeted AX inputs, while
+  retaining full reads before ref actions, waits, and the final input.
+- Encourage batching known AX, GUI, and shell actions until a decision needs
+  fresh evidence. Preserve focus, ref, layout, failure, and final-evidence
+  boundaries. The combined guidance requires a fresh model evaluation.
 - Include a bounded text excerpt in AX find matches when the rendered fields
   omit the value. Removed diff nodes omit addressability markers, and
   consecutive absent refs use inclusive ranges. Explicit full reads still

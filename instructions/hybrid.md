@@ -32,7 +32,8 @@ fits which state, and how to combine them.
 - Once the source, target, and operation are known, act. Further checks must
   answer a concrete blocker.
 - Plan from one read. After `observe` or `find`, put every action you can
-  already determine for that window into one `act`.
+  already determine for that window into one `act`, while later refs and
+  focus remain valid. Split when the next action needs a new observation.
 - Every `act` result starts with what happened, then a diff:
 
 ```text
@@ -65,7 +66,11 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
   selected; check it before applying the command.
 - Take a GUI screenshot when the question is visual or AX lacks a visible
   element. Do not alternate screenshots and AX reads of an unchanged state.
-- Combine related read-only shell checks into one command or script.
+- Put GUI actions determined from the same screenshot into one `actions`
+  array when focus and target positions remain valid. A call returns only a
+  final screenshot. End the batch when a window or dialog opens, closes,
+  moves, resizes, switches, or navigates; use the returned screenshot to plan
+  subsequent coordinates. A screenshot action must stand alone.
 - Start or restart a GUI application from the shell with
   `setsid -f APP ARGS >/tmp/APP.log 2>&1 </dev/null`. Some agent shells kill
   the process group of each command when it returns; an application started

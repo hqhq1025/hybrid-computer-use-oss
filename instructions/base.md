@@ -43,6 +43,15 @@ and final replies concise.
   to keep. "Default" and "preference" mean application or user settings
   unless the user limits them to one object.
 
+## Batch Known Actions
+
+- Batch actions whose targets and inputs are already known and whose later
+  steps do not need an intermediate result. Split at the next decision that
+  needs fresh evidence; the maximum batch size is a limit, not a goal.
+- Combine related shell checks or known command sequences in one call. Check
+  exit status before dependent commands and stop them on failure. Run commands
+  concurrently only when they are independent and do not change shared state.
+
 ## Evidence By Result Type
 
 | Result | Evidence |

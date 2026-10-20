@@ -176,3 +176,108 @@ func TestRootOnlyReadsKeepModelVisibleOutput(t *testing.T) {
 		t.Fatalf("model-visible output differs\nfull reads:\n%s\nroot-only reads:\n%s", full, light)
 	}
 }
+
+func TestRootOnlyBatchDoesNotReuseRefAfterControlDisappears(t *testing.T) {
+	s, backend := rootOnlyService(t, false, reportMain())
+	backend.menuOpen = true
+	window, refs := reportObserve(t, s, "Preferences")
+	backend.onAction = func(b *reportBackend) { b.menuOpen = false }
+	actions := append(keys("a", "b", "c"), map[string]any{
+		"type": "click", "ref": refs["Preferences"],
+	})
+	result := s.callTool(publicToolAX, map[string]any{
+		"mode": "act", "window_ref": window, "actions": actions,
+	})
+	if !result.IsError {
+		t.Fatalf("disappeared control was accepted: %s", resultText(result))
+	}
+	if backend.rootOnlyReads != 2 || backend.fullReads != 1 {
+		t.Fatalf("expected two root reads followed by a full read before ref use: root=%d full=%d",
+			backend.rootOnlyReads, backend.fullReads)
+	}
+	if len(backend.actionRequests) != 3 {
+		t.Fatalf("stale control reached provider input: %#v", backend.actionRequests)
+	}
+	batch, _ := result.StructuredContent["a11y_batch_result"].(map[string]any)
+	if batch["actions_completed_without_call_error"] != 3 ||
+		batch["failed_action_index"] != 3 {
+		t.Fatalf("completed prefix was lost: %#v", result.StructuredContent)
+	}
+}
+
+type partialRootOnlyBackend struct {
+	*rootOnlyBackend
+	failAt int
+}
+
+func (b *partialRootOnlyBackend) ResolveAndAct(request ProviderActionRequest) (ProviderAccessibilityResult, error) {
+	if len(b.actionRequests)+1 != b.failAt {
+		return b.rootOnlyBackend.ResolveAndAct(request)
+	}
+	b.actionRequests = append(b.actionRequests, request)
+	// The provider emitted a prefix before reporting failure. A fresh
+	// recovery read must show that state without retrying the input.
+	b.value = "partially typed"
+	return ProviderAccessibilityResult{
+		OK: false, Error: "input emission stopped after a prefix",
+		Failure: &ProviderFailure{
+			Code: "input_emission_failed", Phase: "emission", FactsComplete: true,
+		},
+		Mutation: &ProviderMutationFacts{
+			InputEventsEmitted: true, PartialInputPossible: true,
+			DesktopStateMutated: true, MutationUnknown: true,
+		},
+	}, nil
+}
+
+func TestRootOnlyLongBatchPartialInputKeepsEvidenceAndFullRecovery(t *testing.T) {
+	s, root := rootOnlyService(t, false, reportMain())
+	backend := &partialRootOnlyBackend{rootOnlyBackend: root, failAt: 40}
+	s.backend = backend
+	window, _ := reportObserve(t, s)
+	initialReads := len(backend.observeRequests)
+	actions := make([]any, 64)
+	for index := range actions {
+		actions[index] = map[string]any{"type": "type", "text": "text"}
+	}
+	result := s.callTool(publicToolAX, map[string]any{
+		"mode": "act", "window_ref": window, "actions": actions,
+	})
+	if !result.IsError || len(backend.actionRequests) != 40 || backend.rootOnlyReads != 39 {
+		t.Fatalf("partial input was retried or later input ran: requests=%d root=%d result=%s",
+			len(backend.actionRequests), backend.rootOnlyReads, resultText(result))
+	}
+	batch, _ := result.StructuredContent["a11y_batch_result"].(map[string]any)
+	if batch["actions_completed_without_call_error"] != 39 || batch["failed_action_index"] != 39 {
+		t.Fatalf("partial failure lost the completed prefix: %#v", batch)
+	}
+	for key, want := range map[string]any{
+		"partial_input_possible":     true,
+		"input_events_emitted":       true,
+		"mutation_unknown":           true,
+		"final_observation_returned": true,
+	} {
+		if result.StructuredContent[key] != want {
+			t.Errorf("%s=%v, want %v", key, result.StructuredContent[key], want)
+		}
+	}
+	if len(backend.observeRequests) <= initialReads {
+		t.Fatal("no independent recovery observation was attempted")
+	}
+	for _, request := range backend.observeRequests[initialReads:] {
+		if request.Observation.MaxTreeNodes == 1 {
+			t.Fatal("recovery inherited the root-only limit")
+		}
+	}
+	snapshot := s.currentSnapshot("Editor")
+	if snapshot == nil || snapshot.lightReadback || len(snapshot.Elements) <= 1 {
+		t.Fatalf("recovery did not restore full state: %#v", snapshot)
+	}
+	found := false
+	for _, element := range snapshot.Elements {
+		found = found || element.Name == "Size" && element.Value == "partially typed"
+	}
+	if !found {
+		t.Fatal("recovery omitted the state left by partial input")
+	}
+}
