@@ -74,9 +74,44 @@ class WirePeer:
 
 
 class WireTests(unittest.TestCase):
+    def test_custom_transport_retry_requires_explicit_guarantee_for_input(self):
+        for asynchronous in (False, True):
+            for kind in ("input", "read", "wait", "safe-input"):
+                with self.subTest(asynchronous=asynchronous, kind=kind):
+                    calls = []
+
+                    def transport(method, params):
+                        calls.append(dict(params))
+                        if len(calls) == 1:
+                            raise hcu.TransportClosed("lost reply", retry_safe=kind == "safe-input")
+                        return {"ok": True}
+
+                    async def async_transport(method, params):
+                        return transport(method, params)
+
+                    args = ({"mode": "apps"} if kind == "read" else {
+                        "mode": "act", "actions": [{"type": "wait" if kind == "wait" else "click", "ref": "r1"}]})
+                    desktop = (hcu.AsyncDesktop(async_transport) if asynchronous else hcu.Desktop(transport))
+                    try:
+                        result = desktop.call("AX", args)
+                        if asynchronous:
+                            result = asyncio.run(result)
+                    except hcu.TransportEffectUnknown as error:
+                        self.assertEqual(kind, "input")
+                        self.assertIsNone(error.input_emitted)
+                        self.assertEqual(len(calls), 1)
+                    else:
+                        self.assertNotEqual(kind, "input")
+                        self.assertTrue(result.ok)
+                        self.assertEqual(len(calls), 2)
+                        self.assertEqual(calls[0], calls[1])
+                    self.assertTrue(all("daemon_instance" not in call for call in calls))
+
     def test_hello_identity_mismatch_closes_before_business_call(self):
         for hello in ({"protocol": 2, "session": "default"},
-                      {"protocol": hcu.PROTOCOL, "session": "wrong-session"}):
+                      {"protocol": hcu.PROTOCOL, "session": "wrong-session"},
+                      {"protocol": hcu.PROTOCOL, "session": "default", "instance_id": 1},
+                      {"protocol": hcu.PROTOCOL, "session": "default", "instance_id": ""}):
             with self.subTest(hello=hello):
                 peer = WirePeer(lambda request: {"id": request["id"],
                                                 "result": {"ok": True}}, hello_result=hello)
@@ -225,7 +260,10 @@ class ReplayTests(unittest.TestCase):
                 requests.append(params.get("request_id"))
                 if len(requests) == 1:
                     transport.close()
-                    raise hcu.TransportClosed("test discards reply after completed input")
+                    # SocketTransport retains the instance binding in params
+                    # and refuses replay if reconnection reaches another daemon.
+                    params["replay_only"] = True
+                    raise hcu.TransportClosed("test discards reply after completed input", retry_safe=True)
                 return result
 
             result = hcu.Desktop(discard_first_reply).click(button.ref)

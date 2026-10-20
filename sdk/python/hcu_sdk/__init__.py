@@ -39,7 +39,7 @@ import uuid
 
 __all__ = [
     "AsyncDesktop", "Desktop", "HcuError", "Record", "SocketTransport",
-    "connect", "error_class", "ptc_transport",
+    "TransportClosed", "TransportEffectUnknown", "connect", "error_class", "ptc_transport",
 ]
 
 PROTOCOL = 1
@@ -139,7 +139,26 @@ def default_socket():
 
 
 class TransportClosed(Exception):
-    """The connection to the daemon dropped; the call may or may not have run."""
+    """The connection dropped; the call may or may not have run.
+
+    Custom transports may set retry_safe only when they guarantee that
+    retrying these same params cannot repeat input, including after restart.
+    """
+
+    def __init__(self, message="connection closed", retry_safe=False):
+        super().__init__(message)
+        self.retry_safe = retry_safe
+
+
+class TransportEffectUnknown(RuntimeError):
+    """No reliable result exists; inspect current state before new input."""
+
+    code = "effect_unknown"
+    input_emitted = None
+
+    def __init__(self, message, request_id=None):
+        super().__init__(message)
+        self.request_id = request_id
 
 
 class SocketTransport:
@@ -186,6 +205,9 @@ class SocketTransport:
             if not isinstance(session, str) or not session or (
                     self.session.strip() and session != self.session.strip()):
                 raise RuntimeError("daemon: unexpected session in hello")
+            if "instance_id" in hello and (
+                    not isinstance(hello["instance_id"], str) or not hello["instance_id"]):
+                raise RuntimeError("daemon: invalid instance_id in hello")
             self.hello = hello
         except BaseException:
             self.close()
@@ -244,14 +266,42 @@ class SocketTransport:
             # protocol failure as a dropped connection and silently retry it.
             raise RuntimeError("daemon: invalid response: %s" % error) from error
         if "error" in response:
+            if response["error"]["code"] in (-32011, -32012):
+                raise TransportEffectUnknown(response["error"]["message"], params.get("request_id"))
             raise RuntimeError("daemon: %s" % response["error"]["message"])
         return response["result"]
 
     def __call__(self, method, params):
         with self._lock:
             if self._sock is None:
-                self._connect()
-            return self._exchange(method, params)
+                try:
+                    self._connect()
+                except TransportClosed as error:
+                    # The business request has not been sent yet.
+                    error.retry_safe = True
+                    raise
+            mutation = method == "call" and _may_emit_input(params.get("tool"), params.get("args", {}))
+            if mutation:
+                instance = self.hello.get("instance_id")
+                bound = params.get("daemon_instance")
+                if bound and bound != instance:
+                    raise TransportEffectUnknown(
+                        "daemon restarted; the previous input may have run; automatic replay stopped",
+                        params.get("request_id"))
+                if instance:
+                    # This dict belongs to one Desktop.call. Its binding survives
+                    # close/reconnect and is checked under the same lock as send.
+                    params["daemon_instance"] = instance
+            try:
+                return self._exchange(method, params)
+            except TransportClosed as error:
+                request_id = params.get("request_id")
+                error.retry_safe = not mutation or bool(
+                    params.get("daemon_instance") and isinstance(request_id, str) and request_id.strip())
+                if mutation and error.retry_safe:
+                    # An evicted result cannot turn a retry into fresh input.
+                    params["replay_only"] = True
+                raise
 
 
 def ptc_transport(ax, gui):
@@ -424,6 +474,21 @@ def _wants_request_id(tool, args):
     return args.get("mode") == "act"
 
 
+def _may_emit_input(tool, args):
+    if tool == "GUI":
+        return any(action.get("type") not in ("screenshot", "wait")
+                   for action in args.get("actions", []))
+    return args.get("mode") == "act" and any(
+        action.get("type") != "wait" for action in args.get("actions", []))
+
+
+def _check_retry(error, tool, args, params):
+    if _may_emit_input(tool, args) and not error.retry_safe:
+        raise TransportEffectUnknown(
+            "connection lost; input may have run; transport cannot guarantee safe replay",
+            params.get("request_id")) from error
+
+
 def _call_params(tool, args, request_id, since):
     params = {"tool": tool, "args": args, "format": "records"}
     if request_id is None and _wants_request_id(tool, args):
@@ -446,16 +511,18 @@ class Desktop(_Builders):
         """Run one public call and return its Record; raise on ok:false.
 
         act and GUI input carry a request_id. When the connection drops, the
-        call is sent again with the same id. The same running daemon returns
-        the first result without repeating input. A restarted daemon has no
-        replay cache, so retrying across a restart can repeat input.
+        call is sent again with the same id only to the same daemon instance.
+        A restarted daemon has no replay cache, so replay stops with
+        TransportEffectUnknown before sending input to that instance.
+        Old daemons and custom transports without a safe-replay guarantee
+        do not automatically retry input after a dropped reply.
         """
         params = _call_params(tool, args, request_id, since)
         for attempt in range(self.retries + 1):
             try:
                 return _raise_for(Record.wrap(self.transport("call", params)))
-            except TransportClosed:
-                # Input request IDs deduplicate only within a running daemon.
+            except TransportClosed as error:
+                _check_retry(error, tool, args, params)
                 if attempt == self.retries:
                     raise
                 time.sleep(0.2 * (attempt + 1))
@@ -508,7 +575,8 @@ class AsyncDesktop(_Builders):
             try:
                 raw = await self._send("call", params)
                 return _raise_for(Record.wrap(raw))
-            except TransportClosed:
+            except TransportClosed as error:
+                _check_retry(error, tool, args, params)
                 if attempt == self.retries:
                     raise
                 await asyncio.sleep(0.2 * (attempt + 1))
