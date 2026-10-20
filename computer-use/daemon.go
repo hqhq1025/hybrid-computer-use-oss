@@ -58,7 +58,8 @@ type daemon struct {
 	stopOnce sync.Once
 	nextConn int
 	// savedCounters is the last value written by saveRefCounters.
-	savedCounters refCounters
+	savedCounters     refCounters
+	refPersistenceErr error
 }
 
 // desktopFingerprint is the session environment the daemon serves. A
@@ -168,7 +169,7 @@ func newDaemon(socket string, desktop *desktopState, environment []string, idle 
 		lastUsed:    time.Now(),
 		stopped:     make(chan struct{}),
 	}
-	server.loadRefCounters()
+	server.refPersistenceErr = server.loadRefCounters()
 	return server
 }
 
@@ -184,14 +185,24 @@ type refCounters struct {
 
 func (d *daemon) countersPath() string { return d.socket + ".refs" }
 
-func (d *daemon) loadRefCounters() {
+func (d *daemon) loadRefCounters() error {
 	data, err := os.ReadFile(d.countersPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
-		return
+		return fmt.Errorf("read reference counters: %w", err)
 	}
 	var counters refCounters
-	if json.Unmarshal(data, &counters) != nil {
-		return
+	if err := json.Unmarshal(data, &counters); err != nil {
+		return fmt.Errorf("decode reference counters: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(data, &fields)
+	for _, key := range []string{"a", "w", "r"} {
+		if value := fields[key]; len(value) == 0 || string(value) == "null" {
+			return fmt.Errorf("reference counters missing %q", key)
+		}
 	}
 	if counters.App > d.desktop.appRefRegistry.next {
 		d.desktop.appRefRegistry.next = counters.App
@@ -202,26 +213,103 @@ func (d *daemon) loadRefCounters() {
 	if counters.Element > d.desktop.refRegistry.next {
 		d.desktop.refRegistry.next = counters.Element
 	}
+	d.savedCounters = counters
+	return nil
 }
 
 // saveRefCounters runs after each call, under the desktop lock.
-func (d *daemon) saveRefCounters() {
+func (d *daemon) saveRefCounters() error {
 	counters := refCounters{
 		App:     d.desktop.appRefRegistry.next,
 		Window:  d.desktop.windowRefRegistry.next,
 		Element: d.desktop.refRegistry.next,
 	}
 	if counters == d.savedCounters {
-		return
+		return nil
 	}
 	data, _ := json.Marshal(counters)
-	if os.WriteFile(d.countersPath(), data, 0o600) == nil {
-		d.savedCounters = counters
+	file, err := os.CreateTemp(filepath.Dir(d.countersPath()), ".refs-*")
+	if err != nil {
+		return err
 	}
+	defer os.Remove(file.Name())
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err := os.Rename(file.Name(), d.countersPath()); err != nil {
+		return err
+	}
+	d.savedCounters = counters
+	return nil
+}
+
+// withDesktopCall keeps both transports inside the same desktop boundary.
+// Persist refs before releasing the lock or delivering them to a client.
+func (d *daemon) withDesktopCall(run func() any) (any, error) {
+	d.desktop.shared.mu.Lock()
+	defer d.desktop.shared.mu.Unlock()
+	if d.refPersistenceErr != nil {
+		return nil, d.refPersistenceErr
+	}
+	if d.currentEnvironment != nil {
+		if now := d.currentEnvironment(); now != d.environment {
+			return nil, fmt.Errorf("the desktop environment changed from %q to %q since this daemon started; "+
+				"no call was run. Stop this daemon and start a new one", d.environment, now)
+		}
+	}
+	result := run()
+	if err := d.saveRefCounters(); err != nil {
+		d.refPersistenceErr = fmt.Errorf("reference counters could not be saved: %w; this daemon will refuse further calls. "+
+			"Do not reuse returned refs or retry input; the preceding call may already have emitted input", err)
+		return result, d.refPersistenceErr
+	}
+	return result, nil
+}
+
+// A failed save must not publish numbers a restarted daemon may reuse.
+// Return only input facts, not the tree, refs, or arbitrary application text.
+func daemonToolError(result toolCallResult, err error) toolCallResult {
+	source := result.StructuredContent
+	if source == nil && len(result.Content) > 0 && result.Content[0].Type == "text" {
+		_ = json.Unmarshal([]byte(result.Content[0].Text), &source)
+	}
+	facts := map[string]any{"ok": false, "code": axCodeRuntimeError}
+	for _, key := range []string{"input_emitted", "completed", "requested"} {
+		if value, ok := source[key]; ok {
+			facts[key] = value
+		}
+	}
+	for key, value := range daemonMutationFacts(source) {
+		facts[key] = value
+	}
+	failure := textResult(compactJSON(facts), true)
+	failure.Content = append(failure.Content, contentItem{Type: "text", Text: err.Error()})
+	if result.StructuredContent != nil {
+		failure.StructuredContent = facts
+	}
+	return failure
+}
+
+func daemonMutationFacts(source map[string]any) map[string]any {
+	facts := map[string]any{}
+	for _, key := range []string{"partial_input_possible", "mutation_unknown", "effect_unknown"} {
+		if value, ok := source[key].(bool); ok {
+			facts[key] = value
+		}
+	}
+	return facts
 }
 
 // listen binds the socket with mode 0600.
 func (d *daemon) listen() error {
+	if d.refPersistenceErr != nil {
+		return d.refPersistenceErr
+	}
 	if err := prepareSocketPath(d.socket); err != nil {
 		return err
 	}
@@ -415,9 +503,15 @@ func (d *daemon) handleRequest(line []byte, sessionName *string) map[string]any 
 			return jsonRPCError(id, -32602, "mcp requires message")
 		}
 		svc := d.session(*sessionName)
-		d.desktop.shared.mu.Lock()
-		response := handleMCPRequest(message, svc)
-		d.desktop.shared.mu.Unlock()
+		value, callErr := d.withDesktopCall(func() any { return handleMCPRequest(message, svc) })
+		response, _ := value.(map[string]any)
+		if callErr != nil {
+			if result, ok := response["result"].(toolCallResult); ok {
+				response["result"] = daemonToolError(result, callErr)
+			} else if message["id"] != nil {
+				response = jsonRPCError(message["id"], -32603, callErr.Error())
+			}
+		}
 		return jsonRPCResult(id, map[string]any{"message": response})
 	default:
 		return jsonRPCError(id, -32601, "Method not found: "+method)
@@ -454,25 +548,32 @@ func (d *daemon) call(svc *service, params map[string]any) any {
 			Message: fmt.Sprintf("unknown tool %q; use AX or GUI", tool), TimingMS: map[string]int64{}}
 	}
 	run := func() any {
-		d.desktop.shared.mu.Lock()
-		defer d.desktop.shared.mu.Unlock()
-		defer d.saveRefCounters()
-		if d.currentEnvironment != nil {
-			if now := d.currentEnvironment(); now != d.environment {
-				return Record{OK: false, Op: recordOp(publicName, args), Code: axCodeRuntimeError,
-					Message: fmt.Sprintf("the desktop environment changed from %q to %q since this daemon started; "+
-						"no call was run. Stop this daemon and start a new one", d.environment, now),
-					TimingMS: map[string]int64{}}
+		response, callErr := d.withDesktopCall(func() any {
+			if format == formatText {
+				result, code, err := svc.callForText(publicName, args)
+				if err != nil {
+					return textResult(err.Error(), true)
+				}
+				return textCallResponse{toolCallResult: result, Code: code}
 			}
+			return svc.callRecord(publicName, args, options)
+		})
+		if callErr == nil {
+			return response
 		}
 		if format == formatText {
-			result, code, err := svc.callForText(publicName, args)
-			if err != nil {
-				return textResult(err.Error(), true)
-			}
-			return textCallResponse{toolCallResult: result, Code: code}
+			result, _ := response.(textCallResponse)
+			result.toolCallResult = daemonToolError(result.toolCallResult, callErr)
+			result.Code = axCodeRuntimeError
+			return result
 		}
-		return svc.callRecord(publicName, args, options)
+		record, ok := response.(Record)
+		if !ok {
+			record = Record{Op: recordOp(publicName, args), TimingMS: map[string]int64{}}
+		}
+		return Record{OK: false, Op: record.Op, Code: axCodeRuntimeError, Message: callErr.Error(),
+			InputEmitted: record.InputEmitted, Completed: record.Completed, Requested: record.Requested,
+			Evidence: daemonMutationFacts(record.Evidence), TimingMS: record.TimingMS}
 	}
 	if strings.TrimSpace(options.RequestID) == "" {
 		return run()

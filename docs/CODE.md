@@ -98,10 +98,15 @@ The CLI and SDK start it on first use.
 | Methods | `hello` (version, contract version, display check), `call`, `schema`, `status`, `stop`, `mcp` |
 | Sessions | each connection has its own session unless `hello` names one (`HCU_SESSION`, `--session`); same name, same session |
 | Input lock | one call runs at a time across all sessions, so input never interleaves. A `wait` step polls inside its call and holds the lock for at most its `timeout_ms` (default 5000, at most 60000), as the `until` it replaced did; the lock is not released between polls. The CLI `wait` command and SDK `wait()` send `observe:"none"`, so a wait adds no tree read after it, also when it times out. An act of only `wait` steps sends no input, so an in-process MCP server allows it while a daemon runs |
-| `request_id` | a call with an id runs once; a repeat (also on a new connection) returns the first result with `replayed: true`; kept 10 minutes |
+| `request_id` | within one running daemon, a call with an id runs once; a repeat (also on a new connection) returns the first result with `replayed: true`; kept 10 minutes. Restart clears this replay cache |
 | Environment | `hello` with another display is refused; a call after the daemon's own session environment changed is refused with `runtime_error` |
-| Restart | ref counters are saved beside the socket, so a restarted daemon never issues an old number; old refs fail as expired |
+| Restart | ordinary calls and attached MCP calls save ref counters beside the socket before returning refs. A normal restart reads those counters and does not reissue old numbers; old refs fail as expired. This is not a crash-safe allocation guarantee |
 | Idle | exits after the idle timeout with no connection |
+
+If ref counters cannot be saved, the daemon withholds the new refs and refuses
+later calls. The error retains available input and partial-completion facts;
+the preceding action may already have run. Invalid existing counter files
+prevent startup. Preserve the counter file when restarting the daemon.
 
 ## Command line
 
@@ -149,9 +154,15 @@ name `hcu`.
 - Records are dicts with attribute access. `ok:false` raises `HcuError`; the
   subclass is named after the code (`hcu.StaleRef`).
 - `act` and GUI input get a fresh `request_id`; after a dropped connection
-  the SDK reconnects and resends with the same id.
+  the SDK reconnects and resends with the same id. Deduplication requires the
+  same daemon and an entry still in its replay cache. Automatic retry across
+  daemon restart can repeat input; use `retries=0` when that risk is unacceptable.
 - `AsyncDesktop` has the same methods as coroutines, over the socket or any
   async transport (`hcu.ptc_transport(hcu_ax, hcu_gui)` in a PTC container).
+- A shared `SocketTransport` serializes the complete request and response,
+  including connection setup and hello. Responses must match their request
+  IDs. A failed hello, EOF, or invalid response clears the connection state.
+  Invalid responses raise a protocol error without an automatic retry.
 - Examples: `sdk/python/examples/` (read a sheet, check a menu item, save as).
 
 ## Programmatic tool calling

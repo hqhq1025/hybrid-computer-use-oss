@@ -33,6 +33,7 @@ import os
 import shutil
 import socket as _socket
 import subprocess
+import threading
 import time
 import uuid
 
@@ -157,6 +158,9 @@ class SocketTransport:
         self._sock = None
         self._buffer = b""
         self._next_id = 0
+        # AsyncDesktop runs synchronous calls in worker threads. A connection
+        # owns one request/reply exchange, including its initial handshake.
+        self._lock = threading.RLock()
 
     def _connect(self):
         try:
@@ -174,18 +178,36 @@ class SocketTransport:
         display = os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")
         if display:
             params["display"] = display
-        self.hello = self._exchange("hello", params)
+        try:
+            hello = self._exchange("hello", params)
+            if type(hello.get("protocol")) is not int or hello["protocol"] != PROTOCOL:
+                raise RuntimeError("daemon: unsupported protocol in hello")
+            session = hello.get("session")
+            if not isinstance(session, str) or not session or (
+                    self.session.strip() and session != self.session.strip()):
+                raise RuntimeError("daemon: unexpected session in hello")
+            self.hello = hello
+        except BaseException:
+            self.close()
+            raise
 
     def _open(self):
         sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
-        sock.settimeout(self.timeout)
-        sock.connect(self.path)
+        try:
+            sock.settimeout(self.timeout)
+            sock.connect(self.path)
+        except BaseException:
+            sock.close()
+            raise
         self._sock, self._buffer = sock, b""
 
     def close(self):
-        if self._sock is not None:
-            self._sock.close()
-            self._sock = None
+        with self._lock:
+            sock, self._sock = self._sock, None
+            self._buffer = b""
+            self.hello = None
+            if sock is not None:
+                sock.close()
 
     def _exchange(self, method, params):
         self._next_id += 1
@@ -198,19 +220,38 @@ class SocketTransport:
                 if not chunk:
                     raise TransportClosed("daemon closed the connection")
                 self._buffer += chunk
-        except (OSError, _socket.timeout) as error:
+        except (OSError, TransportClosed) as error:
             self.close()
-            raise TransportClosed(str(error))
+            raise TransportClosed(str(error)) from error
         line, self._buffer = self._buffer.split(b"\n", 1)
-        response = json.loads(line)
-        if response.get("error"):
-            raise RuntimeError("daemon: %s" % response["error"].get("message"))
+        try:
+            response = json.loads(line)
+            if (not isinstance(response, dict) or response.get("jsonrpc") != "2.0"
+                    or type(response.get("id")) is not int
+                    or response["id"] != self._next_id
+                    or ("result" in response) == ("error" in response)):
+                raise ValueError("unexpected response envelope or id")
+            if "error" in response:
+                error = response["error"]
+                if (not isinstance(error, dict) or type(error.get("code")) is not int
+                        or not isinstance(error.get("message"), str)):
+                    raise ValueError("invalid error response")
+            elif not isinstance(response["result"], dict):
+                raise ValueError("result must be an object")
+        except (ValueError, UnicodeError) as error:
+            self.close()
+            # The reply cannot establish what happened. Do not classify a
+            # protocol failure as a dropped connection and silently retry it.
+            raise RuntimeError("daemon: invalid response: %s" % error) from error
+        if "error" in response:
+            raise RuntimeError("daemon: %s" % response["error"]["message"])
         return response["result"]
 
     def __call__(self, method, params):
-        if self._sock is None:
-            self._connect()
-        return self._exchange(method, params)
+        with self._lock:
+            if self._sock is None:
+                self._connect()
+            return self._exchange(method, params)
 
 
 def ptc_transport(ax, gui):
@@ -405,15 +446,16 @@ class Desktop(_Builders):
         """Run one public call and return its Record; raise on ok:false.
 
         act and GUI input carry a request_id. When the connection drops, the
-        call is sent again with the same id: the daemon then returns the
-        first result and sends no input twice.
+        call is sent again with the same id. The same running daemon returns
+        the first result without repeating input. A restarted daemon has no
+        replay cache, so retrying across a restart can repeat input.
         """
         params = _call_params(tool, args, request_id, since)
         for attempt in range(self.retries + 1):
             try:
                 return _raise_for(Record.wrap(self.transport("call", params)))
             except TransportClosed:
-                # Reads are safe to repeat; input carries a request_id.
+                # Input request IDs deduplicate only within a running daemon.
                 if attempt == self.retries:
                     raise
                 time.sleep(0.2 * (attempt + 1))
@@ -452,7 +494,10 @@ class AsyncDesktop(_Builders):
         self.retries = retries
 
     async def _send(self, method, params):
-        result = self.transport(method, params)
+        if asyncio.iscoroutinefunction(self.transport):
+            return await self.transport(method, params)
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, self.transport, method, params)
         if asyncio.iscoroutine(result):
             return await result
         return result
@@ -461,11 +506,7 @@ class AsyncDesktop(_Builders):
         params = _call_params(tool, args, request_id, since)
         for attempt in range(self.retries + 1):
             try:
-                if asyncio.iscoroutinefunction(self.transport):
-                    raw = await self.transport("call", params)
-                else:
-                    raw = await asyncio.get_running_loop().run_in_executor(
-                        None, self.transport, "call", params)
+                raw = await self._send("call", params)
                 return _raise_for(Record.wrap(raw))
             except TransportClosed:
                 if attempt == self.retries:
