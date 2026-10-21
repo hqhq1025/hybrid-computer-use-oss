@@ -190,6 +190,7 @@ def dispatch_provider_operation(
             "text": inventory["text"],
             "apps": inventory["apps"],
             "notes": inventory["notes"],
+            "inventory_issues": inventory.get("inventory_issues", []),
         }
     if operation_kind == "window_list":
         return app_window_inventory(

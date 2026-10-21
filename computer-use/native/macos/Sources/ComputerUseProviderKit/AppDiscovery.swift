@@ -1,5 +1,6 @@
 import AppKit
 import CoreServices
+import Darwin
 import Foundation
 
 public struct RunningAppDescriptor {
@@ -127,13 +128,24 @@ enum AppDiscovery {
         return runningEntries + recentEntries
     }
 
-    static func runningApps() -> [RunningAppDescriptor] {
-        NSWorkspace.shared.runningApplications
+    static func runningApps(
+        readWorkspace: () -> [NSRunningApplication] = {
+            NSWorkspace.shared.runningApplications
+        }
+    ) -> [RunningAppDescriptor] {
+        if !Thread.isMainThread {
+            return DispatchQueue.main.sync {
+                runningApps(readWorkspace: readWorkspace)
+            }
+        }
+        // A worker can retain an older workspace snapshot across app launches
+        // and exits. Read and materialize each inventory on the main run loop.
+        return readWorkspace()
             .filter {
                 isDiscoverableRunningApplication(
                     isTerminated: $0.isTerminated,
                     bundleIdentifier: $0.bundleIdentifier
-                )
+                ) && !processIsKnownMissing($0.processIdentifier)
             }
             .sorted { lhs, rhs in
                 if lhs.isActive != rhs.isActive {
@@ -236,6 +248,20 @@ enum AppDiscovery {
         bundleIdentifier: String?
     ) -> Bool {
         !isTerminated && bundleIdentifier.map(isDiscoverableBundleIdentifier) != false
+    }
+
+    static func processIsKnownMissing(
+        _ pid: pid_t,
+        probe: (pid_t) -> (result: Int32, error: Int32) = { pid in
+            let result = Darwin.kill(pid, 0)
+            return (result, errno)
+        }
+    ) -> Bool {
+        // NSWorkspace can retain an exited process until its run loop updates.
+        // Only ESRCH proves absence; denied or unavailable probes remain unknown.
+        guard pid > 0 else { return false }
+        let result = probe(pid)
+        return result.result != 0 && result.error == ESRCH
     }
 
     static func compareListedApps(_ lhs: ListedAppDescriptor, _ rhs: ListedAppDescriptor) -> Bool {

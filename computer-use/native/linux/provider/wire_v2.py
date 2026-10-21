@@ -787,6 +787,7 @@ def _accessibility_result(response):
         ("actionEvidence", "action_evidence"),
         ("recoveryContext", "recovery_context"),
         ("apps", "apps"),
+        ("inventory_issues", "inventory_issues"),
         ("resolvedElement", "resolved_element"),
         ("candidates", "candidates"),
         ("candidateCount", "candidate_count"),

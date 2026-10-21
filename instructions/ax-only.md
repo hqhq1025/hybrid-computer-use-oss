@@ -23,6 +23,8 @@ option. Follow the current tool schema for argument shapes and actions.
 
 ## Observe And Act
 
+- An incomplete `apps` inventory still provides confirmed refs. Missing
+  windows remain unknown; they do not prove closure or a unique title match.
 - List windows with `apps`, then observe or find in one window. Use content
   scope for one identifiable page or document root, and window scope for
   chrome, menus, dialogs, and settings. `app` accepts a name or PID;

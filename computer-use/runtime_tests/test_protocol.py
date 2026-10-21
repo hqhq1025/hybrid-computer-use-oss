@@ -8,6 +8,16 @@ from runtime_test_support import *  # noqa: F401,F403
 
 
 class RuntimeActionEvidenceFailureTests(unittest.TestCase):
+    def test_partial_apps_wire_preserves_typed_unknown_coverage(self):
+        issues = [{"app": "Busy app", "reason": "AXWindows unavailable"}]
+        result = wire_v2._accessibility_result({
+            "ok": True, "apps": [{"name": "Editor"}],
+            "notes": ["Incomplete: Busy app"], "inventory_issues": issues,
+        })
+        self.assertEqual(result["inventory_issues"], issues)
+        self.assertEqual(result["apps"], [{"name": "Editor"}])
+        self.assertEqual(result["notes"], ["Incomplete: Busy app"])
+
     def test_partial_failure_preserves_runtime_route(self):
         runtime._CURRENT_ACTION_EVIDENCE = {
             "route": "coordinate_synthesis",

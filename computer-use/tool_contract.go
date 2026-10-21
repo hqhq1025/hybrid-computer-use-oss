@@ -178,7 +178,7 @@ func axInputSchema() map[string]any {
 		"properties": map[string]any{
 			"mode": map[string]any{
 				"type": "string", "enum": []string{axModeApps, axModeObserve, axModeFind, axModeAct},
-				"description": "apps lists every top-level window (wN, title, app, active); observe returns a tree or diff with rN; find returns matching rN; act runs actions.",
+				"description": "apps lists confirmed top-level windows (wN, title, app, active) and reports incomplete inventories; observe returns a tree or diff with rN; find returns matching rN; act runs actions.",
 			},
 			"app": nonBlankString(appArgumentHelp),
 			"window_ref": map[string]any{
@@ -405,7 +405,7 @@ func guiInputSchema() map[string]any {
 // axToolDescription is model-visible on every client, including ones that
 // compact the input schema. Clients may truncate descriptions at 1,000 bytes.
 const axToolDescription = "Accessibility for application windows. Modes: " +
-	"apps lists windows (wN, title, app, active). observe returns the window tree with " +
+	"apps lists confirmed windows (wN, title, app, active) and reports incomplete inventories; missing windows then remain unknown. observe returns the window tree with " +
 	"rN refs. find returns matching rN. act runs ordered steps, checks them before input, " +
 	"stops at the first failed step, and reports each target's change, windows " +
 	"opened/closed/focused, and a diff. Copy rN/wN exactly; stale refs fail. keypress/type " +

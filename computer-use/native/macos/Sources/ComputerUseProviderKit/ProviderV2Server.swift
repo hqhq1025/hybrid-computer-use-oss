@@ -324,7 +324,7 @@ public enum ProviderV2ResponseBuilder {
     ) -> [String: Any] {
         var result: [String: Any] = ["ok": wireBool(runtime["ok"])]
         for key in [
-            "text", "error", "notes", "snapshot", "apps",
+            "text", "error", "notes", "snapshot", "apps", "inventory_issues",
             "resolved_element", "candidates", "candidate_count",
             "candidates_truncated",
             "external_desktop_transition",

@@ -446,7 +446,7 @@ func (s *service) waitForDesktopWindow(context *axBatchContext, wait *axWait) to
 	lastError := ""
 	for {
 		attempts++
-		inventory, failure := s.listDesktopWindows()
+		inventory, failure := s.listDesktopWindows(false)
 		matched := []axDesktopWindow{}
 		titleMatches := 0
 		if inventory == nil {

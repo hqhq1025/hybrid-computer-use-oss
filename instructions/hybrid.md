@@ -29,6 +29,9 @@ fits which state, and how to combine them.
 
 ## Work Efficiently
 
+- `apps` may report an incomplete inventory when an application does not
+  answer. Use confirmed refs from that listing. Missing windows remain unknown;
+  do not infer that they closed or that a title match is unique.
 - Once the source, target, and operation are known, act. Further checks must
   answer a concrete blocker.
 - Plan from one read. After `observe` or `find`, put every action you can

@@ -21,9 +21,10 @@ type axDesktopWindow struct {
 	appProcess [2]string
 }
 
-// axWindowInventory is one complete listing of top-level windows.
+// axWindowInventory contains confirmed windows and any unobserved applications.
 type axWindowInventory struct {
 	windows []axDesktopWindow
+	issues  []ProviderInventoryIssue
 	// titles holds every input-target window title, including windows
 	// without a ref, so a title wait never misses one.
 	titles         []string
@@ -35,7 +36,7 @@ type axWindowInventory struct {
 // top-level windows and issues a wN for each addressable window. The same
 // registry issues wN for observed windows, so a window keeps its ref across
 // apps, observe, and act.
-func (s *service) listDesktopWindows() (*axWindowInventory, toolCallResult) {
+func (s *service) listDesktopWindows(allowIncomplete bool) (*axWindowInventory, toolCallResult) {
 	response, err := s.callProviderObserveApps(ProviderObserveAppsRequest{
 		ProtocolVersion: providerProtocolV2,
 	})
@@ -51,7 +52,25 @@ func (s *service) listDesktopWindows() (*axWindowInventory, toolCallResult) {
 	if !response.OK {
 		return nil, textResult(response.Error, true)
 	}
-	inventory := &axWindowInventory{}
+	inventory := &axWindowInventory{issues: response.InventoryIssues}
+	issueLines := []string{}
+	for _, issue := range inventory.issues {
+		subject := "applications"
+		if issue.App != "" {
+			subject = strconv.Quote(issue.App)
+		}
+		issueLines = append(issueLines, "Incomplete window inventory for "+subject+": "+issue.Reason)
+	}
+	if !allowIncomplete && len(issueLines) > 0 {
+		result := textResult(strings.Join(issueLines, "\n")+
+			"\nWindow absence, unique titles, and focus cannot be inferred from this listing. Use a confirmed wN from AX apps.", true)
+		result.StructuredContent = map[string]any{
+			"failure_code":       "observation_incomplete",
+			"inventory_complete": false,
+			"inventory_issues":   inventory.issues,
+		}
+		return nil, result
+	}
 	lines := []string{}
 	for _, app := range response.Apps {
 		if !app.InputCapable {
@@ -111,6 +130,7 @@ func (s *service) listDesktopWindows() (*axWindowInventory, toolCallResult) {
 	// The provider says when the listing is incomplete, for example when an
 	// application does not answer; a missing window is not proof of absence.
 	lines = append(lines, response.Notes...)
+	lines = append(lines, issueLines...)
 	if len(lines) == 0 {
 		lines = append(lines, "No top-level windows are visible to the accessibility provider.")
 	}
@@ -129,13 +149,17 @@ func (window axDesktopWindow) line() string {
 }
 
 func (s *service) listApps() toolCallResult {
-	inventory, failure := s.listDesktopWindows()
+	inventory, failure := s.listDesktopWindows(true)
 	if inventory == nil {
 		return failure
 	}
 	s.lastInventory = inventory
 	result := textResult(inventory.text, false)
 	result.StructuredContent = map[string]any{"window_count": len(inventory.windows)}
+	if len(inventory.issues) > 0 {
+		result.StructuredContent["inventory_complete"] = false
+		result.StructuredContent["inventory_issues"] = inventory.issues
+	}
 	return result
 }
 
@@ -155,7 +179,7 @@ func (s *service) describeAmbiguousApp(result *toolCallResult, candidates []Prov
 	if len(processes) == 0 {
 		return
 	}
-	inventory, _ := s.listDesktopWindows()
+	inventory, _ := s.listDesktopWindows(false)
 	if inventory == nil {
 		return
 	}
@@ -183,7 +207,7 @@ func (s *service) describeAmbiguousApp(result *toolCallResult, candidates []Prov
 // returned wN is then verified like any other window ref and is never
 // matched by title again.
 func (s *service) resolveWindowTitle(title string) (*axDesktopWindow, *axArgError) {
-	inventory, failure := s.listDesktopWindows()
+	inventory, failure := s.listDesktopWindows(false)
 	if inventory == nil {
 		return nil, &axArgError{
 			code:    axCodeRuntimeError,
@@ -223,7 +247,7 @@ func (s *service) resolveWindowTitle(title string) (*axDesktopWindow, *axArgErro
 
 // resolveFocusedWindow returns the window that holds keyboard focus now.
 func (s *service) resolveFocusedWindow() (*axDesktopWindow, *axArgError) {
-	inventory, failure := s.listDesktopWindows()
+	inventory, failure := s.listDesktopWindows(false)
 	if inventory == nil {
 		return nil, &axArgError{
 			code:    axCodeRuntimeError,

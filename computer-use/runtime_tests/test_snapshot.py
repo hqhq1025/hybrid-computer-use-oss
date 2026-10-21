@@ -1311,6 +1311,9 @@ class ListAppsTopLevelWindowTests(AtspiPatchedTestCase):
         self.assertEqual([a["name"] for a in result["apps"]], ["editor"])
         self.assertEqual(len(result["notes"]), 1)
         self.assertIn("1 application(s) did not answer", result["notes"][0])
+        self.assertEqual(len(result["inventory_issues"]), 1)
+        self.assertEqual(result["inventory_issues"][0]["app"], "unnamed application")
+        self.assertIn("remain unknown", result["inventory_issues"][0]["reason"])
 
     def test_complete_listing_has_no_notes(self):
         doc = _TreeNode(role="frame", name="Doc")
@@ -1319,7 +1322,9 @@ class ListAppsTopLevelWindowTests(AtspiPatchedTestCase):
         self._patch_inventory(
             [editor], {}, {"windowIds": set(), "activeWindow": None},
         )
-        self.assertEqual(runtime.list_apps_inventory()["notes"], [])
+        result = runtime.list_apps_inventory()
+        self.assertEqual(result["notes"], [])
+        self.assertEqual(result["inventory_issues"], [])
 
     def test_unreadable_window_manager_falls_back_to_atspi_active(self):
         window = _TreeNode(role="frame", name="Doc")
@@ -1334,6 +1339,21 @@ class ListAppsTopLevelWindowTests(AtspiPatchedTestCase):
 
 
 class ProviderInventoryCompletenessTests(AtspiPatchedTestCase):
+    def test_incomplete_application_enumeration_reaches_apps_evidence(self):
+        root = _TreeNode(role="desktop", name="Desktop")
+        def fail():
+            raise RuntimeError("AX bus failed")
+        root.get_child_count = fail
+        with mock.patch.object(runtime, "desktop", return_value=root), mock.patch.object(
+            runtime, "correlation_root_window_state", return_value=None
+        ):
+            result = runtime.list_apps_inventory()
+        self.assertEqual(result["apps"], [])
+        self.assertEqual(result["inventory_issues"], [{
+            "reason": "The accessibility bus did not list every application."
+        }])
+        self.assertTrue(result["notes"])
+
     def test_desktop_child_count_failure_is_incomplete_not_empty(self):
         root = _TreeNode(role="desktop", name="Desktop")
 
