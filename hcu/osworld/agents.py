@@ -315,6 +315,8 @@ GEMINI_EXCLUDED_TOOLS = (
     "update_topic",
 )
 GEMINI_THINKING_LEVELS = ("minimal", "low", "medium", "high")
+# Gemini parses MCP identity at the first underscore after its "mcp_" prefix.
+GEMINI_MCP_SERVER = "computer-use"
 # Gemini CLI waits 60 s for response headers by default. The gateway relays a
 # streamed response only after it completes, so long generations need more.
 GEMINI_REQUEST_TIMEOUT_SEC = 600
@@ -379,8 +381,8 @@ def gemini_settings(
         "hooksConfig": {"enabled": False},
         "admin": {"extensions": {"enabled": False}, "skills": {"enabled": False}},
         "tools": {"exclude": list(GEMINI_EXCLUDED_TOOLS)},
-        "mcpServers": {"computer_use": server},
-        "mcp": {"allowed": ["computer_use"]},
+        "mcpServers": {GEMINI_MCP_SERVER: server},
+        "mcp": {"allowed": [GEMINI_MCP_SERVER]},
         "security": {
             "auth": {"selectedType": "gemini-api-key", "enforcedType": "gemini-api-key"},
             "environmentVariableRedaction": {"allowed": ["COMPUTER_USE_CHANNELS"]},

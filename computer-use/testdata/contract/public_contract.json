@@ -638,6 +638,10 @@
                 "type": "object"
               }
             ],
+            "properties": {
+              "actions": {},
+              "settle_ms": {}
+            },
             "type": "object"
           },
           "name": "GUI",
