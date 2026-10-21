@@ -8,10 +8,13 @@ func requestWindowBindingRestoresOnSuccessFailureAndNestedRequests() throws {
     service.activeAppIdentity = ["providerBusName": "outer-app"]
     service.activeWindowHandle = "outer-window"
     try service.withAppIdentity(["providerBusName": "app-a"], windowHandle: "window-a") {
-        #expect(try service.snapshotWindowHandle(requested: nil) == "window-a")
-        #expect(try service.snapshotWindowHandle(requested: "") == "window-a")
+        let inherited = try service.snapshotWindowHandle(requested: nil)
+        let empty = try service.snapshotWindowHandle(requested: "")
+        #expect(inherited == "window-a")
+        #expect(empty == "window-a")
         try service.withAppIdentity(["providerBusName": "app-b"], windowHandle: "window-b") {
-            #expect(try service.snapshotWindowHandle(requested: nil) == "window-b")
+            let nested = try service.snapshotWindowHandle(requested: nil)
+            #expect(nested == "window-b")
         }
         #expect(service.activeAppIdentity?["providerBusName"] as? String == "app-a")
         #expect(service.activeWindowHandle == "window-a")
@@ -54,8 +57,10 @@ func unboundRequestDoesNotInheritAnEarlierRequestWindow() throws {
     try service.withAppIdentity(nil, windowHandle: "window-a") {
         try service.withAppIdentity(nil) {
             #expect(service.activeWindowHandle == nil)
-            #expect(try service.snapshotWindowHandle(requested: nil) == nil)
-            #expect(try service.snapshotWindowHandle(requested: "explicit") == "explicit")
+            let unbound = try service.snapshotWindowHandle(requested: nil)
+            let explicit = try service.snapshotWindowHandle(requested: "explicit")
+            #expect(unbound == nil)
+            #expect(explicit == "explicit")
         }
         #expect(service.activeWindowHandle == "window-a")
     }
