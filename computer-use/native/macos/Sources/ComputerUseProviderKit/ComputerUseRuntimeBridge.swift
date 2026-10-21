@@ -305,6 +305,7 @@ enum BlockingSynchronousBridge {
 }
 
 func runtimeFailureResult(_ error: Error) -> [String: Any] {
+    let error = normalizedScreenCaptureError(error)
     let message = (error as? LocalizedError)?.errorDescription
         ?? String(describing: error)
     let inputEventsEmitted =

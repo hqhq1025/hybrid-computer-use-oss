@@ -175,12 +175,20 @@ func guiFinalObservationResult(
                 "desktop_state_mutated": emitted,
             ]
         } catch {
+            let error = normalizedScreenCaptureError(error)
             let message = (error as? LocalizedError)?.errorDescription
                 ?? String(describing: error)
+            let failureCode: String
+            if let computerError = error as? ComputerUseError,
+               case .permissionDenied = computerError {
+                failureCode = "permission_denied"
+            } else {
+                failureCode = "gui_snapshot_failed"
+            }
             var failure = guiExecutionFailure(
                 error: "GUI final desktop observation failed: \(message)",
                 text: "GUI actions completed, but the required final full-desktop screenshot could not be captured.",
-                code: "gui_snapshot_failed",
+                code: failureCode,
                 phase: emitted ? "observation" : "precondition",
                 failedActionIndex: actionCount,
                 inputActionsDispatched: inputActionsDispatched,

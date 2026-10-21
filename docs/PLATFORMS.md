@@ -61,6 +61,11 @@ The provider's bundle identifier is `org.computer-use.provider.v2`. Upgrading
 from a bundle with a different identifier changes its macOS permission identity;
 grant permissions to the new bundle rather than assuming an old grant applies.
 
+Permission diagnostics use the current provider process's non-prompting AX and
+CoreGraphics checks. An old TCC database grant cannot override a runtime denial.
+After replacing a signed bundle, grant access to the current provider and restart
+it before checking permissions again.
+
 The provider uses a private local socket and retains native object identity
 within its process generation. A reset invalidates that continuity. Do not
 reuse refs from an earlier MCP session or retry an uncertain mutation blindly.
