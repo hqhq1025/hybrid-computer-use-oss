@@ -6,6 +6,19 @@ import Foundation
 import ImageIO
 import ScreenCaptureKit
 
+func normalizedScreenCaptureError(_ error: Error) -> Error {
+    let nativeError = error as NSError
+    guard nativeError.domain == SCStreamErrorDomain,
+          nativeError.code == SCStreamError.Code.userDeclined.rawValue else {
+        return error
+    }
+    return ComputerUseError.permissionDenied(
+        "Screen recording permission was denied for \(PermissionSupport.bundleDisplayName). "
+            + "Ask the user to enable Screen Recording for the current \(PermissionSupport.bundleDisplayName) app "
+            + "in System Settings > Privacy & Security, then restart the provider before taking another screenshot."
+    )
+}
+
 func desktopBounds() -> CGRect {
     CGGetActiveDisplayList(0, nil, nil)
     var count: UInt32 = 0

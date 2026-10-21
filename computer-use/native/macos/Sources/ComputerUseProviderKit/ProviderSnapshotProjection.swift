@@ -37,7 +37,7 @@ extension AppSnapshot {
                 "selected": true,
                 "active": NSRunningApplication(
                     processIdentifier: app.pid
-                )?.isActive ?? false,
+                )?.isActive == true && focusedAXWindowHandle(pid: app.pid) == handle,
                 "modal": false,
                 "showing": true,
             ]]

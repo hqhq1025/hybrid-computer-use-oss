@@ -341,7 +341,8 @@ extension ComputerUseService {
             default:
                 throw nativeAXActionAttemptError(
                     action: action,
-                    result: result
+                    result: result,
+                    earlierInputEmitted: index > 0
                 )
             }
         }

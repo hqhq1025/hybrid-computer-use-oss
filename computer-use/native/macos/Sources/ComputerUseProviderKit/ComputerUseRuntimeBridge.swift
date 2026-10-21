@@ -51,7 +51,10 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
     private func executeSynchronousThrowing(
         _ operation: [String: Any]
     ) throws -> [String: Any] {
-        try service.withAppIdentity(runtimeAppIdentity(operation)) {
+        try service.withAppIdentity(
+            runtimeAppIdentity(operation),
+            windowHandle: runtimeWindowHandle(operation)
+        ) {
             try executeSynchronousBound(operation)
         }
     }
@@ -305,6 +308,7 @@ enum BlockingSynchronousBridge {
 }
 
 func runtimeFailureResult(_ error: Error) -> [String: Any] {
+    let error = normalizedScreenCaptureError(error)
     let message = (error as? LocalizedError)?.errorDescription
         ?? String(describing: error)
     let inputEventsEmitted =

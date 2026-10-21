@@ -31,17 +31,18 @@ type publicError struct {
 }
 
 var publicErrorCodes = map[string]publicError{
-	axCodeInvalidArgument: {2, "no", "fix the argument named by path; hint is a corrected call"},
-	axCodeWaitTimeout:     {3, "maybe", "observe again; completed counts the steps that ran and the message says what the wait saw"},
-	axCodeStaleRef:        {4, "no", "observe or find again and use the new ref; refs never rebind"},
-	axCodeGUIFrameStale:   {4, "no", "take a new GUI screenshot and plan coordinates from it"},
-	axCodeWindowChanged:   {5, "maybe", "observe before retrying; do not repeat the batch blindly"},
-	axCodeEffectUnknown:   {5, "maybe", "observe before retrying; input may have taken effect"},
-	axCodeAppUnavailable:  {6, "no", "list apps; the application is not running or not accessible"},
-	axCodeAmbiguousWindow: {6, "no", "use a longer title or the wN from apps"},
-	axCodeWindowNotFound:  {6, "no", "list apps and use a wN or an exact title"},
-	axCodeNoFocusedWindow: {6, "no", "activate a window first or pass window_ref"},
-	axCodeRuntimeError:    {10, "maybe", "retry reads later; observe before retrying input"},
+	axCodeInvalidArgument:   {2, "no", "fix the argument named by path; hint is a corrected call"},
+	axCodeWaitTimeout:       {3, "maybe", "observe again; completed counts the steps that ran and the message says what the wait saw"},
+	axCodeStaleRef:          {4, "no", "observe or find again and use the new ref; refs never rebind"},
+	axCodeGUIFrameStale:     {4, "no", "take a new GUI screenshot and plan coordinates from it"},
+	axCodeWindowChanged:     {5, "maybe", "observe before retrying; do not repeat the batch blindly"},
+	axCodeEffectUnknown:     {5, "maybe", "observe before retrying; input may have taken effect"},
+	axCodeAppUnavailable:    {6, "no", "list apps; the application is not running or not accessible"},
+	axCodeAmbiguousWindow:   {6, "no", "use a longer title or the wN from apps"},
+	axCodeWindowNotFound:    {6, "no", "list apps and use a wN or an exact title"},
+	axCodeNoFocusedWindow:   {6, "no", "activate a window first or pass window_ref"},
+	axCodeRuntimeError:      {10, "maybe", "retry reads later; observe before retrying input"},
+	guiCodePermissionDenied: {6, "no", guiPermissionHint},
 }
 
 // describeContract is the machine-readable contract: what `schema` prints

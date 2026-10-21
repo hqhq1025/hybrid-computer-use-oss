@@ -566,6 +566,29 @@ func (s *service) actionResult(app string, request axServiceRequest) toolCallRes
 		s.invalidateAccessibilitySnapshots()
 		return result
 	}
+	// A successful close may return an exact-window absence proof instead of
+	// an AX tree. Re-reading that removed window would discard the proof.
+	closedWindowHandle := request.TargetWindowHandle
+	if request.SemanticTarget != nil && closedWindowHandle == "" {
+		closedWindowHandle = request.SemanticTarget.WindowHandle
+	}
+	if request.WindowAction != nil && *request.WindowAction == WindowClose &&
+		snapshot.WindowAbsent && closedWindowHandle != "" &&
+		snapshot.ClosedWindowHandle == closedWindowHandle &&
+		(request.SemanticTarget == nil || request.SemanticTarget.WindowHandle == "" ||
+			request.SemanticTarget.WindowHandle == closedWindowHandle) {
+		s.appendTrace(app, request, before, snapshot, notes, false)
+		response := closedWindowFinalObservation(
+			&axBatchContext{windowRef: request.SourceRef},
+			observation{mode: request.Observe},
+		)
+		response = withActionOutcomeForRequest(response, request, snapshot)
+		response = finalizeVerifiedCloseLifecycle(response)
+		if request.Observe == observeNone {
+			response = omitVerifiedCloseFinalObservation(response)
+		}
+		return response
+	}
 	if snapshot.deliveryOnly {
 		s.appendTrace(app, request, before, nil, notes, false)
 		response := snapshot.notesOnlyResult(observeNoneNotes(notes))

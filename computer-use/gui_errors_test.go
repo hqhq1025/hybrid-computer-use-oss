@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -43,7 +44,7 @@ func guiFailedResponse(t *testing.T, code string, emitted bool, dispatched int) 
 }
 
 // Every GUI code is produced by a real GUI path, and every GUI error line
-// carries a hint that is a valid GUI call or action.
+// carries a corrected GUI call or instructions for external recovery.
 func TestEveryGUIErrorCodeHasAHint(t *testing.T) {
 	seen := map[string]bool{}
 	check := func(name string, result toolCallResult, want string) {
@@ -53,6 +54,18 @@ func TestEveryGUIErrorCodeHasAHint(t *testing.T) {
 			t.Fatalf("%s: want code %s, got %#v", name, want, evidence)
 		}
 		hint, _ := evidence["hint"].(string)
+		if message, _ := evidence["message"].(string); message == "" {
+			t.Fatalf("%s: no message: %#v", name, evidence)
+		}
+		if want == "permission_denied" {
+			for _, step := range []string{"permission", "restart", "screenshot"} {
+				if !strings.Contains(hint, step) {
+					t.Fatalf("%s: hint lacks %s: %q", name, step, hint)
+				}
+			}
+			seen[want] = true
+			return
+		}
 		var decoded map[string]any
 		if json.Unmarshal([]byte(hint), &decoded) != nil {
 			t.Fatalf("%s: hint is not a JSON object: %q", name, hint)
@@ -63,9 +76,6 @@ func TestEveryGUIErrorCodeHasAHint(t *testing.T) {
 		}
 		if err := validateToolArguments(publicToolGUI, guiJSONRoundTrip(t, call)); err != nil {
 			t.Fatalf("%s: hint %s is not a valid GUI call: %s", name, hint, err.Message)
-		}
-		if message, _ := evidence["message"].(string); message == "" {
-			t.Fatalf("%s: no message: %#v", name, evidence)
 		}
 		seen[want] = true
 	}
@@ -81,6 +91,7 @@ func TestEveryGUIErrorCodeHasAHint(t *testing.T) {
 	check("stale mid batch", s.guiResponse(guiFailedResponse(t, "stale_gui_frame", true, 1)), axCodeWindowChanged)
 	check("input failure", s.guiResponse(guiFailedResponse(t, "", true, 1)), axCodeEffectUnknown)
 	check("capture failure", s.guiResponse(guiFailedResponse(t, "", false, 0)), axCodeRuntimeError)
+	check("permission refusal", s.guiResponse(guiFailedResponse(t, "permission_denied", false, 0)), "permission_denied")
 
 	have := append([]string{}, guiPublicErrorCodes...)
 	got := make([]string, 0, len(seen))
@@ -96,6 +107,55 @@ func TestEveryGUIErrorCodeHasAHint(t *testing.T) {
 		if _, ok := publicErrorCodes[code]; !ok {
 			t.Fatalf("GUI code %s is not in the error table", code)
 		}
+	}
+}
+
+func TestGUICapturePermissionRecoveryPreservesInputEvidence(t *testing.T) {
+	for _, emitted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("input_emitted_%t", emitted), func(t *testing.T) {
+			count := 0
+			if emitted {
+				count = 1
+			}
+			response := guiFailedResponse(t, "permission_denied", emitted, count)
+			response.Snapshot = nil
+			response.GUIResult.InputActionsDispatched = &count
+			response.GUIResult.PartialInputPossible = &emitted
+			response.GUIResult.MutationUnknown = &emitted
+			backend := &recordingPlatformBackend{desktopResponse: &response}
+			s := newServiceWithBackend(backend)
+			s.guiSnapshot = &appSnapshot{FrameID: "f1"}
+			result := s.callForModel(publicToolGUI, map[string]any{
+				"actions": []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"}}},
+			}, false)
+			if len(backend.desktopRequests) != 1 {
+				t.Fatalf("permission denial retried the provider: %d requests", len(backend.desktopRequests))
+			}
+			var evidence map[string]any
+			if err := json.Unmarshal([]byte(result.Content[0].Text), &evidence); err != nil {
+				t.Fatal(err)
+			}
+			wantCode := "permission_denied"
+			if emitted {
+				wantCode = axCodeEffectUnknown
+			}
+			if evidence["code"] != wantCode || evidence["input_emitted"] != emitted ||
+				evidence["completed"] != float64(count) || evidence["requested"] != float64(1) {
+				t.Fatalf("permission error lost delivery evidence: %#v", evidence)
+			}
+			hint, _ := evidence["hint"].(string)
+			for _, step := range []string{"Screen Recording", "Accessibility", "restart", "screenshot"} {
+				if !strings.Contains(hint, step) {
+					t.Fatalf("permission recovery lacks %s: %q", step, hint)
+				}
+			}
+			if emitted {
+				actions, _ := evidence["actions"].(map[string]any)
+				if actions["partial_input_possible"] != true || actions["mutation_unknown"] != true {
+					t.Fatalf("permission error lost partial-input warning: %#v", evidence)
+				}
+			}
+		})
 	}
 }
 

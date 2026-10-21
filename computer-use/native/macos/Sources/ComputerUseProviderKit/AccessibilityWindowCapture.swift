@@ -143,6 +143,11 @@ func preferredWindowCaptureCandidate(
     windowIDHint: CGWindowID?,
     titleHint: String?
 ) -> WindowCaptureCandidate? {
+    if let windowIDHint {
+        // A known AX window must never borrow a sibling's capture or geometry.
+        let matches = candidates.filter { $0.windowID == windowIDHint }
+        return matches.count == 1 ? matches[0] : nil
+    }
     let usable = candidates
         .filter { $0.layer == 0 && $0.area >= 20_000 }
         .sorted { lhs, rhs in
@@ -153,12 +158,6 @@ func preferredWindowCaptureCandidate(
         return candidates.sorted { lhs, rhs in
             lhs.area > rhs.area
         }.first
-    }
-
-    if let windowIDHint,
-       let exact = usable.first(where: { $0.windowID == windowIDHint })
-    {
-        return exact
     }
 
     guard let titleHint, !titleHint.isEmpty,

@@ -38,7 +38,7 @@ current GUI schema for argument shapes and supported actions.
   dependent input can share a batch when the click cannot change top-level
   layout. A click already includes press and release.
 - Every result starts with one JSON line: `ok`, on failure `code`, `path`,
-  `message` and `hint` (a corrected call), then `input_emitted`, `completed`
+  `message` and `hint` (a corrected call or recovery instruction), then `input_emitted`, `completed`
   and `requested`, and the returned `screen`.
 - `gui_frame_stale`: the window under a coordinate changed after the
   screenshot used for it; nothing was sent. Recompute coordinates from the returned
@@ -46,6 +46,9 @@ current GUI schema for argument shapes and supported actions.
   `completed` actions ran; send only what remains. `effect_unknown`: input
   may have been sent; inspect before retrying. `invalid_argument`: fix the
   field in `path` as the hint shows. `runtime_error`: retry once.
+- `permission_denied`: restore the provider's operating-system permissions
+  and restart it before observing again. Repeating a screenshot cannot grant
+  access. If earlier input was sent, inspect state before sending more.
 
 ## Waiting And Recovery
 

@@ -134,11 +134,17 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 // GUI error whose correction is to look at the desktop again.
 const guiScreenshotCall = `{"actions":[{"type":"screenshot"}]}`
 
+const guiCodePermissionDenied = "permission_denied"
+
+const guiPermissionHint = "Ask the user to grant the denied system permission to the current Computer Use Provider " +
+	"(on macOS: Screen Recording or Accessibility in System Settings > Privacy & Security), " +
+	"restart the provider, then take a fresh GUI screenshot before retrying input."
+
 // guiPublicErrorCodes are the public codes a GUI result can carry. They are
-// a subset of the error table; gui_frame_stale is the only GUI-only code.
+// a subset of the error table.
 var guiPublicErrorCodes = []string{
 	axCodeInvalidArgument, axCodeGUIFrameStale, axCodeWindowChanged,
-	axCodeEffectUnknown, axCodeRuntimeError,
+	axCodeEffectUnknown, axCodeRuntimeError, guiCodePermissionDenied,
 }
 
 // guiPublicFields are the leading fields of the GUI evidence line, in order:
@@ -330,8 +336,17 @@ func guiProviderFailure(response ProviderDesktopResult, guiResult ProviderGUIRes
 		isTrue(guiResult.PartialInputPossible) ||
 		providerMutationCanInvalidate(response.Mutation):
 		return axCodeEffectUnknown, "", response.Error
+	case failureCode == guiCodePermissionDenied:
+		return guiCodePermissionDenied, "", response.Error
 	}
 	return axCodeRuntimeError, "", response.Error
+}
+
+func guiProviderFailureHint(response ProviderDesktopResult) string {
+	if response.Failure != nil && response.Failure.Code == guiCodePermissionDenied {
+		return guiPermissionHint
+	}
+	return guiScreenshotCall
 }
 
 func guiResultEmitted(guiResult ProviderGUIResult) bool {
@@ -610,7 +625,7 @@ func (s *service) guiResponse(response ProviderDesktopResult) toolCallResult {
 		result.Content = append([]contentItem{{Type: "text", Text: guiValidationErrorText(response)}},
 			result.Content...)
 		code, path, message := guiProviderFailure(response, guiResult)
-		setGUIPublicError(&result, code, path, message, guiScreenshotCall)
+		setGUIPublicError(&result, code, path, message, guiProviderFailureHint(response))
 	}
 	return result
 }
@@ -722,7 +737,7 @@ func guiObservationFailure(
 	if strings.TrimSpace(detail) == "" {
 		detail = message
 	}
-	setGUIPublicError(&result, code, path, detail, guiScreenshotCall)
+	setGUIPublicError(&result, code, path, detail, guiProviderFailureHint(response))
 	return result
 }
 

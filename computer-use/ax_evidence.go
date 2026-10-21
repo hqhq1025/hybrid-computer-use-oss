@@ -274,6 +274,7 @@ func compactAXModelEvidence(
 				key != "input_events_emitted" &&
 				key != "postcondition_verified" &&
 				key != "final_observation_returned" &&
+				key != "screenshot_returned" &&
 				key != "observation_required" &&
 				key != "next_identical_observation_required" {
 				continue

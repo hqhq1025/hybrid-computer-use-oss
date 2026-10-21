@@ -427,8 +427,13 @@ Every GUI result starts with the same JSON line as AX, followed by `screen`
 (the returned image's size and coordinate space) and `actions` (pixel-change
 and settle facts); the screenshot follows as an image. GUI errors use
 `invalid_argument`, `window_changed`, `effect_unknown` and `runtime_error`
-like AX, plus one GUI code: `gui_frame_stale`, coordinates from a screenshot
-whose window under the point has changed, with nothing sent. Its hint is a new screenshot.
+like AX. `gui_frame_stale` means the window under a screenshot coordinate
+changed, with nothing sent; its hint requests a new screenshot.
+`permission_denied` means the operating system denied access. Its hint gives
+permission-recovery instructions instead of another call. Restore the current
+provider's permissions and restart it before observing again. When capture
+fails after input, the result retains its partial or uncertain input evidence;
+restoring permission does not authorize replaying the actions.
 
 AX evidence covers only what the accessibility tree shows, and GUI evidence
 only the returned pixels and reported input delivery. Neither proves file

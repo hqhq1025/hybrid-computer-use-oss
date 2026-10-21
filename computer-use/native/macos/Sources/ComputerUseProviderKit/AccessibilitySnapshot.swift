@@ -412,6 +412,41 @@ func postActionTargetWindowTransitionProven(
     targetDestroyed || currentLiveness == .absent
 }
 
+func selectSnapshotWindow<Node>(
+    requestedHandle: String?,
+    inventory: () -> [Node]?,
+    handleOf: (Node) -> String,
+    unboundWindow: () -> Node?
+) throws -> Node? {
+    guard let requestedHandle, !requestedHandle.isEmpty else {
+        return unboundWindow()
+    }
+    guard let windows = inventory() else {
+        throw ComputerUseError.stateUnavailable(
+            "The requested window cannot be selected from an incomplete accessibility inventory."
+        )
+    }
+    let matches = windows.filter { handleOf($0) == requestedHandle }
+    guard matches.count == 1 else {
+        throw ComputerUseError.stateUnavailable(
+            "The requested window has no unique match in the accessibility inventory."
+        )
+    }
+    return matches[0]
+}
+
+func focusedElementInSnapshotWindow<Node>(
+    _ candidate: Node?,
+    selectedHandle: String,
+    windowHandleOf: (Node) -> String?
+) -> Node? {
+    guard let candidate, !selectedHandle.isEmpty,
+          windowHandleOf(candidate) == selectedHandle else {
+        return nil
+    }
+    return candidate
+}
+
 enum SnapshotBuilder {
     static func build(
         for app: RunningAppDescriptor,
@@ -436,12 +471,23 @@ enum SnapshotBuilder {
         enableBestEffortAccessibilityModes(appElement)
         let systemWide = AXUIElementCreateSystemWide()
         var focusedApplication = copyElement(systemWide, attribute: kAXFocusedApplicationAttribute)
-        var focusedWindow = preferredFocusedWindow(
-            appElement: appElement,
-            appPID: app.pid,
-            focusedApplication: focusedApplication,
-            systemWide: systemWide
-        ) ?? firstAnyWindow(for: appElement)
+        let hasRequestedWindow = !(expectedWindowHandle ?? "").isEmpty
+        var focusedWindow = try selectSnapshotWindow(
+            requestedHandle: expectedWindowHandle,
+            inventory: {
+                let inventory = axWindowInventory(pid: app.pid)
+                return inventory.complete ? inventory.windows : nil
+            },
+            handleOf: { canonicalMacAXWindowHandle(pid: app.pid, window: $0) },
+            unboundWindow: {
+                preferredFocusedWindow(
+                    appElement: appElement,
+                    appPID: app.pid,
+                    focusedApplication: focusedApplication,
+                    systemWide: systemWide
+                ) ?? firstAnyWindow(for: appElement)
+            }
+        )
         if focusedWindow == nil {
             focusedWindow = reusableFallbackWindow(
                 fallbackWindow,
@@ -449,7 +495,7 @@ enum SnapshotBuilder {
                 expectedWindowHandle: expectedWindowHandle
             )
         }
-        if focusedWindow == nil,
+        if !hasRequestedWindow, focusedWindow == nil,
            recoveryPolicy == .allowActivation,
            recoverVisibleWindow(for: app, appElement: appElement, preferredWindow: nil) {
             focusedApplication = copyElement(systemWide, attribute: kAXFocusedApplicationAttribute)
@@ -475,7 +521,7 @@ enum SnapshotBuilder {
             titleHint: captureTitleHint,
             includeScreenshot: includeScreenshot
         )
-        if windowCapture == nil,
+        if !hasRequestedWindow, windowCapture == nil,
            shouldRecoverMissingWindowCapture(
                includeScreenshot: includeScreenshot,
                recoveryPolicy: recoveryPolicy
@@ -627,7 +673,15 @@ enum SnapshotBuilder {
         let screenshotPNGData = includeScreenshot
             ? windowCapture?.pngDataIfAvailable()
             : nil
-        let focusedElement = preferredFocusedElement(appElement: appElement, appPID: app.pid, focusedApplication: focusedApplication, systemWide: systemWide)
+        let focusedElement = focusedElementInSnapshotWindow(
+            preferredFocusedElement(appElement: appElement, appPID: app.pid, focusedApplication: focusedApplication, systemWide: systemWide),
+            selectedHandle: canonicalMacAXWindowHandle(pid: app.pid, window: rootElement),
+            windowHandleOf: { element in
+                containingAXWindow(from: element).map {
+                    canonicalMacAXWindowHandle(pid: app.pid, window: $0)
+                }
+            }
+        )
         let selectedText = focusedElement.flatMap { copySelectedText($0, textLimit: textLimit) }
         let context = RenderContext(
             windowBounds: windowBounds,

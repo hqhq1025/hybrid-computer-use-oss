@@ -174,7 +174,7 @@ func checkboxValueWriteRequiresExactNumericReadback() {
 func failedAdvertisedNativeActionStopsWithPostEmissionEvidence() {
     let error = nativeAXActionAttemptError(
         action: kAXIncrementAction as String,
-        result: .attributeUnsupported
+        result: .cannotComplete
     )
 
     #expect(error.inputEventsEmitted)
@@ -184,7 +184,7 @@ func failedAdvertisedNativeActionStopsWithPostEmissionEvidence() {
     #expect(error.actionRoute == "ax.action.increment")
     #expect(
         error.message.contains(
-            "after the native action was attempted; no fallback input was emitted"
+            "Observe the current state before retrying."
         )
     )
 

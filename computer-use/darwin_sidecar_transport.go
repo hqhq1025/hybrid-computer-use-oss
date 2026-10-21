@@ -518,12 +518,23 @@ func waitForDarwinProviderConnection(
 	deadline time.Time,
 	launchPIDGrace time.Duration,
 ) (net.Conn, error) {
-	acceptResult := make(chan darwinProviderAcceptResult, 1)
+	acceptResult := make(chan darwinProviderAcceptResult)
+	acceptDone := make(chan struct{})
+	defer close(acceptDone)
 	go func() {
 		connection, err := listener.Accept()
-		acceptResult <- darwinProviderAcceptResult{
+		result := darwinProviderAcceptResult{
 			connection: connection,
 			err:        err,
+		}
+		select {
+		case acceptResult <- result:
+		case <-acceptDone:
+			// Startup can fail while Accept finishes. Only the receiver owns
+			// a delivered connection; reclaim one that startup abandoned.
+			if connection != nil {
+				_ = connection.Close()
+			}
 		}
 	}()
 

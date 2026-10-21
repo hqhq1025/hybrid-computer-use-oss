@@ -71,10 +71,12 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
   final screenshot. End the batch when a window or dialog opens, closes,
   moves, resizes, switches, or navigates; use the returned screenshot to plan
   subsequent coordinates. A screenshot action must stand alone.
-- Start or restart a GUI application from the shell with
+- On Linux, start a GUI application from the shell with
   `setsid -f APP ARGS >/tmp/APP.log 2>&1 </dev/null`. Some agent shells kill
   the process group of each command when it returns; an application started
   there with `&`, `nohup`, or `disown` dies without showing a window.
+- On macOS, use `open -a APP` to launch through LaunchServices. Reuse an
+  existing application instance and verify its window before sending input.
 
 ## When Something Fails
 
@@ -101,6 +103,9 @@ Never repeat the request when `retry_same_request=false`. Next step by code:
 - `app_unavailable`: if the application is still starting, wait once for
   its window with `{"mode":"act","actions":[{"type":"wait","window":"..."}]}`;
   otherwise use GUI for it.
+- `permission_denied`: restore the provider's operating-system permissions
+  and restart it before observing again. Repeating a screenshot cannot grant
+  access. If earlier input was sent, inspect state before sending more.
 - `runtime_error`: use the specific failure reason. For a temporary read
   failure, retry the read once unless the result forbids retrying. Inspect
   current state before retrying input. For `coordinate_target_unverified`,

@@ -447,14 +447,35 @@ public final class ComputerUseService {
     var snapshotsByApp: [String: AppSnapshot] = [:]
     // ProviderV2Server awaits requests serially. The synchronous request owns
     // this binding, including captures
-    // performed inside service actions. Never rediscover a bound app by name.
+    // performed inside service actions. Never rediscover a bound app by name
+    // or replace its requested window with a focused sibling.
     var activeAppIdentity: [String: Any]?
+    var activeWindowHandle: String?
 
-    func withAppIdentity<T>(_ identity: [String: Any]?, operation: () throws -> T) rethrows -> T {
+    func withAppIdentity<T>(
+        _ identity: [String: Any]?,
+        windowHandle: String? = nil,
+        operation: () throws -> T
+    ) rethrows -> T {
         let previous = activeAppIdentity
+        let previousWindow = activeWindowHandle
         activeAppIdentity = identity
-        defer { activeAppIdentity = previous }
+        activeWindowHandle = windowHandle.flatMap { $0.isEmpty ? nil : $0 }
+        defer {
+            activeAppIdentity = previous
+            activeWindowHandle = previousWindow
+        }
         return try operation()
+    }
+
+    func snapshotWindowHandle(requested: String?) throws -> String? {
+        let explicit = requested.flatMap { $0.isEmpty ? nil : $0 }
+        if let explicit, let activeWindowHandle, explicit != activeWindowHandle {
+            throw ComputerUseError.stateUnavailable(
+                "The snapshot window conflicts with the current request's bound window."
+            )
+        }
+        return activeWindowHandle ?? explicit
     }
     var nativeWindowHandles: Set<String> = []
 
