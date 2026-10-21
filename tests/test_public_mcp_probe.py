@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from hcu.osworld.agents import claude_mcp_config, codex_config
+from hcu.osworld.agents import claude_mcp_config, codex_config, gemini_settings
 from hcu.osworld.runtime import public_mcp_probe_config, public_mcp_probe_script
 
 
@@ -119,6 +119,15 @@ def test_probe_preserves_claude_adapter_and_args():
     spec = public_mcp_probe_config(config, "claude-code", ["AX", "GUI"])
     assert spec["command"] == "/usr/bin/python3"
     assert spec["args"] == ["/custom/adapter.py", "/custom/mcp", "mcp"]
+
+
+def test_probe_uses_gemini_server_alias():
+    config = gemini_settings(model="model", effort="native", mcp_command="/custom/mcp",
+                             channels="gui,keyboard")
+    spec = public_mcp_probe_config(config, "gemini-cli", ["GUI"])
+    assert spec["command"] == "/custom/mcp"
+    assert spec["args"] == ["mcp"]
+    assert spec["env"] == {"COMPUTER_USE_CHANNELS": "gui,keyboard"}
 
 
 def test_disabled_mcp_is_only_allowed_with_no_expected_tools():

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 
+from hcu.osworld.agents import GEMINI_MCP_SERVER
 from hcu.osworld.prompts import split_completion_message
 
 
@@ -194,10 +195,14 @@ def summarize_gemini_trace(raw: bytes | None) -> dict:
             if text.strip():
                 record_agent_message(summary, text)
             text = ""
+            name = str(event.get("tool_name") or "")
+            # Historical runs used an underscore in the Gemini server key.
+            prefix = ("mcp_computer_use_" if name.startswith("mcp_computer_use_")
+                      else f"mcp_{GEMINI_MCP_SERVER}_")
             count_tool_call(
                 summary,
-                str(event.get("tool_name") or ""),
-                "mcp_computer_use_",
+                name,
+                prefix,
                 "run_shell_command",
             )
         elif kind == "result":

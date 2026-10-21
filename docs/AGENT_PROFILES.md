@@ -101,7 +101,13 @@ original discriminated unions before any side effect.
 The npm package from the artifact lock is uploaded as a tarball and unpacked
 into `/opt/agent-runtime/gemini/cli` in the guest, and the pinned Node binary
 runs it as `~/.local/bin/gemini-node` so the watchdog can find the agent
-process by name. `settings.json` keeps only this MCP server:
+process by name. `settings.json` keeps only this MCP server.
+
+Its server key and MCP allowlist both use `computer-use`; this avoids
+ambiguous server names in Gemini's permission parser. Other profiles retain
+`computer_use`.
+
+The profile applies these settings:
 
 - ambient features are off: agents, auto-memory, task tracker, plan mode,
   skills, hooks, extensions, telemetry and usage statistics;
