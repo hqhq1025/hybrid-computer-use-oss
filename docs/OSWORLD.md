@@ -36,7 +36,7 @@ python3 scripts/install-osworld-v2.py external/OSWorld-V2
 make build-local          # writes artifacts/computer-use
 ```
 
-Put the agent CLI in `artifacts/` (`codex`, `claude`, `grok`, or
+Put the agent CLI in `artifacts/` (`codex`, `claude-code`, `grok`, or
 `gemini-cli.tgz` plus `node`). Reinstall the overlay whenever you replace the
 checkout.
 

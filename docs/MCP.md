@@ -260,7 +260,7 @@ ablation for any agent.
 ## Gemini CLI and Grok Build
 
 Both register the same server directly, without an adapter. Gemini CLI reads
-`mcpServers` from its `settings.json` and is served by
+the `computer-use` entry under `mcpServers` in its `settings.json` and is served by
 `hcu.gateway.gemini_proxy`; Grok Build reads `[mcp_servers.computer_use]` from
 its `config.toml` and is served by `hcu.gateway.openai_proxy` on the Responses
 API. [Agent profiles](AGENT_PROFILES.md) describes the rest of each profile,
@@ -273,6 +273,11 @@ writing configuration. The generator prints the required environment, including
 file. Apply those environment variables when starting `gemini`; its global
 `GEMINI.md` is written beside `settings.json`. An arbitrary JSON filename is not
 a discoverable Gemini configuration.
+
+The Gemini server key avoids underscores because its policy parser uses an
+underscore to separate server and tool names. Other client keys are unchanged.
+See [Client compatibility](CLIENT_COMPATIBILITY.md) for schema conversion,
+error images, and session checks when adding another client.
 
 ## Public contract
 
@@ -435,7 +440,7 @@ the shell or the application.
 | Variable | Effect |
 | --- | --- |
 | `COMPUTER_USE_CHANNELS` | comma-separated channels to expose (`a11y`, `gui`, `keyboard`); all by default. Disabled tools disappear from `tools/list`. |
-| `COMPUTER_USE_STRUCTURED_CONTENT` | `1` adds `structuredContent` to tool results |
+| `COMPUTER_USE_STRUCTURED_CONTENT` | `1` adds `structuredContent` to tool results. Default off: evidence stays in text because some clients replace sibling text with the structured object. Enable only with a tested consumer. |
 | `COMPUTER_USE_ERROR_CONTEXT` | `off` stops capturing fresh UI state after a failed call |
 | `COMPUTER_USE_OUTPUT_MODE` | `file` writes large outputs to files and returns their paths |
 | `COMPUTER_USE_OUTPUT_DIR`, `COMPUTER_USE_OUTPUT_THRESHOLD` | directory and minimum size (4000 characters) for file output |

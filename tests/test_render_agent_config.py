@@ -136,7 +136,7 @@ def test_standalone_expands_user_paths(tmp_path, agent):
         assert server["args"][1] == str(tmp_path / "computer-use")
         assert "SELECTED_INSTRUCTIONS_MARKER" in output.with_suffix(".system-prompt.md").read_text()
     elif agent == "gemini-cli":
-        server = json.loads(output.read_text())["mcpServers"]["computer_use"]
+        server = json.loads(output.read_text())["mcpServers"]["computer-use"]
         assert server["command"] == str(tmp_path / "computer-use")
         assert "SELECTED_INSTRUCTIONS_MARKER" in output.with_name("GEMINI.md").read_text()
     else:
@@ -401,7 +401,7 @@ def test_gemini_environment_resolves_generated_files(tmp_path, capsys, monkeypat
     assert home.is_absolute()
     config = home / ".gemini/settings.json"
     assert str(config) == lines[-1]
-    assert json.loads(config.read_text())["mcpServers"]["computer_use"]
+    assert json.loads(config.read_text())["mcpServers"]["computer-use"]
     assert (home / ".gemini/GEMINI.md").read_text() == (
         "PROFILE_CONTEXT" if enabled else ""
     )
@@ -467,7 +467,7 @@ console.log(JSON.stringify({
     assert result.returncode == 0, result.stderr
     consumed = json.loads(result.stdout.splitlines()[-1])
     assert Path(consumed["settings"]) == output
-    assert consumed["config"]["mcpServers"]["computer_use"]
+    assert consumed["config"]["mcpServers"]["computer-use"]
     assert consumed["memory"] == [{
         "path": str(output.with_name("GEMINI.md")),
         "text": instructions.read_text() if enabled else "",

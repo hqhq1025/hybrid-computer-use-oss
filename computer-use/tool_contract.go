@@ -392,7 +392,13 @@ func guiInputSchema() map[string]any {
 	return map[string]any{
 		"type":        "object",
 		"description": "One screenshot action observes; otherwise run an input batch.",
-		"oneOf":       []any{observe, act},
+		// Some clients close the root object with additionalProperties:false.
+		// Declare its field names here; the branches retain every constraint.
+		"properties": map[string]any{
+			"actions":   map[string]any{},
+			"settle_ms": map[string]any{},
+		},
+		"oneOf": []any{observe, act},
 	}
 }
 

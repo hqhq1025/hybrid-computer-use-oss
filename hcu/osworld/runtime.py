@@ -12,6 +12,7 @@ import json
 import os
 import shlex
 
+from hcu.osworld.agents import GEMINI_MCP_SERVER
 from hcu.osworld.guest import (
     GUEST_CLAUDE_CONFIG_DIR,
     GUEST_CODEX,
@@ -212,7 +213,8 @@ def public_mcp_probe_config(config: str, agent: str, expected_tools: list[str]) 
             import tomli as tomllib
         server = tomllib.loads(config)["mcp_servers"]["computer_use"]
     elif agent in {"claude-code", "gemini-cli"}:
-        server = json.loads(config)["mcpServers"]["computer_use"]
+        key = GEMINI_MCP_SERVER if agent == "gemini-cli" else "computer_use"
+        server = json.loads(config)["mcpServers"][key]
     else:
         raise ValueError(f"Unsupported MCP probe client: {agent}")
     if server.get("enabled") is False:

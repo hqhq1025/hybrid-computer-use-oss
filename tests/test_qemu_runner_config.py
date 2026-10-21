@@ -207,9 +207,10 @@ def test_gemini_and_grok_expose_only_the_requested_channel():
     settings = json.loads(gemini_settings(
         model="gemini-3.8-flash", effort="native", channels="a11y,keyboard"
     ))
-    assert settings["mcpServers"]["computer_use"]["env"] == {
+    assert settings["mcpServers"]["computer-use"]["env"] == {
         "COMPUTER_USE_CHANNELS": "a11y,keyboard"
     }
+    assert settings["mcp"]["allowed"] == list(settings["mcpServers"])
     assert "customOverrides" not in settings["modelConfigs"]
     assert "google_web_search" in settings["tools"]["exclude"]
     with pytest.raises(ValueError):
