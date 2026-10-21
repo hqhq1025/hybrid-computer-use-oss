@@ -247,14 +247,25 @@ func boundWindowLiveness(
 
 extension ComputerUseService {
     func rememberNativeWindowIdentity(_ snapshot: AppSnapshot) {
-        guard let windowID = snapshot.targetWindowID, windowID > 0,
-              let windowHandle = snapshot.targetWindowHandle,
-              windowHandle ==
-                macWindowHandle(pid: snapshot.app.pid, windowID: windowID) else {
+        rememberNativeWindowIdentity(
+            pid: snapshot.app.pid,
+            windowID: snapshot.targetWindowID,
+            windowHandle: snapshot.targetWindowHandle
+        )
+    }
+
+    func rememberNativeWindowIdentity(
+        pid: pid_t,
+        windowID: CGWindowID?,
+        windowHandle: String?
+    ) {
+        guard let windowID, windowID > 0,
+              let windowHandle,
+              windowHandle == macWindowHandle(pid: pid, windowID: windowID) else {
             windowLivenessDiagnostic("provenance", [
                 "registered": false,
-                "positive_native_id": (snapshot.targetWindowID ?? 0) > 0,
-                "has_handle": snapshot.targetWindowHandle != nil,
+                "positive_native_id": (windowID ?? 0) > 0,
+                "has_handle": windowHandle != nil,
             ])
             return
         }
@@ -267,14 +278,14 @@ extension ComputerUseService {
 
 extension ComputerUseRuntimeBridge {
     func boundWindowInspector(
-        windowHandle: String
+        windowHandle: String,
+        inspect: @escaping (pid_t, String, Bool) -> BoundWindowLiveness = {
+            boundWindowLiveness(pid: $0, windowHandle: $1, nativeIdentityComparable: $2)
+        }
     ) -> (pid_t, String) -> BoundWindowLiveness {
         let nativeComparable = service.nativeWindowHandles.contains(windowHandle)
         return { pid, handle in
-            boundWindowLiveness(
-                pid: pid, windowHandle: handle,
-                nativeIdentityComparable: nativeComparable
-            )
+            inspect(pid, handle, nativeComparable)
         }
     }
 }

@@ -46,6 +46,13 @@ extension ComputerUseRuntimeBridge {
             "providerBusName": "mac:\(app.pid)",
             "processGeneration": macProcessGeneration(pid: app.pid),
         ]
+        // An apps-only window ref may not have had a full snapshot yet.
+        // Preserve the native identity while the selected window still exists.
+        service.rememberNativeWindowIdentity(
+            pid: app.pid,
+            windowID: windowNumber(window),
+            windowHandle: selectedHandle
+        )
         let inspectWindow = boundWindowInspector(windowHandle: selectedHandle)
 
         if tool == "activate" {
@@ -97,13 +104,13 @@ extension ComputerUseRuntimeBridge {
                     "The selected window does not expose an AX close button"
                 )
             }
-            let result = AXUIElementPerformAction(
-                closeButton,
-                kAXPressAction as CFString
-            )
-            guard result == .success else {
-                throw ComputerUseError.message(
-                    "AX close button press failed with \(result.rawValue)"
+            try performNativeAXMutation(
+                operation: "AXUIElementPerformAction(AXPress)",
+                route: "ax.window.close"
+            ) {
+                AXUIElementPerformAction(
+                    closeButton,
+                    kAXPressAction as CFString
                 )
             }
         }
@@ -323,7 +330,7 @@ private func preferredAXWindow(
     return windows.first
 }
 
-private func runtimeWindowHandle(_ operation: [String: Any]) -> String? {
+func runtimeWindowHandle(_ operation: [String: Any]) -> String? {
     let direct = string(operation["targetWindowHandle"])
     if !direct.isEmpty {
         return direct

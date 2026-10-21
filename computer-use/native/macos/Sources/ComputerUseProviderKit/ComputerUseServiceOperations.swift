@@ -20,10 +20,13 @@ extension ComputerUseService {
            let rawAction = record.rawActions.first(where: { $0.caseInsensitiveCompare("AXScroll\(normalized.capitalized)ByPage") == .orderedSame }),
            let element = record.element {
             route = "ax.action.scroll\(normalized)bypage"
-            for _ in 0..<repeatCount {
+            for index in 0..<repeatCount {
                 let result = AXUIElementPerformAction(element, rawAction as CFString)
                 guard result == .success else {
-                    throw nativeAXActionAttemptError(action: rawAction, result: result)
+                    throw nativeAXActionAttemptError(
+                        action: rawAction, result: result,
+                        earlierInputEmitted: index > 0
+                    )
                 }
                 Thread.sleep(forTimeInterval: 0.05)
             }
@@ -135,14 +138,14 @@ extension ComputerUseService {
             throw ComputerUseError.message(nonSettableSetValueErrorMessage)
         }
 
-        let result = AXUIElementSetAttributeValue(
-            element,
-            kAXValueAttribute as CFString,
-            value as CFString
-        )
-        guard result == .success else {
-            throw ComputerUseError.message(
-                "AXUIElementSetAttributeValue failed with \(result.rawValue)"
+        try performNativeAXMutation(
+            operation: "AXUIElementSetAttributeValue(AXValue)",
+            route: "ax.attribute.value.set"
+        ) {
+            AXUIElementSetAttributeValue(
+                element,
+                kAXValueAttribute as CFString,
+                value as CFString
             )
         }
 
@@ -287,6 +290,7 @@ extension ComputerUseService {
         fallbackWindow: AXUIElement? = nil,
         expectedWindowHandle: String? = nil
     ) throws -> AppSnapshot {
+        let windowHandle = try snapshotWindowHandle(requested: expectedWindowHandle)
         let app = try resolveRuntimeApplication(query: query, identity: activeAppIdentity)
         let snapshot = try SnapshotBuilder.build(
             for: app,
@@ -295,7 +299,7 @@ extension ComputerUseService {
             recoveryPolicy: recoveryPolicy,
             includeScreenshot: includeScreenshot,
             fallbackWindow: fallbackWindow,
-            expectedWindowHandle: expectedWindowHandle
+            expectedWindowHandle: windowHandle
         )
         if let identity = activeAppIdentity {
             _ = try resolveRuntimeApplication(query: query, identity: identity)
@@ -390,15 +394,58 @@ func dispatchRelativeAdjustment(
 
 func nativeAXActionAttemptError(
     action: String,
-    result: AXError
+    result: AXError,
+    earlierInputEmitted: Bool = false
 ) -> InputDeliveryError {
     let routeName = action
         .replacingOccurrences(of: "AX", with: "")
         .lowercased()
+    return nativeAXMutationAttemptError(
+        operation: "AXUIElementPerformAction(\(action))",
+        route: "ax.action.\(routeName)",
+        result: result,
+        earlierInputEmitted: earlierInputEmitted
+    )
+}
+
+func performNativeAXMutation(
+    operation: String,
+    route: String,
+    action: () -> AXError
+) throws {
+    let result = action()
+    guard result == .success else {
+        throw nativeAXMutationAttemptError(
+            operation: operation, route: route, result: result
+        )
+    }
+}
+
+func nativeAXMutationAttemptError(
+    operation: String,
+    route: String,
+    result: AXError,
+    earlierInputEmitted: Bool = false
+) -> InputDeliveryError {
+    let rejected: Bool
+    switch result {
+    case .illegalArgument, .invalidUIElement, .attributeUnsupported,
+         .actionUnsupported, .notImplemented, .apiDisabled:
+        rejected = true
+    default:
+        // AX cannotComplete includes callbacks that acted but did not reply.
+        // Generic or unknown native errors do not prove rejection either.
+        rejected = false
+    }
+    let possibleInput = earlierInputEmitted || !rejected
+    let explanation = possibleInput
+        ? "The request may have taken effect or earlier input was emitted. Observe the current state before retrying."
+        : "The native request was rejected; no input was emitted."
     return InputDeliveryError(
-        message: "AXUIElementPerformAction(\(action)) returned \(result.rawValue) after the native action was attempted; no fallback input was emitted",
-        inputEventsEmitted: true,
-        partialInputPossible: true,
-        actionRoute: "ax.action.\(routeName)"
+        message: "\(operation) returned \(result.rawValue). \(explanation)",
+        inputEventsEmitted: possibleInput,
+        failureCode: possibleInput ? "effect_unknown" : nil,
+        partialInputPossible: possibleInput,
+        actionRoute: route
     )
 }

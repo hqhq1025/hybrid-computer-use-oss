@@ -51,7 +51,10 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
     private func executeSynchronousThrowing(
         _ operation: [String: Any]
     ) throws -> [String: Any] {
-        try service.withAppIdentity(runtimeAppIdentity(operation)) {
+        try service.withAppIdentity(
+            runtimeAppIdentity(operation),
+            windowHandle: runtimeWindowHandle(operation)
+        ) {
             try executeSynchronousBound(operation)
         }
     }

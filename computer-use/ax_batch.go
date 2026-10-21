@@ -60,9 +60,10 @@ func (s *service) deriveAXBatchContext(
 		ref = strings.TrimSpace(ref)
 		handle = strings.TrimSpace(handle)
 		if context.windowHandle != "" && context.windowHandle != handle {
-			return fmt.Errorf(
+			return axInvalid("", fmt.Sprintf(
 				"batch spans two windows (%s and %s); one act call works in one window, so split it",
-				context.windowRef, ref,
+				context.windowRef, ref),
+				"Split the actions into separate act calls, one window per call.",
 			)
 		}
 		if context.windowRef == "" {
@@ -103,8 +104,9 @@ func (s *service) deriveAXBatchContext(
 				err = bindWindow(entry.LogicalWindowRef, entry.WindowHandle,
 					entry.AppRef, entry.AppIdentity)
 				if err != nil && explicitWindowRef != "" && index == 0 {
-					err = fmt.Errorf("%s belongs to window %s, not window_ref %s; omit window_ref",
-						address, entry.LogicalWindowRef, explicitWindowRef)
+					err = axInvalid("window_ref", fmt.Sprintf("%s belongs to window %s, not window_ref %s; omit window_ref",
+						address, entry.LogicalWindowRef, explicitWindowRef),
+						"Omit window_ref so the action refs determine the window, or use refs from window_ref.")
 				}
 			}
 		} else {
@@ -115,6 +117,10 @@ func (s *service) deriveAXBatchContext(
 			}
 		}
 		if err != nil {
+			var argument *axArgError
+			if errors.As(err, &argument) && argument.path == "" {
+				argument.path = fmt.Sprintf("actions[%d].ref", index)
+			}
 			return nil, fmt.Errorf("actions[%d].ref: %w", index, err)
 		}
 	}
@@ -364,6 +370,10 @@ func axBatchValidationError(message string, requested int) toolCallResult {
 }
 
 func axBatchPreflightError(err error, requested int) toolCallResult {
+	var argument *axArgError
+	if errors.As(err, &argument) {
+		return axArgErrorResult(argument, requested)
+	}
 	return withArgumentRule(
 		withAXLifecycleFailure(axBatchValidationError(err.Error(), requested), err),
 		err,

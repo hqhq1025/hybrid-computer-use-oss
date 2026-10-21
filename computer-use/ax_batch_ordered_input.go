@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -255,18 +256,24 @@ func (s *service) orderedInputTransportFailure(
 	err error,
 	obs observation,
 ) toolCallResult {
+	var transport *runtimeTransportError
+	requestUnsent := errors.As(err, &transport) && !transport.requestSent
+	uncertain := !requestUnsent
+	detail := "; the request may have reached the native provider, so do not retry " +
+		"the batch until current state is observed."
+	if requestUnsent {
+		detail = "; no bytes of this ordered-input request reached the native provider."
+	}
 	result := textResult(
-		"ordered_input_transport_failed: "+err.Error()+
-			"; the request may have reached the native provider, so do not retry "+
-			"the batch until current state is observed.",
+		"ordered_input_transport_failed: "+err.Error()+detail,
 		true,
 	)
 	result.StructuredContent = map[string]any{
 		"failure_code":               "runtime_transport_lost",
 		"failure_phase":              "ordered_input_transport",
 		"input_events_emitted":       false,
-		"partial_input_possible":     true,
-		"mutation_unknown":           true,
+		"partial_input_possible":     uncertain,
+		"mutation_unknown":           uncertain,
 		"retry_same_request":         false,
 		"observation_required":       true,
 		"final_observation_returned": false,
@@ -274,14 +281,14 @@ func (s *service) orderedInputTransportFailure(
 			"actions_requested":                    len(actions),
 			"actions_completed_without_call_error": 0,
 			"failed_action_index":                  nil,
-			"rejected_before_first_action":         false,
-			"partial_sequence":                     true,
+			"rejected_before_first_action":         requestUnsent,
+			"partial_sequence":                     uncertain,
 			"final_observation_returned":           false,
 			"observation_required":                 true,
 			"actions":                              []map[string]any{},
 			"any_input_emitted":                    false,
-			"partial_input_possible":               true,
-			"mutation_unknown":                     true,
+			"partial_input_possible":               uncertain,
+			"mutation_unknown":                     uncertain,
 			"execution_path":                       "provider_ordered_input",
 		},
 	}
@@ -562,7 +569,9 @@ func (s *service) executeWholeBatchOrderedInput(
 		if len(nativeResult.Steps) == 0 && result.StructuredContent["partial_input_possible"] == true {
 			facts["partial_sequence"] = true
 		}
-		if result.StructuredContent["provider_request_rejected"] == true {
+		original, _ := result.StructuredContent["a11y_batch_result"].(map[string]any)
+		if result.StructuredContent["provider_request_rejected"] == true ||
+			(original["rejected_before_first_action"] == true && len(nativeResult.Steps) == 0) {
 			facts["rejected_before_first_action"] = true
 			facts["first_unattempted_action_index"] = 0
 		}

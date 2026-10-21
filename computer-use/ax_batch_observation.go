@@ -206,7 +206,8 @@ func (s *service) recoverClosedWindowActionObservation(
 		result.StructuredContent["final_observation_returned"].(bool)
 	required, _ :=
 		result.StructuredContent["observation_required"].(bool)
-	if hasReturned && returned && !required {
+	if result.StructuredContent["target_window_absent"] == true ||
+		(hasReturned && returned && !required) {
 		result = finalizeVerifiedCloseLifecycle(result)
 		if omitFinalObservation {
 			result = omitVerifiedCloseFinalObservation(result)
