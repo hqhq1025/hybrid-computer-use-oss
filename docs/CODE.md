@@ -128,6 +128,14 @@ success, 2 `invalid_argument`, 3 `wait_timeout`, 4
 10 `runtime_error`, 64 usage. No exit status mixes codes that sent no input
 with codes that may have.
 
+Unknown options on shorthand, batch, schema, and daemon commands fail with
+exit 64 before connecting to the daemon. JSON arguments must contain exactly one value; trailing whitespace
+is allowed, but a second value or trailing garbage is rejected before any
+action. This also applies to `--wait` steps, `call --args`/`--args-file`,
+`call --calls`/`--calls-file`, and `batch`. One-shot commands keep their existing error exit
+status. `find --text VALUE` takes a search value; `batch --text` selects text
+output and does not take a value.
+
 `computer-use call` keeps its one-shot behaviour (own process, no daemon) and
 prints the same model-facing result as MCP, with images as file paths.
 

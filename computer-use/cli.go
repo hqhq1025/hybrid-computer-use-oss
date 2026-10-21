@@ -302,11 +302,49 @@ func appendWaitFlag(args map[string]any, f cliFlags) error {
 func decodeJSONArg(raw string, out any) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()
-	return decoder.Decode(out)
+	if err := decoder.Decode(out); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return fmt.Errorf("invalid trailing JSON content: %w", err)
+		}
+		return errors.New("expected exactly one JSON value")
+	}
+	return nil
 }
 
 // cliBoolFlags take no value.
 var cliBoolFlags = map[string]bool{"json": true, "records": true, "text": true, "keep-going": true}
+
+// CLI-only options are checked before connecting to the daemon. The core
+// still validates all values and the constructed desktop request.
+func allowedCLIFlags(command string) map[string]bool {
+	flags := "socket"
+	if _, shorthand := cliShorthands[command]; shorthand {
+		flags += " session request-id since json records"
+	}
+	switch command {
+	case "observe":
+		flags += " root scope as until"
+	case "find":
+		flags += " role name name-has text text-has state limit cursor scope"
+	case "wait":
+		flags += " as"
+	case "click", "type", "key", "set", "activate", "close", "act":
+		flags += " window as wait until"
+	case "scroll":
+		flags += " window as wait until pages"
+	case "batch":
+		flags += " session keep-going text json records"
+	}
+	allowed := map[string]bool{}
+	for _, name := range strings.Fields(flags) {
+		allowed[name] = true
+	}
+	return allowed
+}
 
 // parseCLIArgs splits positional arguments from --flags. --json is a value
 // flag for act and gui and a switch elsewhere.
@@ -314,6 +352,7 @@ func parseCLIArgs(command string, args []string) ([]string, cliFlags, error) {
 	positional := []string{}
 	flags := cliFlags{}
 	jsonTakesValue := command == "act" || command == "gui"
+	allowed := allowedCLIFlags(command)
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		if !strings.HasPrefix(arg, "--") || arg == "--" {
@@ -321,11 +360,15 @@ func parseCLIArgs(command string, args []string) ([]string, cliFlags, error) {
 			continue
 		}
 		name := strings.TrimPrefix(arg, "--")
+		flag, _, _ := strings.Cut(name, "=")
+		if !allowed[flag] {
+			return nil, nil, usageError(fmt.Sprintf("unknown option --%s for %s; see computer-use help cli", flag, command))
+		}
 		if value, inline, found := strings.Cut(name, "="); found {
 			flags[value] = inline
 			continue
 		}
-		if cliBoolFlags[name] && !(name == "json" && jsonTakesValue) {
+		if cliBoolFlags[name] && !(name == "json" && jsonTakesValue) && !(name == "text" && command == "find") {
 			flags[name] = ""
 			continue
 		}
@@ -476,6 +519,9 @@ func printTextContent(stdout io.Writer, content []contentItem) {
 func runBatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	positional, flags, err := parseCLIArgs("batch", args)
 	if err != nil || len(positional) > 1 {
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+		}
 		fmt.Fprintln(stderr, "usage: computer-use batch [FILE|-] [--keep-going] [--text]")
 		return exitUsage
 	}

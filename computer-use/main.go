@@ -219,9 +219,7 @@ func readArguments(inline, file string) (map[string]any, error) {
 		return nil, err
 	}
 	var args map[string]any
-	decoder := json.NewDecoder(strings.NewReader(source))
-	decoder.UseNumber()
-	if err := decoder.Decode(&args); err != nil {
+	if err := decodeJSONArg(source, &args); err != nil {
 		return nil, fmt.Errorf("Invalid JSON input: %w", err)
 	}
 	if args == nil {
@@ -239,9 +237,7 @@ func readCallSequence(inline, file string) ([]callSpec, error) {
 		return nil, err
 	}
 	var raw []map[string]any
-	decoder := json.NewDecoder(strings.NewReader(source))
-	decoder.UseNumber()
-	if err := decoder.Decode(&raw); err != nil {
+	if err := decodeJSONArg(source, &raw); err != nil {
 		return nil, fmt.Errorf("Invalid JSON input: %w", err)
 	}
 	calls := make([]callSpec, 0, len(raw))
