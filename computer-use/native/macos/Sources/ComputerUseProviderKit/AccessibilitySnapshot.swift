@@ -26,6 +26,7 @@ final class ElementRecord {
     let value: String?
     let setValueSupported: Bool?
     let states: String?
+    let liveIdentity: AXLiveIdentity?
 
     init(
         index: Int,
@@ -43,7 +44,8 @@ final class ElementRecord {
         placeholder: String? = nil,
         value: String? = nil,
         setValueSupported: Bool? = nil,
-        states: String? = nil
+        states: String? = nil,
+        liveIdentity: AXLiveIdentity? = nil
     ) {
         self.index = index
         self.runtimeID = runtimeID ?? [index]
@@ -61,6 +63,7 @@ final class ElementRecord {
         self.value = value
         self.setValueSupported = setValueSupported
         self.states = states
+        self.liveIdentity = liveIdentity
     }
 }
 
@@ -367,6 +370,7 @@ public struct AppSnapshot {
     var providerProcessGeneration: String? = nil
     var diagnosticSnapshotSerial: Int = 0
     var omissions: [SnapshotOmission] = []
+    var rootWindowIdentity: AXLiveIdentity? = nil
 
     public var renderedText: String {
         renderedText(style: .fullState)
@@ -756,7 +760,8 @@ enum SnapshotBuilder {
             diagnosticSnapshotSerial: Thread.current.threadDictionary[
                 "computer-use.failure.snapshot"
             ] as? Int ?? 0,
-            omissions: omissions
+            omissions: omissions,
+            rootWindowIdentity: AXLiveIdentity.sample(rootElement)
         )
     }
 

@@ -100,9 +100,12 @@ final class AXPasteboardRetentionBarrier {
 }
 
 extension ComputerUseService {
-    func focusedEditableTextTarget(in snapshot: AppSnapshot) throws -> AXUIElement? {
+    func focusedEditableTextTarget(
+        from start: AXUIElement?,
+        in snapshot: AppSnapshot
+    ) throws -> AXUIElement? {
         try nearestFocusedEditableTarget(
-            from: snapshot.focusedElement,
+            from: start,
             root: snapshot.rootWindowElement,
             parentOf: copyParent,
             isSame: CFEqual
@@ -284,4 +287,82 @@ extension ComputerUseService {
         let frame = record.localFrame.map { "x=\(Int($0.minX)) y=\(Int($0.minY)) w=\(Int($0.width)) h=\(Int($0.height))" } ?? "nil"
         return "index=\(record.index) role=\(role) synthetic=\(record.isSyntheticText) actions=[\(actions)] frame=\(frame)"
     }
+}
+
+/// The value a text element should hold after `text` replaces its
+/// selection, or nil when the selection lies outside the value. AX ranges
+/// count UTF-16 code units.
+func textAfterInsertion(_ value: String, selection: CFRange, text: String) -> String? {
+    let current = value as NSString
+    guard selection.location >= 0, selection.length >= 0,
+          selection.location + selection.length <= current.length else {
+        return nil
+    }
+    return current.replacingCharacters(
+        in: NSRange(location: selection.location, length: selection.length),
+        with: text
+    )
+}
+
+struct TextInsertionBaseline {
+    let value: String
+    let expected: String
+}
+
+/// Nil when the element's value or selection cannot be read, for example
+/// in a secure text field; typing then cannot be verified by readback.
+func textInsertionBaseline(of element: AXUIElement, inserting text: String) -> TextInsertionBaseline? {
+    var range = CFRange()
+    guard let value = attributeValue(of: element, attribute: kAXValueAttribute) as? String,
+          let rangeValue = attributeValue(
+              of: element, attribute: kAXSelectedTextRangeAttribute
+          ).flatMap(checkedAXValue),
+          AXValueGetValue(rangeValue, .cfRange, &range),
+          let expected = textAfterInsertion(value, selection: range, text: text)
+    else {
+        return nil
+    }
+    return TextInsertionBaseline(value: value, expected: expected)
+}
+
+enum TextReadback: Equatable {
+    case expected
+    case unchanged
+    case other(String?)
+}
+
+func waitForTextReadback(
+    _ element: AXUIElement,
+    baseline: TextInsertionBaseline,
+    timeout: TimeInterval
+) -> TextReadback {
+    let deadline = Date(timeIntervalSinceNow: timeout)
+    while true {
+        let observed = attributeValue(of: element, attribute: kAXValueAttribute) as? String
+        if observed == baseline.expected {
+            return .expected
+        }
+        if Date() >= deadline {
+            return observed == baseline.value ? .unchanged : .other(observed)
+        }
+        Thread.sleep(forTimeInterval: 0.02)
+    }
+}
+
+func axAttributeIsSettable(_ element: AXUIElement, _ attribute: String) -> Bool {
+    var settable = DarwinBoolean(false)
+    return AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success
+        && settable.boolValue
+}
+
+func textReadbackMismatch(route: String, expected: String, observed: String?) -> InputDeliveryError {
+    InputDeliveryError(
+        message: "Text input changed the element, but readback did not match: expected \(String(reflecting: expected)), observed \(String(reflecting: observed ?? "<missing or non-string>"))",
+        inputEventsEmitted: true,
+        failureCode: "readback_mismatch",
+        partialInputPossible: true,
+        readbackSampled: true,
+        readbackVerified: false,
+        actionRoute: route
+    )
 }

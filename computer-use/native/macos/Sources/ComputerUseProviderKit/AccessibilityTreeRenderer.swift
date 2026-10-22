@@ -333,7 +333,8 @@ struct TreeRenderer {
                 role: role,
                 focusedElement: context.focusedElement,
                 expansion: expansion
-            )
+            ),
+            liveIdentity: AXLiveIdentity.sample(root)
         )
         records[index] = record
 
