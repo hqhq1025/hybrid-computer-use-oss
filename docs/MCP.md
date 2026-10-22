@@ -272,9 +272,15 @@ identity graph:
 application aN -> top-level window wN -> element rN
 ```
 
-- `apps` lists every top-level window as `wN` with its title, application and
+- `apps` lists confirmed top-level windows as `wN` with title, application and
   whether it has focus. Output names applications but shows no `aN`; `app`
   still accepts an `aN`, a name, an app id or a PID.
+  If an application does not answer, the listing retains confirmed windows
+  and reports `inventory_complete=false` with `inventory_issues` in text and
+  records output. Each issue names the application when known and gives the
+  read failure. Missing windows remain unknown. Returned refs remain usable;
+  title-based selection, implicit focus, and window waits require a complete
+  listing. A missing window cannot prove that a close succeeded.
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
 - References describe current state; they are not durable selectors. Every
