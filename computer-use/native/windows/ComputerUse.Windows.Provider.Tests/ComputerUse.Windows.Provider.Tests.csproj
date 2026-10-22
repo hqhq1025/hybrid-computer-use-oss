@@ -85,6 +85,9 @@
       Include="../ComputerUse.Windows.Runtime/WindowsDesktopImageGeometry.cs"
       Link="WindowsDesktopImageGeometry.cs" />
     <Compile
+      Include="../ComputerUse.Windows.Runtime/WindowsDesktopZoom.cs"
+      Link="WindowsDesktopZoom.cs" />
+    <Compile
       Include="../ComputerUse.Windows.Runtime/WindowsDesktopLayoutIdentityPolicy.cs"
       Link="WindowsDesktopLayoutIdentityPolicy.cs" />
     <Compile

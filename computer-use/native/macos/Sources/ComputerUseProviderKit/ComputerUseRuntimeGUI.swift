@@ -4,6 +4,9 @@ import Foundation
 extension ComputerUseRuntimeBridge {
     func executeGUI(_ operation: [String: Any]) async throws -> [String: Any] {
         let actions = operation["actions"] as? [[String: Any]] ?? []
+        if actions.count == 1, string(actions[0]["type"]).lowercased() == "zoom" {
+            return executeDesktopZoom(actions[0], frameID: string(operation["frame_id"]))
+        }
         let nativeBounds = desktopBounds()
         let deliveredBounds = desktopDeliveredBounds(nativeBounds)
         do {
@@ -158,6 +161,7 @@ func guiFinalObservationResult(
 ) -> [String: Any] {
         do {
             let observation = try capture()
+            DesktopPublishedLayouts.shared.remember(observation.sample.snapshot)
             return [
                 "ok": true,
                 "snapshot": observation.sample.snapshot,

@@ -20,11 +20,6 @@ const guiZoomMaxError = 2.0
 // frame by the provider's point rule. The provider also rejects the zoom
 // when the windows over the region changed since that frame.
 func (s *Service) guiZoom(action ProviderDesktopAction) ToolCallResult {
-	if platform := s.platformBackend().HostInfo().Platform; platform == "darwin" || platform == "windows" {
-		return guiError(contract.AXCodeInvalidArgument, "actions[0].type",
-			"zoom is implemented by the Linux provider only; nothing was captured. "+
-				"Take a screenshot instead.", GUIScreenshotCall)
-	}
 	frame := s.guiSnapshot
 	if frame == nil || frame.FrameID == "" {
 		// The region means nothing without its frame; the fresh screenshot
@@ -61,8 +56,19 @@ func (s *Service) guiZoom(action ProviderDesktopAction) ToolCallResult {
 			return s.guiResponse(*response)
 		}
 		code, path, message := contract.AXCodeRuntimeError, "", FirstNonEmpty(response.Error, "zoom failed")
-		if len(response.ValidationErrors) > 0 {
+		failureCode := ""
+		if response.Failure != nil {
+			failureCode = response.Failure.Code
+		}
+		switch {
+		case len(response.ValidationErrors) > 0:
 			code, path, message = contract.AXCodeInvalidArgument, "actions[0].region", guiValidationErrorText(*response)
+		case failureCode == "invalid_gui_action" || failureCode == "invalid_zoom_region":
+			// macOS and Windows report a region the live desktop rejects
+			// with a failure code instead of validation errors.
+			code, path = contract.AXCodeInvalidArgument, "actions[0].region"
+		case failureCode == contract.GUICodePermissionDenied:
+			return guiError(failureCode, "", message, contract.GUIPermissionHint)
 		}
 		return guiError(code, path, message, GUIScreenshotCall)
 	}

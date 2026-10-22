@@ -22,7 +22,7 @@ internal sealed partial class ProviderServer
                 action,
                 Fields(
                     "type", "x", "y", "button", "text", "keys", "path",
-                    "scroll_x", "scroll_y"),
+                    "scroll_x", "scroll_y", "region"),
                 path);
             var type = RequiredStringValue(action, "type");
             ValidateDesktopAction(action, type, path);
@@ -80,8 +80,28 @@ internal sealed partial class ProviderServer
             RequiredNumber(action, "scroll_y", path);
         }
 
+        var hasRegion = action["region"] is not null;
+        if (hasRegion && type != "zoom")
+        {
+            throw InvalidRequest($"{path}.{type} does not accept region.");
+        }
         switch (type)
         {
+            case "zoom":
+                if (action["region"] is not JsonArray region ||
+                    region.Count != 4 ||
+                    region.Any(value =>
+                        value is not JsonValue number ||
+                        !number.TryGetValue<double>(out _)))
+                {
+                    throw InvalidRequest($"{path}.region must be four numbers.");
+                }
+                RejectDesktopFields(
+                    hasPoint || hasButton || hasText || hasKeys || hasPath ||
+                    hasScrollX || hasScrollY,
+                    "zoom",
+                    path);
+                break;
             case "screenshot":
                 RejectDesktopFields(
                     hasPoint || hasButton || hasText || hasKeys || hasPath ||
