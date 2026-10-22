@@ -87,6 +87,105 @@ class EmbeddedEditorSelectionTests(AtspiPatchedTestCase):
         self.assertTrue(caught.exception.input_events_emitted)
 
 
+class WrappedSelectionItemTests(AtspiPatchedTestCase):
+    def setUp(self):
+        super().setUp()
+        self.selection = mock.Mock()
+        self.selection.select_child.return_value = True
+        self.selection.is_child_selected.return_value = True
+        for name, value in (("time", _FakeClock()),):
+            patch = mock.patch.object(runtime, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+        patch = mock.patch.object(runtime.Atspi, "Selection", self.selection,
+                                  create=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def wrapped_cell(self):
+        table = _Node(role="tree table")
+        table.selection_iface = table
+        table.add(_Node(role="table cell"))
+        wrapper = _Node(role="table cell", states=(STATE.SELECTABLE,))
+        wrapper.add(_Node(role="table cell"))
+        target = _Node(role="table cell", name="Target", states=(STATE.SELECTABLE,))
+        wrapper.add(target)
+        table.add(wrapper)
+        # The owner and renderer deliberately have different child indices.
+        table.add(_Node(role="table cell"))
+        table.children.insert(0, _Node(role="table cell", parent=table))
+        return table, wrapper, target
+
+    def test_cell_renderer_uses_owning_cell_index_and_verifies_target(self):
+        table, wrapper, target = self.wrapped_cell()
+        self.selection.select_child.side_effect = (
+            lambda *_: target.states.add(STATE.SELECTED) or True)
+        self.assertTrue(runtime.select_item(target))
+        self.selection.select_child.assert_called_once_with(table, 2)
+        self.selection.is_child_selected.assert_called_with(table, 2)
+
+    def test_direct_item_still_uses_its_own_index(self):
+        table, wrapper, _ = self.wrapped_cell()
+        self.assertTrue(runtime.select_item(wrapper))
+        self.selection.select_child.assert_called_once_with(table, 2)
+
+    def test_an_arbitrary_panel_does_not_redirect_selection_to_ancestor(self):
+        table, wrapper, target = self.wrapped_cell()
+        wrapper.get_role_name = lambda: "panel"
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_item(target)
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.selection.select_child.assert_not_called()
+
+    def test_named_selectable_ancestor_is_not_treated_as_a_renderer_wrapper(self):
+        _, wrapper, target = self.wrapped_cell()
+        wrapper.get_name = lambda: "Different item"
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_item(target)
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.selection.select_child.assert_not_called()
+
+    def test_stale_child_index_rejects_before_input(self):
+        _, _, target = self.wrapped_cell()
+        target.get_index_in_parent = lambda: 0
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_item(target)
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.selection.select_child.assert_not_called()
+
+    def test_owner_selected_without_target_selection_is_not_success(self):
+        _, _, target = self.wrapped_cell()
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_item(target)
+        self.assertEqual(caught.exception.failure_code, "effect_unknown")
+        self.assertTrue(caught.exception.input_events_emitted)
+
+    def test_replaced_owner_during_selection_is_not_success(self):
+        table, _, target = self.wrapped_cell()
+
+        def replace(*_):
+            target.states.add(STATE.SELECTED)
+            table.children[2] = _Node(role="table cell", parent=table)
+            return True
+
+        self.selection.select_child.side_effect = replace
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_item(target)
+        self.assertEqual(caught.exception.failure_code, "effect_unknown")
+        self.assertTrue(caught.exception.input_events_emitted)
+
+    def test_matching_object_paths_from_other_bus_are_not_same_owner(self):
+        _, wrapper, target = self.wrapped_cell()
+        foreign = _Node(role="table cell", parent=wrapper)
+        foreign.path = target.path
+        foreign.app = mock.Mock(bus_name=":1.99")
+        wrapper.get_child_at_index = lambda _: foreign
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_item(target)
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.selection.select_child.assert_not_called()
+
+
 class SelectBoundaryTests(AtspiPatchedTestCase):
     def setUp(self):
         super().setUp()

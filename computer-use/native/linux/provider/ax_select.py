@@ -28,6 +28,8 @@ from .foundation import (
     OperationFailure,
     node_name,
     node_role,
+    provider_bus_name,
+    provider_identity_path,
     provider_object_path,
     safe,
     state_contains,
@@ -125,6 +127,55 @@ def _selection_container(node):
     if parent is None or safe(lambda: parent.get_selection_iface()) is None:
         return None
     return parent
+
+
+def _same_selection_item(first, second):
+    if first is second:
+        return first is not None
+    if first is None or second is None:
+        return False
+    identity = provider_identity_path(first)
+    return bool(identity and provider_bus_name(first) == provider_bus_name(second)
+                and identity == provider_identity_path(second))
+
+
+def _selection_item_owner(node):
+    """Resolve selectable cell renderers to their owning Selection child.
+
+    A table cell can contain separate icon and text cell renderers. Those
+    renderers belong to one anonymous selectable cell; its index, rather
+    than the text renderer's index, is owned by the table's Selection API.
+    """
+    current, chain = node, []
+    for _ in range(8):
+        parent = safe(current.get_parent)
+        index = safe(current.get_index_in_parent)
+        if parent is None or index is None or index < 0:
+            break
+        indexed = safe(lambda: parent.get_child_at_index(index))
+        if not _same_selection_item(current, indexed):
+            break
+        chain.append((current, parent, index))
+        if safe(parent.get_selection_iface) is not None:
+            return parent, current, index, chain
+        if (node_role(current) not in ("table cell", "cell")
+                or node_role(parent) not in ("table cell", "cell")
+                or node_name(parent)
+                or not state_contains(current, Atspi.StateType.SELECTABLE)
+                or not state_contains(parent, Atspi.StateType.SELECTABLE)):
+            break
+        current = parent
+    return None
+
+
+def _selection_chain_current(chain):
+    return all(
+        _same_selection_item(safe(child.get_parent), parent)
+        and safe(child.get_index_in_parent) == index
+        and _same_selection_item(
+            safe(lambda: parent.get_child_at_index(index)), child)
+        for child, parent, index in chain
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -436,23 +487,31 @@ def _selected_cell_indices(container):
 
 def select_item(node):
     """Select one child of a Selection container; return True when read back."""
-    container = _selection_container(node)
-    if container is None:
+    owner = _selection_item_owner(node)
+    if owner is None:
         raise _failure(
             "select_unavailable: the element's container does not support "
             "selection; no input was emitted.")
-    index = safe(lambda: node.get_index_in_parent())
-    if index is None or index < 0:
-        raise _failure("select_unavailable: item index could not be read; "
+    container, selected_item, index, chain = owner
+    if not _selection_chain_current(chain):
+        raise _failure("select_unavailable: item ownership changed; "
                        "no input was emitted.")
     if not safe(lambda: Atspi.Selection.select_child(container, int(index)), False):
         raise _failure(
             "select_unavailable: the container refused to select the item; "
             "the selection may have changed.", code="effect_unknown",
             emitted=True, phase="emission")
-    if not _wait_until(lambda: state_contains(node, Atspi.StateType.SELECTED)
-                       or bool(safe(lambda: Atspi.Selection.is_child_selected(
-                           container, int(index)), False)), 0.6):
+    def selected():
+        if not _selection_chain_current(chain):
+            return False
+        target_selected = state_contains(node, Atspi.StateType.SELECTED)
+        owner_selected = bool(safe(lambda: Atspi.Selection.is_child_selected(
+            container, int(index)), False))
+        if selected_item is not node:
+            return target_selected and owner_selected
+        return target_selected or owner_selected
+
+    if not _wait_until(selected, 0.6):
         raise _failure(
             "select_unverified: the item did not report itself selected.",
             code="effect_unknown", emitted=True, phase="readback")
