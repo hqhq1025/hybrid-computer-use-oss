@@ -1,6 +1,6 @@
 # PTC forwarding and image delivery
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-20
 Change ID: `ptc-code-compat-20261020`
 Baseline: main source `b34e5a2`, package version 1.0.0.

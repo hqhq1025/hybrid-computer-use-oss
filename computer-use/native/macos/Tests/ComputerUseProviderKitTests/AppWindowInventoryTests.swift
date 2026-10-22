@@ -51,7 +51,7 @@ import Testing
     #expect(result.apps.count == 2)
     #expect((result.apps[1]["windows"] as? [[String: Any]])?.first?["title"] as? String == "Document")
     #expect(result.issues == [["app": "Test", "reason": "AXWindows unavailable (AX -25204)"]])
-    let wire = ProviderV2ResponseBuilder.domainResult(["ok": true, "apps": result.apps, "inventory_issues": result.issues], operation: "observe_apps")
+    let wire = ProviderResponseBuilder.domainResult(["ok": true, "apps": result.apps, "inventory_issues": result.issues], operation: "observe_apps")
     #expect(wire["inventory_issues"] as? [[String: String]] == result.issues)
 }
 

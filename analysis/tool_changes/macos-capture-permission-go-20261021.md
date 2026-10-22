@@ -1,6 +1,7 @@
 # GUI permission denial recovery
 
-Status: `testing`
+Status: `merged`
+Paths refer to the layout before the package split (a4006c5).
 Created: 2026-10-21 (Asia/Shanghai)
 Change ID: `macos-capture-permission-go-20261021`
 Baseline: package version `1.0.0`, `origin/main` selected for this worktree.

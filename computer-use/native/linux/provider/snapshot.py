@@ -11,8 +11,6 @@ from .foundation import (
     GUI_SNAPSHOT_LAYOUT_ATTEMPTS,
     MAX_DEPTH,
     MAX_ELEMENTS,
-    SCREENSHOT_SCOPE_SCREEN,
-    a11y_screenshots_enabled,
     child_count,
     extents,
     has_text_iface,
@@ -50,11 +48,11 @@ from .x11_windows import (
 
 from .gui_capture import (
     capture_gui_pixels,
-    capture_window_image,
     encoded_screenshot,
     gui_model_dimensions,
     pixbuf_sample,
     scale_to_model,
+    zoom_pixels,
 )
 
 from .atspi_inventory import (
@@ -308,11 +306,9 @@ def build_snapshot(
     text_limit=DEFAULT_TEXT_LIMIT,
     max_tree_nodes=MAX_ELEMENTS,
     max_tree_depth=MAX_DEPTH,
-    include_screenshot=None,
     prune=True,
     boxes=False,
     known_refs=None,
-    screenshot_scope="window",
     app_identity=None,
     target_window_handle=None,
     reuse_tree=False,
@@ -324,23 +320,13 @@ def build_snapshot(
     Every walk, reused or not, may be reused later. Post-action snapshots
     pass False so that the tree after an action is always read fresh.
 
-    ``include_screenshot=None`` defers to a11y_screenshots_enabled(); True or
-    False forces the choice. Callers request AX screenshots explicitly with
-    observe=screenshot or observe=full.
-
-    A window screenshot is costly (about a thousand tokens, most of a pruned
-    observation), but the tree and the screenshot are complementary rather
-    than redundant: the tree
-    provides actionability and the screenshot verifiability. Some effects
-    never reach the tree (saving a file in LibreOffice Impress, for example),
-    while the tree's description identifies controls, such as which spin
-    button is "Position Y", that a screenshot can only guess from label
-    proximity.
+    The snapshot carries no image. AX observe=full/screenshot returns the
+    full-desktop GUI frame, which the Go core captures through the desktop
+    batch after this read.
 
     ``boxes`` defaults to False;
-    geometry takes 35-50% of the rendered tree. Frames share the
-    window-relative space of the AX window screenshot and mainly serve
-    debugging. Element-targeted clicks read coordinates from the records
+    geometry takes 35-50% of the rendered tree. Frames are window-relative
+    and mainly serve debugging. Element-targeted clicks read coordinates from the records
     internally, so leaving frames out of the rendering costs no AX
     capability. GUI coordinates must come from the GUI tool's full-desktop
     image, never from these frames.
@@ -423,17 +409,6 @@ def build_snapshot(
         focus_probe=focus_probe,
     )
     lap("snapshot.handle_title_focus")
-    screenshot_bounds = (
-        desktop_bounds()
-        if screenshot_scope == SCREENSHOT_SCOPE_SCREEN
-        else bounds
-    )
-    screenshot = (
-        capture_window_image(screenshot_bounds)
-        if (a11y_screenshots_enabled() if include_screenshot is None else include_screenshot)
-        else None
-    )
-    lap("snapshot.screenshot")
     snapshot = {
         "app": {
             "name": node_name(app),
@@ -454,9 +429,6 @@ def build_snapshot(
         "sampledAt": utc_timestamp(),
         "snapshotId": snapshot_digest(handle, lines, focused, selected),
         "busy": busy_signal(window, records),
-        "screenshotPngBase64": screenshot.get("data") if screenshot else None,
-        "screenshotMimeType": screenshot.get("mimeType") if screenshot else None,
-        "screenshotEncoding": screenshot.get("encoding") if screenshot else None,
         "treeLines": lines,
         "focusedSummary": focused,
         "selectedText": selected,
@@ -518,6 +490,12 @@ class CapturedGUISnapshot:
         if self._sample is None and self.has_image:
             object.__setattr__(self, "_sample", pixbuf_sample(self._pixbuf))
         return self._sample
+
+    def zoom(self, geometry):
+        """Encode a zoom image cut from this grab; see zoom_geometry."""
+        if not self.has_image:
+            return None
+        return zoom_pixels(self._pixbuf, geometry)
 
     def encode(self):
         if self._encoding_error is not None:

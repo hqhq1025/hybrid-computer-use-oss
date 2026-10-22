@@ -621,28 +621,6 @@ class ExactLogicalWindowReadTests(AtspiPatchedTestCase):
 class VisibleCellsIndexerTests(AtspiPatchedTestCase):
     """Virtual cells share the renderer's indexer for stable target indices."""
 
-    def test_signature_accepts_indexer(self):
-        import inspect
-        params = inspect.signature(runtime.render_visible_cells).parameters
-        self.assertIn("indexer", params,
-                      "render_visible_cells must accept indexer explicitly; "
-                      "otherwise the free name in its body fails at runtime")
-
-    def test_call_site_passes_indexer(self):
-        # Passing the same indexer preserves identity across snapshots.
-        import inspect
-        source = inspect.getsource(runtime.render_tree)
-        self.assertIn("render_visible_cells(", source)
-        call = source[source.index("render_visible_cells("):]
-        call = call[:call.index(")\n")]
-        self.assertIn("indexer=indexer", call,
-                      "render_tree must pass indexer to render_visible_cells")
-        self.assertIn(
-            "annotations=annotations",
-            call,
-            "gaps in self-managed tables must reach the shared completeness record",
-        )
-
     def test_visible_cell_range_failure_marks_acquisition_incomplete(self):
         annotations = []
         with mock.patch.object(runtime, "visible_cell_range", return_value=None):

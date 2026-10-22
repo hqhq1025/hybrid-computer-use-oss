@@ -1,6 +1,6 @@
 # Bind SDK retries to their daemon instance
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-20
 Change ID: `sdk-restart-replay-20261020`
 Baseline: main `629e777`, package version 1.0.0.

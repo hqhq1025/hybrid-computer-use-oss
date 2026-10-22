@@ -1,6 +1,6 @@
 # GUI screenshot scaling and generic instructions
 
-Status: `testing`
+Status: `merged`
 
 Created: 2026-10-20
 

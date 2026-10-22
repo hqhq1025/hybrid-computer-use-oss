@@ -1,6 +1,6 @@
 # Preserve native identity before closing an apps-only window
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-21
 Change ID: `macos-close-native-provenance-20261021`
 Baseline package version: `1.0.0`, unchanged.

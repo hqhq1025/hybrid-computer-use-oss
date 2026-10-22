@@ -1,5 +1,7 @@
 # Instructions
 
+Last verified against commit `a4006c5`.
+
 The agent receives common base policy and, by default, one selected operating
 profile. These files are plain text injected at startup, not skills that a
 client discovers or activates. Every supported agent receives the same selected
@@ -48,7 +50,7 @@ Do not report these ablations as the hybrid result.
 skill settings and their disabled state are independent of this plain-text
 injection.
 
-## Evaluation Boundary
+## Evaluation boundary
 
 Editing either the base or a profile changes model context. Use a new evaluation
 attempt and run ID, record the selected files, and never mix revisions within

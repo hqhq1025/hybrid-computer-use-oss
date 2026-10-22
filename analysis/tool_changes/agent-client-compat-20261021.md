@@ -1,6 +1,7 @@
 # Agent client compatibility
 
-Status: `testing`
+Status: `merged`
+Paths refer to the layout before the package split (a4006c5).
 Created: 2026-10-21 (Asia/Shanghai)
 Change ID: `agent-client-compat-20261021`
 Baseline: main `42488fc`, package version 1.0.0.

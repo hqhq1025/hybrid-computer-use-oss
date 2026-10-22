@@ -1,6 +1,7 @@
 # Preserve unsent ordered-input evidence
 
-Status: `testing`
+Status: `merged`
+Paths refer to the layout before the package split (a4006c5).
 Created: 2026-10-21 (Asia/Shanghai)
 Change ID: `macos-ordered-unsent-evidence-20261021`
 Baseline: native candidate r2, package version `1.0.0`.

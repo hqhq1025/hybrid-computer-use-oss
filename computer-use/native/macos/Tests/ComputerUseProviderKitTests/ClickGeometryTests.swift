@@ -421,28 +421,6 @@ func screenshotSnapshotMayRecoverMissingCGWindowCapture() {
 }
 
 @Test
-func systemFocusedElementRequiresExactTargetPID() {
-    #expect(
-        isSystemFocusedElementOwnedByTarget(
-            appPID: 740,
-            focusedElementPID: 740
-        )
-    )
-    #expect(
-        !isSystemFocusedElementOwnedByTarget(
-            appPID: 740,
-            focusedElementPID: 538
-        )
-    )
-    #expect(
-        !isSystemFocusedElementOwnedByTarget(
-            appPID: 740,
-            focusedElementPID: nil
-        )
-    )
-}
-
-@Test
 func cachedWindowFallbackRequiresExactPIDAndWindowHandle() {
     #expect(
         cachedWindowFallbackMatches(

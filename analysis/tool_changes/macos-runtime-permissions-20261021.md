@@ -1,6 +1,6 @@
 # macOS current-process permission checks
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-21
 Change ID: `macos-runtime-permissions-20261021`
 Baseline package version: `1.0.0`, unchanged.

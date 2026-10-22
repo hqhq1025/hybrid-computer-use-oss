@@ -547,17 +547,6 @@ extension ComputerUseService {
         }
     }
 
-    private func isLikelyContainingWebRowAction(
-        targetFrame: CGRect,
-        candidate: ElementRecord
-    ) -> Bool {
-        isLikelyContainingRowActionFrame(
-            targetFrame: targetFrame,
-            candidateFrame: candidate.localFrame,
-            hasPrimaryAction: hasPrimaryClickAction(candidate)
-        )
-    }
-
     private func hasAncestorRole(_ role: String, of element: AXUIElement) -> Bool {
         var current = element
 

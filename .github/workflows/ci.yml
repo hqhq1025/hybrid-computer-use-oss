@@ -21,11 +21,14 @@ jobs:
           go-version-file: computer-use/go.mod
       - name: gofmt
         run: test -z "$(gofmt -l .)"
+      - name: File layout
+        working-directory: .
+        run: scripts/maint/check_layout.sh
       - name: go vet
         run: go vet ./...
-      - name: go test
-        run: go test ./...
-      - name: Native transport regressions
+      # The sidecar tags only add test transports, so this one run covers every
+      # test of plain `go test ./...`.
+      - name: go test (race, with sidecar transports)
         run: go test -race -tags 'darwin_sidecar_test windows_sidecar_test' ./...
       - name: Cross-platform Go static checks
         run: |
@@ -64,7 +67,7 @@ jobs:
         with:
           dotnet-version: "8.0.x"
       - name: Native protocol and policy tests
-        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.ProviderV2.Tests -- computer-use/testdata/provider-v2
+        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.Provider.Tests -- computer-use/testdata/provider-wire
       - name: Native visibility policy tests
         run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.VisibilityRead.Tests
       - name: Native pointer policy tests

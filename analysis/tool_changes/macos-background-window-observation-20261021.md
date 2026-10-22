@@ -1,6 +1,6 @@
 # macOS observations of explicitly selected background windows
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-21
 Change ID: `macos-background-window-observation-20261021`
 Baseline package version: `1.0.0`, unchanged.

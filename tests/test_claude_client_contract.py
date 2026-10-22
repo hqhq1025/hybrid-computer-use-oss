@@ -143,7 +143,9 @@ for line in sys.stdin:
     })
     with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as endpoint:
         environment["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{endpoint.server_port}"
-        thread = threading.Thread(target=endpoint.serve_forever, daemon=True)
+        thread = threading.Thread(
+            target=endpoint.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
         try:
             completed = subprocess.run([

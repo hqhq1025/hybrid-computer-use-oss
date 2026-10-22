@@ -264,6 +264,12 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
         parse_key("+".join(normalized["keys"]))
     elif action_type == "wait":
         normalized["seconds"] = 1.0
+    elif action_type == "zoom":
+        region = action.get("region")
+        if not isinstance(region, list) or len(region) != 4:
+            raise RuntimeError("gui zoom region must be [x0, y0, x1, y1]")
+        normalized["region"] = [
+            finite_gui_number(value, "gui zoom region") for value in region]
     if bounds is not None:
         normalized = gui_action_to_screen(normalized, bounds, native_bounds)
     return normalized
@@ -323,7 +329,7 @@ def execute_gui_action(action):
 
     """Execute one action that has already passed validate_gui_action."""
     action_type = action["type"]
-    if action_type == "screenshot":
+    if action_type in {"screenshot", "zoom"}:
         return
     if action_type in {"click", "double_click"}:
         x, y = action["x"], action["y"]

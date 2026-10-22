@@ -3,7 +3,7 @@ import CoreServices
 import Darwin
 import Foundation
 
-public struct RunningAppDescriptor {
+public struct RunningAppDescriptor: Sendable {
     public let name: String
     public let bundleIdentifier: String?
     public let pid: pid_t
@@ -129,18 +129,33 @@ enum AppDiscovery {
     }
 
     static func runningApps(
-        readWorkspace: () -> [NSRunningApplication] = {
+        readWorkspace: @MainActor () -> [NSRunningApplication] = {
             NSWorkspace.shared.runningApplications
         }
     ) -> [RunningAppDescriptor] {
-        if !Thread.isMainThread {
-            return DispatchQueue.main.sync {
-                runningApps(readWorkspace: readWorkspace)
-            }
-        }
         // A worker can retain an older workspace snapshot across app launches
-        // and exits. Read and materialize each inventory on the main run loop.
-        return readWorkspace()
+        // and exits. Read and materialize each inventory on the main run loop;
+        // only Sendable descriptors leave the main actor.
+        onMainActor {
+            discoverableRunningApps(readWorkspace())
+        }
+    }
+
+    /// Runs `body` on the main actor and blocks the caller until it returns.
+    /// The main thread must not wait on a caller of this function.
+    static func onMainActor<T: Sendable>(_ body: @MainActor () -> T) -> T {
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated(body)
+        }
+        return DispatchQueue.main.sync {
+            MainActor.assumeIsolated(body)
+        }
+    }
+
+    private static func discoverableRunningApps(
+        _ workspaceApps: [NSRunningApplication]
+    ) -> [RunningAppDescriptor] {
+        workspaceApps
             .filter {
                 isDiscoverableRunningApplication(
                     isTerminated: $0.isTerminated,

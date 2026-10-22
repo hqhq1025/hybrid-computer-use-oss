@@ -7,7 +7,8 @@
   AT-SPI, GTK and GdkPixbuf typelibs (`python3-gi gir1.2-atspi-2.0
   gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0` on Debian or Ubuntu).
 - `pip install -e '.[test]'` for the runner and gateway tests.
-- Docker for `make build`.
+- Docker, KVM and an OSWorld-V2 checkout only for OSWorld runs; see
+  [Running OSWorld](docs/OSWORLD.md).
 - Swift 6.2+ and the macOS SDK for the macOS provider; .NET 8 SDK on Windows
   for the Windows provider. See [native checks](docs/PLATFORMS.md).
 
@@ -20,12 +21,20 @@ make test
 runs gofmt, `go vet` and the Go tests in `computer-use/`, the provider tests
 (`computer-use/runtime_test.py`) and the Python tests in `tests/`. Tests that
 need an OSWorld-V2 checkout are skipped unless `OSWORLD_V2_ROOT` points at one
-with the overlay installed. CI runs the same checks and also compiles the Go
-tests for macOS and Windows. `make test-transports` exercises both native
-worker transports with subprocess fixtures on Linux. Native CI also builds
+with the overlay installed. CI runs the same checks, the native-transport
+tests with the race detector, and `go vet` for macOS and Windows.
+`make test-transports` exercises both native worker transports with subprocess fixtures on Linux. Native CI also builds
 and tests Swift/C# code; it does not prove interactive desktop permissions.
 
-Put Go tests in the `_test.go` file of the source file they exercise,
+`scripts/maint/check_all.sh` runs the full check list: gofmt, builds and
+`go vet` for Linux, macOS and Windows, the Go tests with and without the
+native-transport tags, the provider tests and pytest. With a previous binary
+as its argument it also compares the MCP `initialize`, `tools/list`, `help`
+and `schema` bytes.
+
+Put Go tests in the `_test.go` file of the source file they exercise; a test
+that needs a higher Go package goes to the lowest package that can see
+everything it uses (see [Architecture](docs/ARCHITECTURE.md#tests-across-packages)). Put
 provider tests under `computer-use/runtime_tests/`, and runner and gateway
 tests under `tests/`. Prefer a test that runs the code over one that searches
 source text.
@@ -35,19 +44,19 @@ source text.
 - The tool schemas, descriptions, server instructions, error texts, base policy
   and selected interaction guide are model input. A change to any of them
   changes the benchmark condition. The contract golden test
-  (`computer-use/contract_golden_test.go`) fails on MCP-visible changes;
-  regenerate it with `go test -run TestPublicContractMatchesGolden
+  (`computer-use/internal/transport/contract_golden_test.go`) fails on MCP-visible changes;
+  regenerate it with `go test ./internal/transport -run TestPublicContractMatchesGolden
   -update-contract` and explain the change in the pull request.
 - Product instruction edits require a new evaluation attempt; keep instruction
   revisions separate and do not infer performance from a wording change.
   `instructions/base.md` owns common safety and outcome policy; the selected
   profile owns interaction guidance. The runner alone supplies `TASK_COMPLETE`,
-  `INFEASIBLE` and `ASK_USER` markers. See [Instructions](docs/INSTRUCTIONS.md).
+  `TASK_INFEASIBLE` and `ASK_USER` markers. See [Instructions](docs/INSTRUCTIONS.md).
 - Keep `AX` and `GUI` as the only public MCP tools.
 - Never copy, mount or inject this repository's `AGENTS.md` or other
   documentation into an evaluated agent.
 - The Go server and native providers share a private protocol. Update affected
-  providers together and keep `computer-use/testdata/provider-v2/` consistent.
+  providers together and keep `computer-use/testdata/provider-wire/` consistent.
 - Run a setup canary before any change that needs a real task run to verify;
   real runs spend model quota.
 

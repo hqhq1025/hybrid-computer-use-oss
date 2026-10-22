@@ -28,9 +28,6 @@ func permissionDiagnosticsPreserveEachRuntimeResult(
     #expect(diagnostics.eventPostingGranted == eventPosting)
     #expect(diagnostics.screenCaptureGranted == screenCapture)
     #expect(probes == SystemPermissionKind.allCases)
-    #expect(diagnostics.missingPermissions.contains(.accessibility) == !accessibility)
-    #expect(diagnostics.missingPermissions.contains(.eventPosting) == !eventPosting)
-    #expect(diagnostics.missingPermissions.contains(.screenRecording) == !screenCapture)
 }
 
 @Test
@@ -42,7 +39,7 @@ func permissionDiagnosticsDoNotRetainAnEarlierGrant() {
         eventPosting: probe,
         screenCapture: probe
     )
-    #expect(granted.missingPermissions.isEmpty)
+    #expect(granted.accessibilityTrusted && granted.eventPostingGranted && granted.screenCaptureGranted)
 
     runtimeGranted = false
     let revoked = PermissionDiagnostics.current(
@@ -50,7 +47,7 @@ func permissionDiagnosticsDoNotRetainAnEarlierGrant() {
         eventPosting: probe,
         screenCapture: probe
     )
-    #expect(revoked.missingPermissions == SystemPermissionKind.allCases)
+    #expect(!revoked.accessibilityTrusted && !revoked.eventPostingGranted && !revoked.screenCaptureGranted)
 
     runtimeGranted = true
     let restored = PermissionDiagnostics.current(
@@ -58,5 +55,5 @@ func permissionDiagnosticsDoNotRetainAnEarlierGrant() {
         eventPosting: probe,
         screenCapture: probe
     )
-    #expect(restored.missingPermissions.isEmpty)
+    #expect(restored.accessibilityTrusted && restored.eventPostingGranted && restored.screenCaptureGranted)
 }

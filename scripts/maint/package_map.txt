@@ -1,0 +1,88 @@
+# File-to-package map for scripts/maint/split_packages.sh.
+# "package <key> <dir> <name>" declares a destination; "<file-or-glob> <key>"
+# assigns files. Exact names win over globs; the first matching glob wins.
+# A _test.go file without its own rule follows its source file.
+#
+# Layering (lower packages never import higher ones):
+#   bundle < contract < core < provider < transport < cmd
+# core owns the platform port: the PlatformBackend interface and the
+# Provider* request/result types it exchanges. provider implements the port
+# (wire v2 encoding, Linux executor, darwin/windows sidecar transports).
+
+package bundle    .                 runtimebundle
+package contract  internal/contract contract
+package core      internal/core     core
+package provider  internal/provider provider
+package transport internal/transport transport
+package cmd       cmd/computer-use  main
+
+# bundle: the go:embed file system of the Linux provider. go:embed cannot
+# reach a parent directory, so it stays at the module root.
+runtime_bundle_fs.go      bundle
+
+# files created by split_packages.py prepare-* steps
+platform_default.go       core
+runtime_backend_unsupported.go core
+service_entry.go          core
+mcp_session_state.go      core
+request_replay.go         core
+argument_errors.go        core
+published_values.go       contract
+cli_main.go               transport
+
+# tests that need a higher package than their source file
+schema_validator_test.go  core
+tool_contract_test.go     core
+platform_contract_darwin_test.go  provider
+platform_contract_windows_test.go provider
+runtime_timeout_linux_test.go     provider
+provider_helpers_test.go          provider
+find_delivery_transport_test.go   transport
+cli_arguments_test.go             transport
+transport_helpers_test.go         transport
+entry_equivalence_test.go         transport
+contract_golden_test.go           transport
+platform_notes_test.go            transport
+sdk_python_test.go                transport
+main_test.go                      transport
+cli_strict_input_test.go          transport
+sdk_restart_replay_test.go        transport
+sdk_transport_regression_test.go  transport
+
+# contract: public tool definitions, input schemas, schema validation,
+# public error codes and the describe document
+schema_validator.go       contract
+tool_contract.go          contract
+tool_argument_rules.go    contract
+contract_describe.go      contract
+
+# core: the platform port (consumed by core, implemented by provider):
+# PlatformBackend, the Provider* request/result types (several are aliases
+# of core snapshot types), and the wire v2 schema and validation
+platform_contract.go      core
+provider_sidecar_buffer.go   provider
+provider_diagnostic_line.go  provider
+provider_*.go             core
+macos_key_preflight.go    core
+windows_key_preflight.go  core
+
+# provider: platform backends, sidecar transports, Linux executor
+runtime_backend_darwin.go provider
+runtime_backend_linux.go  provider
+runtime_backend_windows.go provider
+darwin_*.go               provider
+windows_*.go              provider
+linux_*.go                provider
+file_owner_*.go           provider
+
+# transport: MCP, daemon socket, CLI
+mcp_*.go                  transport
+daemon*.go                transport
+cli.go                    transport
+peer_cred_*.go            transport
+
+# cmd/computer-use: main
+main.go                   cmd
+
+# core: service, AX, GUI, registries, results
+*                         core
