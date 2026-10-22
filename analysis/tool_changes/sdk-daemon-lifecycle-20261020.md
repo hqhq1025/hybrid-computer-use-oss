@@ -1,6 +1,6 @@
 # SDK transport and daemon reference persistence
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-20
 Change ID: `sdk-daemon-lifecycle-20261020`
 Baseline: remote main `5d3e423`; package version 1.0.0, unchanged.

@@ -17,13 +17,6 @@ mkdir -p "$log_dir"
 osworld=${OSWORLD_V2_ROOT:-/datadrive2/hcu-eval-runner/OSWorld-V2}
 baseline_binary=${1:-}
 
-# The Go module may sit in computer-use/ (single package) or keep its main
-# package under cmd/computer-use after the package split.
-main_pkg=.
-if [ -d "$repo/computer-use/cmd/computer-use" ]; then
-	main_pkg=./cmd/computer-use
-fi
-
 step() {
 	local name=$1
 	shift
@@ -69,6 +62,6 @@ if [ -n "$baseline_binary" ]; then
 	# Stamp the version like make build-local does, so a baseline built by
 	# make reports the same serverInfo.version.
 	(cd "$repo/computer-use" && CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X main.version=$(cat "$repo/VERSION")" -o "$candidate" "$main_pkg")
+		-ldflags "-X main.version=$(cat "$repo/VERSION")" -o "$candidate" ./cmd/computer-use)
 	step mcp-bytes python3 "$repo/scripts/maint/compare_mcp_bytes.py" "$baseline_binary" "$candidate"
 fi

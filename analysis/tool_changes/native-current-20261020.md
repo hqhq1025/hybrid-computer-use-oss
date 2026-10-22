@@ -1,6 +1,6 @@
 # Native providers and the current AX contract
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-20
 Change ID: `native-current-20261020`
 Baseline: remote main `80c5c0e`, including the tested implementation `f847d1a`.

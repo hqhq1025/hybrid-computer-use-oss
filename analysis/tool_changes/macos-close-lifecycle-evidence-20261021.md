@@ -1,6 +1,7 @@
 # Preserve verified native close evidence
 
-Status: `testing`
+Status: `merged`
+Paths refer to the layout before the package split (a4006c5).
 Created: 2026-10-21 (UTC)
 Change ID: `macos-close-lifecycle-evidence-20261021`
 Baseline: native candidate r5, package version `1.0.0`.

@@ -1,6 +1,6 @@
 # Useful feature integration
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-20
 Change ID: `useful-features-20261020`
 Baseline: main `8fe0c1e`, package VERSION 1.0.0.

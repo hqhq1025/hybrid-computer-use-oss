@@ -1,6 +1,7 @@
 # AX text-field tolerance candidate
 
-Status: `testing`
+Status: `merged`
+Paths refer to the layout before the package split (a4006c5).
 Created: 2026-10-20
 Candidate: `ax-tolerance-20261020`
 Baseline: main `8fe0c1e`, package VERSION 1.0.0, evaluation image
