@@ -434,6 +434,91 @@ def select_item(node):
 
 
 # ---------------------------------------------------------------------------
+# An option of a drop-down
+
+DROPDOWN_ROLES = ("combo box", "list box")
+OPTION_ROLES = ("menu item", "list item", "option", "check menu item",
+                "radio menu item", "table cell")
+# Options read below one drop-down; HTML <select> lists rarely exceed this.
+MAX_DROPDOWN_OPTIONS = 500
+
+
+def _dropdown_options(node):
+    """Return the option nodes below a drop-down, in tree order."""
+    options = []
+    stack = [node]
+    seen = 0
+    while stack and seen < MAX_DROPDOWN_OPTIONS:
+        current = stack.pop(0)
+        seen += 1
+        if current is not node and node_role(current) in OPTION_ROLES:
+            options.append(current)
+            continue
+        count = int(safe(current.get_child_count, 0) or 0)
+        for index in range(min(count, MAX_DROPDOWN_OPTIONS)):
+            child = safe(lambda index=index: current.get_child_at_index(index))
+            if child is not None:
+                stack.append(child)
+    return options
+
+
+def _option_selected(option):
+    if state_contains(option, Atspi.StateType.SELECTED):
+        return True
+    container = _selection_container(option)
+    index = safe(lambda: option.get_index_in_parent())
+    if container is None or index is None or index < 0:
+        return False
+    return bool(safe(lambda: Atspi.Selection.is_child_selected(
+        container, int(index)), False))
+
+
+def select_dropdown_option(node, text):
+    """Choose the option named ``text`` of a closed or open drop-down.
+
+    Browsers expose an HTML <select> as a combo box whose options are menu
+    items with a single "select" action; while the list is closed they are
+    not showing and carry no refs. The option's own action is tried first
+    (Chrome's Selection.select_child returns False), then the container's
+    Selection.select_child (Firefox accepts both). The result is read back
+    from the option's SELECTED state.
+    """
+    options = _dropdown_options(node)
+    wanted = str(text).strip()
+    matches = [option for option in options
+               if str(node_name(option) or "").strip() == wanted]
+    if len(matches) != 1:
+        names = [str(node_name(option) or "").strip() for option in options]
+        raise _failure(
+            "select_option_not_found: {} {} among the options; no input was "
+            "emitted. Options: {}.".format(
+                _quote(text),
+                "is not" if not matches else "occurs more than once",
+                ", ".join(_quote(name) for name in names[:30]) or "none readable"),
+            code="invalid_argument")
+    option = matches[0]
+    if _option_selected(option):
+        return option
+    count = int(safe(option.get_n_actions, 0) or 0)
+    names = [str(safe(lambda k=k: option.get_action_name(k), "") or "")
+             for k in range(count)]
+    if "select" in names:
+        safe(lambda: option.do_action(names.index("select")), False)
+        if _wait_until(lambda: _option_selected(option), 0.6):
+            return option
+    container = _selection_container(option)
+    index = safe(lambda: option.get_index_in_parent())
+    if container is not None and index is not None and index >= 0:
+        safe(lambda: Atspi.Selection.select_child(container, int(index)), False)
+        if _wait_until(lambda: _option_selected(option), 0.6):
+            return option
+    raise _failure(
+        "select_unverified: the option {} did not report itself selected."
+        .format(_quote(text)),
+        code="effect_unknown", emitted=True, phase="readback")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 
 
@@ -455,6 +540,10 @@ def perform_select(action_input, window, element, element_record, to_element,
             action_evidence["route"] = "keyboard_synthesis"
             action_evidence["window_focus_verified"] = True
             action_evidence["input_emitted"] = emitted
+    elif text is not None and role in DROPDOWN_ROLES:
+        option = select_dropdown_option(element, text)
+        summary = "selected option {}".format(_quote(node_name(option)))
+        action_evidence["route"] = "semantic_action"
     elif text is not None or _text_iface(element) is not None and role not in (
             "list item", "table cell", "cell", "tree item", "icon"):
         content = text_between(element, 0, -1)
