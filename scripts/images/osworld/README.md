@@ -95,7 +95,10 @@ release, so the installer rejects a different package name, version or
 architecture. Run `python3 install_wps.py --package /path/to/wps-office.deb
 --check` to inspect the dependency plan. Remove `--check` and run as root to
 install. The installer refuses package removals and verifies the installed
-version and dpkg state.
+version and dpkg state. WPS's package scripts change system and user MIME
+defaults. The installer preserves those preference files, their permissions and
+their ownership, even when installation fails. WPS remains available through
+its desktop entry and the file manager's Open With menu.
 
 Close WPS before installation. The script does not copy profiles, accept license
 terms or change input-method settings. Confirm the license through WPS's normal
