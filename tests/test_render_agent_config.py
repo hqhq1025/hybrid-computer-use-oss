@@ -500,7 +500,9 @@ def test_pinned_claude_consumes_launch_configuration(tmp_path, enabled, model, e
             pass
 
     with HTTPServer(("127.0.0.1", 0), Handler) as endpoint:
-        thread = threading.Thread(target=endpoint.serve_forever, daemon=True)
+        thread = threading.Thread(
+            target=endpoint.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
         try:
             output, base, instructions = render(tmp_path, "claude-code", extra=[
@@ -559,7 +561,9 @@ def test_codex_cli_consumes_instructions_and_existing_context(tmp_path, enabled)
             pass
 
     with HTTPServer(("127.0.0.1", 0), Handler) as endpoint:
-        thread = threading.Thread(target=endpoint.serve_forever, daemon=True)
+        thread = threading.Thread(
+            target=endpoint.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
         try:
             output, base, instructions = render(
