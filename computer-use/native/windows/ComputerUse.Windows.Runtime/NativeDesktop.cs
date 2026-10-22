@@ -14,7 +14,6 @@ internal static partial class NativeDesktop
     private const int GwlStyle = -16;
     private const int GwlExStyle = -20;
     private const uint GwOwner = 4;
-    private const uint WmClose = 0x0010;
     private const int SwRestore = 9;
     private const int ClipboardPasteSettleMilliseconds = 500;
     private const int ClipboardRetryCount = 10;
@@ -282,17 +281,6 @@ internal static partial class NativeDesktop
             GetForegroundWindow());
     }
 
-    internal static void CloseWindow(nint handle)
-    {
-        if (!PostMessage(handle, WmClose, 0, 0))
-        {
-            throw new ProviderFailureException(
-                "window_close_failed",
-                "emission",
-                "The native close command could not be posted.");
-        }
-    }
-
     internal static JsonObject SnapshotJson(ScreenFrame frame)
     {
         return new JsonObject
@@ -393,13 +381,6 @@ internal static partial class NativeDesktop
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool PostMessage(
-        nint handle,
-        uint message,
-        nint wParam,
-        nint lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RedrawWindow(

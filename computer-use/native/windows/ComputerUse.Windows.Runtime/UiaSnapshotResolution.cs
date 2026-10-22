@@ -34,8 +34,7 @@ internal sealed partial class UiaProvider
         {
             var logicalWindow = ProjectNativeWindows(
                 process,
-                NativeDesktop.ListWindows(process.Id),
-                selectedWindow.Handle)
+                NativeDesktop.ListWindows(process.Id))
                 .LogicalRecord(selectedWindow);
             var leaseFound = _observedElementLeases.TryGet(
                 process.Id,
@@ -715,15 +714,9 @@ internal sealed partial class UiaProvider
         string staleFailureCode = "window_target_stale")
     {
         var opaque = OptionalString(target, "windowHandle", requestWindowHandle);
-        var preferredHandle =
-            !string.IsNullOrEmpty(opaque) &&
-            _windowHandles.TryGetValue(opaque, out var preferredBinding)
-                ? preferredBinding.Handle
-                : 0;
         var projection = ProjectNativeWindows(
             process,
-            NativeDesktop.ListWindows(process.Id),
-            preferredHandle);
+            NativeDesktop.ListWindows(process.Id));
         var windows = projection.LogicalWindows();
         if (windows.Count == 0)
         {

@@ -1,10 +1,6 @@
 using System.Drawing;
 using ComputerUse.Windows.Runtime;
 
-#if !PROVIDER_SUITE
-return OptionalRoleRegression.Run();
-#endif
-
 internal static class OptionalRoleRegression
 {
     private enum Role { Button, Window }

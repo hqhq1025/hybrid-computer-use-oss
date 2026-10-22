@@ -278,11 +278,6 @@ internal static partial class NativeDesktop
         }
     }
 
-    internal static string LayoutId()
-    {
-        return CurrentLayout().FrameId;
-    }
-
     internal static WindowsDesktopLayoutSnapshot CurrentLayout()
     {
         var desktopBounds = DesktopBounds();
