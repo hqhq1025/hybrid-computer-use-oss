@@ -266,8 +266,7 @@ def send_key(key):
 # to it and pressing that keycode. Applications translate the keycode when
 # they process the event, not when it is sent, so in a burst every rebound
 # character reads as the last one: Chrome received "Hello 张三 ü" as
-# "Hello üü ü" and "张三" as "三三". In Chrome 150, 10 ms between rebound
-# characters was enough in 9 of 9 runs and none passed without a pause.
+# "Hello üü ü". A short pause between rebound characters keeps each one.
 UNMAPPED_CHARACTER_GAP_SECONDS = 0.02
 
 

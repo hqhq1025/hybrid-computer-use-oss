@@ -964,7 +964,7 @@ class SameTitleWindowHandleTests(AtspiPatchedTestCase):
     """Hidden same-title windows must not take the handle of the shown one.
 
     Electron applications keep hidden BrowserWindows that AT-SPI still lists
-    as frames. Joplin 3.5 lists three frames named "Joplin" while the window
+    as frames. Joplin lists three frames named "Joplin" while the window
     manager manages one window: the 1536x842 main window, plus two hidden
     800x600 ones that wmctrl does not list. All three matched the managed
     window by title, the tie gave none of them a handle, and every node of
