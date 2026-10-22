@@ -1,5 +1,7 @@
 # Running OSWorld
 
+Last verified against commit `a4006c5`.
+
 `hcu.osworld` runs OSWorld (V1) or OSWorld-V2 (V2) tasks. Each task gets a
 fresh official Docker/QEMU guest, and Codex, Claude Code, Gemini CLI or Grok
 Build runs inside it as the task agent. The official evaluator scores the
@@ -85,7 +87,7 @@ loopback, and firewall it.
 ```bash
 # Codex or Grok Build (OpenAI Responses), Azure OpenAI with `az login`:
 python3 -m hcu.gateway.openai_proxy --host 172.17.0.1 --ports 8611 \
-  --upstreams <resource>.openai.azure.com,<resource>.openai.azure.com@gpt-5.4-b,<resource2>.openai.azure.com \
+  --upstreams <resource>.openai.azure.com,<resource>.openai.azure.com@<deployment>,<resource2>.openai.azure.com \
   --out runs/<run_id>/gateway-tokens.jsonl --max-requests-per-task 100
 
 # Same, behind a local relay that picks the deployment within a resource:

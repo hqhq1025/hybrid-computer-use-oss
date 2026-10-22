@@ -1,5 +1,7 @@
 # Computer Use MCP
 
+Last verified against commit `a4006c5`.
+
 `computer-use` is a stdio MCP server that controls an already-running
 desktop. This page covers building it, running it, configuring Codex and
 Claude Code, the public contract and troubleshooting. For the internal design
@@ -18,71 +20,26 @@ One `computer-use mcp` process serves one desktop session. It starts one
 persistent platform provider and keeps AX snapshots, element references and the
 GUI layout lease in memory, so never share a process between benchmark tasks.
 
-### Linux screenshot pipeline
-
-The provider captures raw pixels and samples the desktop layout before encoding
-an image. A screenshot-only GUI call uses one captured frame. A mutation batch
-retains its pre-action frame for failure evidence and encodes its final frame
-for delivery. Layout-race retries discard raw captures without compressing them.
-The provider caches encoded images only within the current call, never across calls.
-
-PNG uses lossless compression level 3. If its base64 size would exceed the image
-budget, the provider tries JPEG qualities 85, 70, 55, and 40. Only the selected
-bytes are base64-encoded. If no encoding fits, the existing smallest-image
-fallback remains. Returned MIME and dimensions describe the actual image.
-Lower PNG compression can switch near-budget images to JPEG sooner.
-
-Coordinate actions still validate the captured layout and recheck the live
-layout before each coordinate input. On Linux a layout change rejects a
-coordinate only when the window under that point changed: another window is
-now topmost there, or that window moved, resized or closed. Capture failure before dispatch prevents
-input. After an action failure, the provider attempts a fresh capture. If final capture or
-encoding fails, the response labels any pre-action fallback explicitly.
-If neither image is available, the response reports unknown visual state.
-
 ## Source layout
 
-```text
-computer-use/
-  cmd/computer-use/main.go     CLI entry point
-  internal/transport/          MCP JSON-RPC framing, daemon socket, CLI
-  internal/contract/           server instructions, AX and GUI schemas,
-                               schema validation, public codes and limits
-  internal/core/
-    service.go                 tool dispatch, session state and error context
-    tool_arguments.go          argument parsing shared by the tools
-    tool_result.go             result type, evidence text and file output
-    app_snapshot.go            snapshot model returned by the provider
-    ax_*.go                    AX requests, batches, refs, projections, evidence
-    gui_service.go             GUI batches and layout-lease checks
-    platform_contract.go       platform backend port
-    provider_*.go              typed private provider protocol
-  internal/provider/
-    runtime_backend_<os>.go    platform backends
-    linux_*.go                 Linux backend: provider process and host runtime
-    *_sidecar_transport.go     native worker lifecycle and bounded transport
-  native/linux/provider/       AT-SPI, X11, screenshot and input provider (Python)
-  native/macos/                Accessibility and CoreGraphics provider (Swift)
-  native/windows/              UIA3 and Win32 provider (C#)
-  runtime.py                   provider entry point
-  runtime_bundle_fs.go         embeds runtime.py and the Linux provider
-```
-
-[Architecture](ARCHITECTURE.md#go-packages) describes the package layering.
+The Go module lives in `computer-use/`: `cmd/computer-use` holds `main()`,
+`internal/contract` the published schemas, `internal/core` the service,
+`internal/provider` the platform backends and `internal/transport` MCP, the
+daemon and the CLI. The native providers live in `native/{linux,macos,windows}/`.
+[Architecture](ARCHITECTURE.md#go-packages) lists every package and file.
 
 ## Build
 
 ```bash
-make build        # release binary in artifacts/computer-use, built in Docker
-make build-local  # the same with a local Go 1.22+ toolchain
+make build-local  # Linux binary in artifacts/computer-use (Go 1.22+)
 make smoke        # initialize, list tools, require exactly AX and GUI
 ```
 
-`make build` runs gofmt and the Go tests inside the builder, injects the
-version from `VERSION` and checks that `--version` reports it. A plain
-`go build` reports `dev`.
+`make build-local` builds `./cmd/computer-use` with `CGO_ENABLED=0` for
+linux/amd64 and injects the version from `VERSION` with
+`-X main.version=...`. A plain `go build` reports `dev`.
 
-Those release targets build Linux. [Platform support](PLATFORMS.md) covers
+`make build-local` builds Linux. [Platform support](PLATFORMS.md) covers
 the macOS app bundle, Windows self-contained executable, and permissions.
 When redistributing a build, include its `LICENSE`, `THIRD_PARTY_NOTICES.md`
 and `licenses/` directory alongside the executable. The Linux output directory
@@ -121,13 +78,15 @@ computer-use mcp               start the stdio MCP server
 computer-use call AX|GUI       call one tool, or a JSON array of calls with --calls
 computer-use doctor            print platform runtime requirements
 computer-use version           print the version
-computer-use help [command]
+computer-use help [command]    general help, or help for mcp, call or cli
 ```
 
 `call` runs the same core as an MCP client in its own process and prints the
 same model-facing result, with images written to files; it is useful for
-diagnostics. Refs do not survive between `call` processes; the daemon
-commands in [Code entry points](CODE.md) keep them.
+diagnostics. Refs do not survive between `call` processes. The daemon,
+`schema`, `batch` and the shorthand commands (`apps`, `find`, `click`, ...)
+keep refs across commands; [Code entry points](CODE.md#command-line)
+describes them.
 
 ```bash
 computer-use call AX --args '{"mode":"apps"}'
@@ -136,7 +95,8 @@ computer-use call GUI --args '{"actions":[{"type":"screenshot"}]}'
 
 ## Codex
 
-The runner writes a task-local `config.toml`; its MCP section is:
+The runner writes a task-local `config.toml`; its MCP section is below. The
+same section works in an existing `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.computer_use]
@@ -184,11 +144,6 @@ or `-c approval_policy=never` can override these defaults. Do not add them to
 standalone launch scripts. `--ignore-user-config` skips the generated config;
 `--profile` can layer different permissions over it.
 
-Use interactive `codex` when you need approval prompts. The pinned CLI's
-non-interactive `codex exec` selects `never` approvals while retaining
-`workspace-write` sandboxing; actions requiring elevation cannot prompt for
-approval. This does not grant unrestricted shell access.
-
 The shell sandbox does not isolate the MCP server or the desktop it controls.
 Use a dedicated desktop or disposable VM for untrusted tasks, keep sensitive
 applications and credentials out of that session, and review any client
@@ -215,7 +170,16 @@ input comes only from this server, the shell or the browser runtime. See
 
 Claude Code connects through `hcu/osworld/guest_files/claude_mcp_schema_adapter.py`.
 The adapter flattens only the schemas it shows Claude; the server still
-validates the original schemas before any side effect.
+validates the original schemas before any side effect. To add the server to
+an existing Claude Code setup:
+
+```bash
+claude mcp add computer_use -- python3 \
+  /abs/path/to/hcu/osworld/guest_files/claude_mcp_schema_adapter.py \
+  /abs/path/to/artifacts/computer-use mcp
+```
+
+The generated profile writes the equivalent JSON:
 
 ```json
 {
@@ -288,6 +252,13 @@ error images, and session checks when adding another client.
 
 ## Public contract
 
+The exact schemas and descriptions are in
+`computer-use/internal/contract/tool_contract.go`; `computer-use schema`
+prints them with the error table. This section describes behavior that the
+schemas cannot express.
+
+### AX modes and refs
+
 `AX` takes a `mode`: `apps`, `observe`, `find` or `act`. The server owns an
 identity graph:
 
@@ -300,58 +271,15 @@ application aN -> top-level window wN -> element rN
   still accepts an `aN`, a name, an app id or a PID.
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
-- An explicit `act observe:"tree"` returns the complete final window tree;
-  `full` also returns its screenshot. These requests have the same meaning
-  after a mutation, an ordered input sequence, or a final wait. Evidence is
-  captured after the wait finishes. The default remains compact `diff`.
-- The decoder accepts `type.value` as `type.text` and non-empty
-  `set_value.text` as `set_value.value`. Supplying both fields is rejected
-  before input. The published schema continues to advertise the canonical
-  field names. Ref, window, and selection validation remain unchanged.
-- `act` accepts up to 64 ordered steps. The sum of all wait timeouts must
-  not exceed 60 seconds; an omitted timeout counts as 5 seconds. This bounds
-  waiting only, not total call duration. Argument errors reject the whole
-  batch before input. `act` runs ordered steps: actions
-  `{type, ref|title, text|keys|value|direction|pages|to_ref}` and `wait` steps. The
-  `rN` or `wN` refs name the window, so an `act` call with refs needs no
-  `window_ref`; `window_ref` only sends ref-less `keypress` and `type` to a
-  window other than the focused one. `activate` and `close` accept a window
-  title substring, resolved to one `wN` before any input. `keypress` and
-  `type` without `ref` go to the window that had focus when the call started.
-  Every step uses the same rule: the first step that fails stops the batch,
-  and the result says how many ran.
-- A `wait` step sends no input. Its forms are `window` (a top-level window
-  whose title contains the text, read from the whole desktop, so another
-  process or a relaunched application counts), `query` (an element in any
-  visible window of the batch's application, including dialogs and popups,
-  matched as `find` matches), `ref` with `value`, `state` or `text` (one
-  element), and `text` alone (text anywhere in the batch window). `gone:true`
-  waits for absence; an exited application has no window. `timeout_ms`
-  defaults to 5000. On timeout the step fails with `wait_timeout`, the
-  message says what was seen or why the state could not be read, and the
-  current state follows; a read that is incomplete keeps polling until the
-  timeout. After a `window` wait, keys and text without `ref` go to that
-  window. An `act` with only `wait` steps waits without input.
-- A `select` step selects without typing or clicking. `{"ref":"rA"}`
-  selects the whole element, or the item in a list. `"text"` selects that
-  exact substring of `rA`; it must occur once. `"to_ref":"rB"` selects from
-  the start of `rA` through the end of `rB`, for two cells of one table or
-  for two sibling text elements such as Writer paragraphs. The provider reads
-  the selection back and reports it as a note, for example
-  `[select] selected 4 cells A2:B3`; it fails with `effect_unknown` when it
-  cannot read back what it asked for. On Linux, text across paragraphs is
-  selected with the caret at the start of `rA` and `ctrl+shift+Down`, because
-  AT-SPI selects inside one object only. A shifted or oversized selection,
-  or a cell set that differs from the requested range, fails with
-  `effect_unknown`; the result reports possible partial input.
+- References describe current state; they are not durable selectors. Every
+  mutation resolves its reference against the live accessibility tree again
+  and rejects stale or cross-window targets before any input.
 
 Observe and find with `scope:"content"` use the whole window when a dialog
 or a window has no unique content area. The result states why the scope
 expanded. Find and query waits accept the roles and states shown in the tree.
 A zero-result find lists at most five nearby candidates; these suggestions
-do not change the query or perform input. Wait timeouts put current window
-refs and nearby elements before diagnostic detail. A failed latest window
-read remains an incomplete observation and never proves that a window closed.
+do not change the query or send input.
 
 Find matches include a `text` excerpt when their role's value is absent from
 the rendered fields, as with paragraphs and cells. The excerpt contains at
@@ -360,19 +288,71 @@ also carry `text_truncated=true`. Text already displayed in a name, property,
 or matched-text field is not repeated. Excerpts are display-only and do not
 change canonical text, selectors, refs, or the response budget.
 
-Removed diff lines omit refs and addressability markers because those lines
-describe prior state. Their absent refs appear separately in `absent_refs`.
-Three or more consecutive absent refs use an inclusive range: `r40..r43`
-means `r40`, `r41`, `r42`, and `r43`. A gap or a ref still present in the
-current snapshot breaks the range. Absence from this snapshot does not by
-itself prove that the object was destroyed.
+### `act` steps
 
-An unchanged-tree response requires the delivered refs to match as well as
-the provider state. Reissued refs cause a fresh tree delivery. An explicit
-`observe:"full"` continues to return the tree on the first request.
+- `act` accepts up to 64 ordered steps: actions
+  `{type, ref|title, text|keys|value|direction|pages|to_ref}` and `wait`
+  steps. Argument errors reject the whole batch before input. The first step
+  that fails stops the batch, and the result says how many ran.
+- The `rN` or `wN` refs name the window, so an `act` call with refs needs no
+  `window_ref`. `window_ref` only sends ref-less `keypress` and `type` to a
+  window other than the focused one. `keypress` and `type` without `ref` go
+  to the window that had focus when the call started.
+- `activate` and `close` accept a window title substring, resolved to one
+  `wN` before any input.
+- The decoder accepts `type.value` as `type.text` and non-empty
+  `set_value.text` as `set_value.value`. Supplying both fields is rejected
+  before input. The published schema advertises only the canonical names.
+- `observe` selects the evidence returned after the batch. The default is a
+  compact `diff`. An explicit `tree` returns the complete final window tree,
+  and `full` also returns its screenshot. These requests have the same
+  meaning after a mutation, an ordered input sequence, or a final wait;
+  evidence is captured after the wait finishes.
 - The removed `until` field, and its older spellings `postcondition` and
   `assertion`, are rejected before any input. The hint is the same call
   rewritten with `wait` steps.
+
+### `wait` steps
+
+A `wait` step sends no input. The sum of all wait timeouts in one `act` must
+not exceed 60 seconds; an omitted `timeout_ms` counts as 5000. This bounds
+waiting only, not total call duration. The forms are:
+
+| Form | Holds when |
+| --- | --- |
+| `window` | A top-level window whose title contains the text exists. It is read from the whole desktop, so another process or a relaunched application counts. |
+| `query` | An element in any visible window of the batch's application, including dialogs and popups, matches as `find` matches. |
+| `ref` with `value`, `state` or `text` | That one element has the value, state or text. |
+| `text` alone | The text appears anywhere in the batch window. |
+
+`gone:true` waits for absence; an exited application has no window. On
+timeout the step fails with `wait_timeout`, the message says what was seen or
+why the state could not be read, and the current window refs and nearby
+elements follow before diagnostic detail. A read that is incomplete keeps
+polling until the timeout, and a failed window read never proves that a
+window closed. After a `window` wait, keys and text without `ref` go to that
+window. An `act` with only `wait` steps waits without input.
+
+### `select` steps
+
+A `select` step selects without typing or clicking:
+
+- `{"ref":"rA"}` selects the whole element, or the item in a list.
+- `"text"` selects that exact substring of `rA`; it must occur once.
+- `"to_ref":"rB"` selects from the start of `rA` through the end of `rB`, for
+  two cells of one table or two sibling text elements such as Writer
+  paragraphs.
+
+The provider reads the selection back and reports it as a note, for example
+`[select] selected 4 cells A2:B3`. It fails with `effect_unknown` when it
+cannot read back what it asked for. On Linux, text across paragraphs is
+selected with the caret at the start of `rA` and `ctrl+shift+Down`, because
+AT-SPI selects inside one object only. A shifted or oversized selection, or a
+cell set that differs from the requested range, fails with `effect_unknown`;
+the result reports possible partial input. Native provider differences are in
+[Platform support](PLATFORMS.md#ax-selection-and-editable-controls).
+
+### `act` results
 
 Every `act` result that sent input starts, after the evidence line, with a
 report built from the reads the call makes anyway:
@@ -392,15 +372,22 @@ not change but other nodes did, the line counts them, for example
 Nodes that appear or disappear under the element count as its effect; changes
 elsewhere do not. The line says `no visible change` when nothing in the window
 changed, `gone` when a complete read no longer has the element, and
-`unknown (reason)` when no read after the action covers it. The
-`windows` line compares the application's top-level windows before the first
-action with those after the last; new windows get a `wN` at once. When the
-report shows every targeted element changed, or a `wait` after the last action
-held, the evidence line does not also say `effect_unknown`.
+`unknown (reason)` when no read after the action covers it. The `windows`
+line compares the application's top-level windows before the first action
+with those after the last; new windows get a `wN` at once. When the report
+shows every targeted element changed, or a `wait` after the last action held,
+the evidence line does not also say `effect_unknown`.
 
-References describe current state; they are not durable selectors. Every
-mutation resolves its reference against the live accessibility tree again and
-rejects stale or cross-window targets before any input.
+Removed diff lines omit refs and addressability markers because those lines
+describe prior state. Their absent refs appear separately in `absent_refs`.
+Three or more consecutive absent refs use an inclusive range: `r40..r43`
+means `r40`, `r41`, `r42`, and `r43`. A gap or a ref still present in the
+current snapshot breaks the range. Absence from this snapshot does not by
+itself prove that the object was destroyed.
+
+An unchanged-tree response requires the delivered refs to match as well as
+the provider state. Reissued refs cause a fresh tree delivery. An explicit
+`observe:"full"` returns the tree on the first request.
 
 On Linux, a visible composite drop-down can represent both a list toggle and
 an editable field. A click addresses the toggle; text editing addresses a
@@ -410,12 +397,29 @@ A list-only control does not become editable merely because its displayed
 role is `combobox`. Missing, ambiguous, or replaced editing targets do not
 receive synthesized keyboard input through the toggle.
 
-Every AX result starts with one JSON line: `ok`, and on failure `code`,
-`path`, `message` and `hint` (a corrected call), then `input_emitted`,
-`completed` and `requested`. The codes are `invalid_argument`, `stale_ref`,
-`window_changed`, `wait_timeout`, `effect_unknown`, `app_unavailable`,
-`runtime_error`, `ambiguous_window`, `window_not_found` and
-`no_focused_window`.
+### Errors
+
+Every AX and GUI result starts with one JSON line: `ok`, and on failure
+`code`, `path`, `message` and `hint` (a corrected call), then
+`input_emitted`, `completed` and `requested`. The public codes are:
+
+| Code | Tool | Input may have been sent | Next step |
+| --- | --- | --- | --- |
+| `invalid_argument` | AX, GUI | no | Fix the argument named by `path`; `hint` is a corrected call. |
+| `stale_ref` | AX | no | Observe or find again and use the new ref. |
+| `gui_frame_stale` | GUI | no | Take a new screenshot and plan coordinates from it. |
+| `wait_timeout` | AX | maybe | Observe again; `completed` counts the steps that ran. |
+| `window_changed` | AX, GUI | maybe | Observe before retrying; do not repeat the batch blindly. |
+| `effect_unknown` | AX, GUI | maybe | Observe before retrying; input may have taken effect. |
+| `app_unavailable` | AX | no | List apps; the application is not running or not accessible. |
+| `ambiguous_window` | AX | no | Use a longer title or the `wN` from `apps`. |
+| `window_not_found` | AX | no | List apps and use a `wN` or an exact title. |
+| `no_focused_window` | AX | no | Activate a window first or pass `window_ref`. |
+| `permission_denied` | GUI | no | Restore the operating-system permission and restart the provider. |
+| `runtime_error` | AX, GUI | maybe | Retry reads later; observe before retrying input. |
+
+`PublicErrorCodes` in `internal/contract/contract_describe.go` is the source
+of this table; the CLI exit statuses come from it too.
 
 Recovery follows the concrete failure, `input_emitted`, `completed`, and
 `retry_same_request`. A coordinate ownership failure requests a new GUI
@@ -424,23 +428,54 @@ to its window. A window-change hint uses an available current window ref or
 requests a GUI screenshot for an anonymous popup. It does not invent a
 window title or instruct the caller to repeat already completed steps.
 
-`GUI` takes an ordered `actions` array: screenshot, pointer, drag, scroll,
-keyboard, text and wait actions. A screenshot establishes a private layout
-lease for the full desktop; coordinate actions fail before input when the
-window under one of their points no longer matches the screenshot they refer
-to.
-
-Every GUI result starts with the same JSON line as AX, followed by `screen`
-(the returned image's size and coordinate space) and `actions` (pixel-change
-and settle facts); the screenshot follows as an image. GUI errors use
-`invalid_argument`, `window_changed`, `effect_unknown` and `runtime_error`
-like AX. `gui_frame_stale` means the window under a screenshot coordinate
-changed, with nothing sent; its hint requests a new screenshot.
 `permission_denied` means the operating system denied access. Its hint gives
 permission-recovery instructions instead of another call. Restore the current
 provider's permissions and restart it before observing again. When capture
 fails after input, the result retains its partial or uncertain input evidence;
 restoring permission does not authorize replaying the actions.
+
+### GUI
+
+`GUI` takes an ordered `actions` array. A call with exactly one `screenshot`
+action observes. Any other call is an input batch of up to 64 `click`,
+`double_click`, `move`, `drag`, `scroll`, `type`, `keypress` and `wait`
+actions, and returns one final screenshot. `wait` is one second without an
+observation, at most 20 seconds per batch. `settle_ms` (default 800, at most
+3000) sets how long the final screenshot waits for visual stillness.
+
+Every provider scales the screenshot to fit within 1366x768, the size the
+model sees. `x` and `y` are pixels of the latest returned image and are
+mapped back to the native desktop per axis. A screenshot establishes a
+private layout lease for the full desktop; a coordinate action fails before
+input with `gui_frame_stale` when the window under one of its points no
+longer matches the screenshot. Nothing is sent, and the result carries a
+fresh screenshot.
+
+Every GUI result starts with the same JSON line as AX, followed by `screen`
+(the returned image's size and coordinate space) and `actions` (pixel-change
+and settle facts); the screenshot follows as an image.
+
+On Linux, the provider captures raw pixels and samples the desktop layout
+before encoding an image:
+
+- A screenshot-only call uses one captured frame. A mutation batch retains
+  its pre-action frame for failure evidence and encodes its final frame for
+  delivery. Layout-race retries discard raw captures without compressing
+  them. Encoded images are cached only within the current call.
+- PNG uses lossless compression level 3. If its base64 size would exceed the
+  image budget, the provider tries JPEG qualities 85, 70, 55, and 40. If no
+  encoding fits, the smallest image is returned. Returned MIME and dimensions
+  describe the actual image.
+- Coordinate actions recheck the live layout before each coordinate input. A
+  layout change rejects a coordinate only when the window under that point
+  changed: another window is now topmost there, or that window moved,
+  resized or closed. Capture failure before dispatch prevents input.
+- After an action failure, the provider attempts a fresh capture. If final
+  capture or encoding fails, the response labels any pre-action fallback
+  explicitly. If neither image is available, the response reports unknown
+  visual state.
+
+### What evidence proves
 
 AX evidence covers only what the accessibility tree shows, and GUI evidence
 only the returned pixels and reported input delivery. Neither proves file
@@ -455,11 +490,12 @@ the shell or the application.
 | `COMPUTER_USE_STRUCTURED_CONTENT` | `1` adds `structuredContent` to tool results. Default off: evidence stays in text because some clients replace sibling text with the structured object. Enable only with a tested consumer. |
 | `COMPUTER_USE_ERROR_CONTEXT` | `off` stops capturing fresh UI state after a failed call |
 | `COMPUTER_USE_OUTPUT_MODE` | `file` writes large outputs to files and returns their paths |
-| `COMPUTER_USE_OUTPUT_DIR`, `COMPUTER_USE_OUTPUT_THRESHOLD` | directory and minimum size (4000 characters) for file output |
+| `COMPUTER_USE_OUTPUT_DIR`, `COMPUTER_USE_OUTPUT_THRESHOLD` | directory (default `computer-use` in the system temporary directory) and minimum size (4000 characters) for file output |
 | `COMPUTER_USE_MAX_INLINE_CHARS` | inline text budget per result, 24000 characters by default |
 | `COMPUTER_USE_TRACE_FILE` | append one JSONL line per AX action |
-| `COMPUTER_USE_PYTHON_BINARY` | interpreter for the provider, `python3` by default |
-| `COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS` | provider request timeout, 30 seconds by default |
+| `COMPUTER_USE_PYTHON_BINARY` | Linux: interpreter for the provider, `python3` by default |
+| `COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS` | base provider request timeout, 30 seconds by default |
+| `COMPUTER_USE_MACOS_PROVIDER`, `COMPUTER_USE_WINDOWS_PROVIDER` | path of the native provider, instead of the one beside the binary |
 
 ## Troubleshooting
 
@@ -482,7 +518,7 @@ wmctrl -lpG
 A client cannot initialize the server:
 
 - check that the configured binary exists and runs `computer-use --version`;
-- make sure no wrapper writes to stdout;
+- check that no wrapper writes to stdout;
 - run the server as the desktop user, not in a detached root session;
 - run `make smoke` outside the desktop to separate protocol problems from
   desktop problems.

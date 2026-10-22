@@ -1,13 +1,15 @@
 # Isolation
 
+Last verified against commit `a4006c5`.
+
 Each benchmark task uses a fresh desktop, task-agent session, MCP process and
 result directory. Do not mount this repository, host credentials, user
 configuration or another task's artifacts into the evaluated environment.
 
 Before the agent starts, the runner removes inherited agent state for every
-supported harness — `.codex`, `.claude`, `.claude.json`, `.gemini`, `.grok`,
+supported harness: `.codex`, `.claude`, `.claude.json`, `.gemini`, `.grok`,
 the context files `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, and the guest
-image's own `.mcp.json`, whose MCP servers are not part of this runner — and
+image's own `.mcp.json`, whose MCP servers are not part of this runner. It then
 injects only the base policy, selected interaction guide, MCP configuration and
 task-scoped gateway settings.
 
@@ -17,7 +19,7 @@ supplies its `TASK_COMPLETE`, `TASK_INFEASIBLE` and `ASK_USER` contract separate
 those markers do not belong in the product instruction files.
 
 Model credentials stay in the host-side gateway. The guest receives a
-placeholder token and a task-scoped endpoint. The gateway has to listen on an
+placeholder token and a task-scoped endpoint. The gateway must listen on an
 address the guest can reach, usually the Docker bridge; restrict that address
 with host firewall or cloud network rules.
 

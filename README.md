@@ -1,145 +1,185 @@
 # Hybrid Computer Use
 
-Hybrid Computer Use lets a coding agent operate a desktop through the
-Model Context Protocol (MCP), and runs Codex, Claude Code, Gemini CLI or Grok
-Build with it on OSWorld and OSWorld-V2 tasks.
+Let a coding agent operate a desktop through accessibility and pixels, from
+one MCP server with two tools.
 
-The `computer-use` MCP server exposes exactly two tools:
+[![CI](https://github.com/hqhq1025/hybrid-computer-use-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/hqhq1025/hybrid-computer-use-oss/actions/workflows/ci.yml)
+![Go 1.22+](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
-- `AX`: app-scoped accessibility observation, lookup, assertion and action
-  through the operating system's accessibility provider.
-- `GUI`: full-desktop screenshots and absolute-pixel mouse and keyboard input.
+## What it is
 
-During an evaluation the agent also keeps its shell, file editing and, for
-Codex, its browser runtime over the Chrome DevTools Protocol (CDP). The
-combination of these channels is what "hybrid" refers to.
-
-## Architecture
+`computer-use` is a stdio MCP server that controls an already-running
+desktop. It exposes exactly two tools. `AX` reads and operates application
+windows through the operating system's accessibility API: it lists windows,
+returns controls as short refs, and runs ordered actions with `wait` and
+`select` steps. `GUI` takes full-desktop screenshots at the size the model
+sees and sends absolute-pixel mouse and keyboard input. The agent keeps its
+own shell, file tools and browser; "hybrid" means the agent picks the channel
+that fits each step.
 
 ```mermaid
 flowchart LR
-    T[OSWorld task instruction] --> Q[Official Docker and QEMU guest]
-    Q --> A{Task agent}
-    A -->|Codex| CX[Codex CLI]
-    A -->|Claude Code| CC[Claude Code CLI]
-    A -->|Gemini CLI| GM[Gemini CLI]
-    A -->|Grok Build| GK[Grok Build]
-    CX --> SH[Shell and file tools]
-    CC --> SH
-    GM --> SH
-    GK --> SH
-    CX --> CDP[Codex browser runtime]
-    CX --> MCP[computer-use MCP over stdio]
-    CC --> AD[Claude schema adapter]
-    AD --> MCP
-    GM --> MCP
-    GK --> MCP
-    MCP --> P[Platform backend]
-    P --> MAC[macOS Swift AX provider]
-    P --> WIN[Windows C# UIA3 provider]
-    P --> ATSPI[AT-SPI accessibility tree]
-    P --> X11[X11 capture and input]
-    ATSPI --> D[Guest desktop]
-    X11 --> D
-    CDP --> D
-    SH --> D
+    agent["Coding agent<br/>Codex, Claude Code,<br/>Gemini CLI, Grok Build"]
+    code["CLI, Python SDK,<br/>PTC adapter"]
+    daemon["computer-use daemon<br/>(Unix socket)"]
+    subgraph server["computer-use core (Go)"]
+        ax["AX tool"]
+        gui["GUI tool"]
+    end
+    linux["Linux<br/>AT-SPI2 + X11"]
+    mac["macOS<br/>Accessibility + ScreenCaptureKit"]
+    win["Windows<br/>UI Automation + Win32"]
+    desktop[("Desktop applications")]
+
+    agent -- "MCP stdio" --> server
+    code --> daemon --> server
+    server --> linux & mac & win --> desktop
+    agent -. "shell, files, browser" .-> desktop
 ```
 
-The Go process owns the MCP protocol, tool schemas, batching, element
-references, evidence and state caches. It selects one persistent native
-provider: embedded Python AT-SPI/X11 on Linux, a Swift Accessibility app on
-macOS, or a C# UIA3 executable on Windows. GUI coordinates are pixels of the
-full-desktop image the tool returned. See [Architecture](docs/ARCHITECTURE.md).
+## Features
+
+| Area | Behavior |
+| --- | --- |
+| AX modes | `apps` lists top-level windows as `wN`; `observe` returns a window tree with `rN` refs; `find` returns matching refs with paging; `act` runs up to 64 ordered steps. |
+| AX refs | Refs name live elements, not selectors. Every action resolves its ref again and rejects stale or cross-window targets before input. |
+| AX `act` | `click`, `type`, `keypress`, `set_value`, `select`, `scroll`, `activate`, `close` and `wait` steps. The first failed step stops the batch. A `wait` step sends no input and waits for a window, a `find` query, a ref's state or text. `select` reads the selection back. |
+| AX results | An `effect:` line per targeted element, a `windows:` line for opened, closed and focused windows, and a compact diff by default. |
+| Errors | Every result starts with one JSON line: `ok`, `code`, `path`, `message`, `hint` (a corrected call), `input_emitted`, `completed`. 12 public codes. |
+| GUI screenshots | Every provider scales the desktop to fit 1366x768, the size the model sees. Coordinates are pixels of that image, mapped back to the native desktop per axis. |
+| GUI input | Click, double click, move, drag, scroll, type, keypress and one-second wait, batched up to 64 actions with one final screenshot. |
+| GUI stale protection | Before each coordinate action, the provider checks the window under that point against the screenshot. A change returns `gui_frame_stale` with nothing sent and a fresh screenshot. |
+| Entry points | MCP over stdio; a per-desktop daemon shared by the CLI, the Python SDK (`hcu_sdk`) and the programmatic tool calling (PTC) adapter. All of them call the same core and return the same text or JSON records. |
+
+## Platform support
+
+| OS | Provider | Status | Checks |
+| --- | --- | --- | --- |
+| Linux | Embedded Python: AT-SPI2, X11, XTest | Primary; target of the OSWorld runner | Go tests and provider tests in CI; OSWorld guest runs |
+| macOS 14+ | Swift app: AXUIElement, CoreGraphics, ScreenCaptureKit | Experimental | Swift unit tests, package build and MCP smoke test in CI (no desktop input) |
+| Windows | C#/.NET 8: FlaUI UIA3, Win32 | Experimental | .NET policy tests, package build and MCP smoke test in CI (no desktop input) |
+
+The build selects one backend per OS; see [Platform support](docs/PLATFORMS.md).
+
+## Quick start
+
+### 1. Build
+
+```bash
+make build-local   # Linux binary in artifacts/computer-use (Go 1.22+)
+make smoke         # start the stdio server and require exactly AX and GUI
+make build-macos   # macOS package in artifacts/macos/ (Swift 6.2+)
+make build-windows # Windows package in artifacts/windows/ (.NET 8, PowerShell 7)
+```
+
+Run the server as the signed-in desktop user. `computer-use doctor` prints
+the requirements for the current platform; [Computer Use MCP](docs/MCP.md#desktop-runtime)
+lists the Linux packages.
+
+### 2. Connect an MCP client
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.computer_use]
+command = "/abs/path/to/artifacts/computer-use"
+args = ["mcp"]
+startup_timeout_sec = 60
+tool_timeout_sec = 180
+```
+
+Claude Code (the adapter only reshapes the GUI schema it shows the model):
+
+```bash
+claude mcp add computer_use -- python3 \
+  /abs/path/to/hcu/osworld/guest_files/claude_mcp_schema_adapter.py \
+  /abs/path/to/artifacts/computer-use mcp
+```
+
+`python3 -m hcu.render_agent_config` writes full profiles for all four agents;
+see [Computer Use MCP](docs/MCP.md#codex).
+
+### 3. Drive it from a shell
+
+```bash
+computer-use apps                                    # list windows (w1, w2, ...)
+computer-use find w1 --role button --name-has Save   # find refs (r12, ...)
+computer-use click r12 --wait '{"window":"Save"}'    # act, then wait for a window
+computer-use gui screenshot                          # screenshot written to a file
+```
+
+One daemon per desktop keeps refs valid between commands;
+`computer-use help cli` lists every command and exit status.
+
+### 4. Drive it from Python
+
+```python
+import hcu_sdk as hcu                     # PYTHONPATH=sdk/python
+d = hcu.connect()                         # starts the daemon on first use
+w = d.apps().windows[0].ref
+save = d.find(w, role="button", name_contains="Save").matches[0]
+d.click(save.ref, wait={"window": "Save"})
+```
+
+The SDK runs `computer-use` from `PATH` or `HCU_BIN`. Errors raise
+`hcu.HcuError` subclasses such as `hcu.StaleRef`. See
+[Code entry points](docs/CODE.md) for records, async use and PTC.
+
+## Evaluation
+
+`hcu.osworld` runs OSWorld and OSWorld-V2 tasks with any of the four agents.
+Each task gets a fresh official Docker/QEMU guest, one MCP process and a
+task-scoped model gateway (`hcu.gateway`) that holds the credentials and
+enforces the model-call budget; the official evaluator scores the guest.
+[Running OSWorld](docs/OSWORLD.md) is the runbook.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `computer-use/` | Go MCP server and Linux, macOS and Windows providers |
-| `hcu/osworld/` | OSWorld runner: one QEMU guest, agent and MCP process per task, then the official evaluator |
-| `hcu/gateway/` | Task-scoped model gateways that route and meter the agents' model requests |
-| `osworld-overlay/` | Patches installed into a structurally compatible OSWorld-V2 checkout |
-| `instructions/` | Plain-text base policy and hybrid, AX-only and GUI-only interaction guides |
-| `docker/`, `scripts/` | Release build, installers and smoke tests |
-| `configs/` | Agent release lock file, environment template and example batch configs |
-
-## Quick start: the MCP server
-
-Build the release binary in Docker and check its public surface:
-
-```bash
-make build    # writes artifacts/computer-use
-make smoke    # starts the stdio server and requires exactly AX and GUI
-```
-
-`make build-local` builds with a local Go 1.22+ toolchain instead.
-
-These two targets build the Linux binary. Native desktop packages use
-`make build-macos` on macOS or the PowerShell build script on Windows.
-See [Platform support](docs/PLATFORMS.md) for prerequisites, permissions,
-and packaging. The native integration is experimental;
-OSWorld runners remain Linux-based.
-
-On Linux, the server must run inside the signed-in desktop session, with Python 3,
-PyGObject, the AT-SPI, GTK and GdkPixbuf typelibs, `xdotool`, `wmctrl` and
-`x11-utils` installed:
-
-```bash
-artifacts/computer-use doctor
-artifacts/computer-use mcp
-```
-
-[Computer Use MCP](docs/MCP.md) covers client configuration for Codex and
-Claude Code, the public contract and troubleshooting.
-
-## Quick start: OSWorld
-
-OSWorld runs need Linux x86-64 with KVM, Docker, Python 3.10+, the
-`happysixd/osworld-docker` image, an OSWorld guest qcow2 image and a model
-gateway reachable from the Docker bridge network.
-
-```bash
-git clone https://github.com/xlang-ai/OSWorld-V2 external/OSWorld-V2
-git -C external/OSWorld-V2 checkout d578d2d4e0dc82b43e270fdaa7fa89d9708cd154
-python3 -m venv external/OSWorld-V2/.venv
-external/OSWorld-V2/.venv/bin/pip install -e external/OSWorld-V2
-python3 scripts/install-osworld-v2.py external/OSWorld-V2
-
-make build-local   # agent CLIs go under artifacts/
-```
-
-OSWorld-V2 task classes are gated on Hugging Face and have to be downloaded
-into the checkout separately; [Running OSWorld](docs/OSWORLD.md) lists the
-commands. Preview a run without starting a VM or spending model quota:
-
-```bash
-external/OSWorld-V2/.venv/bin/python -m hcu.osworld.run_queue \
-  configs/osworld-v1-codex-queue.example.json --dry-run
-```
-
-[Running OSWorld](docs/OSWORLD.md) walks through guest images, model
-gateways, setup canaries, single tasks, panels and result files.
+| `computer-use/cmd/computer-use/` | `main()` of the binary |
+| `computer-use/internal/contract/` | Published tool schemas, server instructions, validation, error codes and limits |
+| `computer-use/internal/core/` | Service, AX and GUI logic, refs, evidence rendering, provider port |
+| `computer-use/internal/provider/` | Platform backends: Linux provider process, macOS and Windows sidecar transports |
+| `computer-use/internal/transport/` | MCP stdio, daemon socket and CLI |
+| `computer-use/native/{linux,macos,windows}/` | Native providers in Python, Swift and C# |
+| `hcu/osworld/` | OSWorld runner, queue, setup canary and result summary |
+| `hcu/gateway/` | Task-scoped OpenAI Responses, Anthropic and Gemini gateways |
+| `sdk/python/` | `hcu_sdk`: Python SDK, code-executor adapter, PTC adapter, examples |
+| `instructions/` | Model input: base policy and hybrid, AX-only and GUI-only guides |
+| `osworld-overlay/` | Files installed into a pinned OSWorld-V2 checkout |
+| `configs/` | Example OSWorld V1 and V2 queue configs |
+| `scripts/`, `scripts/maint/` | OSWorld-V2 installer, MCP smoke test; maintenance checks |
+| `analysis/tool_changes/` | Design and evaluation notes for individual tool changes |
+| `tests/` | Python tests for the runner, gateways and configs |
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md): process model, AX and GUI state, evidence.
-- [Computer Use MCP](docs/MCP.md): build, run, client setup, contract, troubleshooting.
-- [Code entry points](docs/CODE.md): daemon, command line, Python SDK, programmatic tool calling.
-- [Platform support](docs/PLATFORMS.md): native packages and permissions.
-- [Running OSWorld](docs/OSWORLD.md): the evaluation runbook.
-- [Agent profiles](docs/AGENT_PROFILES.md): how the four task agents are configured.
-- [AX, GUI and CDP](docs/AX_AND_CDP.md): desktop session and browser channels.
-- [Instructions](docs/INSTRUCTIONS.md): base policy, operating profiles and injection routes.
-- [Isolation](docs/ISOLATION.md): what an evaluated agent may and may not see.
+| Document | Answers |
+| --- | --- |
+| [Architecture](docs/ARCHITECTURE.md) | How are processes and Go packages arranged, and which files change for a given interface change? |
+| [Computer Use MCP](docs/MCP.md) | How do I build, run and configure the server, and what is the exact public contract? |
+| [Code entry points](docs/CODE.md) | How do the daemon, CLI, Python SDK and PTC adapter work? |
+| [Platform support](docs/PLATFORMS.md) | What does each OS need, and how do the native providers differ? |
+| [Client compatibility](docs/CLIENT_COMPATIBILITY.md) | What must a new MCP client preserve, and which client limits do we know? |
+| [Running OSWorld](docs/OSWORLD.md) | How do I run tasks and panels and read the results? |
+| [Agent profiles](docs/AGENT_PROFILES.md) | How is each task agent configured and isolated? |
+| [Instructions](docs/INSTRUCTIONS.md) | Which plain-text guidance reaches the model, and how is it selected? |
+| [AX, GUI and CDP](docs/AX_AND_CDP.md) | How do the desktop channels and the browser channel start and divide work? |
+| [Isolation](docs/ISOLATION.md) | What may an evaluated agent see? |
 
-## Versioning
+The documents were last verified against commit `a4006c5`.
 
-The release version lives in `VERSION`. The build
-injects it into the binary (`computer-use --version` and the MCP
-`serverInfo.version`) and into the Python package metadata.
+## Contributing
+
+Run `make test` (gofmt, `go vet`, Go tests, provider tests, pytest) before a
+pull request; CI adds race, macOS, Windows, Swift and .NET checks. Tool
+schemas, descriptions, error texts and `instructions/` are model input: read
+[CONTRIBUTING.md](CONTRIBUTING.md) before changing them.
 
 ## License
 
-Original code is released under the [MIT license](LICENSE). Files modified
-from OSWorld-V2 remain under the Apache License 2.0; see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE) for original code. Files modified from OSWorld-V2 remain
+under Apache 2.0; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

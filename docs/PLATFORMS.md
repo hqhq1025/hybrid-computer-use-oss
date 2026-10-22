@@ -1,17 +1,25 @@
 # Native Platforms
 
+Last verified against commit `a4006c5`.
+
 The public MCP surface is always `AX` and `GUI`. The binary selects its
 backend at compile time; an unsupported OS fails explicitly. No platform
 selection parameter is exposed to the model.
 
 | OS | Native implementation | Runtime requirements |
 | --- | --- | --- |
-| Linux | Embedded Python, AT-SPI2, X11 | Signed-in X11 session and the packages in MCP.md |
+| Linux | Embedded Python, AT-SPI2, X11 | Signed-in X11 session and the packages in [Computer Use MCP](MCP.md#desktop-runtime) |
 | macOS | Swift, AXUIElement, CoreGraphics, ScreenCaptureKit | macOS 14+, graphical login, Accessibility and Screen Recording consent |
 | Windows | C#/.NET 8, FlaUI UIA3 5.0, Win32 | Unlocked interactive session, compatible target integrity level |
 
 The macOS and Windows integration is experimental. The OSWorld harness uses
 Linux guests; native providers are for controlling a local desktop.
+
+| OS | Checked in CI | Not checked in CI |
+| --- | --- | --- |
+| Linux | Go tests, race tests of both native transports, provider tests with PyGObject | Desktop input; OSWorld guest runs cover it |
+| macOS | Swift unit tests, `GOOS=darwin go vet`, package build, MCP smoke test | Permissions and desktop input |
+| Windows | .NET protocol and policy tests, `GOOS=windows go vet`, package build, MCP smoke test | Session, integrity level and desktop input |
 
 ## AX selection and editable controls
 
@@ -37,9 +45,10 @@ these providers. They validate its wire format and reject its use before input.
 Use a current ref for the native editable field. Ordinary native field editing
 continues through each provider's existing text and value interfaces.
 
-GUI image scaling and coordinate mapping remain in the existing platform
-capture and input paths. These paths check layout before coordinate input.
-macOS ordered keyboard input accepts up to 64 steps, matching the Go core.
+Every provider scales GUI screenshots to fit within 1366x768 and maps
+coordinates back to the native desktop per axis. Each provider checks the
+layout before coordinate input. macOS ordered keyboard input accepts up to 64
+steps, matching the Go core.
 
 ## macOS
 
@@ -89,7 +98,7 @@ macOS releases.
 
 Install Go 1.22+, the .NET 8 SDK and PowerShell 7+. Windows PowerShell 5.1
 is not supported; installing the .NET SDK does not upgrade PowerShell.
-From the repository root:
+From the repository root (`make build-windows` runs the same script):
 
 ```powershell
 pwsh -NoProfile -File ./computer-use/native/windows/build.ps1 -OutputDirectory "$PWD/artifacts/windows"
@@ -112,7 +121,7 @@ A fresh screenshot or restarting the MCP process does not prove that a pending
 operating-system request has settled. Stop desktop automation and report the
 uncertainty for operator recovery.
 
-## Start A Session
+## Start a session
 
 Run `computer-use doctor` as the signed-in desktop user, then configure the
 client as described in [Computer Use MCP](MCP.md). Start with an AX application

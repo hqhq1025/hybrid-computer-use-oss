@@ -1,5 +1,7 @@
 # Code Entry Points: Daemon, CLI, SDK, PTC
 
+Last verified against commit `a4006c5`.
+
 One core implements the contract. MCP, the daemon socket, the command line,
 the Python SDK and the programmatic tool calling (PTC) adapter are transports
 over the same `callTool`. Adapters construct requests and reject ambiguous
@@ -32,7 +34,7 @@ Go paths are relative to `computer-use/`.
 | Core: decoding | `internal/core/ax_public_request.go` (decoder, public codes), `internal/core/argument_errors.go` |
 | Core: state | `internal/core/service.go` (`DesktopState`, `sessionState`), `ax_ref_registry.go`, `ax_find_cursor.go`, `ax_snapshot_store.go`, `ax_failure_recovery.go`, `request_replay.go` |
 | Core: operations | `internal/core/ax_*.go`, `gui_service.go`, `app_snapshot.go` |
-| Core: rendering | `internal/core/ax_renderer.go`, `ax_evidence.go`, `ax_response_budget.go`, `tool_result.go` (`finalizeForModel`), `records.go` (records) |
+| Core: rendering | `internal/core/ax_renderer.go`, `ax_evidence.go`, `ax_response_budget.go`, `tool_result.go` (`FinalizeForModel`), `records.go` (records) |
 | Provider port | `internal/core/platform_contract.go`, `platform_default.go`, `provider_*.go` |
 | Provider backends | `internal/provider/`: `runtime_backend_<os>.go`, `linux_*.go`, `darwin_*.go`, `windows_*.go`; `native/` |
 | Adapters | `internal/transport/`: `mcp_transport.go`, `mcp_attach.go` (MCP); `daemon.go`, `daemon_client.go`, `daemon_spawn_*.go`, `peer_cred_*.go` (socket); `cli.go`, `cli_main.go` (command line); `cmd/computer-use/main.go`; `sdk/python/` (SDK, PTC) |
@@ -96,11 +98,11 @@ The CLI and SDK start it on first use.
 
 | Property | Behaviour |
 | --- | --- |
-| Socket | `$XDG_RUNTIME_DIR/hcu/desktop-<display>.sock` (or `HCU_SOCKET`); directory 0700, socket 0600; `SO_PEERCRED` uid check on Linux; refuses a socket path owned by another user; replaces a stale socket, never a live one |
-| Start | first call forks `computer-use serve`; a `flock` beside the socket makes concurrent first calls start one daemon |
+| Socket | `$XDG_RUNTIME_DIR/hcu/desktop-<display>.sock`, or `hcu-<uid>/` in the system temporary directory without `XDG_RUNTIME_DIR`; `HCU_SOCKET` overrides it. `<display>` comes from `WAYLAND_DISPLAY` or `DISPLAY`. Directory 0700, socket 0600; `SO_PEERCRED` uid check on Linux; refuses a socket path owned by another user; replaces a stale socket, never a live one |
+| Start | on Linux and macOS, the first call forks `computer-use serve`; a `flock` beside the socket makes concurrent first calls start one daemon. Other platforms run `computer-use serve` explicitly |
 | Methods | `hello` (version, contract version, display check), `call`, `schema`, `status`, `stop`, `mcp` |
 | Sessions | each connection has its own session unless `hello` names one (`HCU_SESSION`, `--session`); same name, same session |
-| Input lock | one call runs at a time across all sessions, so input never interleaves. A `wait` step polls inside its call and holds the lock for at most its `timeout_ms` (default 5000, at most 60000), as the `until` it replaced did; the lock is not released between polls. The CLI `wait` command and SDK `wait()` send `observe:"none"`, so a wait adds no tree read after it, also when it times out. An act of only `wait` steps sends no input, so an in-process MCP server allows it while a daemon runs |
+| Input lock | one call runs at a time across all sessions, so input never interleaves. A `wait` step polls inside its call and holds the lock for at most its `timeout_ms` (default 5000, at most 60000); the lock is not released between polls. The CLI `wait` command and SDK `wait()` send `observe:"none"`, so a wait adds no tree read after it, also when it times out. An act of only `wait` steps sends no input, so an in-process MCP server allows it while a daemon runs |
 | `request_id` | within one running daemon, a call with an id runs once; a repeat (also on a new connection) returns the first result with `replayed: true`; kept 10 minutes. Restart clears this replay cache |
 | Environment | `hello` with another display is refused; a call after the daemon's own session environment changed is refused with `runtime_error` |
 | Restart | ordinary calls and attached MCP calls save ref counters beside the socket before returning refs. A normal restart reads those counters and does not reissue old numbers; old refs fail as expired. This is not a crash-safe allocation guarantee |
@@ -116,19 +118,26 @@ prevent startup. Preserve the counter file when restarting the daemon.
 ```text
 computer-use apps | observe | wait | find | read | click | type | key | set |
              scroll | activate | close | act | gui     shorthand calls
-computer-use batch [FILE|-] [--keep-going]              JSON array of {"tool","args"}
+computer-use batch [FILE|-] [--keep-going] [--text]     JSON array of {"tool","args"}
 computer-use schema                                     contract as JSON
+computer-use serve [--socket PATH] [--idle-timeout 30m] daemon in the foreground
 computer-use daemon start|stop|status
 computer-use mcp --attach SOCKET                        MCP through the daemon
 computer-use help cli                                   full usage and exit codes
 ```
 
+Input shorthands also take `--window wN`, `--as none|diff|tree` and
+`--wait STEP_JSON`, one wait step that runs after the action, for example
+`--wait '{"window":"Save"}'`. Common options are `--session NAME`
+(`HCU_SESSION`), `--socket PATH` (`HCU_SOCKET`), `--request-id ID` and
+`--since SNAPSHOT_ID`.
+
 Default output is the MCP text, byte for byte; `--json` (for `act` and `gui`,
 `--records`) prints the record. Exit status comes from the error table: 0
 success, 2 `invalid_argument`, 3 `wait_timeout`, 4
 `stale_ref`/`gui_frame_stale`, 5 `window_changed`/`effect_unknown`, 6
-`app_unavailable`/`ambiguous_window`/`window_not_found`/`no_focused_window`,
-10 `runtime_error`, 64 usage. No exit status mixes codes that sent no input
+`app_unavailable`/`ambiguous_window`/`window_not_found`/`no_focused_window`/
+`permission_denied`, 10 `runtime_error`, 64 usage. No exit status mixes codes that sent no input
 with codes that may have.
 
 Unknown options on shorthand, batch, schema, and daemon commands fail with
@@ -154,7 +163,9 @@ prints the same model-facing result as MCP, with images as file paths.
 
 ## Python SDK
 
-`sdk/python/hcu_sdk` (standard library only, Python 3.8+). Import it as
+`sdk/python/hcu_sdk` (standard library only, Python 3.8+); put `sdk/python` on
+`PYTHONPATH`. The SDK starts the daemon with `computer-use` from `PATH`, or
+from `HCU_BIN`. Import it as
 `import hcu_sdk as hcu`; the repository's harness package already owns the
 name `hcu`.
 
@@ -335,8 +346,10 @@ window binding and preflight before input stay in the core.
 
 No change is needed. Codex renders each MCP input schema to a TypeScript
 declaration with a 16,000-byte limit (`code-mode-protocol`,
-`DEFAULT_INPUT_SCHEMA_MAX_BYTES`). Rendered with that code, the AX schema is
-3,157 bytes and the GUI schema 1,701 bytes. In code mode the tools stay text:
+`DEFAULT_INPUT_SCHEMA_MAX_BYTES`). The published AX and GUI input schemas are
+each under 5,000 bytes as compact JSON
+(`computer-use/testdata/contract/public_contract.json`), so they stay within
+that limit. In code mode the tools stay text:
 
 ```js
 const out = await tools.mcp__computer_use__AX({mode: "find", window_ref: "w1", query: {role: "button"}, limit: 50});

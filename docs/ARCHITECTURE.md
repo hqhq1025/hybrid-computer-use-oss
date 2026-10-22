@@ -1,5 +1,7 @@
 # Architecture
 
+Last verified against commit `a4006c5`.
+
 ## Control plane
 
 The OSWorld runner creates one isolated desktop per task, installs one task
@@ -62,7 +64,7 @@ The main boundaries (paths are relative to `computer-use/`):
 2. `internal/core/service.go` routes calls, owns session state and captures
    error context.
 3. `internal/core/ax_*.go` implements the canonical AX state, compact working
-   projections, references, action guards, postconditions and evidence.
+   projections, references, action guards, wait checks and evidence.
 4. `internal/core/gui_service.go` validates GUI batches and binds coordinates
    to the last screenshot.
 5. `internal/core/platform_contract.go` and `internal/core/provider_*.go`
@@ -290,18 +292,19 @@ projection that drops empty leaves and collapses neutral containers, while
 ## GUI state model
 
 GUI is full-desktop and not tied to an application. A screenshot establishes
-a private layout lease. Before each coordinate action the provider compares
-the current desktop layout with the lease; if it changed, the action is
-rejected before any input and a fresh screenshot is returned.
+a private layout lease. Before each coordinate action the provider checks the
+window under that point against the lease. If that window changed, the action
+is rejected before any input with `gui_frame_stale`, and a fresh screenshot
+is returned.
 
-The provider returns the desktop scaled to fit 1366x768, the size the model
-sees: GPT-5.4 at detail high shrinks a 1920x1080 image to 1365x768 before the
-model reads it, so a larger image would put the model's coordinates in a
-smaller space than the returned pixels. Coordinates are pixels of the returned
-image and are mapped back to the native desktop per axis, privately. `zoom`
-returns native pixels of a region when the scaled screenshot is too coarse.
+Every provider scales the desktop to fit within 1366x768 and never enlarges
+it. This is the size the model sees: GPT-5.4 at detail high shrinks a
+1920x1080 image to 1365x768, so a larger image would put the model's
+coordinates in a smaller space than the returned pixels. Coordinates are
+pixels of the returned image. The provider maps them back to the native
+desktop per axis, using the exact delivered width and height.
 
-## Identity And Distribution
+## Identity and distribution
 
 Runtime fingerprints remain private implementation details. Providers use
 them to distinguish window instances, detect layout changes and preserve exact
@@ -322,10 +325,10 @@ An accepted call is not task completion. Responses distinguish:
 - validation failures before input;
 - input that was not emitted;
 - input that was or may have been emitted;
-- semantic postcondition evidence;
+- semantic evidence from `wait` steps and AX reads;
 - visual evidence from screenshots;
 - stale state that requires a new observation.
 
 AX cannot prove pixels, durable file contents, network state or evaluator
 acceptance, and GUI cannot prove semantic identity or persistence. The agent
-has to pick the evidence source that matches the requested result.
+must pick the evidence source that matches the requested result.
