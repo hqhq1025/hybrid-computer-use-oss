@@ -1036,13 +1036,16 @@ class UnnamedFrameTitleTests(AtspiPatchedTestCase):
     """
 
     def _app(self):
-        frame = _TreeNode(role="frame", name="", x=-26, y=4, w=952, h=649)
+        bus = _TreeNode(role="radio button", name="Session Bus")
+        frame = _TreeNode(role="frame", name="", x=-26, y=4, w=952, h=649,
+                          kids=(bus,))
         app = _TreeNode(role="application", name="d-feet", kids=(frame,))
         app.get_process_id = lambda: 4242
         return app, frame
 
-    def _patches(self, title="d-feet"):
+    def _patches(self, title="d-feet", window_type="NORMAL"):
         return (
+            mock.patch.object(runtime, "x11_window_type", return_value=window_type),
             mock.patch.object(
                 runtime, "x11_window_inventory_for_pid",
                 return_value=runtime.InventoryResult(
@@ -1080,3 +1083,19 @@ class UnnamedFrameTitleTests(AtspiPatchedTestCase):
             self.addCleanup(patcher.stop)
         listed = runtime.app_top_level_windows(app, runtime.app_windows(app), None)
         self.assertEqual(listed[0]["title"], "Bus browser")
+
+    def test_untitled_infrastructure_window_keeps_its_empty_title(self):
+        # xfce4-panel windows are unnamed in AT-SPI and titled "xfce4-panel"
+        # by X11. Borrowing that title made them look like application
+        # windows; infrastructure windows keep the empty title.
+        # The panel frame holds a panel child, so the AT-SPI infrastructure
+        # probe does not catch it; the EWMH DOCK type does.
+        panel = _TreeNode(role="frame", name="", x=0, y=0, w=1920, h=27,
+                          kids=(_TreeNode(role="panel"),))
+        app = _TreeNode(role="application", name="xfce4-panel", kids=(panel,))
+        app.get_process_id = lambda: 4242
+        for patcher in self._patches(title="xfce4-panel", window_type="DOCK"):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        listed = runtime.app_top_level_windows(app, runtime.app_windows(app), None)
+        self.assertEqual(listed[0]["title"], "")

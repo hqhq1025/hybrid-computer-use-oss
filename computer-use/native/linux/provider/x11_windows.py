@@ -531,8 +531,30 @@ def managed_window_title(app, window, strong_handles=None):
     target = strong_handles[index]
     for item in x11_window_inventory_for_pid(node_pid(app)):
         if opaque_window_instance_handle_for_id(app, item.get("id")) == target:
+            # Docks, panels and the desktop also carry X11 titles
+            # ("xfce4-panel"); only application windows lend theirs.
+            if x11_window_type(item.get("id")) not in TITLED_WINDOW_TYPES:
+                return ""
             return str(item.get("title") or "").strip()
     return ""
+
+
+TITLED_WINDOW_TYPES = {"NORMAL", "DIALOG"}
+
+
+def x11_window_type(window_id):
+    """Return the EWMH _NET_WM_WINDOW_TYPE suffix of one X11 window, or ""."""
+    if not window_id:
+        return ""
+    try:
+        result = subprocess.run(
+            ["xprop", "-id", str(window_id), "_NET_WM_WINDOW_TYPE"],
+            capture_output=True, text=True, timeout=1,
+        )
+    except Exception:
+        return ""
+    match = re.search(r"_NET_WM_WINDOW_TYPE_([A-Z_]+)", result.stdout or "")
+    return match.group(1) if match else ""
 
 
 def accessible_window_title(app, window, strong_handles=None):
