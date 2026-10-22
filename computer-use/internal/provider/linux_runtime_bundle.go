@@ -18,6 +18,7 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/phase_timing.py",
 	"native/linux/provider/app_resolver.py",
 	"native/linux/provider/window_resolver.py",
+	"native/linux/provider/native_windows.py",
 	"native/linux/provider/window_diagnostics.py",
 	"native/linux/provider/ref_continuity.py",
 	"native/linux/provider/recovery.py",

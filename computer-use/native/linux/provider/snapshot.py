@@ -44,6 +44,7 @@ from .x11_windows import (
     main_window,
     select_window_by_handle,
     strong_window_instance_handles,
+    unmapped_window_indices,
     window_instance_handle,
 )
 
@@ -182,8 +183,11 @@ def focus_and_selection(
 def top_level_window_inventory(app, selected_index=None):
     windows = app_windows(app)
     strong_handles = strong_window_instance_handles(app, windows)
+    hidden = unmapped_window_indices(app, windows, strong_handles)
     inventory = []
     for index, window in windows:
+        if index in hidden and index != selected_index:
+            continue
         inventory.append({
             "title": accessible_window_title(app, window, strong_handles),
             "role": str(node_role(window) or "window").strip().lower(),

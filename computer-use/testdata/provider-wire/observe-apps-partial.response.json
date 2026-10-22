@@ -6,7 +6,11 @@
   "accessibility": {
     "ok": true,
     "apps": [
-      {"name": "Editor", "pid": 42, "inputCapable": true}
+      {"name": "Editor", "pid": 42, "inputCapable": true},
+      {"name": "paint3d", "pid": 43, "processGeneration": "pid:43:start:1", "inputCapable": true,
+       "windows": [{"title": "Scene", "role": "window", "handle": "w2:00000000000000000000000000000043",
+                    "providerBusName": "", "providerObjectPath": "", "processGeneration": "pid:43:start:1",
+                    "active": false, "inputTarget": true, "noAccessibilityTree": true}]}
     ],
     "inventory_issues": [
       {"app": "Busy app", "reason": "The window inventory could not be read completely."},

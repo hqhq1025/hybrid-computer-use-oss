@@ -144,7 +144,9 @@ Input shorthands also take `--window wN`, `--as none|diff|tree` and
 element, a substring of it, or a range. `gui` has `screenshot`,
 `zoom X0 Y0 X1 Y1`, `click|double_click|move X Y`, `type TEXT` and
 `key CHORD`. GUI `drag`, `scroll` and `wait` take `gui --json`, and an AX
-batch takes `act --json`. `observe --as full|screenshot` prints an
+batch takes `act --json`. `--json -` reads the body from standard input and
+`--json @FILE` from a file, so code that builds a command need not quote
+JSON for the shell. `observe --as full|screenshot` prints an
 `image: full desktop WxH, the current GUI frame` line before the image path.
 After that line, `gui click` may use the image's pixels. `gui zoom` prints the
 mapping line and the zoom image path. Common options are `--session NAME`
@@ -190,8 +192,8 @@ name `hcu`.
 
 - `Desktop.call(tool, args)` is the whole API; helpers (`apps`, `observe`,
   `find`, `find_all`, `read`, `act`, `click`, `type`, `key`, `set_value`,
-  `select`, `scroll`, `activate`, `close_window`, `screenshot`, `zoom`, `gui`,
-  `wait`) only build argument dicts. GUI input actions go through
+  `select`, `scroll`, `activate`, `close_window`, `screenshot`, `zoom`,
+  `click_zoom`, `gui`, `wait`) only build argument dicts. GUI input actions go through
   `gui(actions)`, with `x`/`y` in pixels of the latest `screen` image.
 - `zoom(region)` returns the zoom record. `hcu.zoom_point(record, u, v)`
   converts a zoom image pixel to the frame pixel that GUI `x`/`y` take, using
@@ -202,7 +204,11 @@ name `hcu`.
   z = d.zoom([600, 60, 680, 100])               # frame pixels
   x, y = hcu.zoom_point(z, 212, 96)             # a point seen in the zoom image
   d.gui([{"type": "click", "x": x, "y": y}])
+  d.click_zoom(z, 212, 96)                      # the same click in one call
   ```
+
+  `click_zoom` sends an ordinary GUI click at the converted frame pixel, so
+  the core checks it against the current frame like any other click.
 
 - `screenshot()` and `zoom()` only look: they get no `request_id`, and a
   dropped connection retries them like any other read.
@@ -381,12 +387,38 @@ window binding and preflight before input stay in the core.
 
 ## Codex code mode
 
-No change is needed. Codex renders each MCP input schema to a TypeScript
-declaration with a 16,000-byte limit (`code-mode-protocol`,
-`DEFAULT_INPUT_SCHEMA_MAX_BYTES`). The published AX and GUI input schemas are
-each under 5,000 bytes as compact JSON
-(`computer-use/testdata/contract/public_contract.json`), so they stay within
-that limit. In code mode the tools stay text:
+In Codex code mode the model writes JavaScript for one `exec` tool, and that
+code calls nested tools. Registering the MCP server is enough: code calls
+`tools.mcp__computer_use__AX(args)` and `tools.mcp__computer_use__GUI(args)`
+and gets the MCP result, `{content, isError}`. The first text item is the
+JSON evidence line; images are `ImageContent` blocks, and `image(block)` shows
+one to the model from the same `exec`, without another model turn.
+`instructions/hybrid-code.md` is the guide for this mode. The OSWorld runner
+and `hcu.render_agent_config` select this setup with `--code-mode`
+(`"code_mode": true` in a queue config); [MCP](MCP.md#codex-code-mode) shows
+the resulting configuration.
+
+- Codex renders each MCP input schema as a TypeScript declaration. Some
+  versions do not resolve `$ref`, so the AX `query` field appears as
+  `unknown`, and the GUI scroll branch, an object with an `anyOf`, appears
+  only as `{ scroll_x: unknown } | { scroll_y: unknown }`. The tool
+  descriptions and `instructions/hybrid-code.md` show both shapes as
+  examples.
+- Codex can defer MCP tools in code mode. A deferred tool is still callable as
+  `tools.mcp__computer_use__AX` and listed in `ALL_TOOLS`, but its declaration
+  is left out of the `exec` description. `omit_tools_from = ["deferred"]` in
+  the server's `[mcp_servers.computer_use]` entry lists AX and GUI again.
+- Use one entry point per task. An in-process MCP server refuses input while
+  a CLI or SDK daemon serves the same desktop; `computer-use mcp --attach`
+  shares one daemon when a task needs both.
+- Without MCP, code runs the CLI or Python through `tools.exec_command`. The
+  record holds the image path; `tools.view_image({path})` returns its data
+  URL, and `image(url)` shows it from the same `exec`. Printing the image
+  as a data URL instead does not survive the nested output limit: a
+  full-desktop PNG is about 100,000 characters, and a smaller
+  `max_output_tokens` on `exec_command` cuts the middle out of it.
+
+In code mode the tools stay text:
 
 ```js
 const out = await tools.mcp__computer_use__AX({mode: "find", window_ref: "w1", query: {role: "button"}, limit: 50});

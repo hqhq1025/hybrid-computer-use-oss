@@ -25,6 +25,7 @@ import uuid
 from hcu.paths import (
     DEFAULT_ARTIFACT_DIR,
     DEFAULT_ASSET_CACHE,
+    CODE_MODE_INSTRUCTIONS_FILE,
     DEFAULT_BASE_INSTRUCTIONS_FILE,
     DEFAULT_INSTRUCTIONS_FILE,
     DEFAULT_RESULTS_DIR,
@@ -37,6 +38,7 @@ from hcu.osworld.agents import (
     AGENTS,
     claude_mcp_config,
     claude_system_prompt,
+    code_mode_profile,
     codex_config,
     gemini_experiments,
     gemini_settings,
@@ -221,6 +223,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--code-mode",
+        action="store_true",
+        help=(
+            "Codex only: give the model Codex's code tool, which calls the "
+            "computer-use MCP tools from code; appends instructions/hybrid-code.md "
+            "to the profile."
+        ),
+    )
+    parser.add_argument(
         "--base-instructions-file",
         default=str(DEFAULT_BASE_INSTRUCTIONS_FILE),
         help="Compact model base instructions copied into the guest.",
@@ -304,6 +315,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-vnc", action="store_true")
     parser.add_argument("--enable-recording", action="store_true")
     args = parser.parse_args()
+    if args.code_mode and args.agent != "codex":
+        parser.error("--code-mode applies only to --agent codex")
     profile = AGENT_PROFILES[args.agent]
     args.model = args.model or profile["default_model"]
     args.effort = args.effort or profile["default_effort"]
@@ -443,6 +456,8 @@ def prepare_run(args: argparse.Namespace) -> TaskRun:
     required_files = [agent_binary, mcp_binary, base_instructions_file]
     if instructions_file is not None:
         required_files.append(instructions_file)
+    if args.code_mode:
+        required_files.append(CODE_MODE_INSTRUCTIONS_FILE)
     if args.agent == "claude-code":
         required_files.append(CLAUDE_MCP_ADAPTER)
     if node_binary is not None:
@@ -521,6 +536,7 @@ def stage_local_files(run: TaskRun) -> None:
             mcp_command=GUEST_MCP,
             channels=args.channels,
             execution_context="isolated-guest",
+            code_mode=getattr(args, "code_mode", False),
         )
     elif args.agent == "claude-code":
         config = claude_mcp_config(channels=args.channels)
@@ -547,7 +563,14 @@ def stage_local_files(run: TaskRun) -> None:
     # Codex reads the profile from a task-local AGENTS.md and Gemini CLI from
     # its global GEMINI.md, both uploaded from instructions_copy; Claude Code and
     # Grok Build get it inside their replacement system prompts.
-    if run.instructions_file is not None:
+    if getattr(args, "code_mode", False):
+        selected = (
+            run.instructions_file.read_text(encoding="utf-8")
+            if run.instructions_file is not None else ""
+        )
+        write_text(run.instructions_copy, code_mode_profile(
+            selected, CODE_MODE_INSTRUCTIONS_FILE.read_text(encoding="utf-8")))
+    elif run.instructions_file is not None:
         run.instructions_copy.write_bytes(run.instructions_file.read_bytes())
     base_instructions = run.base_instructions_file.read_text(encoding="utf-8")
     if run.instructions_file is not None:
@@ -613,6 +636,7 @@ def initial_meta(run: TaskRun, docker_runtime: dict) -> dict:
         ),
         "mcp_binary": str(run.mcp_binary),
         "mcp_channels": args.channels or None,
+        "code_mode": bool(getattr(args, "code_mode", False)),
         "mcp_public_tools": run.mcp_public_tools,
         "instructions_file": str(run.instructions_file) if run.instructions_file else None,
         "base_instructions_file": str(run.base_instructions_file),
@@ -640,7 +664,7 @@ def runtime_uploads(run: TaskRun) -> tuple[list[dict], list[str]]:
         executable_paths.append(guest_binary)
     if args.agent == "codex":
         upload_rows.append({"local_path": str(run.config_path), "path": GUEST_CONFIG})
-        if run.instructions_file is not None:
+        if run.instructions_file is not None or getattr(args, "code_mode", False):
             upload_rows.append(
                 {"local_path": str(run.instructions_copy), "path": GUEST_INSTRUCTIONS}
             )

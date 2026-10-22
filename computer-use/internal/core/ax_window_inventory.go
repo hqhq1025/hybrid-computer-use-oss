@@ -18,6 +18,8 @@ type axDesktopWindow struct {
 	title   string
 	active  bool
 	handle  string
+	// noTree marks a window without an accessibility tree.
+	noTree bool
 	// appProcess is the provider identity of the owning application
 	// process: its bus name and process generation.
 	appProcess [2]string
@@ -107,10 +109,12 @@ func (s *Service) listDesktopWindows(allowIncomplete bool) (*axWindowInventory, 
 				continue
 			}
 			listed++
+			s.WindowRefRegistry.markNoAccessibilityTree(ref, window.NoAccessibilityTree)
 			entry := axDesktopWindow{
 				ref: ref, appRef: appRef, appName: app.Name,
 				title: window.Title, active: window.Active, handle: window.Handle,
 				appProcess: [2]string{app.ProviderBusName, app.ProcessGeneration},
+				noTree:     window.NoAccessibilityTree,
 			}
 			inventory.windows = append(inventory.windows, entry)
 			lines = append(lines, entry.line())
@@ -146,6 +150,9 @@ func (window axDesktopWindow) line() string {
 	line := fmt.Sprintf("%s %s  app=%s", window.ref, strconv.Quote(window.title), window.appName)
 	if window.active {
 		line += "  active"
+	}
+	if window.noTree {
+		line += "  " + axNoTreeWindowMark
 	}
 	return line
 }

@@ -277,14 +277,15 @@ def invisible_window_notes(managed_windows, accessible_pids, proc_root="/proc"):
             continue
         seen.add(pid)
         toolkit = process_toolkit(pid, proc_root)
-        advice = _RESTART_ADVICE.get(
-            toolkit,
-            "the application exports no accessibility tree",
-        )
+        advice = _RESTART_ADVICE.get(toolkit)
+        if advice is None:
+            # No known toolkit: nothing would make the application export a
+            # tree, and its windows are already listed as having none.
+            continue
         notes.append(
-            'Not on the accessibility bus: "{}" (pid {}{}). {}. Until then '
+            'Not on the accessibility bus: "{}" (pid {}, {}). {}. Until then '
             "only GUI can read and operate it.".format(
-                title, pid, ", " + toolkit if toolkit else "", advice)
+                title, pid, toolkit, advice)
         )
     return notes
 

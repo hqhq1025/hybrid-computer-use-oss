@@ -59,7 +59,10 @@ func (s *Service) rebindAfterWindowWait(
 		return
 	}
 	entry, err := s.WindowRefRegistry.Resolve(ref, "")
-	if err != nil || !validInternalWindowHandle(entry.WindowHandle) {
+	if err != nil || !validInternalWindowHandle(entry.WindowHandle) ||
+		entry.NoAccessibilityTree {
+		// A window without an accessibility tree has nothing to read; the
+		// batch stays bound where it was.
 		return
 	}
 	context.WindowRef = entry.Ref
