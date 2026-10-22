@@ -19,6 +19,7 @@ from .atspi_inventory import (
 )
 from .snapshot import snapshot_digest, utc_timestamp
 from .a11y_enable import invisible_window_notes, untracked_window_notes
+from .native_windows import native_app_entries, native_only_windows
 from .x11_windows import (
     _x11_managed_windows,
     accessible_window_title,
@@ -182,9 +183,16 @@ def list_apps_inventory():
             "bus; their windows may be missing above.".format(unreadable)
         )
     managed = _x11_managed_windows()
+    native_entries = []
     if inventory_complete(apps) and inventory_complete(managed):
-        notes.extend(invisible_window_notes(
-            managed, {node_pid(app) for app in apps}))
+        accessible_pids = {node_pid(app) for app in apps}
+        # Windows of processes that are not on the bus are listed with a
+        # native handle, so they can be activated, closed and awaited; the
+        # note adds the restart advice when the toolkit can export a tree.
+        native_entries = native_app_entries(native_only_windows(
+            managed, accessible_pids, active_window_id))
+        lines.extend(entry["displayText"] for entry in native_entries)
+        notes.extend(invisible_window_notes(managed, accessible_pids))
         if not unreadable:
             notes.extend(untracked_window_notes(managed, accessible_titles))
     return {
@@ -203,7 +211,7 @@ def list_apps_inventory():
                 "windows": entry["windows"],
             }
             for entry in entries
-        ],
+        ] + native_entries,
     }
 
 

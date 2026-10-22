@@ -33,6 +33,7 @@ from .x11_windows import (
 )
 
 from .app_resolver import app_window_inventory, list_apps_inventory, windowless_snapshot
+from .native_windows import native_window_for_operation, perform_native_window_action
 from .element_resolver import (
     find_element_at_snapshot_path,
     resolve_semantic_target,
@@ -174,6 +175,10 @@ def dispatch_provider_operation(
         )
     if operation_kind == "desktop_execute_batch":
         return _execute_desktop_batch(operation)
+    if operation_kind == "window_action":
+        native = native_window_for_operation(operation)
+        if native is not None:
+            return perform_native_window_action(action_intent, native)
     if operation_kind == "observe":
         return _observe_operation(operation, observation)
     if (

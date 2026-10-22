@@ -534,7 +534,11 @@ def titled_top_level_window_id(window, native):
 
 
 def opaque_window_instance_handle_for_id(app, window_id):
-    pid = node_pid(app)
+    return window_handle_for_pid(node_pid(app), window_id)
+
+
+def window_handle_for_pid(pid, window_id):
+    """Return the strong w2 handle of one X11 window of process pid."""
     generation = process_generation(pid)
     if not window_id or not pid or not generation:
         return None

@@ -33,6 +33,9 @@ type ProviderAppWindow struct {
 	ProcessGeneration  string `json:"processGeneration"`
 	Active             bool   `json:"active"`
 	InputTarget        bool   `json:"inputTarget"`
+	// NoAccessibilityTree marks a window whose process exports no
+	// accessibility tree; it has a native handle only.
+	NoAccessibilityTree bool `json:"noAccessibilityTree,omitempty"`
 }
 
 type frame struct {
