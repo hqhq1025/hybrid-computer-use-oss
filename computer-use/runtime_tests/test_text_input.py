@@ -354,57 +354,6 @@ class SetElementValueTests(AtspiPatchedTestCase):
             )
 
 
-class TextSynthesisPacingTests(unittest.TestCase):
-    """Characters without a key share one rebound keycode and need spacing.
-
-    at-spi2-registryd types a character that has no key in the keyboard map
-    by rebinding a reserved keycode to it. Sent in one burst, every such
-    character arrives as the last one: Chrome received "Hello 张三 ü" as
-    "Hello üü ü".
-    """
-
-    def _send(self, text, mapped=lambda character: character.isascii()):
-        events = []
-        clock = {"now": 0.0}
-
-        def generate(_keyval, keystring, _synth_type):
-            events.append((clock["now"], keystring))
-            return True
-
-        def sleep(seconds):
-            clock["now"] += seconds
-
-        with mock.patch.object(runtime, "_has_keymap_entry", side_effect=mapped), \
-                mock.patch.object(runtime.time, "sleep", side_effect=sleep), \
-                mock.patch.object(runtime.Atspi, "generate_keyboard_event",
-                                  side_effect=generate, create=True):
-            runtime.send_text(text)
-        return events
-
-    def test_unmapped_characters_are_sent_one_by_one_with_a_gap(self):
-        events = self._send("Hello 张三 ü")
-
-        self.assertEqual(
-            [keystring for _, keystring in events],
-            ["Hello ", "张", "三", " ", "ü"])
-        unmapped_times = [when for when, keystring in events
-                          if not keystring.isascii()]
-        gaps = [later - earlier
-                for earlier, later in zip(unmapped_times, unmapped_times[1:])]
-        self.assertTrue(gaps)
-        for gap in gaps:
-            self.assertGreaterEqual(gap, runtime.UNMAPPED_CHARACTER_GAP_SECONDS)
-
-    def test_text_with_keys_for_every_character_is_one_request(self):
-        events = self._send("plain ascii, 123!")
-
-        self.assertEqual(events, [(0.0, "plain ascii, 123!")])
-
-    def test_empty_text_is_still_one_request(self):
-        """Callers rely on the emission check of the single STRING request."""
-        self.assertEqual(self._send(""), [(0.0, "")])
-
-
 class EmbeddedEditorValueTests(AtspiPatchedTestCase):
     """An editor whose text is only embedded-object characters shows its lines.
 

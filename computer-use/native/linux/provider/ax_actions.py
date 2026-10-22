@@ -260,60 +260,14 @@ def send_key(key):
         raise release_error
 
 
-# Pause between two characters that have no key in the current keyboard map.
-#
-# at-spi2-registryd types such a character by rebinding one reserved keycode
-# to it and pressing that keycode. Applications translate the keycode when
-# they process the event, not when it is sent, so in a burst every rebound
-# character reads as the last one: Chrome received "Hello 张三 ü" as
-# "Hello üü ü". A short pause between rebound characters keeps each one.
-UNMAPPED_CHARACTER_GAP_SECONDS = 0.02
-
-
-def _has_keymap_entry(character):
-    keymap = Gdk.Keymap.get_default() if Gdk is not None else None
-    if keymap is None:
-        # Without a keymap, assume the US layout every X server starts with.
-        return " " <= character <= "~"
-    keyval = Gdk.unicode_to_keyval(ord(character))
-    ok, entries = keymap.get_entries_for_keyval(keyval)
-    return bool(ok and entries)
-
-
-def text_synthesis_runs(text):
-    """Split text into runs that can each be sent in one STRING request.
-
-    Characters with a key in the keyboard map form one run; every character
-    without one is a run of its own, so it can be paced.
-    """
-    runs = []
-    for character in str(text):
-        if _has_keymap_entry(character):
-            if runs and runs[-1][1]:
-                runs[-1][0] += character
-            else:
-                runs.append([character, True])
-        else:
-            runs.append([character, False])
-    return [(run, mapped) for run, mapped in runs]
-
-
 def send_text(text):
-    emitted = False
-    # The reserved keycode is shared by every unmapped character, so the gap
-    # is needed after any earlier one, even with mapped text in between.
-    unmapped_sent = False
-    for run, mapped in text_synthesis_runs(text) or [("", True)]:
-        if not mapped and unmapped_sent:
-            time.sleep(UNMAPPED_CHARACTER_GAP_SECONDS)
-        emitted = emit_keyboard_event(
-            0,
-            run,
-            Atspi.KeySynthType.STRING,
-            "text payload",
-            emitted,
-        )
-        unmapped_sent = unmapped_sent or not mapped
+    emit_keyboard_event(
+        0,
+        str(text),
+        Atspi.KeySynthType.STRING,
+        "text payload",
+        False,
+    )
 
 
 def find_editable_text(root):
