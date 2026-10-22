@@ -400,6 +400,23 @@ class KeyResolutionTests(unittest.TestCase):
                     runtime.keysym(key), runtime.Gdk.keyval_from_name(expected)
                 )
 
+    def test_lowercase_keysym_names_in_any_case(self):
+        # X keysym names for punctuation are lowercase ("comma", "plus").
+        # Callers write them as on a key legend or in upper case, as for the
+        # named keys above; "CTRL+COMMA" failed with "Unsupported key: COMMA".
+        for key, expected in (
+            ("COMMA", "comma"),
+            ("Plus", "plus"),
+            ("MINUS", "minus"),
+            ("PERIOD", "period"),
+            ("EQUAL", "equal"),
+            ("BRACKETLEFT", "bracketleft"),
+        ):
+            with self.subTest(key=key):
+                self.assertEqual(
+                    runtime.keysym(key), runtime.Gdk.keyval_from_name(expected)
+                )
+
     def test_bare_modifier_is_a_key(self):
         # keycode needs a display keymap; the name it receives is the point.
         with mock.patch.object(runtime, "keycode", side_effect=lambda name: 1):

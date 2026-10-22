@@ -123,13 +123,16 @@ GDK_VOID_SYMBOL = 0xFFFFFF
 def keysym(name):
     """Resolve a key name to an X11 keysym, or 0 when it has none.
 
-    Punctuation is accepted as the character itself (",", ".", "/"), and
-    named keys in any case ("INSERT", "caps_lock"), because callers write
-    keys the way they appear on the keyboard.
+    Punctuation is accepted as the character itself (",", ".", "/") or by
+    its keysym name in any case ("COMMA", "plus"), and named keys in any
+    case ("INSERT", "caps_lock"), because callers write keys the way they
+    appear on the keyboard.
     """
     candidates = [name]
     if len(name) > 1:
         candidates.append("_".join(part.capitalize() for part in name.split("_")))
+        # Punctuation keysyms are lowercase names ("comma", "plus").
+        candidates.append(name.lower())
     for candidate in candidates:
         sym = Gdk.keyval_from_name(candidate)
         if sym and sym != GDK_VOID_SYMBOL:
