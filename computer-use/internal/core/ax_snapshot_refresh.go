@@ -122,7 +122,11 @@ func (s *Service) readSnapshot(app string, request AXServiceRequest) (*AppSnapsh
 	if result.IsError {
 		return nil, nil, result
 	}
-	return snapshot, response.Notes, ToolCallResult{}
+	notes := response.Notes
+	if request.IncludeScreenshot != nil && *request.IncludeScreenshot {
+		notes = append(notes, s.attachDesktopFrame(snapshot)...)
+	}
+	return snapshot, notes, ToolCallResult{}
 }
 
 func (s *Service) prepareProviderSnapshot(

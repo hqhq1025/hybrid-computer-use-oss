@@ -66,6 +66,8 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
   selected; check it before applying the command.
 - Take a GUI screenshot when the question is visual or AX lacks a visible
   element. Do not alternate screenshots and AX reads of an unchanged state.
+  An AX `observe:"full"` image is the same full-desktop GUI frame; plan GUI
+  coordinates from it without another screenshot.
 - Put GUI actions determined from the same screenshot into one `actions`
   array when focus and target positions remain valid. A call returns only a
   final screenshot. End the batch when a window or dialog opens, closes,

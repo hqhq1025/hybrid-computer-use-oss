@@ -169,7 +169,6 @@ func (s *Service) stabilizePostActionTransientCommit(
 			Operation:          axServiceObserve,
 			App:                app,
 			IncludeScreenshot:  request.IncludeScreenshot,
-			ScreenshotScope:    request.ScreenshotScope,
 			TargetWindowHandle: replacement.WindowHandle,
 			SourceRef:          replacement.Ref,
 			Scope:              contract.AXScopeWindow,

@@ -99,14 +99,16 @@ func providerObservationOptionsFromOperation(
 		// top-level window and settles before reading.
 		maxTreeNodes = 1
 	}
+	// AX images are full-desktop GUI frames that the service captures after
+	// the read (attachDesktopFrame), so the provider never captures one.
+	noImage := false
 	return ProviderObservationOptions{
 		TextLimit:         providerTextLimit(operation.TextLimit),
 		MaxTreeNodes:      maxTreeNodes,
 		MaxTreeDepth:      operation.MaxTreeDepth,
 		Prune:             operation.Prune,
 		Boxes:             operation.Boxes,
-		IncludeScreenshot: operation.IncludeScreenshot,
-		ScreenshotScope:   operation.ScreenshotScope,
+		IncludeScreenshot: &noImage,
 		CaptureSnapshot:   captureSnapshot,
 	}
 }

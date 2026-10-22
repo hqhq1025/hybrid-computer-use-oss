@@ -57,7 +57,6 @@ OBSERVATION_FIELDS = {
     "prune",
     "boxes",
     "include_screenshot",
-    "screenshot_scope",
     "capture_snapshot",
 }
 APP_IDENTITY_FIELDS = {"providerBusName", "processGeneration"}
@@ -233,11 +232,13 @@ def _validate_observation(value, path):
                 "invalid_provider_request",
                 "{}.{} must be a boolean".format(path, field),
             )
-    screenshot_scope = observation.get("screenshot_scope")
-    if screenshot_scope is not None and screenshot_scope not in {"screen", "window"}:
+    if observation.get("include_screenshot") is True:
+        # AX images are full-desktop GUI frames that the core captures with
+        # a desktop batch; this provider never captures a window image.
         raise ProviderRequestError(
             "invalid_provider_request",
-            "{}.screenshot_scope must be 'screen' or 'window'".format(path),
+            "{}.include_screenshot is not supported; request a desktop "
+            "batch screenshot".format(path),
         )
 
 

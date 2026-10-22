@@ -433,14 +433,6 @@ func validateProviderObservationOptions(
 	if observation.MaxTreeDepth < 0 {
 		return errors.New("provider observation max_tree_depth must be non-negative")
 	}
-	if observation.ScreenshotScope != "" &&
-		observation.ScreenshotScope != "screen" &&
-		observation.ScreenshotScope != "window" {
-		return fmt.Errorf(
-			"unsupported provider screenshot_scope %q",
-			observation.ScreenshotScope,
-		)
-	}
 	return nil
 }
 

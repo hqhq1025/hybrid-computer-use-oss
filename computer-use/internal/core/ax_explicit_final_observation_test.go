@@ -32,6 +32,7 @@ func TestTrailingWaitFullUsesOneFinalReadForTreeAndScreenshot(t *testing.T) {
 		accessibilityResponse: &ProviderAccessibilityResult{OK: true, Snapshot: mixedOrderedInputBatchTestSnapshot(),
 			Mutation: &ProviderMutationFacts{InputEventsEmitted: true}},
 	}}
+	backend.desktopResponse = testDesktopFrame(t, "final-frame", 64, 36)
 	s.Backend = backend
 	result := s.axBatch([]any{
 		map[string]any{"type": "keypress", "keys": []any{"ENTER"}},
@@ -47,13 +48,12 @@ func TestTrailingWaitFullUsesOneFinalReadForTreeAndScreenshot(t *testing.T) {
 	for _, item := range result.Content {
 		if item.Type == "image" {
 			images++
-			if item.Data != fmt.Sprintf("image-%d", backend.readNumber) {
-				t.Fatalf("tree and image are from different reads: %q", item.Data)
-			}
 		}
 	}
-	if images != 1 {
-		t.Fatalf("full returned %d images, want only the final read", images)
+	// Only the final read captures the desktop, after its tree.
+	if images != 1 || len(backend.desktopRequests) != 1 {
+		t.Fatalf("full returned %d images from %d captures, want one from the final read",
+			images, len(backend.desktopRequests))
 	}
 }
 
@@ -68,6 +68,8 @@ func TestExplicitFinalObservationAcrossBatchPaths(t *testing.T) {
 				legacy := &recordingPlatformBackend{accessibilityResponse: &ProviderAccessibilityResult{
 					OK: true, Snapshot: snapshot, Mutation: &ProviderMutationFacts{InputEventsEmitted: true},
 				}}
+				legacy.desktopResponse = testDesktopFrame(t, "final-frame", 64, 36)
+				finalImage := legacy.desktopResponse.Snapshot.ScreenshotPNGBase64
 				s.Backend = legacy
 				actions := []any{map[string]any{"type": "keypress", "keys": []any{"ENTER"}}}
 				var ordered *orderedInputRecordingBackend
@@ -110,7 +112,7 @@ func TestExplicitFinalObservationAcrossBatchPaths(t *testing.T) {
 					}
 					image := false
 					for _, item := range result.Content {
-						image = image || (item.Type == "image" && item.Data == "final-image")
+						image = image || (item.Type == "image" && item.Data == finalImage)
 					}
 					if (mode == contract.ObserveFull || mode == contract.ObserveScreenshot) && !image {
 						t.Fatalf("%s omitted final screenshot: %s", mode, text)
@@ -124,11 +126,13 @@ func TestExplicitFinalObservationAcrossBatchPaths(t *testing.T) {
 					if mode == contract.ObserveDiff && result.StructuredContent["full_tree_returned"] == true {
 						t.Fatalf("default diff expanded to full tree: %s", text)
 					}
-					if path == "wait" && mode == contract.ObserveFull {
-						last := legacy.observeRequests[len(legacy.observeRequests)-1]
-						if last.Observation.IncludeScreenshot == nil || !*last.Observation.IncludeScreenshot {
-							t.Fatal("post-wait final read did not request its screenshot")
-						}
+					wantCaptures := 0
+					if mode == contract.ObserveFull || mode == contract.ObserveScreenshot {
+						wantCaptures = repeat + 1
+					}
+					if len(legacy.desktopRequests) != wantCaptures {
+						t.Fatalf("%s: %d desktop captures after request %d, want %d",
+							mode, len(legacy.desktopRequests), repeat+1, wantCaptures)
 					}
 				}
 			})
@@ -141,7 +145,8 @@ func TestExplicitFullRecoveryPreservesPartialBatch(t *testing.T) {
 	snapshot := mixedOrderedInputBatchTestSnapshot()
 	snapshot.ScreenshotPNGBase64 = "recovery-image"
 	snapshot.ScreenshotMimeType = "image/png"
-	backend := &recordingPlatformBackend{accessibilityResponse: &ProviderAccessibilityResult{OK: true, Snapshot: snapshot}}
+	backend := &recordingPlatformBackend{accessibilityResponse: &ProviderAccessibilityResult{OK: true, Snapshot: snapshot},
+		desktopResponse: testDesktopFrame(t, "recovery-frame", 64, 36)}
 	s.Backend = backend
 	batch := map[string]any{"actions_requested": 3, "actions_completed_without_call_error": 1, "first_failed_action_index": 1}
 	failed := ToolCallResult{IsError: true, StructuredContent: map[string]any{
@@ -161,13 +166,14 @@ func TestExplicitFullRecoveryPreservesPartialBatch(t *testing.T) {
 	if got["actions_completed_without_call_error"] != 1 || got["first_failed_action_index"] != 1 {
 		t.Fatalf("recovery lost completed prefix: %#v", got)
 	}
-	if len(backend.observeRequests) != 1 || backend.observeRequests[0].Observation.IncludeScreenshot == nil ||
-		!*backend.observeRequests[0].Observation.IncludeScreenshot || !strings.Contains(ResultText(result), `status "Ready"`) {
+	if len(backend.observeRequests) != 1 || len(backend.desktopRequests) != 1 ||
+		!strings.Contains(ResultText(result), `status "Ready"`) {
 		t.Fatalf("recovery did not request and return full final state: %#v", result)
 	}
 	foundImage := false
 	for _, item := range result.Content {
-		foundImage = foundImage || item.Type == "image" && item.Data == "recovery-image"
+		foundImage = foundImage || item.Type == "image" &&
+			item.Data == backend.desktopResponse.Snapshot.ScreenshotPNGBase64
 	}
 	if !foundImage {
 		t.Fatal("recovery omitted final screenshot")

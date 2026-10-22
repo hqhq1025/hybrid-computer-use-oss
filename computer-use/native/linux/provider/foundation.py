@@ -69,7 +69,6 @@ SETTLE_POLL_SECONDS = 0.02
 # the tree 35-65 ms after the input inside a continuous burst.
 SETTLE_QUIET_SECONDS = 0.05
 SETTLE_EVENT_FLOOR_SECONDS = 0.07
-SCREENSHOT_SCOPE_SCREEN = "screen"
 # Sampling stride and threshold for pixel comparison. An 8 px stride keeps
 # a full-window comparison to a few tens of milliseconds, negligible next to
 # app resolution, and still detects moved text or an opened or closed
@@ -229,17 +228,6 @@ def inventory_complete(value):
 
 def inventory_errors(value):
     return list(getattr(value, "errors", []) or [])
-
-
-def a11y_screenshots_enabled():
-    """Return whether AX responses include a screenshot; enabled by default.
-
-    Set `COMPUTER_USE_A11Y_SCREENSHOTS=0` to disable. The switch exists for
-    experiments, not everyday use, and does not affect the GUI tool, which
-    always returns its screenshot.
-    """
-    value = os.environ.get("COMPUTER_USE_A11Y_SCREENSHOTS", "1").strip().lower()
-    return value not in {"0", "false", "no", "off"}
 
 
 # Fraction of the node budget after which unnamed structural containers with

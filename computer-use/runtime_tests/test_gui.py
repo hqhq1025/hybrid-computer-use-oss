@@ -37,6 +37,29 @@ class GUIScreenCoordinateTests(GUISettleAndFrameGuardCases, unittest.TestCase):
         self.assertAlmostEqual(x, 959.5, places=3)
         self.assertAlmostEqual(y, 539.5, places=3)
 
+    def test_ax_synthesis_points_are_stated_in_frame_pixels(self):
+        """AX notes state a synthesized point in GUI frame pixels, the
+        inverse of the GUI mapping, so the point can be reused as GUI x/y."""
+        dimensions = runtime.gui_model_dimensions(self.desktop)
+        model = runtime.frame(0, 0, dimensions["width"], dimensions["height"])
+        for native in ((717.0, 414.0), (959.5, 539.5), (3.0, 1070.0)):
+            frame_x, frame_y = runtime.desktop_frame_point(*native, self.desktop)
+            back = runtime.screen_absolute_point(frame_x, frame_y, model, self.desktop)
+            self.assertAlmostEqual(back[0], native[0], places=6)
+            self.assertAlmostEqual(back[1], native[1], places=6)
+        # Edge pixels clamp to the frame, within one native pixel.
+        for native in ((0.0, 0.0), (1919.0, 1079.0)):
+            back = runtime.screen_absolute_point(
+                *runtime.desktop_frame_point(*native, self.desktop), model, self.desktop)
+            self.assertLessEqual(abs(back[0] - native[0]), 1.0)
+            self.assertLessEqual(abs(back[1] - native[1]), 1.0)
+        with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop):
+            self.assertEqual(
+                runtime.frame_point_text(768.0, 425.0),
+                "at (546, 302) in full-desktop frame pixels")
+        with mock.patch.object(runtime, "desktop_bounds", return_value=None):
+            self.assertEqual(runtime.frame_point_text(1, 2), "at an unreported point")
+
     def test_1080p_desktop_is_delivered_at_the_size_the_model_sees(self):
         # GPT-5.4 at detail high shrinks a 1920x1080 image to 1365x768 before
         # the model sees it, so coordinates read from that image were 0.71x
@@ -613,8 +636,7 @@ class GUIScreenCoordinateTests(GUISettleAndFrameGuardCases, unittest.TestCase):
         self.assertTrue(response["effect_unknown"])
 
     def test_gui_fails_closed_when_desktop_bounds_are_unavailable(self):
-        with mock.patch.object(runtime, "desktop_bounds", return_value=None), \
-                mock.patch.object(runtime, "capture_window_image", return_value=None):
+        with mock.patch.object(runtime, "desktop_bounds", return_value=None):
             response = runtime.perform_gui([{"type": "click", "x": 1, "y": 2}])
 
         self.assertFalse(response["ok"])

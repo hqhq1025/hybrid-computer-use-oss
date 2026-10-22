@@ -20,6 +20,9 @@ type ContentItem struct {
 	// Path replaces Data for command-line and socket clients; MCP results
 	// never set it.
 	Path string `json:"path,omitempty"`
+	// frame is the full-desktop GUI frame an AX image shows. It is private:
+	// callTool registers it as the GUI frame when the image is delivered.
+	frame *AppSnapshot
 }
 
 type ToolCallResult struct {

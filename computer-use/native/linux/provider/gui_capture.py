@@ -8,7 +8,6 @@ from .foundation import (
     GUI_MODEL_MAX_WIDTH,
     PIXEL_DIFF_STRIDE,
     PIXEL_DIFF_THRESHOLD,
-    SCREENSHOT_SCOPE_SCREEN,
     SCREENSHOT_MAX_BASE64_CHARS,
 )
 
@@ -167,13 +166,15 @@ def persistent_pixel_change(before, after_one, after_two):
     return result
 
 
-def pixel_change_note(change, screenshot_scope="window"):
-    """Describe a pixel comparison for the model, prefixed with `[pixels]`."""
+def pixel_change_note(change):
+    """Describe an AX window pixel comparison, prefixed with `[pixels]`.
+
+    The note states no coordinates: the comparison samples the target
+    window, while every image the model can click is the full-desktop frame.
+    """
     if change is None:
         return None
-    full_screen = screenshot_scope == SCREENSHOT_SCOPE_SCREEN
-    subject = "full desktop" if full_screen else "window"
-    coordinate_space = "full-desktop image" if full_screen else "window-relative"
+    subject = "window"
     if change.get("resized"):
         return (
             "[pixels] geometry_changed=true: The {} dimensions changed between "
@@ -186,18 +187,13 @@ def pixel_change_note(change, screenshot_scope="window"):
             "between the pre-action {} and both post-action captures. This does not "
             "prove that no application or file state changed."
         ).format(subject)
-    box = change.get("box")
-    where = ""
-    if box:
-        where = " Changes are concentrated in {{{},{},{},{}}} ({} pixels).".format(
-            *box, coordinate_space)
     strength = "tiny" if change["percent"] <= 0.1 else "material"
     return (
         "[pixels] sampled_pixel_change={}: A sampled pixel difference persisted between "
         "the pre-action {} and both post-action captures ({:.2f}% of sample points; "
-        "{} changed).{} This is visual evidence only; input delivery, target identity, "
+        "{} changed). This is visual evidence only; input delivery, target identity, "
         "and task effect are unverified."
-    ).format(strength, subject, change["percent"], change["changed"], where)
+    ).format(strength, subject, change["percent"], change["changed"])
 
 
 def encoded_screenshot(pixbuf):
@@ -235,30 +231,6 @@ def encoded_screenshot(pixbuf):
         "mimeType": mime_type,
         "encoding": encoding,
     }
-
-
-def capture_window_image(bounds):
-    if Gdk is None or bounds is None:
-        return None
-    try:
-        screen = Gdk.Screen.get_default()
-        if screen is None:
-            return None
-        root = screen.get_root_window()
-        pixbuf = Gdk.pixbuf_get_from_window(
-            root,
-            int(round(bounds["x"])),
-            int(round(bounds["y"])),
-            max(1, int(round(bounds["width"]))),
-            max(1, int(round(bounds["height"]))),
-        )
-        if pixbuf is None:
-            return None
-        if pixbuf_looks_black(pixbuf):
-            return None
-        return encoded_screenshot(pixbuf)
-    except Exception:
-        return None
 
 
 def gui_model_dimensions(bounds):

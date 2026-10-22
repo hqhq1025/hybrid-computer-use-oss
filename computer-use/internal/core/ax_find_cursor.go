@@ -308,6 +308,7 @@ func compactFindSnapshot(snapshot *AppSnapshot) *AppSnapshot {
 	clone.ScreenshotPNGBase64 = ""
 	clone.ScreenshotMimeType = ""
 	clone.ScreenshotEncoding = ""
+	clone.desktopFrame = nil
 	clone.TreeLines = nil
 	clone.rawTreeLines = nil
 	clone.baselineProjectionLines = nil

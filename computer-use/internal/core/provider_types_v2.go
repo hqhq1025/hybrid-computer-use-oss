@@ -92,7 +92,6 @@ type ProviderObservationOptions struct {
 	Prune             *bool              `json:"prune,omitempty"`
 	Boxes             *bool              `json:"boxes,omitempty"`
 	IncludeScreenshot *bool              `json:"include_screenshot,omitempty"`
-	ScreenshotScope   string             `json:"screenshot_scope,omitempty"`
 	CaptureSnapshot   *bool              `json:"capture_snapshot,omitempty"`
 }
 

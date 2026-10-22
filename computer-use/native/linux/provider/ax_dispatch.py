@@ -218,12 +218,6 @@ def _observe_operation(operation, observation):
         prune=observation.get("prune", True),
         boxes=bool(observation.get("boxes", False)),
         known_refs=operation.get("known_refs"),
-        # None selects the default policy, which includes a screenshot.
-        # Find and assertion requests pass False: they query or assert
-        # rather than observe, and assertions poll, so attaching a
-        # screenshot (about 5120 tokens) to every poll would be costly.
-        include_screenshot=observation.get("include_screenshot"),
-        screenshot_scope=observation.get("screenshot_scope", "window"),
         app_identity=operation.get("app_identity"),
         target_window_handle=operation.get("window_handle"),
         # An unchanged window may return its previous tree; see
@@ -669,9 +663,7 @@ def _observe_after_action(
             observation.get("max_tree_depth"), MAX_DEPTH),
         prune=observation.get("prune", True),
         boxes=bool(observation.get("boxes", False)),
-        include_screenshot=observation.get("include_screenshot", False),
         known_refs=operation.get("known_refs"),
-        screenshot_scope=observation.get("screenshot_scope", "window"),
         app_identity=operation.get("app_identity"),
     )
     lap("post_action_snapshot")
@@ -713,8 +705,7 @@ def _observe_after_action(
     # toggle, so the blink is not reported as a persistent change.
     change_note = pixel_change_note(persistent_pixel_change(
         pixels_before, pixels_after_one,
-        safe(lambda: capture_window_pixels(after_pixel_bounds))),
-        "window")
+        safe(lambda: capture_window_pixels(after_pixel_bounds))))
     lap("pixels_after_two_and_diff")
     if change_note:
         notes.append(change_note)

@@ -181,7 +181,6 @@ def perform_provider_operation(operation):
                         "prune": operation.get("prune"),
                         "boxes": operation.get("boxes"),
                         "include_screenshot": operation.get("include_screenshot"),
-                        "screenshot_scope": operation.get("screenshot_scope"),
                     }.items()
                     if value is not None
                 },
