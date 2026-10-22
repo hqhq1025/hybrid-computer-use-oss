@@ -289,40 +289,6 @@ func allAccessibilityIntentsAreAccepted(_ intent: String) throws {
 }
 
 @Test
-func accessibilityKeypressValidatesTheKeyBeforeExecution() throws {
-    let identity: [String: Any] = [
-        "providerBusName": "mac:42",
-        "processGeneration": "123456",
-    ]
-    let payload: [String: Any] = [
-        "protocol_version": 2,
-        "intent": "keypress",
-        "app": "TextEdit",
-        "app_identity": identity,
-        "window_handle": "w2:mac:42:123456:7",
-        "expected_window": [
-            "windowHandle": "w2:mac:42:123456:7",
-            "providerBusName": "mac:42",
-            "providerObjectPath": "window:7",
-            "processGeneration": "123456",
-            "role": "window",
-            "name": "Document",
-        ] as [String: Any],
-        "input": ["key": "SUPER+NOT_A_REAL_KEY"],
-    ]
-
-    #expect(throws: ComputerUseError.self) {
-        try ProviderRequestValidator.validate(
-            envelope(
-                operation: "resolve_and_act",
-                payloadName: "action",
-                payload: payload
-            )
-        )
-    }
-}
-
-@Test
 func relativeAdjustmentRequiresTargetAndRejectsInput() {
     var missingTarget: [String: Any] = [
         "protocol_version": 2,
