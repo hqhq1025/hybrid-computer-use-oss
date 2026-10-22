@@ -119,6 +119,12 @@ func axNodeRefEligibility(
 	if !axNodeHasInteractionSemantics(node) {
 		return false, "interaction_semantics_unknown", ""
 	}
+	if axNodeIsUnnamedEditor(node) {
+		// An unnamed text area or entry (gedit, Bluefish and Kate editors,
+		// unlabeled GTK entries) is identified by its provider object, not
+		// by text: the model sees its value and needs a ref to type into it.
+		return true, "", AXLocatorProviderBound
+	}
 	if locatorKind == "" {
 		return false, "semantic_identity_ambiguous", ""
 	}
@@ -128,6 +134,19 @@ func axNodeRefEligibility(
 		return false, "unnamed_target", ""
 	}
 	return true, "", locatorKind
+}
+
+// axNodeIsUnnamedEditor reports an unnamed control that edits text and has
+// a complete provider identity. Unnamed buttons stay unaddressed: one
+// unnamed button is indistinguishable from the next, while an editor is
+// identified by its content and position in the window.
+func axNodeIsUnnamedEditor(node *AXNode) bool {
+	return node != nil &&
+		node.Capabilities.EditText &&
+		strings.TrimSpace(node.Name) == "" &&
+		strings.TrimSpace(node.Properties.Description) == "" &&
+		strings.TrimSpace(node.Properties.Placeholder) == "" &&
+		axNodeProviderIdentityComplete(node)
 }
 
 func (registry *RefRegistry) AssignSnapshotRefs(snapshot *AXSnapshot) {
