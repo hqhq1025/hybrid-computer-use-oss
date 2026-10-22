@@ -47,6 +47,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/window_diagnostics.py",
 		"native/linux/provider/window_resolver.py",
 		"native/linux/provider/wire_v2.py",
+		"native/linux/provider/wire_v2_request.py",
 		"native/linux/provider/x11_windows.py",
 		"runtime.py",
 	}

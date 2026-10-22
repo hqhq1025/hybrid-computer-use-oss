@@ -52,6 +52,7 @@ from native.linux.provider import (  # noqa: E402
     window_diagnostics,
     window_resolver,
     wire_v2,
+    wire_v2_request,
     x11_windows,
 )
 
@@ -87,6 +88,7 @@ PROVIDER_MODULES = (
     window_diagnostics,
     response_builder,
     wire_v2,
+    wire_v2_request,
 )
 
 
