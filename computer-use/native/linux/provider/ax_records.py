@@ -6,6 +6,7 @@
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
     DEFAULT_TEXT_LIMIT,
+    TOP_LEVEL_CONTAINER_ROLES,
     has_editable_text_iface,
     has_text_iface,
     limit_text,
@@ -127,10 +128,64 @@ def effective_name(node):
     own = node_name(node)
     if str(own or "").strip():
         return own
-    combo = gtk_combo_partner(node, node_role(node))
+    role = node_role(node)
+    combo = gtk_combo_partner(node, role)
     if combo is not None:
         return combo_label(combo, node)[0]
-    return labelled_by_name(node)
+    return labelled_by_name(node) or content_name(node, role)
+
+
+# Item roles whose accessible name comes from their content (ARIA
+# name-from-content). Containers and controls with their own label are left
+# alone: naming a panel after its first label would mislabel whole regions.
+NAME_FROM_CONTENT_ROLES = {"list item", "tree item", "table row"}
+NAME_FROM_CONTENT_LABEL_ROLES = {"label", "static"}
+NAME_FROM_CONTENT_MAX_NODES = 24
+NAME_FROM_CONTENT_MAX_DEPTH = 4
+
+
+def content_name(node, role=None):
+    """Name an unnamed item row from its visible labels, or return "".
+
+    GTK3 GtkListBoxRow (GNOME Settings sidebar, D-Feet bus list) and similar
+    rows expose no accessible name; the visible label is a descendant. Such
+    rows rendered as ``listitem [addressable=false]`` next to their text, so
+    the row a user clicks had no ref. The walk is bounded, reads only label
+    descendants with the VISIBLE state, and joins them in tree order; hidden
+    subtitles ("Control how you connect to the Internet") are skipped.
+    """
+    if role is None:
+        role = node_role(node)
+    if str(role or "") not in NAME_FROM_CONTENT_ROLES:
+        return ""
+    parts = []
+    budget = [NAME_FROM_CONTENT_MAX_NODES]
+
+    def visit(current, depth):
+        if depth > NAME_FROM_CONTENT_MAX_DEPTH or budget[0] <= 0:
+            return
+        count = int(safe(lambda: current.get_child_count(), 0) or 0)
+        for index in range(count):
+            if budget[0] <= 0:
+                return
+            budget[0] -= 1
+            child = safe(lambda i=index: current.get_child_at_index(i))
+            if child is None:
+                continue
+            child_role = node_role(child)
+            if child_role in NAME_FROM_CONTENT_ROLES:
+                continue
+            if child_role in NAME_FROM_CONTENT_LABEL_ROLES:
+                if not state_contains(child, Atspi.StateType.VISIBLE):
+                    continue
+                text = str(node_name(child) or "").strip()
+                if text:
+                    parts.append(text)
+                continue
+            visit(child, depth + 1)
+
+    visit(node, 1)
+    return " ".join(parts)
 
 
 def gtk_combo_partner(node, role):
@@ -247,7 +302,60 @@ def effective_role(node, role=None):
     role = str(role or "")
     if gtk_combo_partner(node, role) is not None:
         return "combo box"
-    return role
+    return top_level_window_role(node, editable_text_role(node, role))
+
+
+def top_level_window_role(node, role):
+    """Project a container that is a direct child of the application to ``window``.
+
+    Every direct child of an AT-SPI application object is a top-level window;
+    the role is the toolkit's choice. The server issues a window ref (wN) only
+    from a root record with a window role, so with "filler" the window had no
+    wN and every element in it reported owner_identity_incomplete.
+    """
+    if role not in TOP_LEVEL_CONTAINER_ROLES:
+        return role
+    parent = safe(lambda: node.get_parent())
+    if parent is None or node_role(parent) != "application":
+        return role
+    return "window"
+
+
+def editable_text_role(node, role):
+    """Project an editable AT-SPI ``text`` node to ``entry`` or ``text area``.
+
+    AT-SPI uses role ``text`` for static text and for input fields alike.
+    GTK2/GTK3 (GtkEntry, GtkTextView), Qt (QLineEdit, QPlainTextEdit) and
+    LibreOffice dialog fields all report ``text``; labels use ``label``. The
+    field differs only by the EDITABLE state and the Text interface.
+    Without the projection the gedit document, the LibreOffice Find field
+    and GTK file name entries were rendered as static text: no ref, no value,
+    and a find for role ``textbox`` returned nothing.
+
+    MULTI_LINE marks a text area; anything else is a single-line entry. The
+    editor of a projected LibreOffice combo keeps its role: the combo box
+    already exposes it as its edit target.
+    """
+    if role != "text":
+        return role
+    states = safe(node.get_state_set)
+    if states is None or not states.contains(Atspi.StateType.EDITABLE):
+        return role
+    # KTextEditor (Kate) exposes Text without EditableText; keyboard input
+    # still edits it, so the Text interface is enough.
+    if not (has_editable_text_iface(node) or has_text_iface(node)):
+        return role
+    parent = safe(lambda: node.get_parent())
+    if parent is not None:
+        count = int(safe(lambda: parent.get_child_count(), 0) or 0)
+        if 2 <= count <= 3:
+            for index in range(count):
+                sibling = safe(lambda i=index: parent.get_child_at_index(i))
+                if sibling is not None and node_role(sibling) == "combo box":
+                    return role
+    if states.contains(Atspi.StateType.MULTI_LINE):
+        return "text area"
+    return "entry"
 
 
 def semantic_relations(node, text_limit=DEFAULT_TEXT_LIMIT):
@@ -344,6 +452,7 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
         if str(target.get("name") or "").strip()
     ]
     combo = gtk_combo_partner(node, role)
+    role = top_level_window_role(node, editable_text_role(node, role))
     if combo is not None:
         # See gtk_combo_partner(): the drawn toggle button stands for the
         # hidden combo box, so it takes the combo's role and label.
@@ -358,6 +467,9 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
         full_name = " ".join(labelled_names).rstrip(":").strip()
         name_source = "labelled_by" if full_name else ""
         borrowed = bool(full_name)
+        if not full_name:
+            full_name = content_name(node, role)
+            name_source = "content" if full_name else ""
     name = limit_text(full_name, text_limit=text_limit)
     record = {
         "index": index,

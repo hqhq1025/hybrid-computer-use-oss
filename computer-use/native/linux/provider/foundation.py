@@ -159,6 +159,10 @@ GUI_ACTION_FIELDS = {
 AX_WINDOW_ROLES = {
     "frame", "window", "dialog", "alert", "file chooser", "color chooser",
 }
+# Container roles a toolkit may report for a top-level window: Qt exposes a
+# top-level QWidget without a window flag (Flameshot's "Configuration") as
+# "filler" or "panel".
+TOP_LEVEL_CONTAINER_ROLES = {"filler", "panel"}
 AX_WINDOW_ACTION_TIMEOUT_SECONDS = 1.2
 AX_WINDOW_ACTION_POLL_SECONDS = 0.04
 

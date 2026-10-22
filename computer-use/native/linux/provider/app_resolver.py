@@ -21,6 +21,7 @@ from .snapshot import snapshot_digest, utc_timestamp
 from .a11y_enable import invisible_window_notes, untracked_window_notes
 from .x11_windows import (
     _x11_managed_windows,
+    accessible_window_title,
     app_windows,
     iter_apps,
     opaque_window_instance_handle_for_id,
@@ -49,7 +50,7 @@ def app_top_level_windows(app, windows, active_handle):
         else:
             active = bool(handle) and handle == active_handle
         listed.append({
-            "title": str(node_name(window) or "").strip(),
+            "title": accessible_window_title(app, window, strong),
             "role": str(node_role(window) or "window").strip().lower(),
             "handle": handle,
             "providerBusName": provider_bus_name(window),
@@ -98,7 +99,11 @@ def list_apps_inventory():
             })
         if not windows:
             continue
-        titles = [node_name(window) or "untitled" for _, window in windows]
+        strong = strong_window_instance_handles(app, windows)
+        titles = [
+            accessible_window_title(app, window, strong) or "untitled"
+            for _, window in windows
+        ]
         title = titles[0]
         name = node_name(app)
         # None means the window manager did not report an active window, so

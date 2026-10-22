@@ -958,3 +958,164 @@ class AXDirectTargetResolutionTests(AtspiPatchedTestCase):
 
         self.assertTrue(response["ok"])
         self.assertEqual(response["resolvedElement"], record)
+
+
+
+class NonFrameTopLevelWindowTests(AtspiPatchedTestCase):
+    """A toolkit may expose a top-level window with a non-window role.
+
+    Qt reports a top-level QWidget without a window flag (Flameshot's
+    "Configuration") as role "filler". The X11 window manager manages it like
+    any window, but the provider gave only frame/window/dialog roles a w2:
+    handle, so `apps` listed it as "(not addressable)" and every element in it
+    was owner_identity_incomplete.
+    """
+
+    def _app(self, role):
+        window = _TreeNode(role=role, name="Configuration", x=5, y=56, w=543, h=720)
+        app = _TreeNode(role="application", name="flameshot", kids=(window,))
+        app.get_process_id = lambda: 4242
+        return app, window
+
+    def _patches(self):
+        return (
+            mock.patch.object(
+                runtime, "x11_window_inventory_for_pid",
+                return_value=runtime.InventoryResult(
+                    [{"id": "0xe0000b", "title": "Configuration",
+                      "x": 10, "y": 85, "width": 543, "height": 720}],
+                    complete=True)),
+            mock.patch.object(runtime, "correlation_root_window_state",
+                              return_value={"activeWindow": "0xe0000b"}),
+            mock.patch.object(runtime, "process_generation", return_value="gen"),
+        )
+
+    def test_top_level_filler_matching_one_managed_window_gets_a_handle(self):
+        app, _window = self._app("filler")
+        patches = self._patches()
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        handles = dict(runtime.strong_window_instance_handle_inventory(app))
+        self.assertIn(0, handles)
+        self.assertTrue(handles[0].startswith("w2:"))
+
+    def test_untitled_non_window_child_without_managed_match_gets_none(self):
+        window = _TreeNode(role="panel", name="", x=0, y=0, w=10, h=10)
+        app = _TreeNode(role="application", name="tool", kids=(window,))
+        app.get_process_id = lambda: 4242
+        with mock.patch.object(
+            runtime, "x11_window_inventory_for_pid",
+            return_value=runtime.InventoryResult([], complete=True),
+        ), mock.patch.object(runtime, "process_generation", return_value="gen"):
+            handles = dict(runtime.strong_window_instance_handle_inventory(app))
+        self.assertEqual(handles, {})
+
+    def test_top_level_filler_is_recorded_as_a_window(self):
+        # Go issues the wN from the root record only for window roles; the
+        # provider reports an application's container child as a window.
+        app, window = self._app("filler")
+        window.parent = app
+        window.get_parent = lambda: app
+        record = runtime.record_for(window, 0, [0], None)
+        self.assertEqual(record["controlType"], "window")
+        self.assertEqual(runtime.effective_role(window), "window")
+        self.assertTrue(runtime.record_still_matches(window, record, None))
+
+    def test_nested_filler_keeps_its_role(self):
+        inner = _TreeNode(role="filler", name="Configuration")
+        outer = _TreeNode(role="frame", name="Main", kids=(inner,))
+        inner.get_parent = lambda: outer
+        self.assertEqual(runtime.record_for(inner, 0, [0, 0], None)["controlType"], "filler")
+
+    def test_window_action_preflight_accepts_a_titled_top_level_container(self):
+        app, window = self._app("filler")
+        window.get_parent = lambda: app
+        patches = self._patches() + (
+            mock.patch.object(runtime, "x11_window_id_for_accessible", return_value=None),
+            mock.patch.object(runtime, "x11_root_window_state",
+                              return_value={"windowIds": {"0xe0000b"}}),
+        )
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        handle = dict(runtime.strong_window_instance_handle_inventory(app))[0]
+        record = {"controlType": "filler", "runtimeId": [0], "_windowHandle": handle}
+        got_handle, window_id = runtime._window_action_preflight(
+            "activate", app, window, record)
+        self.assertEqual((got_handle, window_id), (handle, "0xe0000b"))
+
+
+
+class UnnamedFrameTitleTests(AtspiPatchedTestCase):
+    """An AT-SPI frame without a name takes the managed X11 window's title.
+
+    D-Feet (GTK3) exposes its frame with an empty name while the window
+    manager titles it "d-feet". apps listed w1 "" and observe showed
+    "(unnamed frame)", so neither the model nor a title wait could name it.
+    """
+
+    def _app(self):
+        bus = _TreeNode(role="radio button", name="Session Bus")
+        frame = _TreeNode(role="frame", name="", x=-26, y=4, w=952, h=649,
+                          kids=(bus,))
+        app = _TreeNode(role="application", name="d-feet", kids=(frame,))
+        app.get_process_id = lambda: 4242
+        return app, frame
+
+    def _patches(self, title="d-feet", window_type="NORMAL"):
+        return (
+            mock.patch.object(runtime, "x11_window_type", return_value=window_type),
+            mock.patch.object(
+                runtime, "x11_window_inventory_for_pid",
+                return_value=runtime.InventoryResult(
+                    [{"id": "0x3000007", "title": title,
+                      "x": 0, "y": 27, "width": 952, "height": 649}],
+                    complete=True)),
+            mock.patch.object(runtime, "correlation_root_window_state",
+                              return_value={"activeWindow": "0x3000007"}),
+            mock.patch.object(runtime, "process_generation", return_value="gen"),
+        )
+
+    def test_listing_uses_the_managed_window_title(self):
+        app, frame = self._app()
+        for patcher in self._patches():
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        windows = runtime.app_windows(app)
+        listed = runtime.app_top_level_windows(app, windows, None)
+        self.assertEqual(listed[0]["title"], "d-feet")
+        self.assertTrue(listed[0]["handle"].startswith("w2:"))
+
+    def test_window_label_uses_the_managed_window_title(self):
+        app, frame = self._app()
+        frame.get_parent = lambda: app
+        for patcher in self._patches():
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.assertEqual(runtime.window_label(frame), "d-feet")
+
+    def test_named_frame_keeps_its_accessible_name(self):
+        app, frame = self._app()
+        frame.title = "Bus browser"
+        for patcher in self._patches():
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        listed = runtime.app_top_level_windows(app, runtime.app_windows(app), None)
+        self.assertEqual(listed[0]["title"], "Bus browser")
+
+    def test_untitled_infrastructure_window_keeps_its_empty_title(self):
+        # xfce4-panel windows are unnamed in AT-SPI and titled "xfce4-panel"
+        # by X11. Borrowing that title made them look like application
+        # windows; infrastructure windows keep the empty title.
+        # The panel frame holds a panel child, so the AT-SPI infrastructure
+        # probe does not catch it; the EWMH DOCK type does.
+        panel = _TreeNode(role="frame", name="", x=0, y=0, w=1920, h=27,
+                          kids=(_TreeNode(role="panel"),))
+        app = _TreeNode(role="application", name="xfce4-panel", kids=(panel,))
+        app.get_process_id = lambda: 4242
+        for patcher in self._patches(title="xfce4-panel", window_type="DOCK"):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        listed = runtime.app_top_level_windows(app, runtime.app_windows(app), None)
+        self.assertEqual(listed[0]["title"], "")
