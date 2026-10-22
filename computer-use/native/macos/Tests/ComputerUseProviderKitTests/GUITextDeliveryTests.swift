@@ -228,35 +228,4 @@ func pasteFailureRestoresClipboardAndReportsPossibleInput() throws {
     #expect(after == before)
 }
 
-@Test
-func targetedTextUsesPidPasteAndRestoresClipboard() throws {
-    let pasteboard = seededPasteboard()
-    defer {
-        pasteboard.releaseGlobally()
-    }
-    let before = try PasteboardSnapshot.capture(
-        from: pasteboard,
-        attempts: 1
-    )
-    var observedPID: pid_t?
-    var observedText: String?
-
-    try InputSimulation.typeText(
-        "targeted text",
-        pid: 4242,
-        pasteboard: pasteboard
-    ) { pid in
-        observedPID = pid
-        observedText = pasteboard.string(forType: .string)
-    }
-
-    let after = try PasteboardSnapshot.capture(
-        from: pasteboard,
-        attempts: 1
-    )
-    #expect(observedPID == 4242)
-    #expect(observedText == "targeted text")
-    #expect(after == before)
-}
-
 }

@@ -362,26 +362,6 @@ func shouldScanDescendantsOfHitRecord(originalFrame: CGRect?, hitFrame: CGRect?)
     return true
 }
 
-func isLikelyContainingRowActionFrame(
-    targetFrame: CGRect,
-    candidateFrame: CGRect?,
-    hasPrimaryAction: Bool
-) -> Bool {
-    let targetCenter = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
-    guard
-        hasPrimaryAction,
-        let candidateFrame,
-        candidateFrame.insetBy(dx: -2, dy: -2).contains(targetCenter),
-        candidateFrame.width >= targetFrame.width,
-        candidateFrame.height >= targetFrame.height,
-        candidateFrame.height <= max(targetFrame.height + 32, targetFrame.height * 2)
-    else {
-        return false
-    }
-
-    return true
-}
-
 func canUseActivationOnlyClickFallback(role: String?) -> Bool {
     guard let role else {
         return false

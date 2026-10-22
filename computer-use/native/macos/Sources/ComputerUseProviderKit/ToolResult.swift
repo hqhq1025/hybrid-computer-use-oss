@@ -32,17 +32,6 @@ public struct ToolCallResult: @unchecked Sendable {
         self.isError = isError
     }
 
-    public var primaryText: String? {
-        content.first(where: { $0.dictionary["type"] as? String == "text" })?.dictionary["text"] as? String
-    }
-
-    public var asDictionary: [String: Any] {
-        [
-            "content": content.map(\.dictionary),
-            "isError": isError,
-        ]
-    }
-
     public static func text(_ text: String, isError: Bool = false) -> ToolCallResult {
         ToolCallResult(content: [.text(text)], isError: isError)
     }
