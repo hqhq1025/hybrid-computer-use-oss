@@ -1,7 +1,5 @@
 # Code Entry Points: Daemon, CLI, SDK, PTC
 
-Last verified against commit `a4006c5`.
-
 One core implements the contract. MCP, the daemon socket, the command line,
 the Python SDK and the programmatic tool calling (PTC) adapter are transports
 over the same `callTool`. Adapters construct requests and reject ambiguous
@@ -302,9 +300,10 @@ describes the failed delivery. Image retrieval failures raise `OutputError`
 with the original record. Neither failure retries desktop input.
 
 `sdk/python/examples/open_gcua_worker.py` injects this adapter into OpenGCUA's
-existing `CodeExecutor`. The example was tested against upstream `ae34bba`
-and uses private bootstrap hooks, not a supported plugin interface. The
-host and worker require Python 3.11+ and Pillow. Configure these variables:
+existing `CodeExecutor`. The example names the OpenGCUA revision it was
+tested against and uses private bootstrap hooks, not a supported plugin
+interface. The host and worker require Python 3.11+ and Pillow. Configure
+these variables:
 
 | Variable | Value |
 | --- | --- |

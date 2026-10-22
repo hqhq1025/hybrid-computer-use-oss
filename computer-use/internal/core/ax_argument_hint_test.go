@@ -183,8 +183,8 @@ func axHintDecodeError(args map[string]any, err *axArgError) *axArgError {
 	return hintErr
 }
 
-// The six recorded calls from the full-e panel whose errors had no hint,
-// and the corrected call the model sent next.
+// Six calls models wrote whose field errors had no hint, and the corrected
+// call the model sent next.
 func TestRecordedFieldErrorsHintTheNextCall(t *testing.T) {
 	for raw, hint := range map[string]string{
 		`{"mode":"apps","app":"soffice"}`:                                                                   `{"mode":"apps"}`,

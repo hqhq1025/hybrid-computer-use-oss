@@ -1,7 +1,5 @@
 # Native Platforms
 
-Last verified against commit `a4006c5`.
-
 The public MCP surface is always `AX` and `GUI`. The binary selects its
 backend at compile time; an unsupported OS fails explicitly. No platform
 selection parameter is exposed to the model.

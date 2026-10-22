@@ -1,7 +1,5 @@
 # Computer Use MCP
 
-Last verified against commit `a4006c5`.
-
 `computer-use` is a stdio MCP server that controls an already-running
 desktop. This page covers building it, running it, configuring Codex and
 Claude Code, the public contract and troubleshooting. For the internal design

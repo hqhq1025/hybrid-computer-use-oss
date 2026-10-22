@@ -9,8 +9,8 @@ import (
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 )
 
-// Every until call models wrote in the full-d and full-e panels (94
-// distinct calls) is rejected before input, and its hint is the same call
+// Every until call models wrote in recorded OSWorld tasks (94 distinct
+// calls) is rejected before input, and its hint is the same call
 // written with wait steps: it decodes, keeps every input step in order, and
 // puts each wait where the until was.
 func TestPanelUntilCallsAreRejectedWithAnEquivalentWait(t *testing.T) {
