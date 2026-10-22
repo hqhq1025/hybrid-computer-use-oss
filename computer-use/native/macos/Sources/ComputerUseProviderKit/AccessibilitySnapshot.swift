@@ -535,7 +535,7 @@ enum SnapshotBuilder {
 
         guard let resolvedFocusedWindow = focusedWindow else {
             windowLivenessDiagnostic("snapshot_no_ax_root", [:])
-            throw ComputerUseError.stateUnavailable(computerUseNoWindowFoundMessage)
+            throw ComputerUseError.stateUnavailable(computerUseNoWindowFoundMessage(appName: app.name))
         }
         let rootWindow = resolvedFocusedWindow
 

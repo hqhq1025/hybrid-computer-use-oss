@@ -52,13 +52,6 @@ enum AppDiscovery {
     private static let lastUsedDateRankingAttribute = "kMDItemLastUsedDate_Ranking"
     private static let useCountAttribute = "kMDItemUseCount"
     private static let maxRecentNonRunningApps = 10
-    private static let applicationLaunchTimeout: TimeInterval = 5
-    private static let standardApplicationSearchRoots: [URL] = [
-        URL(fileURLWithPath: "/Applications", isDirectory: true),
-        URL(fileURLWithPath: "/System/Applications", isDirectory: true),
-        URL(fileURLWithPath: "/System/Library/CoreServices", isDirectory: true),
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
-    ]
 
     static let usageDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -186,16 +179,8 @@ enum AppDiscovery {
             return match
         }
 
-        try launchIfPossible(normalizedQuery)
-
-        for _ in 0..<20 {
-            if let launched = resolvedRunningApp(in: runningApps(), matching: normalizedQuery) {
-                return launched
-            }
-
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-
+        // Observation and actions are read-only towards the application
+        // list: the provider never launches an application.
         throw ComputerUseError.appNotFound(normalizedQuery)
     }
 
@@ -303,116 +288,6 @@ enum AppDiscovery {
         }
 
         return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-    }
-
-    private static func launchIfPossible(_ query: String) throws {
-        if isBundleIdentifierQuery(query) {
-            guard !AppSafetyPolicy.isBlocked(bundleIdentifier: query) else {
-                return
-            }
-
-            if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: query) {
-                try openApplication(at: appURL)
-            }
-            return
-        }
-
-        guard let appURL = applicationURL(named: query) else {
-            return
-        }
-
-        if AppSafetyPolicy.isBlocked(bundleIdentifier: Bundle(url: appURL)?.bundleIdentifier) {
-            return
-        }
-
-        try openApplication(at: appURL)
-    }
-
-    private static func applicationURL(named query: String) -> URL? {
-        let targetName = stripAppSuffix(from: query).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !targetName.isEmpty else {
-            return nil
-        }
-
-        let fileManager = FileManager.default
-        let resourceKeys: [URLResourceKey] = [.isApplicationKey, .isDirectoryKey, .nameKey]
-        var visitedPaths: Set<String> = []
-
-        for root in standardApplicationSearchRoots where fileManager.fileExists(atPath: root.path) {
-            guard let enumerator = fileManager.enumerator(
-                at: root,
-                includingPropertiesForKeys: resourceKeys,
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else {
-                continue
-            }
-
-            for case let candidateURL as URL in enumerator {
-                guard candidateURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame else {
-                    continue
-                }
-
-                let normalizedPath = candidateURL.standardizedFileURL.path.lowercased()
-                guard visitedPaths.insert(normalizedPath).inserted else {
-                    continue
-                }
-
-                let candidateName = stripAppSuffix(from: candidateURL.lastPathComponent)
-                if candidateName.caseInsensitiveCompare(targetName) == .orderedSame {
-                    return candidateURL
-                }
-            }
-        }
-
-        return nil
-    }
-
-    private static func openApplication(at appURL: URL) throws {
-        let configuration = NSWorkspace.OpenConfiguration()
-        let semaphore = DispatchSemaphore(value: 0)
-        let errorBox = LaunchErrorBox()
-
-        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
-            errorBox.error = error
-            semaphore.signal()
-        }
-
-        guard waitForSignal(semaphore, timeout: applicationLaunchTimeout) else {
-            throw ComputerUseError.stateUnavailable(
-                "Timed out after \(Int(applicationLaunchTimeout)) seconds while asking macOS to launch \(appURL.lastPathComponent). The desktop application service did not complete the launch request."
-            )
-        }
-
-        if let launchError = errorBox.error {
-            throw launchError
-        }
-    }
-
-    static func waitForSignal(
-        _ semaphore: DispatchSemaphore,
-        timeout: TimeInterval,
-        isMainThread: Bool = Thread.isMainThread,
-        pumpRunLoop: () -> Void = {
-            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
-        }
-    ) -> Bool {
-        let boundedTimeout = max(0, timeout)
-        if isMainThread {
-            let deadline = Date(timeIntervalSinceNow: boundedTimeout)
-            while semaphore.wait(timeout: .now()) == .timedOut {
-                guard Date() < deadline else {
-                    return false
-                }
-                pumpRunLoop()
-            }
-            return true
-        }
-
-        return semaphore.wait(timeout: .now() + boundedTimeout) == .success
-    }
-
-    private final class LaunchErrorBox: @unchecked Sendable {
-        var error: Error?
     }
 
     private static func recentUsageCutoff(referenceDate: Date = Date()) -> Date {
