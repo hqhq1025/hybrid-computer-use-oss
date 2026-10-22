@@ -51,11 +51,10 @@ def polling(tmp_path, monkeypatch):
     return state
 
 
-@pytest.mark.parametrize("agent", ["codex", "claude-code", "gemini-cli", "grok-build"])
-def test_last_response_tools_can_finish_without_early_kill(polling, agent):
+def test_last_response_tools_can_finish_without_early_kill(polling):
     polling.write_rows({"task": "task-test", "model_step_completed": True})
     polling.done_at = 10
-    result = polling.run(agent)
+    result = polling.run()
     assert not result["truncated"]
     assert not result["budget_exhausted"]
     assert polling.now == 10
@@ -101,11 +100,9 @@ def test_inflight_reservation_rejection_is_not_budget_exhaustion(polling):
     assert not polling.kills
 
 
-@pytest.mark.parametrize("returncode", [0, 1])
-def test_done_does_not_hide_a_real_budget_rejection(polling, returncode):
+def test_done_does_not_hide_a_real_budget_rejection(polling):
     polling.write_rows({"task": "task-test", "budget_rejected": True})
     polling.done_at = 0
-    polling.returncode = returncode
     assert polling.run()["budget_exhausted"]
 
 

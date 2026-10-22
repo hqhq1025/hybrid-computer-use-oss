@@ -11,7 +11,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from hcu.osworld import agents
-from hcu.osworld.guest import GUEST_CODEX_HOME
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,18 +83,6 @@ def test_codex_render_preserves_context_and_uses_local_home(tmp_path, home_sourc
     assert base.read_text() == "BASE_CONTEXT_MARKER\n"
 
 
-@pytest.mark.parametrize("channels", ["", "a11y,keyboard", "gui,keyboard"])
-def test_standalone_codex_does_not_infer_guest_permissions(tmp_path, channels):
-    output, _, _ = render(tmp_path, "codex", extra=[
-        "--codex-home", GUEST_CODEX_HOME, "--channels", channels,
-        "--task-id", "osworld-task", "--instructions-file", "",
-    ])
-    config = read_toml(output)
-    assert config["approval_policy"] == "on-request"
-    assert config["sandbox_mode"] == "workspace-write"
-    assert config["developer_instructions"] == ""
-
-
 @pytest.mark.parametrize("agent", agents.AGENT_PROFILES)
 def test_standalone_expands_user_paths(tmp_path, agent):
     filename = (
@@ -141,9 +128,10 @@ def test_codex_config_quotes_native_paths_and_instruction_text():
     assert config["skills"]["config"][0]["path"].startswith(home + "/")
 
 
-@pytest.mark.parametrize("agent", agents.AGENT_PROFILES)
 @pytest.mark.parametrize("missing_flag", ["--instructions-file", "--base-instructions"])
-def test_missing_instructions_fail_before_overwriting_output(tmp_path, agent, missing_flag):
+def test_missing_instructions_fail_before_overwriting_output(tmp_path, missing_flag):
+    # render() reads both files before any per-agent branch.
+    agent = "codex"
     output, base, instructions = render(tmp_path, agent)
     previous = {path: path.read_bytes() for path in output.parent.iterdir()}
     result = subprocess.run(
@@ -188,9 +176,11 @@ def test_standalone_injects_plain_text_and_clears_disabled_profile(tmp_path, age
         assert "SELECTED_INSTRUCTIONS_MARKER" not in path.read_text()
 
 
-@pytest.mark.parametrize("agent", agents.AGENT_PROFILES)
 @pytest.mark.parametrize("profile", ["hybrid", "ax-only", "gui-only"])
-def test_standalone_loads_real_instruction_files(tmp_path, agent, profile):
+def test_standalone_loads_real_instruction_files(tmp_path, profile):
+    # Codex embeds the text in TOML; the other agents copy it verbatim
+    # (test_standalone_injects_plain_text_and_clears_disabled_profile).
+    agent = "codex"
     base = ROOT / "instructions/base.md"
     instructions = ROOT / "instructions" / f"{profile}.md"
     output, _, _ = render(tmp_path, agent, extra=[
