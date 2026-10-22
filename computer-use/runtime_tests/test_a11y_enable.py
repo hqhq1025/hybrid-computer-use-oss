@@ -154,3 +154,62 @@ class ProviderStartupEnablesAccessibilityTests(unittest.TestCase):
         ):
             runtime._initialize_provider({"request_id": "r1"})
             self.assertTrue(runtime._provider_initialized)
+
+
+class ChromiumTreeRequestTests(AtspiPatchedTestCase):
+    """Chromium builds the tree below its frames only for a screen reader.
+
+    Chrome 150 and Electron apps started after IsEnabled exposed only their
+    application and frame (2 nodes) until an AT called GetAttributes.
+    """
+
+    def setUp(self):
+        super().setUp()
+        runtime._attribute_requested.clear()
+        self.addCleanup(runtime._attribute_requested.clear)
+
+    def _app(self, bus_name):
+        app = _TreeNode(role="application", name="Browser",
+                        kids=(_TreeNode(role="frame", name="Page"),))
+        calls = []
+        app.get_attributes = lambda: calls.append(bus_name) or {}
+        return app, calls
+
+    def test_listing_asks_each_application_for_attributes_once(self):
+        app, calls = self._app(":1.7")
+        root = _TreeNode(role="desktop", name="Desktop", kids=(app,))
+        with mock.patch.object(runtime, "desktop", return_value=root), \
+                mock.patch.object(runtime, "provider_bus_name",
+                                  return_value=":1.7"):
+            runtime.iter_apps()
+            runtime.iter_apps()
+
+        self.assertEqual(calls, [":1.7"])
+
+    def test_restarted_application_is_asked_again(self):
+        first, calls = self._app(":1.7")
+        second, _ = self._app(":1.9")
+        second.get_attributes = first.get_attributes
+        names = iter([":1.7", ":1.9"])
+        with mock.patch.object(runtime, "provider_bus_name",
+                               side_effect=lambda _app: next(names)):
+            runtime.request_full_tree(first)
+            runtime.request_full_tree(second)
+
+        self.assertEqual(len(calls), 2)
+
+    def test_attribute_failure_does_not_break_the_listing(self):
+        app = _TreeNode(role="application", name="Hung")
+
+        def fail():
+            raise RuntimeError("timeout")
+
+        app.get_attributes = fail
+        root = _TreeNode(role="desktop", name="Desktop", kids=(app,))
+        with mock.patch.object(runtime, "desktop", return_value=root), \
+                mock.patch.object(runtime, "provider_bus_name",
+                                  return_value=":1.8"):
+            inventory = runtime.iter_apps()
+
+        self.assertEqual(list(inventory), [app])
+        self.assertTrue(inventory.complete)
