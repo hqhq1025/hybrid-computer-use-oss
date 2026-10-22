@@ -92,6 +92,27 @@ class GUIScreenCoordinateTests(GUISettleAndFrameGuardCases, unittest.TestCase):
                                     abs(y0 + v / scale_y - native_y / per_y))
                         self.assertLessEqual(error, 2.0)
 
+    def test_zoom_geometry_matches_the_shared_fixture(self):
+        """macOS and Windows replay the same fixture; it pins one geometry."""
+        path = Path(__file__).resolve().parent.parent / "testdata" / "contract" / "zoom_geometry.json"
+        cases = json.loads(path.read_text())["cases"]
+        self.assertGreater(len(cases), 50)
+        for case in cases:
+            with self.subTest(case["name"]):
+                desktop = runtime.frame(0, 0, *case["native"])
+                size = runtime.gui_model_dimensions(desktop)
+                self.assertEqual([size["width"], size["height"]], case["frame"])
+                if "expect" not in case:
+                    with self.assertRaises(ValueError):
+                        runtime.zoom_geometry(case["region"], desktop)
+                    continue
+                g = runtime.zoom_geometry(case["region"], desktop)
+                self.assertEqual(list(g["native"]), case["expect"]["native"])
+                self.assertEqual((g["width"], g["height"]),
+                                 (case["expect"]["width"], case["expect"]["height"]))
+                for got, want in zip(g["region"], case["expect"]["region"]):
+                    self.assertAlmostEqual(got, want, places=9)
+
     def test_zoom_geometry_rejects_small_or_outside_regions(self):
         for region in ([100, 0, 107.9, 768], [0, 0, 1366, 100], [-1, 0, 50, 50],
                        [50, 50, 40, 60]):
