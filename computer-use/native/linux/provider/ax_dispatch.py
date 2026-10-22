@@ -705,8 +705,7 @@ def _observe_after_action(
     # toggle, so the blink is not reported as a persistent change.
     change_note = pixel_change_note(persistent_pixel_change(
         pixels_before, pixels_after_one,
-        safe(lambda: capture_window_pixels(after_pixel_bounds))),
-        "window")
+        safe(lambda: capture_window_pixels(after_pixel_bounds))))
     lap("pixels_after_two_and_diff")
     if change_note:
         notes.append(change_note)

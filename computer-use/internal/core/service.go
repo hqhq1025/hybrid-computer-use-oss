@@ -264,10 +264,7 @@ func (s *Service) callTool(
 	args map[string]any,
 ) (result ToolCallResult) {
 	defer func() {
-		result = enforceAXImageOutputPolicy(name, args, result)
-		if name == contract.PublicToolAX {
-			result = s.registerDeliveredDesktopFrames(result)
-		}
+		result = s.deliverAXImages(name, args, result)
 	}()
 
 	s.syncSessionWithDesktop()

@@ -61,6 +61,19 @@ func (s *Service) captureDesktopFrame() (*AppSnapshot, error) {
 	return frame, nil
 }
 
+// deliverAXImages applies the AX image policy at the shared output boundary:
+// images the caller did not request are removed, and the remaining desktop
+// frames are registered. An error result keeps and registers its image too:
+// it is a fresh desktop capture, and the point rule still guards input
+// planned from it.
+func (s *Service) deliverAXImages(name string, args map[string]any, result ToolCallResult) ToolCallResult {
+	result = enforceAXImageOutputPolicy(name, args, result)
+	if name != contract.PublicToolAX {
+		return result
+	}
+	return s.registerDeliveredDesktopFrames(result)
+}
+
 // registerDeliveredDesktopFrames makes the last delivered AX desktop image
 // the GUI coordinate frame and says so before each image. It runs on the
 // final AX result, after images the caller did not request are removed, so

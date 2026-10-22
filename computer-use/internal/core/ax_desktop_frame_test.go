@@ -166,3 +166,61 @@ func TestAXDesktopCaptureFailureReturnsTheTreeWithoutAFrame(t *testing.T) {
 		t.Fatal("a failed capture must not become the GUI frame")
 	}
 }
+
+func TestAXFullWithoutTheGUIChannelStillReturnsTheDesktopFrame(t *testing.T) {
+	t.Setenv("COMPUTER_USE_CHANNELS", "a11y,keyboard")
+	for _, tool := range contract.ToolDefinitions() {
+		if tool.Name == contract.PublicToolGUI {
+			t.Fatal("GUI is listed although its channel is disabled")
+		}
+	}
+	backend := desktopFrameBackend(t)
+	s := NewServiceWithBackend(backend)
+	result := s.CallForModel(contract.PublicToolAX, map[string]any{
+		"mode": "observe", "app": "Editor", "observe": "full",
+	}, false)
+	if onlyImage(t, result).Data != backend.desktopResponse.Snapshot.ScreenshotPNGBase64 {
+		t.Fatal("AX full did not return the desktop frame")
+	}
+	text := ResultText(result)
+	if !strings.Contains(text, "image: full desktop 136x77.") ||
+		strings.Contains(text, "GUI") {
+		t.Fatalf("the image line must not mention GUI when GUI is disabled: %s", text)
+	}
+}
+
+func TestAXErrorImagesBecomeTheGUIFrameOnlyWhenDelivered(t *testing.T) {
+	frame := testDesktopFrame(t, "recovery-frame", 136, 77).Snapshot
+	failed := func() ToolCallResult {
+		return ToolCallResult{IsError: true, Content: []ContentItem{
+			{Type: "text", Text: "effect unknown; current state follows"},
+			{Type: "image", Data: frame.ScreenshotPNGBase64, MimeType: "image/png", frame: frame},
+		}}
+	}
+	previous := &AppSnapshot{FrameID: "gui-frame"}
+
+	// observe full: the caller asked for the image, so the fresh desktop
+	// attached to the error is delivered and becomes the frame.
+	s := NewService()
+	s.guiSnapshot = previous
+	delivered := s.deliverAXImages(contract.PublicToolAX,
+		map[string]any{"mode": "act", "observe": "full"}, failed())
+	onlyImage(t, delivered)
+	if s.guiSnapshot != frame || !strings.Contains(ResultText(delivered), "image: full desktop 136x77") {
+		t.Fatalf("a delivered error image must become the GUI frame: %#v", s.guiSnapshot)
+	}
+
+	// observe diff: the image is withheld, so the frame does not move.
+	s = NewService()
+	s.guiSnapshot = previous
+	withheld := s.deliverAXImages(contract.PublicToolAX,
+		map[string]any{"mode": "act", "observe": "diff"}, failed())
+	for _, item := range withheld.Content {
+		if item.Type == "image" {
+			t.Fatal("an image the caller did not request was delivered")
+		}
+	}
+	if s.guiSnapshot != previous || strings.Contains(ResultText(withheld), "image: full desktop") {
+		t.Fatal("a withheld image must not move the GUI frame or be described")
+	}
+}

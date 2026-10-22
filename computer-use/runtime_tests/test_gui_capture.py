@@ -501,22 +501,10 @@ class PixelEvidenceTests(unittest.TestCase):
             runtime.persistent_pixel_change(self._frame(10), after, after))
         self.assertIn("sampled_pixel_change=material", note)
         self.assertIn("% of sample points", note)
-        self.assertIn("concentrated in", note)
-
-    def test_gui_change_region_uses_full_desktop_image_pixels(self):
-        after = self._frame(10)
-        data = bytearray(after["data"])
-        data[0:3] = b"\xff\xff\xff"
-        after["data"] = bytes(data)
-
-        note = runtime.pixel_change_note(
-            runtime.persistent_pixel_change(self._frame(10), after, after),
-            runtime.SCREENSHOT_SCOPE_SCREEN,
-        )
-
-        self.assertIn("pre-action full desktop", note)
-        self.assertIn("% of sample points", note)
-        self.assertIn("full-desktop image pixels", note)
+        # The window comparison states no coordinates: the only clickable
+        # image is the full-desktop frame.
+        self.assertNotIn("concentrated", note)
+        self.assertNotIn("window-relative", note)
 
     def _dots(self, count, size, offset_rows=1):
         frame = self._frame(10, size=size)
@@ -553,7 +541,7 @@ class PixelEvidenceTests(unittest.TestCase):
         self.assertEqual(change["changed"], 30)
         note = runtime.pixel_change_note(change)
         self.assertIn("sampled_pixel_change=material", note)
-        self.assertIn("concentrated in", note)
+        self.assertNotIn("{", note)
 
     def test_resize_between_captures_is_reported_not_guessed(self):
         size = (1600, 1000)

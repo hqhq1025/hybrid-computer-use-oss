@@ -69,7 +69,6 @@ SETTLE_POLL_SECONDS = 0.02
 # the tree 35-65 ms after the input inside a continuous burst.
 SETTLE_QUIET_SECONDS = 0.05
 SETTLE_EVENT_FLOOR_SECONDS = 0.07
-SCREENSHOT_SCOPE_SCREEN = "screen"
 # Sampling stride and threshold for pixel comparison. An 8 px stride keeps
 # a full-window comparison to a few tens of milliseconds, negligible next to
 # app resolution, and still detects moved text or an opened or closed
