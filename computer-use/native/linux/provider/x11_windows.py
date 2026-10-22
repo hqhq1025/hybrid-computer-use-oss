@@ -6,6 +6,7 @@ import re
 import subprocess
 from .foundation import (
     AX_WINDOW_ROLES,
+    TOP_LEVEL_CONTAINER_ROLES,
     Atspi,
     Gdk,
     GUI_MAX_LAYOUT_WINDOWS,
@@ -432,6 +433,25 @@ def x11_window_id_for_accessible(app, window):
     return None
 
 
+def titled_top_level_window_id(window, native):
+    """Bind a top-level child with a non-window role by its exact title.
+
+    Qt reports a top-level QWidget that lacks a window flag (Flameshot's
+    "Configuration") as role "filler", yet the window manager manages it as
+    an ordinary window. Such children get a handle only on strong evidence:
+    a non-empty title equal to exactly one managed window of the process.
+    Untitled panels and popups never match, so they stay unaddressed.
+    """
+    title_key = semantic_text_key(node_name(window))
+    if not title_key:
+        return None
+    matches = [
+        window_id for window_id, item in native.items()
+        if semantic_text_key(item.get("title")) == title_key
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def opaque_window_instance_handle_for_id(app, window_id):
     pid = node_pid(app)
     generation = process_generation(pid)
@@ -466,7 +486,12 @@ def strong_window_instance_handle_inventory(app, windows=None):
     grouped = {}
     for index, window in windows:
         role = str(node_role(window) or "").strip().lower()
+        if role not in AX_WINDOW_ROLES and role not in TOP_LEVEL_CONTAINER_ROLES:
+            continue
         if role not in AX_WINDOW_ROLES:
+            window_id = titled_top_level_window_id(window, native)
+            if window_id:
+                grouped.setdefault(window_id, []).append((index, window))
             continue
         window_id = x11_window_id_for_accessible(app, window)
         if window_id:
@@ -496,6 +521,59 @@ def strong_window_instance_handle_inventory(app, windows=None):
         for index, handle in selected.items()
         if str(handle or "").startswith("w2:")
     }.items(), complete=True)
+
+
+def managed_window_title(app, window, strong_handles=None):
+    """Return the X11 title of the managed window bound to ``window``, or "".
+
+    Some toolkits leave a top-level AT-SPI frame unnamed while the window
+    manager shows a title (GTK3 D-Feet: frame "" vs WM_NAME "d-feet"). The
+    title is taken only for a window with a one-to-one strong binding, so it
+    names exactly the window the model can address.
+    """
+    windows = app_windows(app)
+    if strong_handles is None:
+        strong_handles = strong_window_instance_handles(app, windows)
+    index = next(
+        (i for i, candidate in windows if candidate is window), None
+    )
+    if index is None or not strong_handles.get(index):
+        return ""
+    target = strong_handles[index]
+    for item in x11_window_inventory_for_pid(node_pid(app)):
+        if opaque_window_instance_handle_for_id(app, item.get("id")) == target:
+            # Docks, panels and the desktop also carry X11 titles
+            # ("xfce4-panel"); only application windows lend theirs.
+            if x11_window_type(item.get("id")) not in TITLED_WINDOW_TYPES:
+                return ""
+            return str(item.get("title") or "").strip()
+    return ""
+
+
+TITLED_WINDOW_TYPES = {"NORMAL", "DIALOG"}
+
+
+def x11_window_type(window_id):
+    """Return the EWMH _NET_WM_WINDOW_TYPE suffix of one X11 window, or ""."""
+    if not window_id:
+        return ""
+    try:
+        result = subprocess.run(
+            ["xprop", "-id", str(window_id), "_NET_WM_WINDOW_TYPE"],
+            capture_output=True, text=True, timeout=1,
+        )
+    except Exception:
+        return ""
+    match = re.search(r"_NET_WM_WINDOW_TYPE_([A-Z_]+)", result.stdout or "")
+    return match.group(1) if match else ""
+
+
+def accessible_window_title(app, window, strong_handles=None):
+    """Return the window's AT-SPI name, or its managed X11 title when unnamed."""
+    own = str(node_name(window) or "").strip()
+    if own:
+        return own
+    return managed_window_title(app, window, strong_handles)
 
 
 def strong_window_instance_handles(app, windows=None):

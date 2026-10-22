@@ -35,6 +35,7 @@ from .tree_reuse import (
 from . import ui_events
 
 from .x11_windows import (
+    accessible_window_title,
     app_windows,
     desktop_bounds,
     desktop_layout_frame_id,
@@ -184,7 +185,7 @@ def top_level_window_inventory(app, selected_index=None):
     inventory = []
     for index, window in windows:
         inventory.append({
-            "title": str(node_name(window) or "").strip(),
+            "title": accessible_window_title(app, window, strong_handles),
             "role": str(node_role(window) or "window").strip().lower(),
             "handle": strong_handles.get(index) or (
                 "weak:pid{}/win{}/{}".format(
