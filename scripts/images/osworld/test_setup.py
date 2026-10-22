@@ -1,17 +1,20 @@
 """Check source repairs and profile preservation without changing the host."""
 
 import configparser
+import io
 import json
 from pathlib import Path
 import tempfile
 import tarfile
 import unittest
+import xml.etree.ElementTree as ET
 from unittest import mock
 
 import configure_desktop
 import configure_editor
 import install
 import install_qt
+import install_libreoffice
 
 
 class SetupTests(unittest.TestCase):
@@ -83,6 +86,59 @@ class SetupTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "metadata differs"):
                 install_qt.install_freecad(archive, {"freecad_version": "selected"})
             run.assert_not_called()
+
+    def test_libreoffice_preferences_preserve_initialization_and_other_settings(self):
+        oor = install_libreoffice.OOR
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(install_libreoffice.os, "chown"):
+            path = Path(directory) / "profile/user/registrymodifications.xcu"
+            path.parent.mkdir(parents=True)
+            path.write_text(f'<oor:items xmlns:oor="{oor}">'
+                '<item oor:path="/org.openoffice.Setup/Product">'
+                '<prop oor:name="FirstRun"><value>true</value></prop>'
+                '<prop oor:name="WhatsNew"><value>true</value></prop>'
+                '</item></oor:items>')
+            for _ in range(2):
+                install_libreoffice.prepare_preferences(path, 1000, 1000)
+            properties = [(prop.get(f"{{{oor}}}name"), prop.findtext("value"))
+                          for item in ET.parse(path).getroot() for prop in item]
+            self.assertEqual(properties.count(("FirstRun", "true")), 1)
+            for name in ("WhatsNew", "ShowTipOfTheDay", "AutoPilot"):
+                self.assertEqual(properties.count((name, "false")), 1)
+
+    def test_libreoffice_rejects_missing_package_before_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "release.tar"
+            with tarfile.open(archive, "w") as output:
+                item = tarfile.TarInfo("DEBS/one.deb")
+                item.size = 4
+                output.addfile(item, io.BytesIO(b"fake"))
+            extracted = root / "extracted"
+            extracted.mkdir()
+            manifest = {"packages": ["one", "two"], "package_version": "selected",
+                        "architecture": "amd64"}
+            with mock.patch.object(install_libreoffice, "command", side_effect=lambda args:
+                    {"Package": "one", "Version": "selected", "Architecture": "amd64"}[args[-1]]) as run:
+                with self.assertRaisesRegex(ValueError, "Missing candidate packages: two"):
+                    install_libreoffice.extract_packages(archive, extracted, manifest)
+                self.assertTrue(all(call.args[0][0] == "dpkg-deb" for call in run.call_args_list))
+
+    def test_libreoffice_rejects_package_architecture_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "release.tar"
+            with tarfile.open(archive, "w") as output:
+                item = tarfile.TarInfo("DEBS/one.deb")
+                item.size = 4
+                output.addfile(item, io.BytesIO(b"fake"))
+            extracted = root / "extracted"
+            extracted.mkdir()
+            manifest = {"packages": ["one"], "package_version": "selected", "architecture": "amd64"}
+            with mock.patch.object(install_libreoffice, "command", side_effect=lambda args:
+                    {"Package": "one", "Version": "selected", "Architecture": "arm64"}[args[-1]]):
+                with self.assertRaisesRegex(ValueError, "Unexpected package metadata"):
+                    install_libreoffice.extract_packages(archive, extracted, manifest)
 
 
 if __name__ == "__main__":

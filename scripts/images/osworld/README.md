@@ -1,7 +1,7 @@
 # Desktop image setup
 
-These operator scripts install ordinary desktop applications into a fresh Ubuntu
-OSWorld guest. They preserve the existing LibreOffice, browser and benchmark
+The default installation adds ordinary desktop applications to a fresh Ubuntu
+OSWorld guest. It preserves the existing LibreOffice, browser and benchmark
 software versions. Package dependencies can require upgrades; review the apt
 plan before installation. The scripts do not launch a benchmark or install HCU.
 
@@ -59,6 +59,22 @@ the selected software rather than rerunning over an unknown partial image.
 
 `--check` validates the operating system, architecture and required filenames.
 It does not run apt, verify archive contents or prove application behavior.
+
+## Optional LibreOffice installation
+
+`install_libreoffice.py` installs the official release selected in
+`libreoffice.json` beside the distribution version. This separate command does
+not run as part of `install.py`. It validates the exact package set, versions
+and architecture before installing. It creates an isolated profile and sets
+ordinary preferences to suppress welcome, tip and template dialogs.
+
+Download the archive from the manifest's source, then run the installer as root
+with `--archive /path/to/the/archive.tar.gz --desktop-user user`. The archive's
+basename must match the manifest. The default preserves the existing commands
+and user profile. Add `--switch-default` only when selecting this release for
+the image. That option adds `/usr/local/bin/libreoffice` and `soffice` symlinks;
+the distribution commands remain in `/usr/bin`. Close candidate applications
+before installation, then verify Writer, Calc and Impress in a fresh session.
 
 ## Repairs and configuration
 

@@ -10,7 +10,6 @@ SETTINGS = {
     ".config/Kingsoft/Office.conf": {
         "6.0": {
             "common\\do_not_detect_file_association_while_startup": "true",
-            "common\\system_check\\dpix_not_equal_dpiy": "false",
         },
     },
     ".config/MuseScore/MuseScore4.ini": {
