@@ -17,3 +17,11 @@
 /computer-use/native/windows/**/bin/
 /computer-use/native/windows/**/obj/
 /assets/
+/computer-use/cmd/computer-use/computer-use
+/computer-use/cmd/computer-use/computer-use.exe
+/computer-use/native/macos/.swiftpm/
+/build/
+*.egg-info/
+.DS_Store
+.vscode/
+.idea/
