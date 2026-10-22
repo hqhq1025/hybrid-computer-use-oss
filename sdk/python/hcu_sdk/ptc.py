@@ -85,11 +85,15 @@ _DESCRIPTIONS = {
     "AX": "Desktop accessibility (HCU AX). Same arguments as the AX MCP tool, plus mode read, "
           "request_id and since. Returns a JSON string: {ok, code, message, hint, op, window, "
           "elements|matches|read|diff, page{returned,total,next_cursor}, input_emitted, "
-          "completed, requested, timing_ms}. Never truncated; page with next_cursor.",
+          "completed, requested, timing_ms}. Never truncated; page with next_cursor. observe "
+          "full/screenshot adds screen{width,height,image}: the current GUI frame.",
     "GUI": "Full-desktop screenshot and pixel input (HCU GUI). Same arguments as the GUI MCP tool, "
-           "plus request_id. Returns records JSON with screen{width,height,image}; image is a guest "
-           "file path. Direct calls also return image blocks when the harness has an image reader. "
-           "Code callers receive JSON only and need a direct observation to show an image to the model.",
+           "plus request_id. Returns records JSON with screen{width,height,image}, the GUI frame "
+           "whose pixels x/y use; image is a guest file path. zoom returns images[0] and "
+           "evidence.zoom{region,scale_x,scale_y}: frame x = region[0] + u/scale_x, "
+           "y = region[1] + v/scale_y. Direct calls also return image blocks when the harness has "
+           "an image reader. Code callers receive JSON only and need a direct observation to show "
+           "an image to the model.",
 }
 
 
