@@ -6,6 +6,7 @@ import runtimebundle "github.com/hqhq1025/hybrid-computer-use-oss/computer-use"
 
 var linuxProviderPaths = []string{
 	"native/linux/provider/foundation.py",
+	"native/linux/provider/node_facts.py",
 	"native/linux/provider/x11_windows.py",
 	"native/linux/provider/atspi_inventory.py",
 	"native/linux/provider/ax_node_properties.py",
@@ -20,6 +21,8 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/ref_continuity.py",
 	"native/linux/provider/recovery.py",
 	"native/linux/provider/element_resolver.py",
+	"native/linux/provider/semantic_window_candidates.py",
+	"native/linux/provider/semantic_scan.py",
 	"native/linux/provider/gui_capture.py",
 	"native/linux/provider/gui_dispatch.py",
 	"native/linux/provider/snapshot.py",
@@ -29,6 +32,7 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/ax_actions.py",
 	"native/linux/provider/ax_select.py",
 	"native/linux/provider/ax_dispatch.py",
+	"native/linux/provider/ax_input_delivery.py",
 	"native/linux/provider/ax_snapshot_diagnostics.py",
 	"native/linux/provider/ax_target_notes.py",
 	"native/linux/provider/ax_transition_evidence.py",
@@ -38,6 +42,7 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/ui_events.py",
 	"native/linux/provider/response_builder.py",
 	"native/linux/provider/wire_v2.py",
+	"native/linux/provider/wire_v2_request.py",
 }
 
 func linuxRuntimeBundle() map[string]string {

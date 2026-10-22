@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
@@ -62,13 +61,6 @@ var (
 		)
 	}
 )
-
-type darwinProviderArtifact struct {
-	bundlePath     string
-	executablePath string
-	libraryPath    string
-	infoPlistPath  string
-}
 
 type darwinProviderProcessManager struct {
 	mu          sync.Mutex
@@ -137,87 +129,6 @@ func darwinProviderRequestTimeout(request core.ProviderWireRequest) time.Duratio
 	timeout += time.Duration(min(waits, contract.GUIMaxTotalWait)) * time.Second
 	timeout += time.Duration(max(0, min(request.Desktop.SettleMS, contract.GUIMaxSettleMS))) * time.Millisecond
 	return timeout
-}
-
-func darwinProviderStartupTimeout() time.Duration {
-	timeout := darwinProviderRuntimeTimeout()
-	if timeout > darwinProviderStartupLimit {
-		return darwinProviderStartupLimit
-	}
-	return timeout
-}
-
-func darwinProviderExecutable() (darwinProviderArtifact, error) {
-	if configured := strings.TrimSpace(
-		os.Getenv("COMPUTER_USE_MACOS_PROVIDER"),
-	); configured != "" {
-		return darwinProviderArtifactFromPath(configured)
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return darwinProviderArtifact{}, err
-	}
-	return darwinProviderArtifactFromPath(filepath.Join(
-		filepath.Dir(executable),
-		darwinProviderAppName,
-	))
-}
-
-func darwinProviderArtifactFromPath(
-	path string,
-) (darwinProviderArtifact, error) {
-	cleanPath := filepath.Clean(path)
-	if filepath.Ext(cleanPath) != ".app" {
-		bundleRoot := filepath.Dir(filepath.Dir(filepath.Dir(cleanPath)))
-		if filepath.Base(bundleRoot) != darwinProviderAppName ||
-			filepath.Base(filepath.Dir(cleanPath)) != "MacOS" {
-			return darwinProviderArtifact{}, fmt.Errorf(
-				"macOS provider must be the %s app bundle",
-				darwinProviderAppName,
-			)
-		}
-		cleanPath = bundleRoot
-	}
-	if filepath.Base(cleanPath) != darwinProviderAppName {
-		return darwinProviderArtifact{}, fmt.Errorf(
-			"macOS provider app = %q, want %q",
-			filepath.Base(cleanPath),
-			darwinProviderAppName,
-		)
-	}
-	return darwinProviderArtifact{
-		bundlePath: cleanPath,
-		executablePath: filepath.Join(
-			cleanPath, "Contents", "MacOS", darwinProviderExecutableName,
-		),
-		libraryPath: filepath.Join(
-			cleanPath, "Contents", "Frameworks", darwinProviderLibraryName,
-		),
-		infoPlistPath: filepath.Join(cleanPath, "Contents", "Info.plist"),
-	}, nil
-}
-
-func verifyDarwinProvider(artifact darwinProviderArtifact) error {
-	for _, item := range []struct {
-		label string
-		path  string
-	}{
-		{label: "executable", path: artifact.executablePath},
-		{label: "library", path: artifact.libraryPath},
-		{label: "Info.plist", path: artifact.infoPlistPath},
-	} {
-		info, err := os.Stat(item.path)
-		if err != nil {
-			return fmt.Errorf("stat macOS provider %s: %w", item.label, err)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("macOS provider %s must be a regular file", item.label)
-		}
-		if item.label == "executable" && info.Mode().Perm()&0o111 == 0 {
-			return errors.New("macOS provider executable has no execute permission")
-		}
-	}
-	return nil
 }
 
 func runDarwinProvider(
@@ -303,36 +214,6 @@ func (manager *darwinProviderProcessManager) run(
 	return response, nil
 }
 
-func startDarwinProviderWorkerWithRetry(
-	artifact darwinProviderArtifact,
-) (*darwinProviderWorker, error) {
-	delays := []time.Duration{
-		250 * time.Millisecond,
-		750 * time.Millisecond,
-		1500 * time.Millisecond,
-		3 * time.Second,
-	}
-	failures := make([]string, 0, len(delays)+1)
-	for attempt := 0; attempt <= len(delays); attempt++ {
-		worker, err := darwinProviderWorkerStarter(artifact)
-		if err == nil {
-			return worker, nil
-		}
-		failures = append(
-			failures,
-			fmt.Sprintf("attempt %d: %v", attempt+1, err),
-		)
-		if attempt < len(delays) {
-			darwinProviderRetrySleep(delays[attempt])
-		}
-	}
-	return nil, fmt.Errorf(
-		"macOS provider startup failed after %d attempts: %s",
-		len(failures),
-		strings.Join(failures, "; "),
-	)
-}
-
 func darwinProviderRequestCanRetryAfterReset(
 	request core.ProviderWireRequest,
 	response *core.ProviderWireResponse,
@@ -413,208 +294,6 @@ func shutdownDarwinProviderProcess() {
 	darwinProviderProcesses.mu.Lock()
 	defer darwinProviderProcesses.mu.Unlock()
 	darwinProviderProcesses.stopLocked()
-}
-
-func startDarwinProviderWorker(
-	artifact darwinProviderArtifact,
-) (*darwinProviderWorker, error) {
-	if err := verifyDarwinProvider(artifact); err != nil {
-		return nil, err
-	}
-	runtimeDir, err := os.MkdirTemp(
-		"/tmp",
-		"computer-use-macos-provider-*",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create macOS provider runtime directory: %w", err)
-	}
-	cleanup := func() {
-		_ = os.RemoveAll(runtimeDir)
-	}
-	socketPath := filepath.Join(runtimeDir, "provider.sock")
-	pidPath := filepath.Join(runtimeDir, "provider.pid")
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		cleanup()
-		return nil, fmt.Errorf("listen for macOS provider: %w", err)
-	}
-	if err := os.Chmod(socketPath, 0o600); err != nil {
-		_ = listener.Close()
-		cleanup()
-		return nil, fmt.Errorf("protect macOS provider socket: %w", err)
-	}
-
-	cmd := darwinProviderOpenCommand(
-		artifact.bundlePath,
-		socketPath,
-		pidPath,
-	)
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		_ = listener.Close()
-		cleanup()
-		return nil, fmt.Errorf("open macOS provider stderr: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		_ = listener.Close()
-		cleanup()
-		return nil, fmt.Errorf(
-			"launch macOS provider app through LaunchServices: %w",
-			err,
-		)
-	}
-	worker := &darwinProviderWorker{
-		cmd:        cmd,
-		stderr:     &boundedProviderBuffer{limit: maxDarwinProviderStderrBytes},
-		done:       make(chan struct{}),
-		stderrDone: make(chan struct{}),
-		runtimeDir: runtimeDir,
-	}
-	go worker.forwardStderr(stderrPipe)
-	go worker.wait()
-
-	deadline := time.Now().Add(darwinProviderStartupTimeout())
-	if unixListener, ok := listener.(*net.UnixListener); ok {
-		_ = unixListener.SetDeadline(deadline)
-	}
-	connection, err := waitForDarwinProviderConnection(
-		listener,
-		worker,
-		pidPath,
-		deadline,
-		darwinProviderLaunchPIDGrace,
-	)
-	_ = listener.Close()
-	_ = os.Remove(socketPath)
-	if err != nil {
-		worker.stop()
-		return nil, fmt.Errorf(
-			"accept macOS provider app connection: %w: %s",
-			err,
-			strings.TrimSpace(worker.stderrText()),
-		)
-	}
-	providerPID, err := readDarwinProviderPIDUntil(pidPath, deadline)
-	if err != nil {
-		_ = connection.Close()
-		if discoveredPID, pidErr := readDarwinProviderPID(pidPath); pidErr == nil {
-			worker.providerPID = discoveredPID
-		}
-		worker.stop()
-		return nil, fmt.Errorf("read macOS provider pid: %w", err)
-	}
-	worker.connection = connection
-	worker.stdout = bufio.NewReader(connection)
-	worker.providerPID = providerPID
-	return worker, nil
-}
-
-type darwinProviderAcceptResult struct {
-	connection net.Conn
-	err        error
-}
-
-func waitForDarwinProviderConnection(
-	listener net.Listener,
-	worker *darwinProviderWorker,
-	pidPath string,
-	deadline time.Time,
-	launchPIDGrace time.Duration,
-) (net.Conn, error) {
-	acceptResult := make(chan darwinProviderAcceptResult)
-	acceptDone := make(chan struct{})
-	defer close(acceptDone)
-	go func() {
-		connection, err := listener.Accept()
-		result := darwinProviderAcceptResult{
-			connection: connection,
-			err:        err,
-		}
-		select {
-		case acceptResult <- result:
-		case <-acceptDone:
-			// Startup can fail while Accept finishes. Only the receiver owns
-			// a delivered connection; reclaim one that startup abandoned.
-			if connection != nil {
-				_ = connection.Close()
-			}
-		}
-	}()
-
-	startupTimer := time.NewTimer(time.Until(deadline))
-	defer startupTimer.Stop()
-	pidPoll := time.NewTicker(20 * time.Millisecond)
-	defer pidPoll.Stop()
-
-	launcherDone := worker.done
-	var launchPIDTimer *time.Timer
-	var launchPIDDeadline <-chan time.Time
-	defer func() {
-		if launchPIDTimer != nil {
-			launchPIDTimer.Stop()
-		}
-	}()
-
-	updateProviderPID := func() {
-		if worker.providerPID > 0 {
-			return
-		}
-		if providerPID, err := readDarwinProviderPID(pidPath); err == nil {
-			worker.providerPID = providerPID
-		}
-	}
-
-	for {
-		select {
-		case result := <-acceptResult:
-			updateProviderPID()
-			return result.connection, result.err
-		case <-pidPoll.C:
-			updateProviderPID()
-			if worker.providerPID > 0 &&
-				!darwinProviderProcessExists(worker.providerPID) {
-				return nil, fmt.Errorf(
-					"provider pid %d exited before connecting",
-					worker.providerPID,
-				)
-			}
-		case <-launcherDone:
-			launcherDone = nil
-			updateProviderPID()
-			if worker.waitErr != nil {
-				return nil, fmt.Errorf(
-					"LaunchServices command failed: %w",
-					worker.waitErr,
-				)
-			}
-			if worker.providerPID == 0 {
-				wait := launchPIDGrace
-				if remaining := time.Until(deadline); wait > remaining {
-					wait = remaining
-				}
-				if wait <= 0 {
-					return nil, fmt.Errorf(
-						"LaunchServices command exited but provider pid was not published",
-					)
-				}
-				launchPIDTimer = time.NewTimer(wait)
-				launchPIDDeadline = launchPIDTimer.C
-			}
-		case <-launchPIDDeadline:
-			updateProviderPID()
-			if worker.providerPID == 0 {
-				return nil, fmt.Errorf(
-					"LaunchServices command exited successfully but provider pid "+
-						"was not published within %s",
-					launchPIDGrace,
-				)
-			}
-			launchPIDDeadline = nil
-		case <-startupTimer.C:
-			updateProviderPID()
-			return nil, os.ErrDeadlineExceeded
-		}
-	}
 }
 
 func (worker *darwinProviderWorker) forwardStderr(stderr io.Reader) {
@@ -785,113 +464,6 @@ func (worker *darwinProviderWorker) call(
 	return &response, nil
 }
 
-func readDarwinProviderLine(
-	reader *bufio.Reader,
-	limit int,
-) ([]byte, error) {
-	if limit <= 0 {
-		return nil, errDarwinProviderResponseTooLarge
-	}
-	line := make([]byte, 0, min(limit, 64*1024))
-	for {
-		fragment, err := reader.ReadSlice('\n')
-		if len(fragment) > limit-len(line) {
-			return nil, errDarwinProviderResponseTooLarge
-		}
-		line = append(line, fragment...)
-		switch {
-		case err == nil:
-			return line, nil
-		case errors.Is(err, bufio.ErrBufferFull):
-			continue
-		default:
-			return line, err
-		}
-	}
-}
-
-func readDarwinProviderPIDUntil(
-	path string,
-	deadline time.Time,
-) (int, error) {
-	var lastErr error
-	for {
-		pid, err := readDarwinProviderPID(path)
-		if err == nil {
-			return pid, nil
-		}
-		lastErr = err
-		if !time.Now().Before(deadline) {
-			return 0, lastErr
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func readDarwinProviderPID(path string) (int, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return 0, fmt.Errorf(
-			"invalid pid %q",
-			strings.TrimSpace(string(data)),
-		)
-	}
-	return pid, nil
-}
-
-func terminateDarwinProvider(pid int) {
-	if pid <= 0 {
-		return
-	}
-	process, err := os.FindProcess(pid)
-	if err == nil {
-		_ = process.Signal(syscall.SIGTERM)
-	}
-}
-
-func darwinProviderProcessExists(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-func waitForDarwinProviderExit(pid int, timeout time.Duration) bool {
-	if pid <= 0 {
-		return true
-	}
-	deadline := time.Now().Add(timeout)
-	for darwinProviderProcessExists(pid) {
-		if !time.Now().Before(deadline) {
-			return false
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return true
-}
-
-func waitForDarwinProviderCommand(
-	done <-chan struct{},
-	timeout time.Duration,
-) bool {
-	if done == nil {
-		return true
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case <-done:
-		return true
-	case <-timer.C:
-		return false
-	}
-}
-
 func (worker *darwinProviderWorker) stop() {
 	if worker == nil {
 		return
@@ -939,4 +511,98 @@ func (worker *darwinProviderWorker) stop() {
 			_ = os.RemoveAll(worker.runtimeDir)
 		}
 	})
+}
+
+func startDarwinProviderWorker(
+	artifact darwinProviderArtifact,
+) (*darwinProviderWorker, error) {
+	if err := verifyDarwinProvider(artifact); err != nil {
+		return nil, err
+	}
+	runtimeDir, err := os.MkdirTemp(
+		"/tmp",
+		"computer-use-macos-provider-*",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create macOS provider runtime directory: %w", err)
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(runtimeDir)
+	}
+	socketPath := filepath.Join(runtimeDir, "provider.sock")
+	pidPath := filepath.Join(runtimeDir, "provider.pid")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("listen for macOS provider: %w", err)
+	}
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		_ = listener.Close()
+		cleanup()
+		return nil, fmt.Errorf("protect macOS provider socket: %w", err)
+	}
+
+	cmd := darwinProviderOpenCommand(
+		artifact.bundlePath,
+		socketPath,
+		pidPath,
+	)
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		_ = listener.Close()
+		cleanup()
+		return nil, fmt.Errorf("open macOS provider stderr: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		_ = listener.Close()
+		cleanup()
+		return nil, fmt.Errorf(
+			"launch macOS provider app through LaunchServices: %w",
+			err,
+		)
+	}
+	worker := &darwinProviderWorker{
+		cmd:        cmd,
+		stderr:     &boundedProviderBuffer{limit: maxDarwinProviderStderrBytes},
+		done:       make(chan struct{}),
+		stderrDone: make(chan struct{}),
+		runtimeDir: runtimeDir,
+	}
+	go worker.forwardStderr(stderrPipe)
+	go worker.wait()
+
+	deadline := time.Now().Add(darwinProviderStartupTimeout())
+	if unixListener, ok := listener.(*net.UnixListener); ok {
+		_ = unixListener.SetDeadline(deadline)
+	}
+	connection, err := waitForDarwinProviderConnection(
+		listener,
+		worker,
+		pidPath,
+		deadline,
+		darwinProviderLaunchPIDGrace,
+	)
+	_ = listener.Close()
+	_ = os.Remove(socketPath)
+	if err != nil {
+		worker.stop()
+		return nil, fmt.Errorf(
+			"accept macOS provider app connection: %w: %s",
+			err,
+			strings.TrimSpace(worker.stderrText()),
+		)
+	}
+	providerPID, err := readDarwinProviderPIDUntil(pidPath, deadline)
+	if err != nil {
+		_ = connection.Close()
+		if discoveredPID, pidErr := readDarwinProviderPID(pidPath); pidErr == nil {
+			worker.providerPID = discoveredPID
+		}
+		worker.stop()
+		return nil, fmt.Errorf("read macOS provider pid: %w", err)
+	}
+	worker.connection = connection
+	worker.stdout = bufio.NewReader(connection)
+	worker.providerPID = providerPID
+	return worker, nil
 }

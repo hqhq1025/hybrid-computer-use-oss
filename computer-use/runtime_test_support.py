@@ -27,6 +27,7 @@ from native.linux.provider import (  # noqa: E402
     app_resolver,
     atspi_inventory,
     ax_dispatch,
+    ax_input_delivery,
     ax_actions,
     ax_node_properties,
     ax_records,
@@ -37,7 +38,10 @@ from native.linux.provider import (  # noqa: E402
     ax_transition_evidence,
     ax_virtual_table,
     element_resolver,
+    semantic_window_candidates,
+    semantic_scan,
     foundation,
+    node_facts,
     gui_capture,
     gui_dispatch,
     gui_input,
@@ -52,11 +56,13 @@ from native.linux.provider import (  # noqa: E402
     window_diagnostics,
     window_resolver,
     wire_v2,
+    wire_v2_request,
     x11_windows,
 )
 
 PROVIDER_MODULES = (
     foundation,
+    node_facts,
     action_evidence,
     phase_timing,
     app_resolver,
@@ -74,6 +80,8 @@ PROVIDER_MODULES = (
     ref_continuity,
     recovery,
     element_resolver,
+    semantic_window_candidates,
+    semantic_scan,
     window_resolver,
     actionability,
     gui_input,
@@ -81,12 +89,14 @@ PROVIDER_MODULES = (
     ax_actions,
     ax_select,
     ax_dispatch,
+    ax_input_delivery,
     ax_snapshot_diagnostics,
     ax_target_notes,
     ax_transition_evidence,
     window_diagnostics,
     response_builder,
     wire_v2,
+    wire_v2_request,
 )
 
 
