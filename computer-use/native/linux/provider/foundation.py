@@ -7,6 +7,30 @@ import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+
+def pin_gdk_device_pixels(environ=None):
+    """Make GDK report X root pixels, whatever the desktop's scale setting.
+
+    GDK applies its window scale (GDK_SCALE, or the XSETTINGS
+    Gdk/WindowScalingFactor that Xfce and GNOME publish) to the screen and
+    monitor geometry it returns. At scale 2 on a 1920x1080 root, GDK reports
+    960x540 while a root-window grab still returns 1920x1080 pixels and
+    XTEST still takes root coordinates. Screenshot dimensions then disagree
+    with the declared screen, and points mapped through the halved geometry
+    land up to the full screen width away from the target.
+
+    GDK reads the setting once, when it opens the display, so the pin must be
+    in the environment before the first `gi.repository.Gdk` import. An
+    explicit GDK_SCALE overrides XSETTINGS. GDK_DPI_SCALE only scales fonts;
+    it is removed so the provider never renders text of its own differently.
+    """
+    environ = os.environ if environ is None else environ
+    environ["GDK_SCALE"] = "1"
+    environ.pop("GDK_DPI_SCALE", None)
+
+
+pin_gdk_device_pixels()
+
 import gi
 
 gi.require_version("Atspi", "2.0")

@@ -15,6 +15,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/__init__.py",
 		"native/linux/__init__.py",
 		"native/linux/provider/__init__.py",
+		"native/linux/provider/a11y_enable.py",
 		"native/linux/provider/action_evidence.py",
 		"native/linux/provider/actionability.py",
 		"native/linux/provider/app_resolver.py",

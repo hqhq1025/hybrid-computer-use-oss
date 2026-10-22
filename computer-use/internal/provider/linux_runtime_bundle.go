@@ -6,6 +6,7 @@ import runtimebundle "github.com/hqhq1025/hybrid-computer-use-oss/computer-use"
 
 var linuxProviderPaths = []string{
 	"native/linux/provider/foundation.py",
+	"native/linux/provider/a11y_enable.py",
 	"native/linux/provider/node_facts.py",
 	"native/linux/provider/x11_windows.py",
 	"native/linux/provider/atspi_inventory.py",
