@@ -11,10 +11,10 @@ import (
 	"strings"
 )
 
-// This file decodes the public AX arguments. The published input schema is
-// flat (no oneOf), so it cannot say which fields belong to which mode or
-// action type; those rules live here, and every rejection names the field
-// and shows a corrected call. Decoding is strict: no case folding, aliases,
+// This file decodes the public AX arguments. The published input schema
+// defines mode fields and required combinations. Action-specific rules also
+// live here; every rejection names the field and shows a corrected call.
+// Decoding is strict: no case folding, aliases,
 // or numeric strings. The services below receive only decoded values.
 
 // Public AX error codes. Internal failure codes stay in telemetry; the model
@@ -62,9 +62,8 @@ type axArgError struct {
 	fix []axEdit
 }
 
-// Cross-field rules that the flat AX schema cannot express. The consistency
-// test accepts a runtime rejection of a schema-valid call only with one of
-// these codes.
+// Decoder rule codes. The consistency test permits schema-valid rejections
+// only for the action rules that the published schema does not express.
 const (
 	axRuleFieldForMode    = "ax_field_for_mode"
 	axRuleFieldForType    = "ax_field_for_action_type"

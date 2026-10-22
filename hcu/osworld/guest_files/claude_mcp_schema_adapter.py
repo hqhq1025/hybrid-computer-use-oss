@@ -41,16 +41,26 @@ def adapt_input_schema(schema: object) -> object:
     adapted.setdefault("type", "object")
     property_variants: dict[str, list[object]] = {}
     required_sets = []
+    root_properties = schema.get("properties") or {}
     for branch in branches:
         for name, property_schema in (branch.get("properties") or {}).items():
+            # Shared root constraints remain in force in every branch. Avoid
+            # turning a reference to that root field into a self-reference
+            # when the compatibility view moves it back to the root.
+            if property_schema == {"$ref": f"#/properties/{name}"}:
+                property_schema = {}
             property_variants.setdefault(name, []).append(property_schema)
         required_sets.append(set(branch.get("required") or []))
-    adapted["properties"] = {
-        name: merge_property_schemas(variants)
-        for name, variants in property_variants.items()
-    }
+    properties = dict(root_properties)
+    for name, variants in property_variants.items():
+        union = {} if {} in variants else merge_property_schemas(variants)
+        shared = root_properties.get(name, {})
+        properties[name] = (
+            {"allOf": [shared, union]} if shared and union else shared or union
+        )
+    adapted["properties"] = properties
     if required_sets:
-        required = sorted(set.intersection(*required_sets))
+        required = sorted(set(schema.get("required") or []) | set.intersection(*required_sets))
         if required:
             adapted["required"] = required
     adapted["description"] = (

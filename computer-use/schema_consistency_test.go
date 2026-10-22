@@ -32,26 +32,19 @@ var crossFieldRuleCodes = map[string]bool{
 	argumentRulePostconditionIndex: true,
 	argumentRuleRefOwnsIdentity:    true,
 	argumentRuleWaitBudget:         true,
-	// The flat AX schema has no oneOf or if/then, so rules that depend on
-	// the value of mode or of an action type are declared rules of
-	// the AX decoder: which fields a mode or type accepts or requires,
-	// whether a ref must be rN or wN, and exactly-one-of pairs whose
-	// presence depends on the type. Rules the flat schema can express
-	// (blank strings, app with window_ref) are in the schema instead.
-	axRuleFieldForMode:    true,
+	// Action-specific rules remain in the decoder. Mode field membership,
+	// required combinations, and observe=none are expressed by the schema
+	// and must not be exempted from consistency checks.
 	axRuleFieldForType:    true,
-	axRuleRequiredForMode: true,
 	axRuleRequiredForType: true,
 	axRuleOneOf:           true,
 	axRuleRefKind:         true,
-	axRuleObserveNone:     true,
 	axRuleFindFilterPair:  true,
 	axRuleValueMatch:      true,
 }
 
-// axConsistencySeeds are valid calls for each AX mode and action type. The
-// flat AX schema has no branches, so seeds generated from it alone would
-// cover only the fields every call shares.
+// axConsistencySeeds supplement schema-generated mode samples with valid
+// action combinations whose relationships remain decoder rules.
 var axConsistencySeeds = []string{
 	`{"mode":"apps"}`,
 	`{"mode":"observe","app":"a1"}`,

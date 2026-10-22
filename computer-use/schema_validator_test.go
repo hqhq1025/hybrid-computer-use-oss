@@ -49,8 +49,8 @@ func TestArgumentErrorsSelectTheIntendedBranch(t *testing.T) {
 		{"GUI", `{"actions":[{"type":"scroll","x":1,"y":1,"scroll_y":0}]}`, "/actions/0/scroll_y",
 			[]string{"scroll_y must not be 0"}},
 		{"AX", `{"mode":"ACT"}`, "/mode", []string{`mode "ACT" is unsupported`}},
-		{"AX", `{"mode":"observe","app":"x","actions":[]}`, "/actions",
-			[]string{"actions must contain 1 to 64 items"}},
+		{"AX", `{"mode":"observe","app":"x","actions":[]}`, "",
+			[]string{`mode="observe" does not accept fields: "actions"`}},
 		{"AX", `{"mode":"observe","window_ref":7}`, "/window_ref",
 			[]string{"window_ref must be a string, not a number"}},
 		{"AX", `{"mode":"act","actions":[{"type":"click","ref":"r1","target":"r1"}]}`, "/actions/0",
@@ -106,6 +106,9 @@ func TestAXDecoderAcceptedCallsPassTheSchema(t *testing.T) {
 // Rejected arguments must not reach a provider or emit input.
 func TestSchemaRejectionHappensBeforeAnyProviderCall(t *testing.T) {
 	for _, tc := range []struct{ tool, args string }{
+		{"AX", `{"mode":"observe","window_ref":"w8","limit":20}`},
+		{"AX", `{"mode":"find","cursor":"f1","app":"Finder"}`},
+		{"AX", `{"mode":"apps","actions":[{"type":"click","ref":"r1"}]}`},
 		{"AX", `{"mode":"act","actions":[{"ref":"r1","action":"press"}]}`},
 		{"AX", `{"mode":"observe","app":"x","observe":"Diff"}`},
 		{"AX", `{"mode":"act","actions":[{"type":"wait","ref":"r1","gone":"yes"}]}`},

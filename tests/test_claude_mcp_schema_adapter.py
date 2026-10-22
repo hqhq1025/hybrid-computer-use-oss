@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 # The adapter is uploaded into the guest as a standalone script.
@@ -38,3 +39,22 @@ def test_flattens_root_oneof_but_keeps_mode_values():
     assert "oneOf" not in adapted
     assert adapted["properties"]["mode"]["enum"] == ["observe", "act"]
     assert adapted["required"] == ["mode"]
+
+
+def test_shared_root_constraints_survive_adapter_without_self_references():
+    contract = json.loads(
+        (ADAPTER_PATH.parents[3] / "computer-use/testdata/contract/public_contract.json").read_text()
+    )
+    # Use the real tools/list contract so additions to AX fields cannot be
+    # silently replaced with unconstrained objects by the adapter.
+    tools = contract["tools_list"]["result"]["tools"]
+    ax = next(tool["inputSchema"] for tool in tools if tool["name"] == "AX")
+    adapted = adapt_input_schema(ax)
+    assert "oneOf" not in adapted
+    assert adapted["required"] == ["mode"]
+    for field in ("app", "window_ref", "actions", "query", "scope", "observe", "limit", "cursor", "root"):
+        assert adapted["properties"][field] == ax["properties"][field]
+    serialized = json.dumps(adapted)
+    assert "#/properties/" not in serialized
+    assert adapted["$defs"] == ax["$defs"]
+    assert adapted["properties"]["actions"]["items"]["properties"]["type"]["enum"]

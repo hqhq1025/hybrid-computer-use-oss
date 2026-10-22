@@ -288,6 +288,19 @@ identity graph:
 application aN -> top-level window wN -> element rN
 ```
 
+The published schema restricts fields by mode. `limit` belongs only to `find`;
+it does not bound an `observe` tree. Omitted fields retain their existing defaults.
+
+| Mode | Required fields after `mode` | Optional fields |
+| --- | --- | --- |
+| `apps` | None | None |
+| `observe` | Exactly one of `app`, `window_ref` | `scope`, `observe` (except `none`), `root` |
+| `find` (new query) | Exactly one of `app`, `window_ref`; `query` | `scope`, `limit` (1 to 50) |
+| `find` (next page) | `cursor` | `limit` (1 to 50) |
+| `act` | `actions` | `window_ref`, `observe` |
+
+Waits use `act` actions; `assert_ax` remains a removed mode.
+
 - `apps` lists confirmed top-level windows as `wN` with title, application and
   whether it has focus. Output names applications but shows no `aN`; `app`
   still accepts an `aN`, a name, an app id or a PID.

@@ -10,6 +10,13 @@ gateways for controlled runs; importing a full profile changes more than MCP.
 
 ## Schemas
 
+AX publishes a closed `oneOf` branch for each mode. Shared root properties
+define field types and descriptions once; each branch restricts membership
+and required combinations. `find` separates a new query from a cursor page.
+Codex keeps these mode constraints below its 5,000-byte compaction budget.
+Its normalization still drops numeric bounds and `minProperties`; the server
+enforces the original limits and rejects empty queries.
+
 The GUI schema declares its property names at the root and keeps its complete
 `oneOf` branches. Root declarations let clients close the root object without
 rejecting properties declared in a branch. Branches still define the types,
@@ -20,9 +27,12 @@ different presentation for its model API; that presentation does not replace
 server validation. Do not remove `$ref`, union branches, or unknown-field
 checks merely to make a client accept the tool definition.
 
-Claude Code uses the existing schema adapter. It changes the GUI schema view,
+Claude Code uses the existing schema adapter. It changes the AX and GUI schema views,
 not results, images, errors, or action execution. Retain it until the selected
 client and model API have been tested without it.
+The adapter retains shared root field constraints when it flattens mode
+branches. Claude's compatibility view does not enforce mode membership;
+the MCP decoder and original schema remain authoritative.
 
 Gemini uses `computer-use` as its client-side MCP server key. Current Gemini
 policy parsing splits server and tool names at an underscore, so

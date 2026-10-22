@@ -150,7 +150,7 @@ func desktopVisualSample(captureTimeout: TimeInterval) throws -> DesktopVisualSa
         }
         guard desktopBounds() == bounds,
               desktopLayoutFrameID(desktopLayout()) == frameID else {
-            throw ComputerUseError.message("Desktop layout changed during screenshot capture.")
+            throw DesktopCaptureLayoutChangedError()
         }
         var snapshot: [String: Any] = [
             "app": ["name": "", "pid": 0],

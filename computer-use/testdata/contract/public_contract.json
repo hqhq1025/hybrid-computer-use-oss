@@ -52,6 +52,7 @@
               "query": {
                 "additionalProperties": false,
                 "description": "At least one filter; ANDed, case-insensitive.",
+                "minProperties": 1,
                 "properties": {
                   "name_contains": {
                     "pattern": "\\S",
@@ -88,6 +89,156 @@
                 "window_ref"
               ]
             },
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "mode": {
+                    "const": "apps"
+                  }
+                },
+                "required": [
+                  "mode"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "oneOf": [
+                  {
+                    "required": [
+                      "app"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "window_ref"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "app": {
+                    "$ref": "#/properties/app"
+                  },
+                  "mode": {
+                    "const": "observe"
+                  },
+                  "observe": {
+                    "enum": [
+                      "diff",
+                      "tree",
+                      "full",
+                      "screenshot"
+                    ]
+                  },
+                  "root": {
+                    "$ref": "#/properties/root"
+                  },
+                  "scope": {
+                    "$ref": "#/properties/scope"
+                  },
+                  "window_ref": {
+                    "$ref": "#/properties/window_ref"
+                  }
+                },
+                "required": [
+                  "mode"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "oneOf": [
+                      {
+                        "required": [
+                          "app"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "window_ref"
+                        ]
+                      }
+                    ],
+                    "properties": {
+                      "app": {},
+                      "limit": {},
+                      "mode": {},
+                      "query": {},
+                      "scope": {},
+                      "window_ref": {}
+                    },
+                    "required": [
+                      "query"
+                    ]
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "cursor": {},
+                      "limit": {},
+                      "mode": {}
+                    },
+                    "required": [
+                      "cursor"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "properties": {
+                  "app": {
+                    "$ref": "#/properties/app"
+                  },
+                  "cursor": {
+                    "$ref": "#/properties/cursor"
+                  },
+                  "limit": {
+                    "$ref": "#/properties/limit"
+                  },
+                  "mode": {
+                    "const": "find"
+                  },
+                  "query": {
+                    "$ref": "#/properties/query"
+                  },
+                  "scope": {
+                    "$ref": "#/properties/scope"
+                  },
+                  "window_ref": {
+                    "$ref": "#/properties/window_ref"
+                  }
+                },
+                "required": [
+                  "mode"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "actions": {
+                    "$ref": "#/properties/actions"
+                  },
+                  "mode": {
+                    "const": "act"
+                  },
+                  "observe": {
+                    "$ref": "#/properties/observe"
+                  },
+                  "window_ref": {
+                    "$ref": "#/properties/window_ref"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "actions"
+                ],
+                "type": "object"
+              }
+            ],
             "properties": {
               "actions": {
                 "description": "act: ordered steps; a failed step stops the batch. Wait timeouts total at most 60000 ms; an omitted timeout counts as 5000 ms.",

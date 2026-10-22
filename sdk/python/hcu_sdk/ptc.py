@@ -43,14 +43,16 @@ _READ_MODE = "read"
 
 
 def _inline_refs(schema):
-    """Replace local {"$ref": "#/$defs/x"} with the definition."""
-    definitions = schema.get("$defs", {})
+    """Inline local JSON pointers into the tool's own schema."""
 
     def walk(node):
         if isinstance(node, dict):
             ref = node.get("$ref")
-            if isinstance(ref, str) and ref.startswith("#/$defs/"):
-                return walk(copy.deepcopy(definitions[ref[len("#/$defs/"):]]))
+            if isinstance(ref, str) and ref.startswith("#/"):
+                target = schema
+                for segment in ref[2:].split("/"):
+                    target = target[segment.replace("~1", "/").replace("~0", "~")]
+                return walk(copy.deepcopy(target))
             return {key: walk(value) for key, value in node.items() if key != "$defs"}
         if isinstance(node, list):
             return [walk(item) for item in node]
@@ -72,12 +74,22 @@ def _input_schema(tool, records):
             "type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^r[1-9][0-9]*$"},
             "description": "read: element refs rN.",
         }
-    for name, option in _OPTIONS.items():
-        properties[name] = option
-    if "oneOf" in schema:
-        # GUI: one object schema per branch; the options are valid on both.
-        for branch in schema["oneOf"]:
-            branch.setdefault("properties", {}).update(_OPTIONS)
+        if "oneOf" in schema:
+            schema["oneOf"].append({
+                "type": "object", "additionalProperties": False,
+                "properties": {"mode": {"const": _READ_MODE}, "refs": properties["refs"]},
+                "required": ["mode", "refs"],
+            })
+
+    def add_call_options(node):
+        # Every closed branch describes the same call object, including
+        # find's query/cursor alternatives. Options do not enter actions.
+        node.setdefault("properties", {}).update(_OPTIONS)
+        for keyword in ("oneOf", "anyOf", "allOf"):
+            for branch in node.get(keyword, []):
+                add_call_options(branch)
+
+    add_call_options(schema)
     return schema
 
 

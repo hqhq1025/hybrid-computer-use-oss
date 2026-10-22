@@ -156,10 +156,9 @@ func nonBlankString(description string) map[string]any {
 	return property
 }
 
-// axInputSchema is the single flat AX schema. It has no oneOf: which
-// fields belong to which mode or action type is checked by decodeAXRequest,
-// which names the field and shows a corrected call. Keep it under the
-// client compaction budget (TestAXSchemaSurvivesClientCompaction).
+// axInputSchema shares field definitions at the root to stay within client
+// compaction budgets. Closed mode branches select the legal fields and their
+// required combinations; the decoder still validates action-specific rules.
 func axInputSchema() map[string]any {
 	query := map[string]any{}
 	for _, field := range axFindFilters {
@@ -169,10 +168,11 @@ func axInputSchema() map[string]any {
 		"type":                 "object",
 		"additionalProperties": false,
 		"required":             []string{"mode"},
+		"oneOf":                axModeSchemas(),
 		// window_ref already names its app.
 		"not": map[string]any{"required": []string{"app", "window_ref"}},
 		"$defs": map[string]any{"query": map[string]any{
-			"type": "object", "additionalProperties": false, "properties": query,
+			"type": "object", "additionalProperties": false, "properties": query, "minProperties": 1,
 			"description": "At least one filter; ANDed, case-insensitive.",
 		}},
 		"properties": map[string]any{
@@ -241,6 +241,43 @@ func axInputSchema() map[string]any {
 			},
 		},
 	}
+}
+
+func axModeSchemas() []any {
+	var branches []any
+	for _, mode := range []string{axModeApps, axModeObserve, axModeFind, axModeAct} {
+		properties := map[string]any{}
+		for _, field := range axModeFields[mode] {
+			properties[field] = map[string]any{"$ref": "#/properties/" + field}
+		}
+		properties["mode"] = map[string]any{"const": mode}
+		branch := objectSchema(properties, []string{"mode"})
+		switch mode {
+		case axModeObserve:
+			branch["oneOf"] = []any{
+				map[string]any{"required": []string{"app"}},
+				map[string]any{"required": []string{"window_ref"}},
+			}
+			properties["observe"] = map[string]any{"enum": []string{observeDiff, observeTree, observeFull, observeScreenshot}}
+		case axModeFind:
+			branch["oneOf"] = []any{
+				map[string]any{
+					"additionalProperties": false,
+					"properties":           map[string]any{"mode": map[string]any{}, "app": map[string]any{}, "window_ref": map[string]any{}, "scope": map[string]any{}, "query": map[string]any{}, "limit": map[string]any{}},
+					"required":             []string{"query"},
+					"oneOf": []any{
+						map[string]any{"required": []string{"app"}},
+						map[string]any{"required": []string{"window_ref"}},
+					},
+				},
+				objectSchema(map[string]any{"mode": map[string]any{}, "cursor": map[string]any{}, "limit": map[string]any{}}, []string{"cursor"}),
+			}
+		case axModeAct:
+			branch["required"] = []string{"mode", "actions"}
+		}
+		branches = append(branches, branch)
+	}
+	return branches
 }
 
 func guiActionProperty(includeScreenshot bool) map[string]any {

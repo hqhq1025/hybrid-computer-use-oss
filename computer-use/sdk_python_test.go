@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,5 +37,54 @@ func TestPythonSDKAgainstDaemon(t *testing.T) {
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("SDK tests failed: %v\n%s", err, output)
+	}
+
+	// Validate the actual Python PTC schema, including records-only read and
+	// transport options inside every closed AX mode branch.
+	command = exec.Command(python, "-c", `import json, sys
+sys.path.insert(0, sys.argv[1])
+from hcu_sdk import Desktop, SocketTransport, ptc
+desktop = Desktop(SocketTransport(start=False))
+print(json.dumps(ptc.tool_definitions(desktop.schema())))
+desktop.close()
+`, filepath.Dir(filepath.Dir(script)))
+	command.Env = append(os.Environ(), "HCU_SOCKET="+socket)
+	output, err = command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("read PTC schema: %v\n%s", err, output)
+	}
+	var definitions []struct {
+		Name   string         `json:"name"`
+		Schema map[string]any `json:"input_schema"`
+	}
+	if err := json.Unmarshal(output, &definitions); err != nil {
+		t.Fatal(err)
+	}
+	var tools []toolDefinition
+	for _, definition := range definitions {
+		tools = append(tools, toolDefinition{Name: definition.Name, InputSchema: definition.Schema})
+	}
+	schemas, err := compileInputSchemas(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args  string
+		valid bool
+	}{
+		{`{"mode":"apps","request_id":"a"}`, true},
+		{`{"mode":"observe","window_ref":"w1","since":"s1"}`, true},
+		{`{"mode":"find","window_ref":"w1","query":{"role":"button"},"request_id":"a"}`, true},
+		{`{"mode":"find","cursor":"f1","limit":2,"request_id":"a"}`, true},
+		{`{"mode":"act","actions":[{"type":"click","ref":"r1"}],"request_id":"a"}`, true},
+		{`{"mode":"read","refs":["r1"],"request_id":"a"}`, true},
+		{`{"mode":"read"}`, false},
+		{`{"mode":"apps","refs":["r1"]}`, false},
+		{`{"mode":"observe","window_ref":"w1","limit":20}`, false},
+		{`{"mode":"find","cursor":"f1","window_ref":"w1","query":{"role":"button"}}`, false},
+	} {
+		if err := schemas["hcu_ax"].Validate(decodeTestArguments(t, tc.args)); (err == nil) != tc.valid {
+			t.Errorf("PTC %s accepted=%v want %v: %v", tc.args, err == nil, tc.valid, err)
+		}
 	}
 }

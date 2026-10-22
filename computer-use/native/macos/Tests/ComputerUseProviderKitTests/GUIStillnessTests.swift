@@ -76,6 +76,53 @@ func guiSamplingFailurePreservesInputAndResetEvidence() throws {
 }
 
 @Test
+func guiLayoutCaptureRetryKeepsEmissionCountsAndMatchingSnapshot() throws {
+    var now = 0.0
+    var captures = 0
+    let result = guiFinalObservationResult(
+        actionCount: 2, inputActionsDispatched: 2, emitted: true
+    ) {
+        try sampleGUIStillness(settleMS: 100, capture: { _ -> DesktopVisualSample in
+            captures += 1
+            if captures == 1 { throw DesktopCaptureLayoutChangedError() }
+            return visualSample(frameID: "layout-b", revision: captures)
+        }, identical: { $0.hasSamePixelsAndLayout(as: $1) }, clock: { now }, sleep: { now += $0 })
+    }
+    let gui = try #require(result["guiResult"] as? [String: Any])
+    let snapshot = try #require(result["snapshot"] as? [String: Any])
+    #expect(result["ok"] as? Bool == true)
+    #expect(gui["input_actions_dispatched"] as? Int == 2)
+    #expect(gui["input_events_emitted"] as? Bool == true)
+    #expect(gui["quiescent"] as? Bool == false)
+    #expect(snapshot["revision"] as? Int == 2)
+    #expect(snapshot["frameId"] as? String == "layout-b")
+}
+
+@Test
+func guiExhaustedLayoutCaptureDoesNotReturnOlderImage() throws {
+    var now = 0.0
+    var captures = 0
+    let result = guiFinalObservationResult(
+        actionCount: 2, inputActionsDispatched: 2, emitted: true
+    ) {
+        try sampleGUIStillness(settleMS: 250, capture: { _ -> DesktopVisualSample in
+            captures += 1
+            if captures > 1 { throw DesktopCaptureLayoutChangedError() }
+            return visualSample()
+        }, identical: { $0.hasSamePixelsAndLayout(as: $1) }, clock: { now }, sleep: { now += $0 })
+    }
+    let gui = try #require(result["guiResult"] as? [String: Any])
+    #expect(result["ok"] as? Bool == false)
+    #expect(result["snapshot"] == nil)
+    #expect(result["failureCode"] as? String == "gui_snapshot_failed")
+    #expect(result["input_events_emitted"] as? Bool == true)
+    #expect(result["partial_input_possible"] as? Bool == true)
+    #expect(result["mutation_unknown"] as? Bool == true)
+    #expect(gui["input_actions_dispatched"] as? Int == 2)
+    #expect(captures == 4)
+}
+
+@Test
 func guiPixelSamplingDetectsSinglePixelChanges() throws {
     let context = try #require(CGContext(
         data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
