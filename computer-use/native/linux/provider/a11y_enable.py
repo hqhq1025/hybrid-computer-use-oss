@@ -30,6 +30,8 @@ invisible if their toolkit reads the setting only at startup;
 `invisible_window_notes` names them and says what to restart.
 """
 
+import os
+
 from .foundation import provider_bus_name, safe
 
 try:
@@ -183,3 +185,88 @@ def request_full_tree(app):
         return
     _attribute_requested.add(key)
     safe(app.get_attributes)
+
+
+# Process image markers, checked against the paths mapped by a process. A
+# path is a marker when it ends with the given name or contains it as a
+# directory component, so versioned libraries match.
+_TOOLKIT_MARKERS = (
+    ("Qt", ("libQt5Core.so", "libQt6Core.so")),
+    ("Gecko", ("libxul.so",)),
+    ("Chromium", ("chrome_100_percent.pak",)),
+    ("GTK 2", ("libgtk-x11-2.0.so",)),
+    ("GTK", ("libgtk-3.so", "libgtk-4.so")),
+)
+
+
+def process_toolkit(pid, proc_root="/proc"):
+    """Return the UI toolkit a process has mapped, or "" when unknown."""
+    try:
+        with open(os.path.join(proc_root, str(int(pid)), "maps"),
+                  encoding="utf-8", errors="replace") as maps:
+            names = {
+                os.path.basename(line.split()[-1])
+                for line in maps
+                if "/" in line
+            }
+    except (OSError, ValueError):
+        return ""
+    for toolkit, markers in _TOOLKIT_MARKERS:
+        for marker in markers:
+            if any(name.startswith(marker) or name == marker for name in names):
+                return toolkit
+    return ""
+
+
+_RESTART_ADVICE = {
+    "Qt": (
+        "Qt reads the accessibility setting only when it starts; restart the "
+        "application"
+    ),
+    "Gecko": (
+        "Gecko reads the accessibility setting only when it starts; restart "
+        "the application"
+    ),
+    "Chromium": (
+        "Chromium and Electron read the accessibility setting only when they "
+        "start; quit every window of the application and start it again"
+    ),
+    "GTK 2": (
+        "GTK 2 needs the gail and atk-bridge modules; restart the application "
+        "with GTK_MODULES=gail:atk-bridge if it does not appear within a few "
+        "seconds"
+    ),
+    "GTK": (
+        "GTK registers on its own unless it was started with NO_AT_BRIDGE=1 "
+        "or without the session's accessibility bus; restart it from the "
+        "desktop session"
+    ),
+}
+
+
+def invisible_window_notes(managed_windows, accessible_pids, proc_root="/proc"):
+    """Name titled windows whose process has no accessibility application.
+
+    Without this the window is simply absent from the listing, and the
+    agent cannot tell an application that exports nothing from one that
+    needs a restart.
+    """
+    seen = set()
+    notes = []
+    for window in managed_windows:
+        pid = int(window.get("pid") or 0)
+        title = str(window.get("title") or "").strip()
+        if pid <= 0 or not title or pid in accessible_pids or pid in seen:
+            continue
+        seen.add(pid)
+        toolkit = process_toolkit(pid, proc_root)
+        advice = _RESTART_ADVICE.get(
+            toolkit,
+            "the application exports no accessibility tree",
+        )
+        notes.append(
+            'Not on the accessibility bus: "{}" (pid {}{}). {}. Until then '
+            "only GUI can read and operate it.".format(
+                title, pid, ", " + toolkit if toolkit else "", advice)
+        )
+    return notes

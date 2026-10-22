@@ -18,7 +18,9 @@ from .atspi_inventory import (
     resolve_app_identity,
 )
 from .snapshot import snapshot_digest, utc_timestamp
+from .a11y_enable import invisible_window_notes
 from .x11_windows import (
+    _x11_managed_windows,
     app_windows,
     iter_apps,
     opaque_window_instance_handle_for_id,
@@ -154,6 +156,10 @@ def list_apps_inventory():
             "Incomplete: {} application(s) did not answer the accessibility "
             "bus; their windows may be missing above.".format(unreadable)
         )
+    managed = _x11_managed_windows()
+    if inventory_complete(apps) and inventory_complete(managed):
+        notes.extend(invisible_window_notes(
+            managed, {node_pid(app) for app in apps}))
     return {
         "text": "\n".join(lines),
         "notes": notes,

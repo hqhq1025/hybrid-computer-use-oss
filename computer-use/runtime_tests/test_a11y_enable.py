@@ -213,3 +213,77 @@ class ChromiumTreeRequestTests(AtspiPatchedTestCase):
 
         self.assertEqual(list(inventory), [app])
         self.assertTrue(inventory.complete)
+
+
+class InvisibleWindowNoteTests(AtspiPatchedTestCase):
+    """A window whose process is not on the bus is named, with what to do."""
+
+    def _proc(self, root, pid, libraries):
+        os.makedirs(os.path.join(root, str(pid)))
+        with open(os.path.join(root, str(pid), "maps"), "w",
+                  encoding="utf-8") as maps:
+            for library in libraries:
+                maps.write(
+                    "7f00-7f01 r-xp 00000000 08:01 1 {}\n".format(library))
+            maps.write("7ffd-7ffe rw-p 00000000 00:00 0 [stack]\n")
+
+    def test_toolkit_is_read_from_mapped_libraries(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._proc(root, 10, ["/usr/lib/x86_64-linux-gnu/libQt5Core.so.5.15.3"])
+            self._proc(root, 11, ["/opt/firefox/libxul.so",
+                                  "/usr/lib/libgtk-3.so.0.2404.29"])
+            self._proc(root, 12, ["/opt/app/chrome_100_percent.pak",
+                                  "/usr/lib/libgtk-3.so.0.2404.29"])
+            self._proc(root, 13, ["/usr/lib/libgtk-x11-2.0.so.0.2400.33"])
+            self._proc(root, 14, ["/usr/lib/libgtk-3.so.0.2404.29"])
+            self._proc(root, 15, ["/usr/lib/libc.so.6"])
+
+            toolkits = [runtime.process_toolkit(pid, root)
+                        for pid in range(10, 17)]
+
+        self.assertEqual(
+            toolkits, ["Qt", "Gecko", "Chromium", "GTK 2", "GTK", "", ""])
+
+    def test_names_windows_of_processes_missing_from_the_bus(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._proc(root, 20, ["/usr/lib/libQt5Core.so.5"])
+            self._proc(root, 21, ["/usr/lib/libgtk-3.so.0"])
+            notes = runtime.invisible_window_notes(
+                [
+                    {"pid": 20, "title": "VLC media player"},
+                    {"pid": 20, "title": "VLC preferences"},
+                    {"pid": 21, "title": "Untitled - gedit"},
+                    {"pid": 22, "title": ""},
+                ],
+                accessible_pids={21},
+                proc_root=root,
+            )
+
+        self.assertEqual(len(notes), 1)
+        self.assertIn('"VLC media player" (pid 20, Qt)', notes[0])
+        self.assertIn("restart the application", notes[0])
+        self.assertIn("only GUI", notes[0])
+
+    def test_listing_reports_windows_of_processes_missing_from_the_bus(self):
+        window = _TreeNode(role="frame", name="Untitled - gedit")
+        app = _TreeNode(role="application", name="gedit", kids=(window,))
+        app.get_process_id = lambda: 21
+        original_apps = runtime.iter_apps
+        runtime.iter_apps = lambda: [app]
+        self.addCleanup(setattr, runtime, "iter_apps", original_apps)
+        managed = runtime.InventoryResult([
+            {"pid": 21, "id": "0x1", "x": 0, "y": 0, "width": 9, "height": 9,
+             "title": "Untitled - gedit"},
+            {"pid": 20, "id": "0x2", "x": 0, "y": 0, "width": 9, "height": 9,
+             "title": "Welcome - Visual Studio Code"},
+        ])
+        with mock.patch.object(runtime, "_x11_managed_windows",
+                               return_value=managed), \
+                mock.patch.object(runtime, "process_toolkit",
+                                  return_value="Chromium"):
+            notes = runtime.list_apps_inventory()["notes"]
+
+        self.assertEqual(len(notes), 1)
+        self.assertIn('"Welcome - Visual Studio Code" (pid 20, Chromium)',
+                      notes[0])
+        self.assertIn("quit every window", notes[0])
