@@ -31,6 +31,7 @@ invisible if their toolkit reads the setting only at startup;
 """
 
 import os
+import time
 
 from .foundation import provider_bus_name, safe
 
@@ -170,6 +171,12 @@ def enable_session_accessibility(bus=None):
 _attribute_requested = set()
 
 
+# Time Chromium needs after the first GetAttributes to insert the web
+# document below its frame. Measured on Chrome 150: 17-18 ms in 5 of 5
+# launches; the read that follows the call missed the page without a pause.
+CHROMIUM_WAKE_SETTLE_SECONDS = 0.15
+
+
 def request_full_tree(app):
     """Ask an application for its attributes once, as a screen reader does.
 
@@ -182,9 +189,19 @@ def request_full_tree(app):
     """
     key = provider_bus_name(app)
     if not key or key in _attribute_requested:
-        return
+        return False
     _attribute_requested.add(key)
     safe(app.get_attributes)
+    return str(safe(app.get_toolkit_name, "") or "") == "Chromium"
+
+
+def request_full_trees(apps):
+    """Wake every new application, then wait once if a Chromium one woke."""
+    woke_chromium = False
+    for app in apps:
+        woke_chromium = request_full_tree(app) or woke_chromium
+    if woke_chromium:
+        time.sleep(CHROMIUM_WAKE_SETTLE_SECONDS)
 
 
 # Process image markers, checked against the paths mapped by a process. A

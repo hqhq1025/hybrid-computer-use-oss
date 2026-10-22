@@ -333,3 +333,39 @@ class WindowWithoutTreeNoteTests(AtspiPatchedTestCase):
         self.assertIn('"Visual Studio Code"', result["notes"][0])
         self.assertIn("pid 2980", result["notes"][0])
         self.assertIn("only GUI", result["notes"][0])
+
+
+class ChromiumWakeSettleTests(AtspiPatchedTestCase):
+    """The first read after the wake must see the web document.
+
+    Chromium inserts the renderer's document about 20 ms after the first
+    GetAttributes. The first observe of a freshly started Chrome walked the
+    tree in the same request and missed the page (only browser chrome and
+    "ax_content=uncertain"); the next observe had it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        runtime._attribute_requested.clear()
+        self.addCleanup(runtime._attribute_requested.clear)
+
+    def _listing(self, toolkit):
+        app = _TreeNode(role="application", name="Browser",
+                        kids=(_TreeNode(role="frame", name="Page"),))
+        app.get_toolkit_name = lambda: toolkit
+        app.get_attributes = lambda: {}
+        root = _TreeNode(role="desktop", name="Desktop", kids=(app,))
+        sleeps = []
+        with mock.patch.object(runtime, "desktop", return_value=root), \
+                mock.patch.object(runtime, "provider_bus_name", return_value=":1.5"), \
+                mock.patch.object(runtime.time, "sleep", side_effect=sleeps.append):
+            runtime.iter_apps()
+            runtime.iter_apps()
+        return sleeps
+
+    def test_first_listing_waits_once_for_a_woken_chromium_application(self):
+        self.assertEqual(self._listing("Chromium"),
+                         [runtime.CHROMIUM_WAKE_SETTLE_SECONDS])
+
+    def test_other_toolkits_do_not_wait(self):
+        self.assertEqual(self._listing("gtk"), [])
