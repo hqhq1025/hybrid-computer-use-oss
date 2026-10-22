@@ -144,7 +144,9 @@ Input shorthands also take `--window wN`, `--as none|diff|tree` and
 element, a substring of it, or a range. `gui` has `screenshot`,
 `zoom X0 Y0 X1 Y1`, `click|double_click|move X Y`, `type TEXT` and
 `key CHORD`. GUI `drag`, `scroll` and `wait` take `gui --json`, and an AX
-batch takes `act --json`. `observe --as full|screenshot` prints an
+batch takes `act --json`. `--json -` reads the body from standard input and
+`--json @FILE` from a file, so code that builds a command does not have to
+quote JSON for the shell. `observe --as full|screenshot` prints an
 `image: full desktop WxH, the current GUI frame` line before the image path.
 After that line, `gui click` may use the image's pixels. `gui zoom` prints the
 mapping line and the zoom image path. Common options are `--session NAME`

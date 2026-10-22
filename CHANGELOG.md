@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The CLI `act --json` and `gui --json` read their body from standard input
+  with `-` and from a file with `@FILE`, in addition to an inline value.
 - The AX schema writes the find `query` object out where it is used instead
   of sharing it through `$defs`, and the GUI scroll action lists `scroll_x`
   and `scroll_y` as plain numbers; the core rejects a scroll without a
