@@ -184,7 +184,7 @@ func (s *Service) prepareProviderSnapshot(
 		baselineProjection.serializerOmitted
 	response.Snapshot.serializerBranches =
 		baselineProjection.serializerBranches
-	if err := s.BuildAndRenderAXSnapshotV1(
+	if err := s.BuildAndRenderAXSnapshot(
 		response.Snapshot,
 		request.TreeView,
 	); err != nil {
@@ -193,7 +193,7 @@ func (s *Service) prepareProviderSnapshot(
 			return nil, s.providerIdentityConflictResult(request, response, conflict)
 		}
 		return nil, TextResult(
-			"AXSnapshotV1 pipeline failed: "+err.Error(),
+			"AXSnapshot pipeline failed: "+err.Error(),
 			true,
 		).withEvidenceScope("error_only")
 	}

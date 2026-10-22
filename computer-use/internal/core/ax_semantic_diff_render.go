@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func projectedAXNodesByID(snapshot *AXSnapshotV1) map[string]*AXNode {
+func projectedAXNodesByID(snapshot *AXSnapshot) map[string]*AXNode {
 	out := map[string]*AXNode{}
 	if snapshot == nil {
 		return out
@@ -246,7 +246,7 @@ func renderAXOrderChange(
 	}
 }
 
-func canonicalAXRefs(snapshot *AXSnapshotV1) map[string]bool {
+func canonicalAXRefs(snapshot *AXSnapshot) map[string]bool {
 	refs := map[string]bool{}
 	if snapshot == nil {
 		return refs
@@ -264,7 +264,7 @@ func canonicalAXRefs(snapshot *AXSnapshotV1) map[string]bool {
 	return refs
 }
 
-func compactAbsentRefs(changes []AXDiffChange, after *AXSnapshotV1) []string {
+func compactAbsentRefs(changes []AXDiffChange, after *AXSnapshot) []string {
 	seen := map[string]bool{}
 	refs := []string{}
 	current := canonicalAXRefs(after)
@@ -330,7 +330,7 @@ func renderAXRemovedChunks(
 	lines *[]string,
 	changes []AXDiffChange,
 	before,
-	after *AXSnapshotV1,
+	after *AXSnapshot,
 ) {
 	projected := projectedAXNodesByID(before)
 	currentProjected := projectedAXNodesByID(after)
@@ -434,7 +434,7 @@ func renderAXRemovedChunks(
 func renderAXChangedChunks(
 	changes []AXDiffChange,
 	before,
-	after *AXSnapshotV1,
+	after *AXSnapshot,
 	acquisitionComplete bool,
 ) []string {
 	lines := []string{"ax_diff:"}

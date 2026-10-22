@@ -66,7 +66,7 @@ func axNodeHasInteractionSemantics(node *AXNode) bool {
 }
 
 func axNodeRefEligibility(
-	snapshot *AXSnapshotV1,
+	snapshot *AXSnapshot,
 	node *AXNode,
 ) (bool, string, AXLocatorKind) {
 	if snapshot == nil || node == nil {
@@ -130,7 +130,7 @@ func axNodeRefEligibility(
 	return true, "", locatorKind
 }
 
-func (registry *RefRegistry) AssignSnapshotRefs(snapshot *AXSnapshotV1) {
+func (registry *RefRegistry) AssignSnapshotRefs(snapshot *AXSnapshot) {
 	if registry == nil || snapshot == nil {
 		return
 	}
@@ -217,7 +217,7 @@ func (registry *RefRegistry) AssignSnapshotRefs(snapshot *AXSnapshotV1) {
 }
 
 func (registry *RefRegistry) markExistingNodeRefsPresent(
-	snapshot *AXSnapshotV1,
+	snapshot *AXSnapshot,
 	node *AXNode,
 	seenRefs map[string]bool,
 ) {

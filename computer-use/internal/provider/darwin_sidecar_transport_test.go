@@ -103,7 +103,7 @@ func TestDarwinProviderResetRetryClassification(t *testing.T) {
 		func() core.ProviderWireRequest {
 			request := core.NewProviderWireRequest("observe", core.ProviderWireObserve)
 			request.Observe = &core.ProviderObserveRequest{
-				ProtocolVersion: core.ProviderProtocolV2,
+				ProtocolVersion: core.ProviderProtocolVersion,
 				App:             "Editor",
 			}
 			return request
@@ -111,7 +111,7 @@ func TestDarwinProviderResetRetryClassification(t *testing.T) {
 		func() core.ProviderWireRequest {
 			request := core.NewProviderWireRequest("windows", core.ProviderWireWindowList)
 			request.WindowList = &core.ProviderWindowListRequest{
-				ProtocolVersion: core.ProviderProtocolV2,
+				ProtocolVersion: core.ProviderProtocolVersion,
 				App:             "Editor",
 			}
 			return request
@@ -119,7 +119,7 @@ func TestDarwinProviderResetRetryClassification(t *testing.T) {
 		func() core.ProviderWireRequest {
 			request := core.NewProviderWireRequest("resolve", core.ProviderWireResolveAndAct)
 			request.Action = &core.ProviderActionRequest{
-				ProtocolVersion: core.ProviderProtocolV2,
+				ProtocolVersion: core.ProviderProtocolVersion,
 				Intent:          core.AccessibilityResolveTarget,
 				App:             "Editor",
 				Target: &core.ProviderSemanticTarget{
@@ -143,7 +143,7 @@ func TestDarwinProviderResetRetryClassification(t *testing.T) {
 
 	mutation := core.NewProviderWireRequest("click", core.ProviderWireResolveAndAct)
 	mutation.Action = &core.ProviderActionRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 		Intent:          core.AccessibilityClick,
 		App:             "Editor",
 		Target: &core.ProviderSemanticTarget{
@@ -170,7 +170,7 @@ func TestDarwinProviderManagerRetriesReadOnlyResetAtMostOnce(t *testing.T) {
 	responses := []*core.ProviderWireResponse{
 		{
 			Protocol:              core.ProviderProtocolName,
-			SchemaVersion:         core.ProviderProtocolV2,
+			SchemaVersion:         core.ProviderProtocolVersion,
 			RequestID:             request.RequestID,
 			Operation:             request.Operation,
 			ProviderResetRequired: true,
@@ -178,7 +178,7 @@ func TestDarwinProviderManagerRetriesReadOnlyResetAtMostOnce(t *testing.T) {
 		},
 		{
 			Protocol:              core.ProviderProtocolName,
-			SchemaVersion:         core.ProviderProtocolV2,
+			SchemaVersion:         core.ProviderProtocolVersion,
 			RequestID:             request.RequestID,
 			Operation:             request.Operation,
 			ProviderResetRequired: true,
@@ -245,7 +245,7 @@ func TestDarwinProviderManagerRetriesReadOnlyResetAtMostOnce(t *testing.T) {
 func TestDarwinProviderManagerNeverReplaysMutationReset(t *testing.T) {
 	request := core.NewProviderWireRequest("reset-mutation", core.ProviderWireResolveAndAct)
 	request.Action = &core.ProviderActionRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 		Intent:          core.AccessibilityClick,
 		App:             "Editor",
 		Target: &core.ProviderSemanticTarget{
@@ -258,7 +258,7 @@ func TestDarwinProviderManagerNeverReplaysMutationReset(t *testing.T) {
 	}
 	wireResponse := core.ProviderWireResponse{
 		Protocol:              core.ProviderProtocolName,
-		SchemaVersion:         core.ProviderProtocolV2,
+		SchemaVersion:         core.ProviderProtocolVersion,
 		RequestID:             request.RequestID,
 		Operation:             request.Operation,
 		ProviderResetRequired: true,
@@ -332,7 +332,7 @@ func TestDarwinProviderManagerRetriesStartupBeforeSendingRequest(t *testing.T) {
 	request := validDarwinObserveAppsRequest("startup-retry")
 	response := core.ProviderWireResponse{
 		Protocol:      core.ProviderProtocolName,
-		SchemaVersion: core.ProviderProtocolV2,
+		SchemaVersion: core.ProviderProtocolVersion,
 		RequestID:     request.RequestID,
 		Operation:     request.Operation,
 		Accessibility: &core.ProviderAccessibilityResult{OK: true},
@@ -519,7 +519,7 @@ func TestDarwinProviderCallValidatesResponseIdentity(t *testing.T) {
 			request := validDarwinObserveAppsRequest("identity")
 			response := core.ProviderWireResponse{
 				Protocol:      core.ProviderProtocolName,
-				SchemaVersion: core.ProviderProtocolV2,
+				SchemaVersion: core.ProviderProtocolVersion,
 				RequestID:     request.RequestID,
 				Operation:     request.Operation,
 				Accessibility: &core.ProviderAccessibilityResult{OK: true},
@@ -567,14 +567,14 @@ func TestDarwinProviderCallRejectsUncorrelatedOrderedInputEvidence(
 		core.ProviderWireOrderedInput,
 	)
 	request.OrderedInput = &core.ProviderOrderedInputWireRequest{
-		ProtocolVersion:             core.ProviderProtocolV2,
+		ProtocolVersion:             core.ProviderProtocolVersion,
 		ProviderOrderedInputRequest: ordered,
 	}
 	result := darwinTestOrderedInputSuccess(ordered)
 	result.Steps[1].ActionIndex++
 	response := core.ProviderWireResponse{
 		Protocol:      core.ProviderProtocolName,
-		SchemaVersion: core.ProviderProtocolV2,
+		SchemaVersion: core.ProviderProtocolVersion,
 		RequestID:     request.RequestID,
 		Operation:     request.Operation,
 		OrderedInput:  &result,
@@ -605,7 +605,7 @@ func TestDarwinProviderInvalidEnvelopePreservesProviderReason(t *testing.T) {
 	request := validDarwinObserveAppsRequest("identity")
 	response := core.ProviderWireResponse{
 		Protocol:      core.ProviderProtocolName,
-		SchemaVersion: core.ProviderProtocolV2,
+		SchemaVersion: core.ProviderProtocolVersion,
 		RequestID:     "invalid",
 		Operation:     core.ProviderWireObserveApps,
 		Accessibility: &core.ProviderAccessibilityResult{
@@ -723,7 +723,7 @@ func TestDarwinProviderOpenCommandDoesNotWaitForApplicationExit(t *testing.T) {
 func validDarwinObserveAppsRequest(requestID string) core.ProviderWireRequest {
 	request := core.NewProviderWireRequest(requestID, core.ProviderWireObserveApps)
 	request.ObserveApps = &core.ProviderObserveAppsRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 	}
 	return request
 }
@@ -758,7 +758,7 @@ func darwinTestOrderedInputRequest(keys ...string) core.ProviderOrderedInputRequ
 	handle := "w2:" + strings.Repeat("a", 32)
 	capture := true
 	request := core.ProviderOrderedInputRequest{
-		ContractVersion: core.ProviderOrderedInputContractV1,
+		ContractVersion: core.ProviderOrderedInputContractVersion,
 		App:             "a1",
 		AppIdentity: &core.ProviderAppIdentity{
 			ProviderBusName: "pid:42", ProcessGeneration: "pid:42:start:100",
@@ -780,7 +780,7 @@ func darwinTestOrderedInputRequest(keys ...string) core.ProviderOrderedInputRequ
 
 func darwinTestOrderedInputSuccess(request core.ProviderOrderedInputRequest) core.ProviderOrderedInputResult {
 	result := core.ProviderOrderedInputResult{
-		ContractVersion: core.ProviderOrderedInputContractV1,
+		ContractVersion: core.ProviderOrderedInputContractVersion,
 		OK:              true,
 		Snapshot:        &core.ProviderSnapshot{WindowHandle: request.WindowHandle},
 		Mutation:        core.ProviderMutationFacts{InputEventsEmitted: true, DesktopStateMutated: true},

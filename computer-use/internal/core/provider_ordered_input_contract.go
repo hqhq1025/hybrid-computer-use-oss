@@ -8,7 +8,7 @@ import (
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 )
 
-const ProviderOrderedInputContractV1 = 1
+const ProviderOrderedInputContractVersion = 1
 const providerOrderedInputMaxKeyLength = contract.GUIMaxKeys*contract.GUIMaxKeyLength + contract.GUIMaxKeys - 1
 
 type ProviderOrderedInputStepStatus string
@@ -144,7 +144,7 @@ func providerOrderedInputRequestsFromPlan(
 		if activeRun != step.orderedInputRun {
 			capture := true
 			requests = append(requests, ProviderOrderedInputRequest{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				App:             context.AppToken,
 				AppIdentity: &ProviderAppIdentity{
 					ProviderBusName:   expectedWindow.ProviderBusName,
@@ -177,11 +177,11 @@ func providerOrderedInputRequestsFromPlan(
 }
 
 func (request ProviderOrderedInputRequest) Validate() error {
-	if request.ContractVersion != ProviderOrderedInputContractV1 {
+	if request.ContractVersion != ProviderOrderedInputContractVersion {
 		return fmt.Errorf(
 			"ordered-input contract version = %d, want %d",
 			request.ContractVersion,
-			ProviderOrderedInputContractV1,
+			ProviderOrderedInputContractVersion,
 		)
 	}
 	if strings.TrimSpace(request.App) == "" {

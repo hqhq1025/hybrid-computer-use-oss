@@ -63,7 +63,7 @@ func transportFindDeliverySnapshot(t testing.TB, value string) (*core.Service, *
 		},
 		Scope: contract.AXScopeWindow,
 	}
-	if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
+	if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
 		t.Fatal(err)
 	}
 	return svc, snapshot
@@ -80,7 +80,7 @@ func transportFindDeliveryMany(t testing.TB, count int) (*core.Service, *core.Ap
 			Description: strings.Repeat("d", 240),
 		})
 	}
-	if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
+	if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
 		t.Fatal(err)
 	}
 	return svc, snapshot, snapshot.Elements[2:]
@@ -491,7 +491,7 @@ func transportTestProviderOrderedInputRequest(
 		})
 	}
 	return core.ProviderOrderedInputRequest{
-		ContractVersion: core.ProviderOrderedInputContractV1,
+		ContractVersion: core.ProviderOrderedInputContractVersion,
 		App:             "a1",
 		AppIdentity: &core.ProviderAppIdentity{
 			ProviderBusName:   "pid:42",

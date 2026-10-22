@@ -186,12 +186,12 @@ class ComboEditTests(AtspiPatchedTestCase):
         self.text.assert_not_called()
 
     def test_private_wire_fixture_and_incomplete_identity(self):
-        fixture = Path(__file__).resolve().parents[1] / "testdata/provider-v2/combo-edit.request.json"
+        fixture = Path(__file__).resolve().parents[1] / "testdata/provider-wire/combo-edit.request.json"
         request = json.loads(fixture.read_text())
-        wire_v2.validate_request(request)
+        wire.validate_request(request)
         del request["action"]["target"]["editTarget"]["processGeneration"]
-        with self.assertRaises(wire_v2.ProviderRequestError):
-            wire_v2.validate_request(request)
+        with self.assertRaises(wire.ProviderRequestError):
+            wire.validate_request(request)
 
     def test_partial_selection_delete_then_failed_insert_never_retries(self):
         iface = FakeTextIface("abc", selection=(0, 2), accept=False)

@@ -30,7 +30,7 @@ func TestNativeVisibilityUnknownAliases(t *testing.T) {
 			record.Showing, record.Visible, record.VisibilityEvidence = evidence.Showing, evidence.Visible, evidence.VisibilityEvidence
 			snapshot.Elements = append(snapshot.Elements, record)
 		}
-		tree, err := buildAXSnapshotV1(snapshot)
+		tree, err := buildAXSnapshot(snapshot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +61,7 @@ func TestNativeVisibilityCloneAndWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	decoded.publicAppRef, decoded.publicWindowRef = "a1", "w1"
-	tree, err := buildAXSnapshotV1(&decoded)
+	tree, err := buildAXSnapshot(&decoded)
 	if err != nil {
 		t.Fatal(err)
 	}

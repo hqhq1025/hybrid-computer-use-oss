@@ -14,7 +14,7 @@ func TestFindCanIssueProviderBoundRefWithoutKnownCapability(t *testing.T) {
 		Showing:            &showing,
 		Visible:            &showing,
 	}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef:       "a1",
 		AppIdentity:  "calc",
 		WindowHandle: "window-1",
@@ -55,7 +55,7 @@ func TestFindPrefersSemanticRefWhenProviderIdentityIsIncomplete(t *testing.T) {
 		Showing:        &showing,
 		Visible:        &showing,
 	}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef:       "a1",
 		AppIdentity:  "calc",
 		WindowHandle: "private-window",
@@ -96,7 +96,7 @@ func TestFindCanIssueRefsAcrossPassiveCanonicalRoles(t *testing.T) {
 				Showing:            &showing,
 				Visible:            &showing,
 			}
-			snapshot := &AXSnapshotV1{
+			snapshot := &AXSnapshot{
 				AppRef:       "a1",
 				AppIdentity:  "app",
 				WindowHandle: "private-window",
@@ -129,7 +129,7 @@ func TestFindAddressabilityReportsUnavailableStableIdentity(t *testing.T) {
 		Name:      "C2",
 		FindMatch: true,
 	}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef:       "a1",
 		AppIdentity:  "calc",
 		WindowHandle: "private-window",
@@ -158,7 +158,7 @@ func TestDefaultObserveCanIssueRefFromGeometryAndPointerEvidence(t *testing.T) {
 			States: "[has-click-action]",
 		},
 	}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef:       "a1",
 		AppIdentity:  "calc",
 		WindowHandle: "private-window",
@@ -186,7 +186,7 @@ func TestDefaultObserveSeparatesControlIdentityFromActionability(t *testing.T) {
 		Showing:        &showing,
 		Visible:        &showing,
 	}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef:       "a1",
 		AppIdentity:  "app",
 		WindowHandle: "private-window",
@@ -219,7 +219,7 @@ func TestDefaultObserveCanIssueRefToVisibleSelectableItem(t *testing.T) {
 			Frame: &frame{X: 40, Y: 50, Width: 80, Height: 24},
 		},
 	}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef:       "a1",
 		AppIdentity:  "app",
 		WindowHandle: "private-window",
@@ -249,7 +249,7 @@ func TestDefaultObserveDoesNotInferActionabilityFromRoleAndGeometry(t *testing.T
 			Frame: &frame{X: 40, Y: 50, Width: 80, Height: 24},
 		},
 	}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef:       "a1",
 		AppIdentity:  "app",
 		WindowHandle: "private-window",
@@ -279,7 +279,7 @@ func TestExpandableProviderOmissionBlocksSemanticRefIssuance(t *testing.T) {
 		Showing:            &showing,
 		Visible:            &showing,
 	}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c1",
 		IdentityCoverageIncomplete: true,
@@ -319,7 +319,7 @@ func TestFindAddressabilityExplainsHiddenTarget(t *testing.T) {
 		FindMatch:          true,
 	}
 	collapsed.Children = []*AXNode{node}
-	snapshot := &AXSnapshotV1{
+	snapshot := &AXSnapshot{
 		AppRef:       "a1",
 		AppIdentity:  "editor",
 		WindowHandle: "window-1",

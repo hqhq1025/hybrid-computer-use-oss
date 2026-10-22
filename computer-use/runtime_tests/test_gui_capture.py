@@ -790,7 +790,7 @@ class ScreenshotPolicyTests(unittest.TestCase):
 
     def _observe_request(self, observation):
         return {
-            "protocol": "computer-use-provider-v2",
+            "protocol": "computer-use-provider",
             "schema_version": 2,
             "request_id": "req-observe",
             "operation": "observe",

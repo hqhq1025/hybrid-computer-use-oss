@@ -14,7 +14,7 @@ import (
 func darwinTimeoutDesktopRequest(actions []core.ProviderDesktopAction, settleMS int) core.ProviderWireRequest {
 	request := core.NewProviderWireRequest("timeout-budget", core.ProviderWireDesktopBatch)
 	request.Desktop = &core.ProviderDesktopRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 		Actions:         actions,
 		SettleMS:        settleMS,
 	}
