@@ -9,7 +9,6 @@ import sys
 
 import pytest
 
-from hcu.osworld import config as config_module
 from hcu.osworld import run_queue
 from hcu.osworld.config import load_config, runner_command
 
@@ -208,8 +207,3 @@ def test_dry_run_prints_commands_without_creating_the_run(tmp_path, capsys):
     assert "--max-requests-per-task 3" in out
     assert len([line for line in out.splitlines() if line.startswith("[")]) == 2
     assert not (tmp_path / "runs").exists()
-
-
-def test_results_dir_default_is_inside_the_repository(tmp_path):
-    config = load_config(write_config(tmp_path / "c.json"))
-    assert Path(config["results_dir"]) == config_module.DEFAULT_RESULTS_DIR

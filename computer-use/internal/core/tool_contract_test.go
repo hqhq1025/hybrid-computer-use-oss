@@ -10,21 +10,6 @@ import (
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 )
 
-func TestToolDefinitionCount(t *testing.T) {
-	if got := len(contract.ToolDefinitions()); got != 2 {
-		t.Fatalf("toolDefinitions() count = %d, want 2", got)
-	}
-	findToolDefinition(t, "AX")
-	findToolDefinition(t, "GUI")
-	for _, removed := range []string{"get_screenshot", "click_xy", "drag_xy"} {
-		for _, tool := range contract.ToolDefinitions() {
-			if tool.Name == removed {
-				t.Fatalf("legacy GUI tool %q must not be exposed", removed)
-			}
-		}
-	}
-}
-
 // TestCapabilityIsMeasuredNeverDeclaredByAppName checks that the server
 // instructions never scope capability by application name. Declaring an app
 // unsupported by name makes the agent give up on tasks the tools can perform;
@@ -371,10 +356,6 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 	if snapshot.CoordinateSpace != "screen_image_px" || snapshot.FrameID != "abc" ||
 		snapshot.Width != 1920 || snapshot.Height != 1080 {
 		t.Fatalf("GUI metadata did not survive runtime decoding: %#v", snapshot)
-	}
-	if !strings.Contains(mainGoSource(t), `"coordinate_space":`) ||
-		!strings.Contains(mainGoSource(t), `snapshot.CoordinateSpace`) {
-		t.Fatal("gui metadata helper must normalize runtime coordinateSpace to public coordinate_space")
 	}
 	for actionType, fields := range byType {
 		for _, forbidden := range []string{

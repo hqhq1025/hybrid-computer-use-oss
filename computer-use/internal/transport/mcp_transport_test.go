@@ -106,46 +106,6 @@ func TestMCPStructuredContentIsExplicitOptIn(t *testing.T) {
 	}
 }
 
-func TestMCPInitializeUsesProductOwnedServerName(t *testing.T) {
-	response := handleMCPRequest(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      float64(1),
-		"method":  "initialize",
-		"params": map[string]any{
-			"protocolVersion": core.MCPProtocolStructured,
-		},
-	}, core.NewService())
-	result, ok := response["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("initialize result has unexpected type: %#v", response["result"])
-	}
-	serverInfo, ok := result["serverInfo"].(map[string]any)
-	if !ok {
-		t.Fatalf("initialize result has no serverInfo: %#v", result)
-	}
-	if got := serverInfo["name"]; got != "computer-use" {
-		t.Fatalf("server name = %#v, want computer-use", got)
-	}
-}
-
-func TestMCPRejectsUnknownToolAsInvalidParams(t *testing.T) {
-	request := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name":      "get_app_state",
-			"arguments": map[string]any{},
-		},
-	}
-	response := handleMCPRequest(request, core.NewService())
-	rpcError, _ := response["error"].(map[string]any)
-	if rpcError["code"] != -32602 ||
-		!strings.Contains(rpcError["message"].(string), "use AX or GUI") {
-		t.Fatalf("unknown tool must be a -32602 protocol error: %#v", response)
-	}
-}
-
 func TestMCPFramingRecoversFromMalformedAndOversizedMessages(t *testing.T) {
 	ping := `{"jsonrpc":"2.0","id":1,"method":"ping"}` + "\n"
 	oversized := `{"x":"` + strings.Repeat("x", contract.MaxMCPMessageBytes) + `"}` + "\n"

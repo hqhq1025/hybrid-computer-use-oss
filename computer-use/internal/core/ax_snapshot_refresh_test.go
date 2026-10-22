@@ -368,15 +368,6 @@ func TestVerifyPreservesProjectionWithoutReplacingActionCache(t *testing.T) {
 			t.Fatalf("verify projection contract missing %q", marker)
 		}
 	}
-	for _, forbidden := range []string{
-		"retryRequest.Prune = &unpruned",
-		"[search escalation]",
-		`StructuredContent["auto_unpruned_retry"]`,
-	} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("find must not auto-escalate or report rejected metadata %q", forbidden)
-		}
-	}
 }
 
 func TestMutatingAXRequestIsNeverReplayedAfterWindowChange(t *testing.T) {

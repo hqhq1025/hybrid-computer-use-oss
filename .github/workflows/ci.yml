@@ -23,9 +23,9 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: go vet
         run: go vet ./...
-      - name: go test
-        run: go test ./...
-      - name: Native transport regressions
+      # The sidecar tags only add test transports, so this one run covers every
+      # test of plain `go test ./...`.
+      - name: go test (race, with sidecar transports)
         run: go test -race -tags 'darwin_sidecar_test windows_sidecar_test' ./...
       - name: Cross-platform Go static checks
         run: |

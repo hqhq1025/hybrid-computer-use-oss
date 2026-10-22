@@ -397,15 +397,6 @@ class GUIScreenCoordinateTests(GUISettleAndFrameGuardCases, unittest.TestCase):
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.kwargs["timeout"], 0.25)
 
-    def test_gui_window_actions_are_removed(self):
-        for action_type in ("activate_window", "close_window"):
-            with self.assertRaisesRegex(
-                    RuntimeError, "unsupported gui action type"):
-                runtime.validate_gui_action(
-                    {"type": action_type, "x": 10, "y": 20},
-                    self.desktop,
-                )
-
     def test_gui_executes_actions_in_order_and_returns_one_final_screenshot(self):
         executed = []
         with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop), \

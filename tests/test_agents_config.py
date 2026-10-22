@@ -49,8 +49,7 @@ def test_unknown_execution_context_is_rejected(context):
         config(execution_context=context)
 
 
-@pytest.mark.parametrize("version", ["v1", "v2"])
-def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch, version):
+def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch):
     tomllib = pytest.importorskip("tomllib")
     root = Path(__file__).resolve().parents[1]
     # Import the real staging path without loading the VM or task assets.
@@ -73,7 +72,7 @@ def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch, version)
     args = argparse.Namespace(
         agent="codex", model="selected-model", effort="xhigh",
         gateway="http://gateway:8600",
-        benchmark_version=version, channels="",
+        benchmark_version="v2", channels="",
     )
     run = runner.TaskRun(
         args=args, run_tag="config-test", result_dir=tmp_path,

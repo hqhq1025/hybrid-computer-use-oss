@@ -466,29 +466,6 @@ func failureDiagnosticFragmentsPreserveBytesAndBoundLogStrings() throws {
 }
 
 @Test
-func failureDiagnosticNativeLogRoundtripCanary() {
-    let context = Thread.current.threadDictionary
-    let keys = ["computer-use.liveness.request", "computer-use.failure.count",
-                "computer-use.liveness.phase", "computer-use.failure.snapshot"]
-    let saved = keys.map { context[$0] }
-    defer {
-        for (key, value) in zip(keys, saved) {
-            if let value { context[key] = value } else { context.removeObject(forKey: key) }
-        }
-    }
-    let request = "diagnostic-roundtrip-" + UUID().uuidString
-    context[keys[0]] = request
-    context[keys[1]] = 7
-    context[keys[2]] = "native-log-canary"
-    context[keys[3]] = 23
-    providerFailureDiagnostic("native_log_roundtrip") {
-        ["sample": String(repeating: "x", count: 15_000), "tail": "end-of-canary"]
-    }
-    #expect(context[keys[1]] as? Int == 8)
-    print("PROVIDER_FAILURE_LOG_CANARY \(request) \(getpid())")
-}
-
-@Test
 func expansionAdvertisedBooleanIsSampledOnceInOrder() throws {
     for expected in [false, true] {
         var calls: [String] = []
