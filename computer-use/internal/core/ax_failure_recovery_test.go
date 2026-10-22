@@ -688,3 +688,24 @@ func TestBatchStopAfterNoInputFailureSaysTheFailedActionDidNotCauseTheState(t *t
 		}
 	}
 }
+
+// An AX error while a stale-reference observation is still owed tells the
+// model that the explicit observation is still required and that the
+// earlier failure caused no UI change.
+func TestAXErrorWhileObservationIsOwedRepeatsTheRequirement(t *testing.T) {
+	service := NewService()
+	service.rememberFailedObservation("editor", &AppSnapshot{
+		App:          AppDescriptor{Name: "Editor", PID: 7},
+		WindowHandle: "pid7/editor/frame",
+		sourceApp:    "editor",
+	})
+	result := service.callTool(contract.PublicToolAX, map[string]any{
+		"mode": "act", "app": "editor", "actions": []any{map[string]any{"type": "click", "ref": "r17"}},
+	})
+	text := ResultText(result)
+	if !result.IsError || result.StructuredContent["observation_required"] != true ||
+		!strings.Contains(text, "An explicit AX mode=observe or mode=find call is still required "+
+			"after the earlier stale-reference failure.") {
+		t.Fatalf("owed observation was not repeated: %#v\n%s", result.StructuredContent, text)
+	}
+}

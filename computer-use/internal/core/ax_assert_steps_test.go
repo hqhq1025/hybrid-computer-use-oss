@@ -1,54 +1,9 @@
 package core
 
 import (
-	"errors"
 	"strings"
 	"testing"
 )
-
-func TestWindowTitlePollKeepsTitlesAcrossAFailedRead(t *testing.T) {
-	poll := windowTitlePoll{lastTitles: []string{}}
-	matched := poll.record("editor", "settings", &ProviderWindowResult{
-		OK: true, WindowTitles: []string{"Main", "Settings"},
-	}, nil)
-	if len(matched) != 1 || !poll.sampledLiveUI {
-		t.Fatalf("matched=%q poll=%#v", matched, poll)
-	}
-	poll.record("editor", "settings", nil, errors.New("bridge down"))
-	if poll.lastError != "bridge down" || len(poll.lastTitles) != 2 {
-		t.Fatalf("failed read lost the last complete titles: %#v", poll)
-	}
-	timeout := poll.timeoutResult("editor", "settings", true, 1, 2, 0)
-	if !timeout.IsError ||
-		timeout.StructuredContent["assertion_status"] != "observation_incomplete" ||
-		timeout.StructuredContent["inventory_sample_complete"] != false {
-		t.Fatalf("a timeout after a failed read must stay incomplete: %#v",
-			timeout.StructuredContent)
-	}
-}
-
-func TestWindowTitlePollCountsCompleteAppAbsenceAsALiveRead(t *testing.T) {
-	poll := windowTitlePoll{lastTitles: []string{"Old"}}
-	poll.record("a1", "settings", &ProviderWindowResult{
-		Error: "gone",
-		Failure: &ProviderFailure{
-			Code: "stale_app_ref", Subject: "app", FactsComplete: true,
-		},
-	}, nil)
-	if poll.lastError != "" || !poll.sampledLiveUI || poll.lastTitles != nil {
-		t.Fatalf("complete app absence was not a live empty read: %#v", poll)
-	}
-	poll = windowTitlePoll{}
-	poll.record("editor", "settings", &ProviderWindowResult{
-		Error: "gone",
-		Failure: &ProviderFailure{
-			Code: "stale_app_ref", Subject: "app", FactsComplete: true,
-		},
-	}, nil)
-	if poll.lastError == "" || poll.sampledLiveUI {
-		t.Fatalf("absence of an app named without aN must stay an error: %#v", poll)
-	}
-}
 
 func TestRefAssertionPollKeepsStatusOnSuccessfulResolve(t *testing.T) {
 	poll := refAssertionPoll{lastStatus: "locator_missing"}

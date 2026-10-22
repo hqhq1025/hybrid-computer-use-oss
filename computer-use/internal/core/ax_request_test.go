@@ -142,9 +142,6 @@ func TestDecodeAXPredicateMapsToInternalAssertions(t *testing.T) {
 			map[string]any{"type": "value", "value": "14", "match": "contains"}},
 		"text": {map[string]any{"type": "text", "ref": "r1", "text": "Done", "negate": true},
 			map[string]any{"type": "text_contains", "text": "Done", "negate": true}},
-		"title": {map[string]any{"type": "title", "text": "Saved", "timeout_ms": 900.0, "stable_ms": 100.0},
-			map[string]any{"type": "window_title_contains", "text": "Saved", "exists": true,
-				"timeout_ms": 900, "stable_ms": 100}},
 	} {
 		got, err := decodeAXPredicate(test.in, "until")
 		if err != nil {

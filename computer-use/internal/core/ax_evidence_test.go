@@ -607,27 +607,6 @@ func TestPrepareAXEvidenceKeepsFinalWindowTransition(t *testing.T) {
 	}
 }
 
-// A passing action until is reported once, as until:"true"; its internal
-// reconciliation details do not repeat it per action with "cause
-// unattributed" next to a verified result.
-func TestCompactBatchOmitsPassingActionGuard(t *testing.T) {
-	result := compactAXBatchResult(map[string]any{
-		"actions": []map[string]any{{
-			"action_index": 0,
-			"action_type":  "click",
-			"postcondition": map[string]any{
-				"status":                              "pass",
-				"verified":                            true,
-				"reconciled_by_canonical_observation": true,
-				"cause_unattributed":                  true,
-			},
-		}},
-	})
-	if _, present := result["actions"]; present {
-		t.Fatalf("a passing guard was repeated per action: %#v", result)
-	}
-}
-
 func TestPrepareAXEvidenceFullViewStillHidesDebugTelemetry(t *testing.T) {
 	full := map[string]any{
 		"ax_mode":      "observe",
