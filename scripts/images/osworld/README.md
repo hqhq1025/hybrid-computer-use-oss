@@ -96,6 +96,53 @@ errors. It checks that Chrome's installed version stays unchanged. It does not
 upgrade Chrome or disable signature verification. Other repository entries and
 legacy key files remain unchanged.
 
+## Optional VS Code upgrade
+
+This separate procedure selects an official Microsoft package. It does not run
+as part of `install.py`. Preserve the existing Code settings and profile.
+
+1. Close Code in the guest.
+2. Download the selected release and check its package metadata:
+
+```bash
+code_version=1.143.0-1792533444
+code_deb="/tmp/code_${code_version}_amd64.deb"
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://update.code.visualstudio.com/${code_version%%-*}/linux-deb-x64/stable" \
+  --output "$code_deb"
+test "$(dpkg-deb -f "$code_deb" Package)" = code
+test "$(dpkg-deb -f "$code_deb" Version)" = "$code_version"
+test "$(dpkg-deb -f "$code_deb" Architecture)" = amd64
+```
+
+Stop if any metadata check fails. Keep the variables in the same shell for the
+remaining commands.
+
+3. Inspect the dependency plan:
+
+```bash
+sudo apt-get --simulate --no-remove --reinstall install "$code_deb"
+```
+
+Proceed only if `code` is the only package to change, with no added or removed
+packages. `--reinstall` also restores package files when this version is already
+installed. Repair filesystem errors offline before reinstalling packages.
+
+4. Install the package and verify its recorded version and package state:
+
+```bash
+sudo apt-get --no-remove --reinstall -y install "$code_deb"
+test "$(dpkg-query -W -f='${Version}' code)" = "$code_version"
+sudo dpkg --audit
+```
+
+5. Restart Code as the desktop user with the existing profile, then verify
+   editor accessibility, Unicode input, newlines, tabs and saving a file.
+
+Do not pass a diagnostic `--user-data-dir` or copy a test profile into the
+image. This package update does not establish final image readiness; complete
+the filesystem and cold-boot checks before selecting the image for evaluation.
+
 ## Optional LibreOffice installation
 
 `install_libreoffice.py` installs the official release selected in
