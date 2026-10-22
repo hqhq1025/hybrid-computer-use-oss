@@ -20,6 +20,7 @@ from runtime_tests.test_snapshot_identity import *  # noqa: F401,F403
 from runtime_tests.test_events import *  # noqa: F401,F403
 from runtime_tests.test_capabilities import *  # noqa: F401,F403
 from runtime_tests.test_combo_edit import *  # noqa: F401,F403
+from runtime_tests.test_editable_click import *  # noqa: F401,F403
 from runtime_tests.test_select_boundaries import *  # noqa: F401,F403
 from runtime_tests.test_chromium_windows import *  # noqa: F401,F403
 from runtime_tests.test_a11y_enable import *  # noqa: F401,F403
