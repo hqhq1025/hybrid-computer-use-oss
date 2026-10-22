@@ -302,8 +302,8 @@ with the original record. Neither failure retries desktop input.
 `sdk/python/examples/open_gcua_worker.py` injects this adapter into OpenGCUA's
 existing `CodeExecutor`. The example names the OpenGCUA revision it was
 tested against and uses private bootstrap hooks, not a supported plugin
-interface. The
-host and worker require Python 3.11+ and Pillow. Configure these variables:
+interface. The host and worker require Python 3.11+ and Pillow. Configure
+these variables:
 
 | Variable | Value |
 | --- | --- |

@@ -176,8 +176,8 @@ missing required response evidence stops preparation.
 
 An empty desktop can pass discovery without exercising observe or find;
 the report records those checks as skipped. Before evaluating a changed
-build, also run these reads against a known open fixture window and require every check
-to pass. A setup canary alone does not verify the MCP response contract.
+build, also run these reads against a known open fixture window and require
+every check to pass. A setup canary alone does not verify the MCP response contract.
 
 ## Run one task
 
