@@ -2,6 +2,7 @@
 
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
+    corrected_screen_frame,
     frame,
     limit_text,
     node_pid,
@@ -130,7 +131,9 @@ class NodeFacts:
         component = self.value("component")
         if component is None:
             return None
-        return sane_rect_frame(self.value("extents"))
+        return corrected_screen_frame(
+            self.node, sane_rect_frame(self.value("extents")),
+            self.scope_cache("embedded_origins"), role=self.value("role", ""))
 
     def relative_frame(self, window_bounds):
         bounds = self.screen_frame()

@@ -5,6 +5,97 @@ from runtime_test_support import *  # noqa: F401,F403
 from runtime_tests.test_failure_recovery import FailureRecoveryCases
 
 
+class EmbeddedOriginTests(unittest.TestCase):
+    class Node:
+        def __init__(self, role, bounds, parent=None):
+            self.role, self.bounds, self.parent = role, bounds, parent
+            self.children = []
+            if parent is not None:
+                parent.children.append(self)
+
+        def get_role_name(self):
+            return self.role
+
+        def get_parent(self):
+            return self.parent
+
+        def get_component_iface(self):
+            return self
+
+        def get_child_count(self):
+            return len(self.children)
+
+        def get_child_at_index(self, index):
+            return self.children[index]
+
+    def tree(self, x=70, y=64):
+        rect = lambda x, y, w, h: dict(x=x, y=y, width=w, height=h)
+        window = self.Node("frame", rect(x, y-37, 800, 637))
+        outer = self.Node("panel", rect(x, y, 800, 600), window)
+        host = self.Node("panel", rect(x, y+25, 800, 575), outer)
+        root = self.Node("root pane", rect(x, y, 800, 575), host)
+        button = self.Node("push button", rect(x+48, y+2, 44, 35), root)
+        return window, outer, host, root, button
+
+    def test_host_inset_translates_only_embedded_subtree(self):
+        for x, y in [(70, 64), (317, 243)]:
+            nodes = self.tree(x, y)
+            with mock.patch.object(foundation, "raw_extents", lambda n: n.bounds):
+                for node in nodes[:3]:
+                    self.assertEqual(foundation.extents(node), node.bounds)
+                for node in nodes[3:]:
+                    self.assertEqual(foundation.extents(node)["y"], node.bounds["y"]+25)
+                    self.assertEqual(foundation.extents(node)["x"], node.bounds["x"])
+
+    def test_unrelated_root_panes_are_not_translated(self):
+        for change in ["size", "origin", "parent_role", "outer_edge", "correct"]:
+            window, outer, host, root, button = self.tree()
+            if change == "size": root.bounds["height"] -= 1
+            if change == "origin": root.bounds["x"] += 1
+            if change == "parent_role": host.role = "window"
+            if change == "outer_edge": outer.bounds["width"] += 1
+            if change == "correct": root.bounds["y"] = host.bounds["y"]
+            with mock.patch.object(foundation, "raw_extents", lambda n: n.bounds):
+                self.assertEqual(foundation.extents(button), button.bounds)
+
+    def test_embedding_is_found_when_parent_reply_skips_host_panels(self):
+        nodes = self.tree()
+        for index, node in enumerate(nodes):
+            node.path = '/accessible/' + str(index)
+        nodes[3].parent = nodes[0]
+        with mock.patch.object(foundation, "raw_extents", lambda n: n.bounds):
+            self.assertEqual(foundation.extents(nodes[-1])["y"], 91)
+            nodes[0].children.append(nodes[1])
+            self.assertEqual(foundation.extents(nodes[-1]), nodes[-1].bounds)
+
+    def test_new_geometry_read_does_not_reuse_previous_translation(self):
+        window, outer, host, root, button = self.tree()
+        with mock.patch.object(foundation, "raw_extents", lambda n: n.bounds):
+            self.assertEqual(foundation.extents(button)["y"], 91)
+            root.bounds["y"] += 25
+            button.bounds["y"] += 25
+            self.assertEqual(foundation.extents(button)["y"], 91)
+
+    def test_detached_root_pane_has_no_origin_correction(self):
+        root = self.tree()[3]
+        root.parent = None
+        with mock.patch.object(foundation, "raw_extents", lambda n: n.bounds):
+            self.assertEqual(foundation.extents(root), root.bounds)
+
+    def test_hit_testing_converts_only_inside_embedded_provider(self):
+        nodes = self.tree()
+        calls = []
+        def hit(node, x, y, coord):
+            calls.append((node, x, y))
+            index = nodes.index(node)
+            return nodes[index+1] if index+1 < len(nodes) else None
+        with mock.patch.object(foundation, "raw_extents", lambda n: n.bounds), \
+                mock.patch.object(foundation.Atspi.Component, "get_accessible_at_point", hit):
+            self.assertIs(actionability._deepest_accessible_at(nodes[0], 140, 108), nodes[-1])
+        self.assertEqual([(x,y) for _,x,y in calls],
+                         [(140,108)]*3 + [(140,83)]*2)
+
+
 class ProviderIdentityPrimitiveTests(unittest.TestCase):
     def test_process_generation_handles_spaces_and_parentheses_in_comm(self):
         with tempfile.TemporaryDirectory() as root:
