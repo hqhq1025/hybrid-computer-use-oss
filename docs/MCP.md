@@ -97,7 +97,9 @@ Sessions that already have accessibility on see only reads.
 
 `AX {"mode":"apps"}` names each titled window whose process is not on the
 accessibility bus, with its toolkit and the restart that makes it visible.
-Until the restart, only GUI can read and operate that window.
+Until the restart, only GUI can read and operate that window. It also names
+windows that an application on the bus shows outside its tree, such as the
+native message boxes of Electron applications; use GUI for those.
 
 On other desktops, applications started before the provider may also need
 a restart. A GTK 2 application without an XSETTINGS manager needs
