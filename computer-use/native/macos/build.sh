@@ -115,6 +115,7 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
   )
   "${swiftc_bin}" \
     -O \
+    -swift-version 6 \
     -target "${swift_target}" \
     -sdk "${sdk_path}" \
     -num-threads "${COMPUTER_USE_SWIFT_THREADS:-4}" \
@@ -129,6 +130,7 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     -o "${swift_output}/libComputerUseProviderKit.dylib"
   "${swiftc_bin}" \
     -O \
+    -swift-version 6 \
     -target "${swift_target}" \
     -sdk "${sdk_path}" \
     -parse-as-library \
