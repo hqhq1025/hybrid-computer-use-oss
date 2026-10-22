@@ -277,3 +277,59 @@ func TestCLIStrictBatchJSONSourcesRejectBeforeDaemon(t *testing.T) {
 		}
 	}
 }
+
+// act and gui read a --json body from standard input (-) or a file (@PATH)
+// exactly as they read it inline, so code that builds a command needs no
+// shell quoting. An unreadable source is a usage error before the daemon.
+func TestCLIJSONBodyFromStdinOrFile(t *testing.T) {
+	t.Setenv("DISPLAY", ":9")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	server, backend, socket := startInProcessDaemon(t, time.Minute)
+	ref := firstRef(t, observeMain(t, testClient(t, socket, "json-source-setup")))
+	body := fmt.Sprintf(`{"actions":[{"type":"click","ref":%q}],"observe":"none"}`, ref)
+	file := filepath.Join(t.TempDir(), "act.json")
+	if err := os.WriteFile(file, []byte(body+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defer func(previous io.Reader) { cliStdin = previous }(cliStdin)
+	for index, source := range []string{"-", "@" + file} {
+		cliStdin = strings.NewReader(body)
+		var stdout, stderr bytes.Buffer
+		args := []string{"--socket", socket, "--records", "--json", source}
+		if status := runShorthand("act", args, &stdout, &stderr); status != 0 {
+			t.Fatalf("%s: status=%d stderr=%q", source, status, stderr.String())
+		}
+		var record core.Record
+		if err := json.Unmarshal(stdout.Bytes(), &record); err != nil || !record.OK || backend.inputCount() != index+1 {
+			t.Fatalf("%s: record=%+v err=%v inputs=%d", source, record, err, backend.inputCount())
+		}
+	}
+	for _, tc := range []struct {
+		command, source, stdin string
+	}{
+		{"act", "@" + filepath.Join(t.TempDir(), "missing.json"), ""},
+		{"gui", "@" + filepath.Join(t.TempDir(), "missing.json"), ""},
+		{"act", "-", body + " trailing"},
+		{"gui", "-", ""},
+	} {
+		cliStdin = strings.NewReader(tc.stdin)
+		before := strictConnectionCount(server)
+		var stdout, stderr bytes.Buffer
+		status := runShorthand(tc.command, []string{"--socket", socket, "--json", tc.source}, &stdout, &stderr)
+		if status != exitUsage || strictConnectionCount(server) != before {
+			t.Fatalf("%s %s: status=%d connections=%d->%d stderr=%q", tc.command, tc.source, status,
+				before, strictConnectionCount(server), stderr.String())
+		}
+	}
+	cliStdin = strings.NewReader(`{"actions":[{"type":"screenshot"}]}`)
+	p, f, err := parseCLIArgs("gui", []string{"--json", "-"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f["json"], err = jsonFlagSource(f["json"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, args, err := cliShorthands["gui"].build(p, f); err != nil || len(args["actions"].([]any)) != 1 {
+		t.Fatalf("gui --json - built %v, %v", args, err)
+	}
+}

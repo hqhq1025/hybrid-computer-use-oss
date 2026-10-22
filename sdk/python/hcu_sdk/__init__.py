@@ -501,6 +501,17 @@ class _Builders:
             args["settle_ms"] = settle_ms
         return self.call("GUI", args, request_id=request_id)
 
+    def click_zoom(self, record, u, v, request_id=None, **click):
+        """Click the frame pixel shown at (u, v) of a zoom image.
+
+        record is the zoom() result; zoom_point converts (u, v) to the frame
+        pixel, and the click is an ordinary GUI click on the current frame,
+        so it fails as stale when the window there changed. click takes the
+        other click fields, such as button or keys.
+        """
+        x, y = zoom_point(record, u, v)
+        return self.gui([dict(click, type="click", x=x, y=y)], request_id=request_id)
+
 
 def _window_action(kind, window):
     if isinstance(window, str) and window[:1] == "w" and window[1:].isdigit():

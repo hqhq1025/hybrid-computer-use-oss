@@ -58,6 +58,13 @@ Outside OSWorld, the configuration generator embeds the selected profile in
 `developer_instructions` instead, without replacing the user's workspace
 instructions. Its `--codex-home` must match the client's actual `CODEX_HOME`.
 
+`--code-mode` (queue config `"code_mode": true`) is the Codex code-mode
+profile. It turns on `code_mode`, `code_mode_only` and `code_mode_host`
+(otherwise `code_mode_host` stays off), keeps the `computer_use` MCP server
+with `omit_tools_from = ["deferred"]`, and appends `instructions/hybrid-code.md`
+to the selected profile. Code then calls AX and GUI as nested MCP tools. Other
+agents reject the switch.
+
 ## Claude Code
 
 Allowed tools:
