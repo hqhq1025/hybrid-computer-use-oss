@@ -1,47 +1,21 @@
-# AX, GUI, And CDP
+# AX, GUI, and CDP
 
-## AX Startup
+Last verified against commit `a4006c5`.
+
+## AX and GUI startup
 
 `computer-use` must run in the same signed-in desktop session as the
-applications. See [Platform support](PLATFORMS.md) for macOS permissions and
-Windows session requirements. On Linux the environment must expose the correct:
-
-```text
-DISPLAY
-XAUTHORITY
-XDG_RUNTIME_DIR
-DBUS_SESSION_BUS_ADDRESS
-```
+applications. [Computer Use MCP](MCP.md#desktop-runtime) lists the Linux
+session variables and packages, and [Platform support](PLATFORMS.md) covers
+macOS permissions and Windows session requirements.
 
 OSWorld guests provide `/home/user/a11y-env.sh`; runners source it before
-starting the agent. The MCP can discover some session values from
-`/run/user/<uid>` and desktop processes, but explicit guest session binding is
-more reliable.
+starting the agent. When session variables are missing, the server tries to
+discover them from `/run/user/<uid>` and desktop processes, but explicit
+session binding is more reliable. [Troubleshooting](MCP.md#troubleshooting)
+lists diagnostic commands.
 
-Required Linux packages:
-
-```text
-python3
-python3-gi
-gir1.2-atspi-2.0
-gir1.2-gtk-3.0
-gir1.2-gdkpixbuf-2.0
-xdotool
-wmctrl
-x11-utils
-```
-
-Quick diagnostics:
-
-```bash
-computer-use doctor
-computer-use --version
-python3 -c 'import gi; gi.require_version("Atspi", "2.0"); from gi.repository import Atspi'
-xdotool getactivewindow
-wmctrl -lpG
-```
-
-## CDP Startup
+## CDP startup
 
 CDP is independent from AX and GUI:
 
@@ -65,7 +39,7 @@ ss -ltnp | grep 9222
 The endpoint may be forwarded by the OSWorld provider. Always use the endpoint
 reported by the active environment rather than assuming a host port.
 
-## Channel Selection
+## Channel selection
 
 - Use CDP for DOM-aware browser navigation and downloads when Codex exposes it.
 - Use AX for browser chrome, dialogs, menus, named controls, and semantic state.
@@ -73,5 +47,6 @@ reported by the active environment rather than assuming a host port.
 - Use shell/file APIs for durable state when the instruction does not require a
   visible application workflow.
 
-After GUI mutation, refresh AX before reusing semantic refs. Never reuse AX
-window-relative coordinates as GUI full-desktop coordinates.
+After GUI input, read AX again before reusing refs. GUI coordinates are
+pixels of the latest GUI screenshot; do not reuse AX bounds or
+window-relative coordinates as GUI coordinates.

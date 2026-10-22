@@ -1,10 +1,13 @@
 # Client compatibility
 
+Last verified against commit `a4006c5`.
+
 HCU exposes `AX` and `GUI` over stdio MCP. A client that discovers both tools
 has passed discovery, not a complete desktop test. Check the model request,
 tool result, and next model request to verify the whole path.
 
-Use a minimal MCP configuration to add HCU to an existing client. The
+Use a minimal MCP configuration to add HCU to an existing client; see
+[Computer Use MCP](MCP.md#codex) for Codex and Claude Code examples. The
 [agent profiles](AGENT_PROFILES.md) also replace prompts and configure model
 gateways for controlled runs; importing a full profile changes more than MCP.
 

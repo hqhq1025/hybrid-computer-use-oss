@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Rewrite the README as a short overview with a feature table, a platform
+  matrix and client, CLI and SDK quick starts. Update the docs for the
+  package split, the 1366x768 screenshot size, the current error table, CLI
+  commands and environment variables, and replace duplicated setup text with
+  links.
 - Split the `computer-use` Go module from one `package main` into layered
   packages: `internal/contract`, `internal/core`, `internal/provider`,
   `internal/transport` and `cmd/computer-use`; the embedded Linux provider
