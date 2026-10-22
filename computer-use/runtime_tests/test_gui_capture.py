@@ -251,6 +251,84 @@ class GUICapturePipelineTests(unittest.TestCase):
                     self.assertIn("changed during the batch", response["error"])
                     self.assertTrue(response["mutation_unknown"])
 
+    # Zoom is look-only and bound to the frame its region came from.
+    def zoom_after(self, published, now, region, frame_id=None):
+        frame_id = self.publish(published) if frame_id is None else frame_id
+        self.layout_mock.side_effect = [now] * 8
+        self.zoomed = []
+        def zoom(_capture, geometry):
+            self.zoomed.append(geometry)
+            return {"data": "zoom-png", "mimeType": "image/png", "encoding": "png"}
+        with mock.patch.object(runtime.CapturedGUISnapshot, "zoom", zoom):
+            return runtime.perform_gui([{"type": "zoom", "region": region}],
+                                       frame_id=frame_id)
+
+    def test_zoom_returns_a_region_of_the_named_frame_without_input(self):
+        layout = self.layouts([("0xa", 0, 0, 50, 50)])[0]
+        response = self.zoom_after(layout, layout, [10, 10, 40, 30])
+        self.assertTrue(response["ok"], response.get("error"))
+        self.execute.assert_not_called()
+        self.assertFalse(response["input_events_emitted"])
+        zoom = response["guiResult"]["zoom"]
+        self.assertEqual(zoom["region"], [10.0, 10.0, 40.0, 30.0])
+        self.assertEqual((zoom["width"], zoom["height"]), (120, 80))
+        # The zoom image is not a frame and is never remembered as one.
+        self.assertNotIn("frameId", response["snapshot"])
+        self.assertEqual(response["snapshot"]["coordinateSpace"], "zoom_image_px")
+        published = dict(gui_dispatch._published_layouts)
+        self.assertEqual(dict(gui_dispatch._published_layouts), published)
+
+    def test_zoom_rejects_an_unpublished_frame(self):
+        before, after = self.layouts(
+            [("0xa", 0, 0, 50, 50)], [("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 20, 20)])
+        response = self.zoom_after(before, after, [10, 10, 40, 30],
+                                   frame_id="not-a-published-frame")
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["failureCode"], "stale_gui_frame")
+        self.assertEqual(self.zoomed, [])
+        self.assertTrue(response["snapshot"]["frameId"])
+
+    def test_zoom_without_a_frame_is_stale(self):
+        layout = self.layouts([("0xa", 0, 0, 50, 50)])[0]
+        self.layout_mock.side_effect = [layout] * 4
+        response = runtime.perform_gui([{"type": "zoom", "region": [0, 0, 20, 20]}])
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["failureCode"], "stale_gui_frame")
+
+    def test_zoom_checks_every_window_over_the_region(self):
+        before = self.layouts([("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 30, 30)])[0]
+        for name, windows, ok in [
+            ("unrelated window moved", [("0xa", 0, 0, 50, 50), ("0xb", 65, 60, 30, 30)], True),
+            ("window over region moved", [("0xa", 2, 0, 50, 50), ("0xb", 60, 60, 30, 30)], False),
+            ("new window covers a corner", [("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 30, 30),
+                                             ("0xc", 38, 28, 5, 5)], False),
+            ("stacking changed", [("0xb", 60, 60, 30, 30), ("0xa", 0, 0, 50, 50)], True),
+        ]:
+            with self.subTest(name):
+                response = self.zoom_after(before, self.layouts(windows)[0], [10, 10, 40, 30])
+                self.assertEqual(response["ok"], ok, response.get("error"))
+                self.execute.assert_not_called()
+                if not ok:
+                    self.assertEqual(response["failureCode"], "stale_gui_frame")
+                    self.assertEqual(self.zoomed, [])
+
+    def test_zoom_region_is_validated_before_capture(self):
+        for region in ([0, 0, 7, 50], [0, 0, 50, 7.9], [90, 90, 101, 99], [20, 0, 10, 10]):
+            with self.subTest(region=region):
+                self.capture.reset_mock()
+                response = runtime.perform_gui([{"type": "zoom", "region": region}],
+                                               frame_id=self.frame_id)
+                self.assertFalse(response["ok"])
+                self.assertTrue(response["preflight_only"])
+                self.capture.assert_not_called()
+
+    def test_zoom_must_be_alone(self):
+        response = runtime.perform_gui([
+            {"type": "zoom", "region": [0, 0, 20, 20]},
+            {"type": "click", "x": 1, "y": 1}], frame_id=self.frame_id)
+        self.assertFalse(response["ok"])
+        self.execute.assert_not_called()
+
     def test_absent_initial_capture_rejects_keyboard_input_too(self):
         self.capture.side_effect = None
         self.capture.return_value = None

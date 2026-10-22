@@ -628,7 +628,17 @@ func validateProviderDesktopAction(action ProviderDesktopAction) error {
 	hasPoint := action.X != nil || action.Y != nil
 	hasInput := action.Text != "" || len(action.Keys) > 0 ||
 		len(action.Path) > 0 || action.ScrollX != nil || action.ScrollY != nil
+	if action.Type != "zoom" && len(action.Region) > 0 {
+		return fmt.Errorf("%s does not accept region", action.Type)
+	}
 	switch action.Type {
+	case "zoom":
+		if len(action.Region) != 4 {
+			return errors.New("zoom requires region [x0, y0, x1, y1]")
+		}
+		if hasPoint || action.Button != "" || hasInput {
+			return errors.New("zoom accepts only region")
+		}
 	case "screenshot":
 		if hasPoint || action.Button != "" || hasInput {
 			return errors.New("screenshot does not accept action fields")

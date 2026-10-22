@@ -13,13 +13,17 @@ const (
 )
 
 const (
-	GUIMaxActions      = 64
-	GUIMaxScrollDelta  = 2000
-	GUIMaxDragPoints   = 256
-	GUIMaxKeys         = 8
-	GUIMaxKeyLength    = 64
-	GUIMaxTextLength   = 10000
-	GUIMaxTotalWait    = 20
+	GUIMaxActions     = 64
+	GUIMaxScrollDelta = 2000
+	GUIMaxDragPoints  = 256
+	GUIMaxKeys        = 8
+	GUIMaxKeyLength   = 64
+	GUIMaxTextLength  = 10000
+	GUIMaxTotalWait   = 20
+	// GUIZoomMinSide is the smallest zoom region side in frame pixels. A
+	// narrower crop magnifies almost nothing, and its few output pixels
+	// round to a scale that no longer maps back within two frame pixels.
+	GUIZoomMinSide     = 8
 	GUIMaxSettleMS     = 3000
 	AXBatchMaxActions  = 64
 	AXBatchMaxText     = 20000
@@ -361,12 +365,22 @@ func GUIInputSchema() map[string]any {
 			"type":     "array",
 			"minItems": 1,
 			"maxItems": 1,
-			"items": objectSchema(map[string]any{
-				"type": constStringProperty(
-					"screenshot",
-					"Capture the final full desktop; this must be the only action.",
-				),
-			}, []string{"type"}),
+			"items": map[string]any{"oneOf": []any{
+				objectSchema(map[string]any{
+					"type": constStringProperty(
+						"screenshot",
+						"Capture the final full desktop; this must be the only action.",
+					),
+				}, []string{"type"}),
+				objectSchema(map[string]any{
+					"type": constStringProperty("zoom", "Look only: enlarge a frame region; alone."),
+					"region": map[string]any{
+						"type": "array", "minItems": 4, "maxItems": 4,
+						"items":       map[string]any{"type": "number", "minimum": 0},
+						"description": fmt.Sprintf("[x0,y0,x1,y1] frame pixels; sides >= %d.", GUIZoomMinSide),
+					},
+				}, []string{"type", "region"}),
+			}},
 		},
 	}, []string{"actions"})
 	act := objectSchema(map[string]any{
@@ -391,7 +405,7 @@ func GUIInputSchema() map[string]any {
 	}, []string{"actions"})
 	return map[string]any{
 		"type":        "object",
-		"description": "One screenshot action observes; otherwise run an input batch.",
+		"description": "One screenshot or zoom action observes; otherwise run an input batch.",
 		// Some clients close the root object with additionalProperties:false.
 		// Declare its field names here; the branches retain every constraint.
 		"properties": map[string]any{
@@ -419,14 +433,15 @@ const axToolDescription = "Accessibility for application windows. Modes: " +
 	`{"mode":"find","window_ref":"w2","query":{"role":"button","name_contains":"Save"}}`
 
 var guiToolDescription = fmt.Sprintf("Full-desktop screenshot and pixel input. "+
-	`{"actions":[{"type":"screenshot"}]} alone observes. Any other batch is checked before `+
+	`{"actions":[{"type":"screenshot"}]} alone observes; {"type":"zoom","region":[x0,y0,x1,y1]} alone `+
+	"enlarges a frame region to read small text and icons. Any other batch is checked before "+
 	"input and returns one final screenshot. x/y are pixels of the latest full-desktop image (screen "+
 	"width x height) from GUI or AX full/screenshot, which return the same frame. type/keypress go to the current focus, so click "+
-	"the field first in the same batch. Batch the actions planned from one screenshot; end "+
+	"the field first. Batch the actions planned from one screenshot; end "+
 	"the batch after an action that may open, close, or move a window, and plan the rest "+
 	"from the returned image. GUI cannot address windows; AX activates and closes them by "+
 	"title. wait is one second with no observation, at most %d s per batch. Errors return "+
-	"code and hint like AX; gui_frame_stale means nothing was sent: plan again from the "+
+	"code and hint like AX; gui_frame_stale means nothing was sent: replan from the "+
 	"returned screenshot. Example: "+
 	`{"actions":[{"type":"click","x":640,"y":412},{"type":"type","text":"hello"},{"type":"keypress","keys":["ENTER"]}]}`,
 	GUIMaxTotalWait)
