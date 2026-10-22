@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The Python SDK adds `click_zoom(zoom_record, u, v)`, which clicks the
+  frame pixel shown at a point of a zoom image.
 - The CLI `act --json` and `gui --json` read their body from standard input
   with `-` and from a file with `@FILE`, in addition to an inline value.
 - The AX schema writes the find `query` object out where it is used instead

@@ -192,8 +192,8 @@ name `hcu`.
 
 - `Desktop.call(tool, args)` is the whole API; helpers (`apps`, `observe`,
   `find`, `find_all`, `read`, `act`, `click`, `type`, `key`, `set_value`,
-  `select`, `scroll`, `activate`, `close_window`, `screenshot`, `zoom`, `gui`,
-  `wait`) only build argument dicts. GUI input actions go through
+  `select`, `scroll`, `activate`, `close_window`, `screenshot`, `zoom`,
+  `click_zoom`, `gui`, `wait`) only build argument dicts. GUI input actions go through
   `gui(actions)`, with `x`/`y` in pixels of the latest `screen` image.
 - `zoom(region)` returns the zoom record. `hcu.zoom_point(record, u, v)`
   converts a zoom image pixel to the frame pixel that GUI `x`/`y` take, using
@@ -204,7 +204,11 @@ name `hcu`.
   z = d.zoom([600, 60, 680, 100])               # frame pixels
   x, y = hcu.zoom_point(z, 212, 96)             # a point seen in the zoom image
   d.gui([{"type": "click", "x": x, "y": y}])
+  d.click_zoom(z, 212, 96)                      # the same click in one call
   ```
+
+  `click_zoom` sends an ordinary GUI click at the converted frame pixel, so
+  the core checks it against the current frame like any other click.
 
 - `screenshot()` and `zoom()` only look: they get no `request_id`, and a
   dropped connection retries them like any other read.
