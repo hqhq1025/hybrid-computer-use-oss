@@ -6,6 +6,7 @@
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
     DEFAULT_TEXT_LIMIT,
+    TOP_LEVEL_CONTAINER_ROLES,
     has_editable_text_iface,
     has_text_iface,
     limit_text,
@@ -301,7 +302,23 @@ def effective_role(node, role=None):
     role = str(role or "")
     if gtk_combo_partner(node, role) is not None:
         return "combo box"
-    return editable_text_role(node, role)
+    return top_level_window_role(node, editable_text_role(node, role))
+
+
+def top_level_window_role(node, role):
+    """Project a container that is a direct child of the application to ``window``.
+
+    Every direct child of an AT-SPI application object is a top-level window;
+    the role is the toolkit's choice. The server issues a window ref (wN) only
+    from a root record with a window role, so with "filler" the window had no
+    wN and every element in it reported owner_identity_incomplete.
+    """
+    if role not in TOP_LEVEL_CONTAINER_ROLES:
+        return role
+    parent = safe(lambda: node.get_parent())
+    if parent is None or node_role(parent) != "application":
+        return role
+    return "window"
 
 
 def editable_text_role(node, role):
@@ -435,7 +452,7 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
         if str(target.get("name") or "").strip()
     ]
     combo = gtk_combo_partner(node, role)
-    role = editable_text_role(node, role)
+    role = top_level_window_role(node, editable_text_role(node, role))
     if combo is not None:
         # See gtk_combo_partner(): the drawn toggle button stands for the
         # hidden combo box, so it takes the combo's role and label.

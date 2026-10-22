@@ -6,6 +6,7 @@ import re
 import subprocess
 from .foundation import (
     AX_WINDOW_ROLES,
+    TOP_LEVEL_CONTAINER_ROLES,
     Atspi,
     Gdk,
     GUI_MAX_LAYOUT_WINDOWS,
@@ -421,6 +422,25 @@ def x11_window_id_for_accessible(app, window):
     return None
 
 
+def titled_top_level_window_id(window, native):
+    """Bind a top-level child with a non-window role by its exact title.
+
+    Qt reports a top-level QWidget that lacks a window flag (Flameshot's
+    "Configuration") as role "filler", yet the window manager manages it as
+    an ordinary window. Such children get a handle only on strong evidence:
+    a non-empty title equal to exactly one managed window of the process.
+    Untitled panels and popups never match, so they stay unaddressed.
+    """
+    title_key = semantic_text_key(node_name(window))
+    if not title_key:
+        return None
+    matches = [
+        window_id for window_id, item in native.items()
+        if semantic_text_key(item.get("title")) == title_key
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def opaque_window_instance_handle_for_id(app, window_id):
     pid = node_pid(app)
     generation = process_generation(pid)
@@ -455,7 +475,12 @@ def strong_window_instance_handle_inventory(app, windows=None):
     grouped = {}
     for index, window in windows:
         role = str(node_role(window) or "").strip().lower()
+        if role not in AX_WINDOW_ROLES and role not in TOP_LEVEL_CONTAINER_ROLES:
+            continue
         if role not in AX_WINDOW_ROLES:
+            window_id = titled_top_level_window_id(window, native)
+            if window_id:
+                grouped.setdefault(window_id, []).append((index, window))
             continue
         window_id = x11_window_id_for_accessible(app, window)
         if window_id:
