@@ -18,7 +18,7 @@ from .atspi_inventory import (
     resolve_app_identity,
 )
 from .snapshot import snapshot_digest, utc_timestamp
-from .a11y_enable import invisible_window_notes
+from .a11y_enable import invisible_window_notes, untracked_window_notes
 from .x11_windows import (
     _x11_managed_windows,
     app_windows,
@@ -68,6 +68,9 @@ def list_apps_inventory():
     root_state = correlation_root_window_state()
     active_window_id = root_state.get("activeWindow") if root_state else None
     apps = iter_apps()
+    # Titles of every AT-SPI top-level window, by process; see
+    # untracked_window_notes.
+    accessible_titles = {}
     for app in sorted(
         apps,
         key=lambda item: (node_name(item).lower(), node_pid(item)),
@@ -81,6 +84,8 @@ def list_apps_inventory():
         if all(identity):
             seen_identities.add(identity)
         windows = app_windows(app)
+        accessible_titles.setdefault(pid, set()).update(
+            str(node_name(window) or "").strip() for _, window in windows)
         if not inventory_complete(windows):
             # A busy or hung application does not answer within the AT-SPI
             # call timeout. Its windows cannot be listed, but the listing
@@ -160,6 +165,8 @@ def list_apps_inventory():
     if inventory_complete(apps) and inventory_complete(managed):
         notes.extend(invisible_window_notes(
             managed, {node_pid(app) for app in apps}))
+        if not unreadable:
+            notes.extend(untracked_window_notes(managed, accessible_titles))
     return {
         "text": "\n".join(lines),
         "notes": notes,

@@ -270,3 +270,33 @@ def invisible_window_notes(managed_windows, accessible_pids, proc_root="/proc"):
                 title, pid, ", " + toolkit if toolkit else "", advice)
         )
     return notes
+
+
+def untracked_window_notes(managed_windows, accessible_titles):
+    """Name on-screen windows of accessible processes that the tree lacks.
+
+    ``accessible_titles`` maps each process on the bus to the titles of its
+    AT-SPI top-level windows. Electron shows native message boxes ("A
+    setting has changed that requires a restart") as managed windows of the
+    same process that never enter its tree, so the listing gave no sign
+    that a modal box was waiting. Windows parked off screen are skipped.
+    """
+    notes = []
+    for window in managed_windows:
+        pid = int(window.get("pid") or 0)
+        title = str(window.get("title") or "").strip()
+        titled = {name for name in accessible_titles.get(pid, ()) if name}
+        # Desktop components (panels) expose only untitled frames while
+        # X11 titles them; only applications with titled trees qualify.
+        if not titled or not title or title in titled:
+            continue
+        if int(window.get("x", 0)) + int(window.get("width", 0)) <= 0 or (
+                int(window.get("y", 0)) + int(window.get("height", 0)) <= 0):
+            continue
+        notes.append(
+            'Window without an accessibility tree: "{}" (pid {}), a window of '
+            "an application listed above. It may be a native message box "
+            "waiting for an answer; only GUI can read and operate it.".format(
+                title, pid)
+        )
+    return notes

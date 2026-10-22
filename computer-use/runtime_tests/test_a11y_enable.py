@@ -287,3 +287,49 @@ class InvisibleWindowNoteTests(AtspiPatchedTestCase):
         self.assertIn('"Welcome - Visual Studio Code" (pid 20, Chromium)',
                       notes[0])
         self.assertIn("quit every window", notes[0])
+
+
+class WindowWithoutTreeNoteTests(AtspiPatchedTestCase):
+    """A managed window that the application's tree does not contain is named.
+
+    Electron shows native GTK message boxes ("A setting has changed that
+    requires a restart", "The window terminated unexpectedly") as managed
+    X11 windows of the same process, but they are not in the AT-SPI tree.
+    AX apps listed only the main window, so the agent did not know a modal
+    message box was blocking it.
+    """
+
+    def test_apps_names_a_managed_window_missing_from_the_tree(self):
+        main = _TreeNode(role="frame", name="a.txt - Visual Studio Code",
+                         x=240, y=90, w=1440, h=900)
+        app = _TreeNode(role="application", name="code", kids=(main,))
+        app.get_process_id = lambda: 2980
+        original_apps = runtime.iter_apps
+        runtime.iter_apps = lambda: [app]
+        self.addCleanup(setattr, runtime, "iter_apps", original_apps)
+        panel = _TreeNode(role="application", name="xfce4-panel",
+                          kids=(_TreeNode(role="frame", name=""),))
+        panel.get_process_id = lambda: 85
+        runtime.iter_apps = lambda: [app, panel]
+        managed = runtime.InventoryResult([
+            {"pid": 85, "id": "0x600003", "x": 0, "y": 0, "width": 1920,
+             "height": 27, "title": "xfce4-panel"},
+            {"pid": 2980, "id": "0xe00004", "x": 240, "y": 90, "width": 1440,
+             "height": 900, "title": "a.txt - Visual Studio Code"},
+            {"pid": 2980, "id": "0x1e0008f", "x": 642, "y": 436, "width": 636,
+             "height": 208, "title": "Visual Studio Code"},
+            {"pid": 2980, "id": "0x1e00090", "x": -9999, "y": -9999,
+             "width": 306, "height": 3, "title": "offscreen helper"},
+        ])
+        with mock.patch.object(runtime, "_x11_managed_windows",
+                               return_value=managed), \
+                mock.patch.object(runtime, "process_generation",
+                                  return_value="77"), \
+                mock.patch.object(runtime, "correlation_root_window_state",
+                                  return_value=None):
+            result = runtime.list_apps_inventory()
+
+        self.assertEqual(len(result["notes"]), 1, result["notes"])
+        self.assertIn('"Visual Studio Code"', result["notes"][0])
+        self.assertIn("pid 2980", result["notes"][0])
+        self.assertIn("only GUI", result["notes"][0])
