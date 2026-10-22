@@ -389,38 +389,6 @@ func unrelatedContainersDoNotProvideSelectionFallback() {
 }
 
 @Test
-func axOnlySnapshotDoesNotActivateAppForMissingCGWindowCapture() {
-    #expect(
-        !shouldRecoverMissingWindowCapture(
-            includeScreenshot: false,
-            recoveryPolicy: .allowActivation
-        )
-    )
-    #expect(
-        !shouldRecoverMissingWindowCapture(
-            includeScreenshot: false,
-            recoveryPolicy: .readOnly
-        )
-    )
-}
-
-@Test
-func screenshotSnapshotMayRecoverMissingCGWindowCapture() {
-    #expect(
-        shouldRecoverMissingWindowCapture(
-            includeScreenshot: true,
-            recoveryPolicy: .allowActivation
-        )
-    )
-    #expect(
-        !shouldRecoverMissingWindowCapture(
-            includeScreenshot: true,
-            recoveryPolicy: .readOnly
-        )
-    )
-}
-
-@Test
 func cachedWindowFallbackRequiresExactPIDAndWindowHandle() {
     #expect(
         cachedWindowFallbackMatches(

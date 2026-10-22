@@ -121,7 +121,7 @@ private func identitySnapshot(_ records: [ElementRecord]) -> AppSnapshot {
         windowTitle: "Identity Test", windowBounds: nil,
         rootWindowElement: AXUIElementCreateSystemWide(),
         targetWindowID: nil, targetWindowHandle: "window-one",
-        targetWindowLayer: nil, screenshotPNGData: nil, treeLines: [],
+        targetWindowLayer: nil, treeLines: [],
         focusedSummary: nil, focusedElement: nil, selectedText: nil,
         elements: Dictionary(uniqueKeysWithValues: records.map { ($0.index, $0) }),
         providerProcessGeneration: "captured-generation"

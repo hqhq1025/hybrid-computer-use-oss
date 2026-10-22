@@ -69,13 +69,6 @@ enum SnapshotRecoveryPolicy: Equatable {
     case readOnly
 }
 
-func shouldRecoverMissingWindowCapture(
-    includeScreenshot: Bool,
-    recoveryPolicy: SnapshotRecoveryPolicy
-) -> Bool {
-    includeScreenshot && recoveryPolicy == .allowActivation
-}
-
 func cachedWindowFallbackMatches(
     appPID: pid_t,
     candidatePID: pid_t?,
@@ -324,7 +317,6 @@ public struct AppSnapshot {
     let targetWindowID: CGWindowID?
     let targetWindowHandle: String?
     let targetWindowLayer: Int?
-    public let screenshotPNGData: Data?
     let treeLines: [String]
     let focusedSummary: String?
     let focusedElement: AXUIElement?
@@ -435,7 +427,6 @@ enum SnapshotBuilder {
         textLimit: SnapshotTextLimit = .defaults,
         treeLimits: AccessibilityTreeLimits = .defaults,
         recoveryPolicy: SnapshotRecoveryPolicy = .allowActivation,
-        includeScreenshot: Bool = false,
         fallbackWindow: AXUIElement? = nil,
         expectedWindowHandle: String? = nil
     ) throws -> AppSnapshot {
@@ -489,46 +480,17 @@ enum SnapshotBuilder {
             ) ?? firstAnyWindow(for: appElement)
         }
 
-        var rootWindow: AXUIElement
         guard let resolvedFocusedWindow = focusedWindow else {
             windowLivenessDiagnostic("snapshot_no_ax_root", [:])
             throw ComputerUseError.stateUnavailable(computerUseNoWindowFoundMessage)
         }
-        rootWindow = resolvedFocusedWindow
+        let rootWindow = resolvedFocusedWindow
 
-        var captureTitleHint = stringValue(of: rootWindow, attribute: kAXTitleAttribute)
-        var windowCapture = WindowCapture.resolve(
+        let windowCapture = WindowCapture.resolve(
             for: app.pid,
             windowIDHint: windowNumber(rootWindow),
-            titleHint: captureTitleHint,
-            includeScreenshot: includeScreenshot
+            titleHint: stringValue(of: rootWindow, attribute: kAXTitleAttribute)
         )
-        if !hasRequestedWindow, windowCapture == nil,
-           shouldRecoverMissingWindowCapture(
-               includeScreenshot: includeScreenshot,
-               recoveryPolicy: recoveryPolicy
-           ),
-           recoverVisibleWindow(for: app, appElement: appElement, preferredWindow: rootWindow) {
-            focusedApplication = copyElement(systemWide, attribute: kAXFocusedApplicationAttribute)
-            if let recoveredWindow = preferredFocusedWindow(
-                appElement: appElement,
-                appPID: app.pid,
-                focusedApplication: focusedApplication,
-                systemWide: systemWide
-            ) ?? firstAnyWindow(for: appElement) {
-                rootWindow = recoveredWindow
-                captureTitleHint = stringValue(of: recoveredWindow, attribute: kAXTitleAttribute)
-                windowCapture = WindowCapture.resolve(
-                    for: app.pid,
-                    windowIDHint: windowNumber(recoveredWindow),
-                    titleHint: captureTitleHint,
-                    includeScreenshot: includeScreenshot
-                )
-            }
-        }
-        if windowCapture == nil, includeScreenshot {
-            throw ComputerUseError.stateUnavailable(computerUseNoWindowFoundMessage)
-        }
 
         return try buildAccessibilitySnapshot(
             app: app,
@@ -538,8 +500,7 @@ enum SnapshotBuilder {
             focusedApplication: focusedApplication,
             systemWide: systemWide,
             textLimit: textLimit,
-            treeLimits: treeLimits,
-            includeScreenshot: includeScreenshot
+            treeLimits: treeLimits
         )
     }
 
@@ -646,15 +607,11 @@ enum SnapshotBuilder {
         focusedApplication: AXUIElement?,
         systemWide: AXUIElement,
         textLimit: SnapshotTextLimit,
-        treeLimits: AccessibilityTreeLimits,
-        includeScreenshot: Bool
+        treeLimits: AccessibilityTreeLimits
     ) throws -> AppSnapshot {
         let generation = macProcessGeneration(pid: app.pid)
         let windowBounds = windowCapture?.bounds ??
             resolveLocalFrame(of: rootElement, windowBounds: nil)
-        let screenshotPNGData = includeScreenshot
-            ? windowCapture?.pngDataIfAvailable()
-            : nil
         let focusedElement = focusedElementInSnapshotWindow(
             preferredFocusedElement(appElement: appElement, appPID: app.pid, focusedApplication: focusedApplication, systemWide: systemWide),
             selectedHandle: canonicalMacAXWindowHandle(pid: app.pid, window: rootElement),
@@ -701,7 +658,6 @@ enum SnapshotBuilder {
                 window: rootElement
             ),
             targetWindowLayer: windowCapture?.layer,
-            screenshotPNGData: screenshotPNGData,
             treeLines: renderer.lines,
             focusedSummary: renderer.focusedSummary,
             focusedElement: focusedElement,

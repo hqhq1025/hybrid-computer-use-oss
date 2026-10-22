@@ -404,10 +404,6 @@ struct TreeRenderer {
         )
     }
 
-    private func opaqueIdentifier(for element: AXUIElement) -> String {
-        String(CFHash(element))
-    }
-
     private func webAreaDepth(role: String, ancestors: [AXUIElement]) -> Int? {
         if role == axWebAreaRole {
             return 0

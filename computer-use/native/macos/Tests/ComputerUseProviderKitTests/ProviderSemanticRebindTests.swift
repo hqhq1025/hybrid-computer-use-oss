@@ -227,7 +227,7 @@ func ambiguityFactsBoundPairsAndExposeTruncationWithoutContent() throws {
             pid: getpid(), runningApplication: NSRunningApplication.current),
         windowTitle: "private-title", windowBounds: nil,
         rootWindowElement: AXUIElementCreateSystemWide(), targetWindowID: nil,
-        targetWindowHandle: nil, targetWindowLayer: nil, screenshotPNGData: nil,
+        targetWindowHandle: nil, targetWindowLayer: nil,
         treeLines: [], focusedSummary: nil, focusedElement: nil, selectedText: nil,
         elements: Dictionary(uniqueKeysWithValues: records.map { ($0.index, $0) }),
         diagnosticSnapshotSerial: 7
