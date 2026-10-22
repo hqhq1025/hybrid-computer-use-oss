@@ -26,7 +26,7 @@ current GUI schema for argument shapes and supported actions.
 - Start with a screenshot when desktop state is unknown. A screenshot action
   must stand alone. Use exact returned full-desktop pixels and reported image
   dimensions, not a chat preview, thumbnail, window size, or independent capture.
-- On Linux, use `zoom` on a frame region when small text or icons are hard to
+- Use `zoom` on a frame region when small text or icons are hard to
   read. Convert a zoom point to frame pixels with the mapping in the result,
   and click with those frame pixels.
 - Resolve ambiguity, clipping, occlusion, and offscreen targets by inspecting

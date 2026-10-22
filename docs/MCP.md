@@ -463,7 +463,7 @@ read and registers it as the current GUI frame, so `x` and `y` may come from
 it and a following GUI call needs no new screenshot. The AX result states
 the image size on a line before the image.
 
-On Linux, `{"actions":[{"type":"zoom","region":[x0,y0,x1,y1]}]}`, alone in a
+`{"actions":[{"type":"zoom","region":[x0,y0,x1,y1]}]}`, alone in a
 call, returns an enlarged region of the current GUI frame to read small text
 and icons. The region is in frame pixels, and each side is at least 8 pixels.
 Zoom only looks: it sends no input, and its image never becomes a frame. The
@@ -472,7 +472,8 @@ result states the frame, the region snapped to native pixels, and the mapping
 axis. GUI `x` and `y` are still frame pixels, and the point rule checks them
 against that frame. Zoom fails with `gui_frame_stale` and a fresh screenshot
 when there is no frame, or when any window over the region changed since the
-frame. macOS and Windows reject zoom with `invalid_argument`.
+frame. Linux, macOS and Windows implement the same geometry, pinned by
+`testdata/contract/zoom_geometry.json`, which every provider test replays.
 
 Every GUI result starts with the same JSON line as AX, followed by `screen`
 (the returned image's size and coordinate space) and `actions` (pixel-change
