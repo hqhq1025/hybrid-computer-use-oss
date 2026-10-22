@@ -2,13 +2,13 @@ package core
 
 import "github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 
-// A selector or title predicate observes the whole application that owns the
-// batch or read window: every visible top-level window, including a dialog or
-// popup menu that the action opened as a window of its own. A predicate with
-// ref rN keeps reading that one element. Reads never re-bind an input target:
-// they only sample state, and the batch window stays the target of input.
+// A query or text wait observes the whole application that owns the batch
+// window: every visible top-level window, including a dialog or popup menu
+// that the action opened as a window of its own. A ref wait keeps reading
+// that one element. Reads never re-bind an input target: they only sample
+// state, and the batch window stays the target of input.
 
-// untilApplicationRead is one poll of a selector predicate.
+// untilApplicationRead is one poll of a query or text wait.
 type untilApplicationRead struct {
 	// primary is the bound window, or the application's main window once the
 	// bound window is gone. It is an empty snapshot when the application has

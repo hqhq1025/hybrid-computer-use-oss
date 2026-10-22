@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Bring the CLI, Python SDK, code mode and PTC adapter up to the MCP
+  contract. The CLI adds `gui zoom X0 Y0 X1 Y1`, `gui double_click|move X Y`
+  and `select rN [TEXT] [--to rN]`. The SDK adds `zoom(region)`,
+  `hcu.zoom_point(record, u, v)` and `select()`. Zoom counts as an
+  observation everywhere: it gets no `request_id`, retries like a read, and
+  is allowed by an in-process MCP server while a daemon runs. Records of AX
+  `observe:"full"`/`"screenshot"` now carry `screen`, the GUI frame, like a
+  GUI screenshot. `CodeDesktop.emit_image` delivers a zoom image labelled
+  `zoom_pixels` with its mapping. MCP output is unchanged. Two tests read the
+  AX modes, observe values, act steps, wait kinds and GUI actions from the
+  published schemas. They fail when the CLI or the SDK neither supports a new
+  item nor lists it as reachable only through generic JSON calls.
+
 - Drop history-only version markers from names: `AXSnapshotV1` is
   `AXSnapshot`, `ProviderV2*` is `Provider*`, `provider_wire_v2.go` is
   `provider_wire.go`, `wire_v2.py` is `wire.py`, the Windows test project is

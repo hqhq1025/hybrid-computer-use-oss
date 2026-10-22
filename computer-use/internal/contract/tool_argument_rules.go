@@ -79,11 +79,10 @@ func refineGUIArgumentError(args map[string]any, found *explanation) {
 // them after the schema gate, before any input, and marks the rejection with
 // its rule code so the consistency test can tell a declared rule from drift.
 const (
-	ArgumentRuleCloseNotLast       = "close_not_last"
-	ArgumentRuleTextBudget         = "text_budget"
-	ArgumentRulePostconditionIndex = "postcondition_index_target"
-	ArgumentRuleRefOwnsIdentity    = "ref_owns_identity"
-	ArgumentRuleWaitBudget         = "wait_budget"
+	ArgumentRuleCloseNotLast    = "close_not_last"
+	ArgumentRuleTextBudget      = "text_budget"
+	ArgumentRuleRefOwnsIdentity = "ref_owns_identity"
+	ArgumentRuleWaitBudget      = "wait_budget"
 )
 
 // ArgumentRuleError is a cross-field rule violation.

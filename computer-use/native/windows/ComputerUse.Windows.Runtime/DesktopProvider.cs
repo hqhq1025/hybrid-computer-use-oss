@@ -10,6 +10,14 @@ internal static class DesktopProvider
     internal static JsonObject ExecuteBatch(JsonObject request)
     {
         var actions = request["actions"] as JsonArray ?? new JsonArray();
+        if (actions.Count == 1 &&
+            actions[0] is JsonObject zoom &&
+            zoom["type"]?.GetValue<string>() == "zoom")
+        {
+            return NativeDesktop.Zoom(
+                zoom,
+                request["frame_id"]?.GetValue<string>() ?? string.Empty);
+        }
         var desktopBounds = NativeDesktop.DesktopBounds();
         var deliveredSize = WindowsDesktopImageGeometry.DeliveredSize(
             desktopBounds.Width,

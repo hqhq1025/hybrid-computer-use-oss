@@ -134,11 +134,23 @@ extension ComputerUseRuntimeBridge {
                 return try snapshot.providerDictionary(includeScreenshot: includeScreenshot)
             },
             validateWindow: {
-                try validateBoundWindowLiveness(
-                    appIdentity: appIdentity,
-                    windowHandle: selectedHandle,
-                    resolveApp: { try resolveOrderedInputApp(appIdentity) },
-                    inspectWindow: inspectWindow
+                try validateClosingWindow(
+                    timeout: 0.6,
+                    wait: { interval in
+                        if let changeWake {
+                            _ = changeWake.wait(timeout: interval)
+                        } else {
+                            Thread.sleep(forTimeInterval: interval)
+                        }
+                    },
+                    validateWindow: {
+                        try validateBoundWindowLiveness(
+                            appIdentity: appIdentity,
+                            windowHandle: selectedHandle,
+                            resolveApp: { try resolveOrderedInputApp(appIdentity) },
+                            inspectWindow: inspectWindow
+                        )
+                    }
                 )
             }
         )
@@ -169,6 +181,27 @@ extension ComputerUseRuntimeBridge {
             ],
         ]
     }
+}
+
+// Keep the validator's contract: a typed stale identity proves absence;
+// returning at the deadline leaves absence unproven. AX and WindowServer can
+// remove a closing window at different times, so resample the same identity.
+func validateClosingWindow(
+    timeout: TimeInterval,
+    pollInterval: TimeInterval = 0.05,
+    now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+    wait: (TimeInterval) -> Void,
+    validateWindow: () throws -> Void
+) throws {
+    let deadline = now() + max(0, timeout)
+    repeat {
+        // Each sample validates the process generation before and after the
+        // existing corroborated AX/WindowServer check. Do not retry errors.
+        try validateWindow()
+        let remaining = deadline - now()
+        guard remaining > 0 else { return }
+        wait(min(max(0.001, pollInterval), remaining))
+    } while now() < deadline
 }
 
 func windowActionFinalObservation(
@@ -251,7 +284,7 @@ func focusedAXWindowHandle(pid: pid_t) -> String? {
 
 func axWindowInventory(
     pid: pid_t
-) -> (windows: [AXUIElement], complete: Bool) {
+) -> (windows: [AXUIElement], complete: Bool, status: AXError) {
     let app = AXUIElementCreateApplication(pid)
     AXUIElementSetMessagingTimeout(app, 0.25)
     var value: CFTypeRef?
@@ -269,12 +302,12 @@ func axWindowInventory(
         "cast_success": value as? [AXUIElement] != nil,
     ])
     guard status == .success else {
-        return ([], false)
+        return ([], false, status)
     }
     guard let windows = value as? [AXUIElement] else {
-        return ([], false)
+        return ([], false, status)
     }
-    return (windows, true)
+    return (windows, true, status)
 }
 
 private func axWindows(pid: pid_t) -> [AXUIElement] {

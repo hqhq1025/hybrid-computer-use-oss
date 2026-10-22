@@ -204,8 +204,17 @@ func recordFromResult(name string, result ToolCallResult) Record {
 		if item.Type == "image" {
 			if path, err := writeImageFile(item.Data, item.MimeType); err == nil {
 				record.Images = append(record.Images, path)
+				if item.frame != nil {
+					// An AX observe full/screenshot image is the GUI frame;
+					// its screen is the one a GUI screenshot record carries.
+					record.Screen = &RecordScreen{Width: item.frame.Width, Height: item.frame.Height,
+						CoordinateSpace: item.frame.CoordinateSpace, Image: path}
+				}
 			}
 		}
+	}
+	if record.Screen != nil && record.Screen.Image != "" {
+		return record
 	}
 	if record.Screen != nil && len(record.Images) > 0 {
 		record.Screen.Image = record.Images[0]

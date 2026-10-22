@@ -11,15 +11,13 @@ import (
 type axElementLookup func(*AppSnapshot) (*ElementRecord, error)
 
 // verifyLookup polls the application that owns the read window until goal
-// holds for the element lookup finds, or timeoutMS passes. A selector until
-// and a wait step with a find query share it; only the lookup differs.
-// numeric marks an element-index lookup, which is never searched in other
-// windows. hint names what to list as the closest elements on a miss.
+// holds for the element lookup finds, or timeoutMS passes. Query and text
+// wait steps share it; only the lookup differs. hint names what to list as
+// the closest elements on a miss.
 func (s *Service) verifyLookup(
 	app string,
 	lookup axElementLookup,
 	displaySelector, hint string,
-	numeric bool,
 	goal verifyGoal,
 	timeoutMS,
 	stableMS int,
@@ -69,11 +67,6 @@ func (s *Service) verifyLookup(
 			}
 			return result
 		}
-		// Resolve with lookupElementFor rather than lookupBySelectorFor: it
-		// accepts numeric indices as well as selectors. A selector-only lookup
-		// would treat an index such as "62" as a selector and keep reporting
-		// no match while the element is present, a false negative that is
-		// worse than no assertion.
 		snapshot := read.primary
 		if attempt == 1 {
 			first = verifyLookupBaseline{
@@ -82,9 +75,7 @@ func (s *Service) verifyLookup(
 				count:  scopedCanonicalElementCount(snapshot),
 			}
 		}
-		record, lookupErr, incomplete := s.lookupAcrossWindows(
-			read, lookup, numeric,
-		)
+		record, lookupErr, incomplete := s.lookupAcrossWindows(read, lookup)
 		ok, observed := goal.check(record, lookupErr)
 		if incomplete {
 			// No match proves nothing while a visible window was unread.
@@ -95,8 +86,7 @@ func (s *Service) verifyLookup(
 			strings.Contains(strings.ToLower(lookupErr.Error()), "ambiguous")
 		attempts = append(attempts, fmt.Sprintf("attempt %d at +%dms — %s",
 			attempt, timeoutMS-int(time.Until(deadline).Milliseconds()), observed))
-		if attempt == 1 && lookupErr != nil &&
-			(numeric || selectorAmbiguous) {
+		if attempt == 1 && lookupErr != nil && selectorAmbiguous {
 			return locatorFailureWaitResult(
 				observed, selectorAmbiguous, snapshot, attempt, stableMS,
 			)
@@ -196,11 +186,10 @@ func appUnavailableWaitResult(
 func (s *Service) lookupAcrossWindows(
 	read *untilApplicationRead,
 	lookup axElementLookup,
-	numeric bool,
 ) (*ElementRecord, error, bool) {
 	record, lookupErr := lookup(read.lookup)
 	incomplete := false
-	if record == nil && !numeric &&
+	if record == nil &&
 		!strings.Contains(strings.ToLower(fmt.Sprint(lookupErr)), "ambiguous") {
 		// The bound window has no match: the effect may be a dialog
 		// or popup in another window of the application.

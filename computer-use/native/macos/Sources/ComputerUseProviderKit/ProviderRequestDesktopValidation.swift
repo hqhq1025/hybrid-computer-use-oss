@@ -36,7 +36,7 @@ extension ProviderRequestValidator {
             path: path,
             allowed: [
                 "type", "x", "y", "button", "text", "keys",
-                "path", "scroll_x", "scroll_y",
+                "path", "scroll_x", "scroll_y", "region",
             ]
         )
         let type = try requiredString(action["type"], path: "\(path).type")
@@ -47,6 +47,13 @@ extension ProviderRequestValidator {
             }
         }
         switch type {
+        case "zoom":
+            guard present == ["region"],
+                  let region = action["region"] as? [Any], region.count == 4,
+                  region.allSatisfy({ number($0) != nil })
+            else {
+                throw invalid("\(path).zoom requires region with four numbers only")
+            }
         case "screenshot", "wait":
             guard present.isEmpty else {
                 throw invalid("\(path).\(type) does not accept action fields")

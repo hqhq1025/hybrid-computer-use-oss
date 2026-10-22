@@ -101,12 +101,7 @@ func TestActionPostconditionReconciliationSamplesAfterPolling(t *testing.T) {
 			WindowRef:    windowRef,
 			WindowHandle: handle,
 		},
-		map[string]any{
-			"type":   "state",
-			"target": map[string]any{"ref": elementRef},
-			"state":  "checked",
-			"value":  true,
-		},
+		axRefPredicate{ref: elementRef, goal: verifyGoal{state: "checked"}},
 		incomplete,
 	)
 	if reconciled.IsError ||
@@ -157,24 +152,5 @@ func TestPostconditionFailureClassificationPreservesUnderlyingCause(t *testing.T
 			classification,
 			underlying,
 		)
-	}
-}
-
-// The published "value" predicate must keep its comparison when the goal is
-// rebuilt from the raw assertion (canonical reconciliation). It used to
-// switch on the raw type, build an empty goal for "value", and pass for any
-// observed value.
-func TestValueAssertionGoalIsNotEmpty(t *testing.T) {
-	for _, assertion := range []map[string]any{
-		{"type": "value", "target": map[string]any{"ref": "r1"}, "value": "draft"},
-		{"type": "value", "target": map[string]any{"ref": "r1"}, "value": "draft", "match": "contains"},
-	} {
-		goal := assertionGoal(assertion)
-		if goal.empty() {
-			t.Fatalf("assertion %v produced an empty goal", assertion)
-		}
-		if ok, detail := goal.check(&ElementRecord{Value: "final"}, nil); ok {
-			t.Fatalf("assertion %v passed for an unrelated value: %s", assertion, detail)
-		}
 	}
 }
