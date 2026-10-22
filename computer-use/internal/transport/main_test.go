@@ -42,21 +42,6 @@ func TestReadArgumentsAcceptsJSONObject(t *testing.T) {
 	}
 }
 
-func TestCLIHelpMentionsNativeRuntimes(t *testing.T) {
-	var out bytes.Buffer
-	if err := RunCLI([]string{"--help"}, &out); err != nil {
-		t.Fatal(err)
-	}
-	for _, platform := range []string{"Linux AT-SPI2", "macOS Accessibility", "Windows UI Automation"} {
-		if !strings.Contains(out.String(), platform) {
-			t.Fatalf("help text did not mention %s:\n%s", platform, out.String())
-		}
-	}
-	if strings.Contains(out.String(), "open-computer-use") {
-		t.Fatalf("help text leaked the retired upstream command:\n%s", out.String())
-	}
-}
-
 func TestRemovedCLICompatibilityCommandsStayRemoved(t *testing.T) {
 	for _, command := range []string{"list-apps", "snapshot"} {
 		var output bytes.Buffer

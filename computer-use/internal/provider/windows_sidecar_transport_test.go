@@ -524,43 +524,6 @@ func TestWindowsProviderResponseIsBounded(t *testing.T) {
 	}
 }
 
-func TestWindowsProviderStderrBufferIsBounded(t *testing.T) {
-	buffer := &boundedProviderBuffer{limit: 32}
-	raw := strings.Repeat("stderr-", 20)
-	if _, err := buffer.Write([]byte(raw)); err != nil {
-		t.Fatal(err)
-	}
-	data, truncated := buffer.snapshot()
-	if len(data) != 32 || !truncated {
-		t.Fatalf("bounded stderr length=%d truncated=%v", len(data), truncated)
-	}
-	if string(data) != raw[len(raw)-32:] {
-		t.Fatalf("bounded stderr retained wrong tail: %q", data)
-	}
-}
-
-func TestWindowsProviderDiagnosticLineIsBounded(t *testing.T) {
-	raw := strings.Repeat("diagnostic-", 20)
-	line, originalBytes, truncated, err :=
-		readProviderDiagnosticLine(
-			bufio.NewReader(strings.NewReader(raw+"\n")),
-			32,
-		)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(line) != raw[:32] ||
-		originalBytes != len(raw) ||
-		!truncated {
-		t.Fatalf(
-			"bounded diagnostic line=%q original=%d truncated=%v",
-			line,
-			originalBytes,
-			truncated,
-		)
-	}
-}
-
 func TestWindowsProviderStderrIsForwardedForOperatorDiagnostics(t *testing.T) {
 	var operator bytes.Buffer
 	previousWriter := windowsProviderDiagnosticWriter

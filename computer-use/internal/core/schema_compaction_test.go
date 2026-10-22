@@ -439,24 +439,6 @@ func codexPruneCompositions(value any) any {
 	}
 }
 
-func TestReportCodexCompactedSchemaSizes(t *testing.T) {
-	for _, tool := range contract.AllToolDefinitions() {
-		raw, _ := json.Marshal(tool.InputSchema)
-		stages := codexCompact(tool.InputSchema)
-		parts := []string{}
-		for _, stage := range stages {
-			parts = append(parts, stage.name+"="+itoa(stage.bytes))
-		}
-		final := stages[len(stages)-1].bytes
-		status := "within budget"
-		if len(stages) > 1 {
-			status = "compacted; the model sees a reduced schema"
-		}
-		t.Logf("%s: raw=%d %s (%s; final %d bytes)", tool.Name, len(raw),
-			strings.Join(parts, " "), status, final)
-	}
-}
-
 func itoa(value int) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
