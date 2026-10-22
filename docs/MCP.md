@@ -44,24 +44,31 @@ If neither image is available, the response reports unknown visual state.
 
 ```text
 computer-use/
-  main.go                  CLI entry point
-  mcp_transport.go         JSON-RPC framing and MCP method handling
-  service.go               tool dispatch, session state and error context
-  tool_contract.go         server instructions and the AX and GUI schemas
-  tool_arguments.go        argument parsing shared by the tools
-  tool_result.go           result type, evidence text and file output
-  app_snapshot.go          snapshot model returned by the provider
-  ax_*.go                  AX requests, batches, refs, projections, evidence
-  gui_service.go           GUI batches and layout-lease checks
-  runtime_backend*.go      platform backend boundary
-  provider_*.go            typed private provider protocol
-  linux_*.go               Linux backend: provider process and host runtime
-  native/linux/provider/   AT-SPI, X11, screenshot and input provider (Python)
-  native/macos/            Accessibility and CoreGraphics provider (Swift)
-  native/windows/          UIA3 and Win32 provider (C#)
-  *_sidecar_transport.go   native worker lifecycle and bounded transport
-  runtime.py               provider entry point
+  cmd/computer-use/main.go     CLI entry point
+  internal/transport/          MCP JSON-RPC framing, daemon socket, CLI
+  internal/contract/           server instructions, AX and GUI schemas,
+                               schema validation, public codes and limits
+  internal/core/
+    service.go                 tool dispatch, session state and error context
+    tool_arguments.go          argument parsing shared by the tools
+    tool_result.go             result type, evidence text and file output
+    app_snapshot.go            snapshot model returned by the provider
+    ax_*.go                    AX requests, batches, refs, projections, evidence
+    gui_service.go             GUI batches and layout-lease checks
+    platform_contract.go       platform backend port
+    provider_*.go              typed private provider protocol
+  internal/provider/
+    runtime_backend_<os>.go    platform backends
+    linux_*.go                 Linux backend: provider process and host runtime
+    *_sidecar_transport.go     native worker lifecycle and bounded transport
+  native/linux/provider/       AT-SPI, X11, screenshot and input provider (Python)
+  native/macos/                Accessibility and CoreGraphics provider (Swift)
+  native/windows/              UIA3 and Win32 provider (C#)
+  runtime.py                   provider entry point
+  runtime_bundle_fs.go         embeds runtime.py and the Linux provider
 ```
+
+[Architecture](ARCHITECTURE.md#go-packages) describes the package layering.
 
 ## Build
 

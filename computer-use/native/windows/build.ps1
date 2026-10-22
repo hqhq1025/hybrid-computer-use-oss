@@ -129,7 +129,7 @@ try {
         go build -trimpath `
             -ldflags $ldflags `
             -o (Join-Path $OutputDirectory "computer-use.exe") `
-            .
+            ./cmd/computer-use
         if ($LASTEXITCODE -ne 0) {
             throw "Windows MCP build failed with exit code $LASTEXITCODE"
         }

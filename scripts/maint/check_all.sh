@@ -66,6 +66,9 @@ step pytest env OSWORLD_V2_ROOT="$osworld" "$osworld/.venv/bin/python" -m pytest
 
 if [ -n "$baseline_binary" ]; then
 	candidate="$log_dir/computer-use.candidate"
-	(cd "$repo/computer-use" && CGO_ENABLED=0 go build -trimpath -o "$candidate" "$main_pkg")
+	# Stamp the version like make build-local does, so a baseline built by
+	# make reports the same serverInfo.version.
+	(cd "$repo/computer-use" && CGO_ENABLED=0 go build -trimpath \
+		-ldflags "-X main.version=$(cat "$repo/VERSION")" -o "$candidate" "$main_pkg")
 	step mcp-bytes python3 "$repo/scripts/maint/compare_mcp_bytes.py" "$baseline_binary" "$candidate"
 fi

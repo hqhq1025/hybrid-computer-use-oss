@@ -25,7 +25,9 @@ tests for macOS and Windows. `make test-transports` exercises both native
 worker transports with subprocess fixtures on Linux. Native CI also builds
 and tests Swift/C# code; it does not prove interactive desktop permissions.
 
-Put Go tests in the `_test.go` file of the source file they exercise,
+Put Go tests in the `_test.go` file of the source file they exercise; a test
+that needs a higher Go package goes to the lowest package that can see
+everything it uses (see [Architecture](docs/ARCHITECTURE.md#tests-across-packages)). Put
 provider tests under `computer-use/runtime_tests/`, and runner and gateway
 tests under `tests/`. Prefer a test that runs the code over one that searches
 source text.
@@ -35,8 +37,8 @@ source text.
 - The tool schemas, descriptions, server instructions, error texts, base policy
   and selected interaction guide are model input. A change to any of them
   changes the benchmark condition. The contract golden test
-  (`computer-use/contract_golden_test.go`) fails on MCP-visible changes;
-  regenerate it with `go test -run TestPublicContractMatchesGolden
+  (`computer-use/internal/transport/contract_golden_test.go`) fails on MCP-visible changes;
+  regenerate it with `go test ./internal/transport -run TestPublicContractMatchesGolden
   -update-contract` and explain the change in the pull request.
 - Product instruction edits require a new evaluation attempt; keep instruction
   revisions separate and do not infer performance from a wording change.
