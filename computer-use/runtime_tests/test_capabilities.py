@@ -307,9 +307,8 @@ class _RecreatingList(_Node):
 
     Qt's AT-SPI bridge wraps each item-view cell (and each list item of a
     combo popup) in a fresh QAccessibleInterface per query, so the object
-    path of the same cell changes on every read (measured on VLC and Okular,
-    Qt 5.15). The cells are TRANSIENT children of a MANAGES_DESCENDANTS
-    container.
+    path of the same cell changes on every read. The cells are TRANSIENT
+    children of a MANAGES_DESCENDANTS container.
     """
 
     def __init__(self, names, **kwargs):

@@ -591,11 +591,11 @@ class TreeOmissionTests(AtspiPatchedTestCase):
 class HiddenNestedWindowTests(AtspiPatchedTestCase):
     """Hidden Qt dock windows must not spend the node budget.
 
-    Krita parents 30+ closed dockers to its main window as frames that are
-    neither SHOWING nor VISIBLE. Their subtrees held 1828 of the window's
-    3342 nodes and 268 of the 538 rendered records (Qt keeps SHOWING on
-    their combo-popup items), so the record and character budgets ran out
-    before the menu bar, and observe and find never saw "Settings".
+    Krita parents dozens of closed dockers to its main window as frames that
+    are neither SHOWING nor VISIBLE. Their subtrees held about half of the
+    window's nodes (Qt keeps SHOWING on their combo-popup items), so the
+    record and character budgets ran out before the menu bar, and observe
+    and find never saw "Settings".
     """
 
     def _window(self, hidden_count=40):

@@ -312,12 +312,12 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             probe_frame = probe["frame"]
             probe_role = probe["role"]
             # A window nested in this window that is neither SHOWING nor
-            # VISIBLE is closed, and so is everything in it. Krita keeps 30+
-            # closed Qt dockers as such frames; their subtrees held half of
-            # the window's nodes and records (Qt reports SHOWING on their
-            # combo-popup items), so the budgets ran out before the menu
-            # bar and neither observe nor find saw "Settings". Skip the
-            # whole subtree and count it as filtered.
+            # VISIBLE is closed, and so is everything in it. Krita keeps
+            # dozens of closed Qt dockers as such frames; their subtrees held
+            # about half of the window's nodes and records (Qt reports
+            # SHOWING on their combo-popup items), so the budgets ran out
+            # before the menu bar and neither observe nor find saw
+            # "Settings". Skip the whole subtree and count it as filtered.
             if (
                 probe_role in AX_WINDOW_ROLES
                 and not probe_errors
