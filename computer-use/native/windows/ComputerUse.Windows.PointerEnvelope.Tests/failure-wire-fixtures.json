@@ -371,5 +371,40 @@
         "inventoryComplete": true
       }
     }
+  },
+  "ambiguous_app": {
+    "protocol": "computer-use-provider",
+    "schema_version": 2,
+    "request_id": "test-1",
+    "operation": "observe",
+    "accessibility": {
+      "ok": false,
+      "error": "two processes",
+      "failure": {
+        "code": "ax_app_ambiguous",
+        "phase": "precondition",
+        "facts_complete": true,
+        "subject": "app"
+      },
+      "mutation": {
+        "input_events_emitted": false,
+        "partial_input_possible": false,
+        "desktop_state_mutated": false,
+        "mutation_unknown": false
+      },
+      "candidates": [
+        {
+          "name": "explorer",
+          "providerBusName": "uia3:pid:6800",
+          "processGeneration": "1"
+        },
+        {
+          "name": "explorer",
+          "providerBusName": "uia3:pid:7300",
+          "processGeneration": "2"
+        }
+      ],
+      "candidate_count": 2
+    }
   }
 }

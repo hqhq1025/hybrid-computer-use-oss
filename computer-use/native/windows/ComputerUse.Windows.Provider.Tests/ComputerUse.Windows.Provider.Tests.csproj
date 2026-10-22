@@ -162,5 +162,11 @@
     <Compile
       Include="../ComputerUse.Windows.Runtime/WindowsUiaAutomationFactory.cs"
       Link="WindowsUiaAutomationFactory.cs" />
+    <Compile
+      Include="../ComputerUse.Windows.Runtime/WindowsAppInventory.cs"
+      Link="WindowsAppInventory.cs" />
+    <Compile
+      Include="../ComputerUse.Windows.Runtime/ActionEvidencePolicy.cs"
+      Link="ActionEvidencePolicy.cs" />
   </ItemGroup>
 </Project>

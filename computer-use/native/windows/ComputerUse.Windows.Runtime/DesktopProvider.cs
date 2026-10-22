@@ -136,7 +136,7 @@ internal static class DesktopProvider
         {
             throw new ProviderFailureException(
                 "final_desktop_observation_failed",
-                "postcondition",
+                "post_action_observation",
                 error.Message,
                 inputEmitted,
                 false,

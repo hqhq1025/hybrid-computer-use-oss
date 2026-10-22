@@ -325,7 +325,7 @@ internal static class ProviderServerRequestTests
                     actionEvidence: disabledEvidence);
             if (disabledAfterInputFailure is not {
                     Code: "post_action_observation_failed",
-                    Phase: "postcondition",
+                    Phase: "post_action_observation",
                     InputEventsEmitted: true,
                     MutationUnknown: true
                 })

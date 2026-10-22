@@ -15,6 +15,9 @@ internal static partial class NativeDesktop
     private const int GwlExStyle = -20;
     private const uint GwOwner = 4;
     private const int SwRestore = 9;
+    private const int DwmwaCloaked = 14;
+    private const string ApplicationFrameClass = "ApplicationFrameWindow";
+    private const string UwpCoreWindowClass = "Windows.UI.Core.CoreWindow";
     private const int ClipboardPasteSettleMilliseconds = 500;
     private const int ClipboardRetryCount = 10;
     private const int ClipboardRetryMilliseconds = 20;
@@ -66,11 +69,25 @@ internal static partial class NativeDesktop
         bool Active,
         uint Style,
         uint ExtendedStyle,
-        uint ThreadId);
+        uint ThreadId,
+        bool Cloaked = false,
+        int HostedProcessId = 0)
+    {
+        internal TopLevelWindow ToTopLevel() => new(
+            Handle.ToInt64(),
+            ProcessId,
+            Title,
+            ClassName,
+            ExtendedStyle,
+            Active,
+            Cloaked,
+            HostedProcessId);
+    }
 
     internal static nint RootWindow(nint handle) => GetAncestor(handle, 2);
     internal static nint OwnerWindow(nint handle) => GetWindow(handle, GwOwner);
     internal static nint DesktopWindow() => GetDesktopWindow();
+    internal static nint ForegroundWindow() => GetForegroundWindow();
     internal static nint WindowAtPoint(Point point) =>
         WindowFromPoint(new NativePoint { X = point.X, Y = point.Y });
 
@@ -121,6 +138,12 @@ internal static partial class NativeDesktop
                 _ = GetWindowText(handle, title, title.Capacity);
                 var className = new StringBuilder(256);
                 _ = GetClassName(handle, className, className.Capacity);
+                var cloaked = DwmGetWindowAttribute(
+                        handle,
+                        DwmwaCloaked,
+                        out var cloakedReason,
+                        sizeof(int)) == 0 &&
+                    cloakedReason != 0;
                 windows.Add(new WindowRecord(
                     handle,
                     GetWindow(handle, GwOwner),
@@ -133,11 +156,34 @@ internal static partial class NativeDesktop
                     unchecked((uint)GetWindowLongPtr(
                         handle,
                         GwlExStyle).ToInt64()),
-                    threadId));
+                    threadId,
+                    cloaked,
+                    HostedProcessId(handle, className.ToString())));
                 return true;
             },
             0);
         return windows;
+    }
+
+    // A UWP app (Settings, Calculator) draws in a CoreWindow that its own
+    // process owns, inside a frame that ApplicationFrameHost owns. The
+    // CoreWindow's process is the application the user sees.
+    private static int HostedProcessId(nint frame, string className)
+    {
+        if (!string.Equals(
+                className,
+                ApplicationFrameClass,
+                StringComparison.Ordinal))
+        {
+            return 0;
+        }
+        var core = FindWindowEx(frame, 0, UwpCoreWindowClass, null);
+        if (core == 0)
+        {
+            return 0;
+        }
+        _ = GetWindowThreadProcessId(core, out var processId);
+        return processId is > 0 and <= int.MaxValue ? (int)processId : 0;
     }
 
     internal static bool TryGetWindowProcessId(
@@ -354,6 +400,20 @@ internal static partial class NativeDesktop
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint FindWindowEx(
+        nint parent,
+        nint childAfter,
+        string? className,
+        string? windowName);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(
+        nint handle,
+        int attribute,
+        out int value,
+        int size);
 
     [DllImport("user32.dll")]
     private static extern nint GetWindow(nint handle, uint command);

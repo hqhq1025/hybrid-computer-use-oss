@@ -117,7 +117,7 @@ internal sealed partial class UiaProvider
         }
         var snapshot = new JsonObject
         {
-            ["app"] = AppJson(process),
+            ["app"] = AppJson(process, selectedWindow.HostedProcessId),
             ["windowTitle"] = selectedWindow.Title,
             ["windowHandle"] = selectedHandle,
             ["windows"] = windowInventory,

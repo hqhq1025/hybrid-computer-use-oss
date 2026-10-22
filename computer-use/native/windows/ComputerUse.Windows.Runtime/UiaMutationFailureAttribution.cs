@@ -38,7 +38,7 @@ internal static class UiaMutationFailureAttribution
         {
             return new ProviderFailureException(
                 "post_action_observation_failed",
-                "postcondition",
+                "post_action_observation",
                 error.Message,
                 inputEventsEmitted: true,
                 mutationUnknown: true,
