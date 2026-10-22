@@ -3,33 +3,42 @@ import Foundation
 import Testing
 @testable import ComputerUseProviderKit
 
+@MainActor
+private final class WorkspaceReadCounter {
+    var reads = 0
+}
+
 @Test @MainActor
 func applicationDiscoveryReadsOnMainWithoutRedispatch() {
-    var calls = 0
+    let counter = WorkspaceReadCounter()
     let apps = AppDiscovery.runningApps {
         #expect(Thread.isMainThread)
-        calls += 1
+        counter.reads += 1
         return []
     }
-    #expect(calls == 1)
+    #expect(counter.reads == 1)
     #expect(apps.isEmpty)
+}
+
+private func discoverTwiceFromWorker(_ counter: WorkspaceReadCounter) -> (Int, Int) {
+    #expect(!Thread.isMainThread)
+    let read: @MainActor () -> [NSRunningApplication] = {
+        #expect(Thread.isMainThread)
+        counter.reads += 1
+        return []
+    }
+    let first = AppDiscovery.runningApps(readWorkspace: read)
+    let second = AppDiscovery.runningApps(readWorkspace: read)
+    return (first.count, second.count)
 }
 
 @Test
 func applicationDiscoveryMovesEachWorkerReadToMain() async {
+    let counter = await WorkspaceReadCounter()
     let results = await Task.detached {
-        #expect(!Thread.isMainThread)
-        var reads = 0
-        let read: () -> [NSRunningApplication] = {
-            #expect(Thread.isMainThread)
-            reads += 1
-            return []
-        }
-        let first = AppDiscovery.runningApps(readWorkspace: read)
-        let second = AppDiscovery.runningApps(readWorkspace: read)
-        return (first.count, second.count, reads)
+        discoverTwiceFromWorker(counter)
     }.value
     #expect(results.0 == 0)
     #expect(results.1 == 0)
-    #expect(results.2 == 2)
+    #expect(await counter.reads == 2)
 }
