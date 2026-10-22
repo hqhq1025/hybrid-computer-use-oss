@@ -202,3 +202,80 @@ class SelectBoundaryTests(AtspiPatchedTestCase):
                             "emission")
         selection.select_child.assert_not_called()
         self.assertEqual(table.selected, [])
+
+
+class ComboOptionSelectTests(SelectBoundaryTests):
+    """select on a closed drop-down picks the option named by text.
+
+    Chrome and Firefox expose an HTML <select> as a combo box with a menu of
+    menu items whose only action is "select"; the options are not SHOWING
+    while the list is closed, so they have no refs. select {ref: combo,
+    text: "Seattle"} searched the combo's own text instead and failed with
+    select_text_not_found. Chrome selects through the item action (its
+    Selection.select_child returns False); Firefox through either.
+    """
+
+    def _combo(self, value="Beijing", options=("Beijing", "Shanghai", "Seattle"),
+               item_action=True, selection_api=True):
+        combo = _Node(role="combo box", name="City")
+        menu = _Node(role="menu")
+        combo.add(menu)
+        items = []
+        for name in options:
+            item = _Node(role="menu item", name=name, states=())
+            if name == value:
+                item.states.add(STATE.SELECTED)
+            items.append(item)
+        menu.add(*items)
+
+        def choose(index):
+            for other in items:
+                other.states.discard(STATE.SELECTED)
+            items[index].states.add(STATE.SELECTED)
+            return True
+
+        for index, item in enumerate(items):
+            item.get_n_actions = lambda: 1
+            item.get_action_name = lambda _i: "select"
+            item.do_action = (lambda _i, index=index: choose(index)) if item_action \
+                else (lambda _i: True)
+        if selection_api:
+            menu.selection_iface = mock.Mock()
+            selection = mock.Mock()
+            selection.select_child = lambda _iface, index: choose(index)
+            selection.is_child_selected = (
+                lambda _iface, index: STATE.SELECTED in items[index].states)
+            patch = mock.patch.object(runtime.Atspi, "Selection", selection, create=True)
+            patch.start()
+            self.addCleanup(patch.stop)
+        return combo, items
+
+    def test_option_is_chosen_by_its_name(self):
+        combo, items = self._combo()
+        notes = []
+
+        runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, notes, {})
+
+        self.assertIn(STATE.SELECTED, items[2].states)
+        self.assertNotIn(STATE.SELECTED, items[0].states)
+        self.assertTrue(any("Seattle" in note for note in notes))
+
+    def test_selection_api_is_used_when_the_item_action_does_nothing(self):
+        combo, items = self._combo(item_action=False)
+
+        runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
+
+        self.assertIn(STATE.SELECTED, items[2].states)
+
+    def test_unknown_option_is_rejected_before_input(self):
+        combo, _ = self._combo()
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Paris"}, None, combo, {}, None, [], {})
+        self.assertEqual(caught.exception.failure_code, "invalid_argument")
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertIn("Seattle", str(caught.exception))
+
+    def test_option_that_does_not_take_reports_unknown_effect(self):
+        combo, _ = self._combo(item_action=False, selection_api=False)
+        self.assert_unknown(lambda: runtime.perform_select(
+            {"text": "Seattle"}, None, combo, {}, None, [], {}))

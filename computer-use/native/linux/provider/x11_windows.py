@@ -355,6 +355,72 @@ def _x11_managed_windows():
     return inventory
 
 
+# Children of the root window inspected for override-redirect popups.
+MAX_POPUP_CANDIDATES = 64
+_ROOT_CHILD_RE = re.compile(
+    r"^\s+(0x[0-9a-fA-F]+) .*?(\d+)x(\d+)[+-]-?\d+[+-]-?\d+\s+([+-]-?\d+)([+-]-?\d+)\s*$",
+    re.MULTILINE,
+)
+
+
+def _x11_override_redirect_windows(pid):
+    """Return viewable override-redirect top-level windows owned by pid.
+
+    Menus, context menus and drop-down lists of Chromium and Electron are
+    override-redirect windows: the window manager does not manage them, so
+    wmctrl never lists them. Each is read only when it is big enough to be
+    a popup, and the result is cached for the operation like the managed
+    listing.
+    """
+    key = ("override_redirect", int(pid))
+    cached = _x11_window_inventory_cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        root = subprocess.run(
+            ["xwininfo", "-root", "-children"],
+            capture_output=True, text=True, timeout=1,
+        )
+    except Exception:
+        return []
+    found = []
+    matches = list(_ROOT_CHILD_RE.finditer(root.stdout or ""))
+    for match in matches[:MAX_POPUP_CANDIDATES]:
+        window_id, width, height = match.group(1), int(match.group(2)), int(match.group(3))
+        if width < 20 or height < 20:
+            continue
+        try:
+            info = subprocess.run(
+                ["xwininfo", "-id", window_id],
+                capture_output=True, text=True, timeout=0.5,
+            )
+        except Exception:
+            continue
+        layout = parse_xwininfo_layout(info.stdout)
+        if not layout or not layout["visible"] or not layout["overrideRedirect"]:
+            continue
+        try:
+            owner = subprocess.run(
+                ["xprop", "-id", window_id, "_NET_WM_PID"],
+                capture_output=True, text=True, timeout=0.5,
+            )
+        except Exception:
+            continue
+        owner_pid = re.search(r"=\s*(\d+)", owner.stdout or "")
+        if owner_pid is None or int(owner_pid.group(1)) != int(pid):
+            continue
+        normalized = normalize_x11_window_id(window_id)
+        if normalized:
+            found.append({
+                "id": normalized,
+                "x": layout["x"], "y": layout["y"],
+                "width": layout["width"], "height": layout["height"],
+                "title": "",
+            })
+    _x11_window_inventory_cache[key] = found
+    return found
+
+
 def x11_window_inventory_for_pid(pid):
     """Return bounded native windows with explicit enumeration completeness."""
     pid = int(pid or 0)
@@ -382,6 +448,21 @@ def frame_distance(first, second):
         + abs(int(first.get("width", 0)) - int(second.get("width", 0)))
         + abs(int(first.get("height", 0)) - int(second.get("height", 0)))
     )
+
+
+def _closest_by_geometry(candidates, native_window):
+    """Return the index of the one candidate clearly nearest the native frame."""
+    ranked = []
+    for index, window in candidates:
+        distance = frame_distance(safe(lambda: extents(window)), native_window)
+        if distance is not None:
+            ranked.append((distance, index))
+    ranked.sort()
+    if len(ranked) == 1 or (
+        len(ranked) > 1 and ranked[0][0] + 8 < ranked[1][0]
+    ):
+        return ranked[0][1]
+    return None
 
 
 def x11_window_id_for_accessible(app, window):
@@ -506,6 +587,40 @@ def strong_window_instance_handle_inventory(app, windows=None):
             selected[exact[0][0]] = opaque_window_instance_handle_for_id(
                 app, window_id
             )
+            continue
+        # Several frames with the managed title: Electron keeps hidden
+        # BrowserWindows that AT-SPI still lists (Joplin: a 1536x842 main
+        # window and two hidden 800x600 ones, all titled "Joplin"). The
+        # frame whose extents match the managed geometry is the shown one;
+        # equally close frames stay without a handle.
+        closest = _closest_by_geometry(exact or matches, native.get(window_id))
+        if closest is not None:
+            selected[closest] = opaque_window_instance_handle_for_id(
+                app, window_id
+            )
+    # Untitled frames left without a managed window may be popups that the
+    # window manager does not manage (Chromium menus); match them by
+    # geometry to override-redirect windows of the same process.
+    # Only applications with a titled window qualify: desktop panels own
+    # untitled frames too, and scanning for them on every listing would
+    # cost about 40 ms for nothing.
+    claimed = set(selected)
+    unmatched = [
+        (index, window) for index, window in windows
+        if index not in claimed
+        and str(node_role(window) or "").strip().lower() in AX_WINDOW_ROLES
+        and not semantic_text_key(node_name(window))
+    ]
+    has_titled_window = any(
+        semantic_text_key(node_name(window)) for _, window in windows)
+    if unmatched and has_titled_window:
+        for popup in _x11_override_redirect_windows(node_pid(app)):
+            closest = _closest_by_geometry(unmatched, popup)
+            if closest is not None:
+                selected[closest] = opaque_window_instance_handle_for_id(
+                    app, popup["id"]
+                )
+                unmatched = [item for item in unmatched if item[0] != closest]
     return InventoryResult({
         index: handle
         for index, handle in selected.items()

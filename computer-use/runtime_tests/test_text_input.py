@@ -352,3 +352,40 @@ class SetElementValueTests(AtspiPatchedTestCase):
                 runtime.set_element_value_outcome(node, "25"),
                 "effect_unknown",
             )
+
+
+class EmbeddedEditorValueTests(AtspiPatchedTestCase):
+    """An editor whose text is only embedded-object characters shows its lines.
+
+    Electron editors (Joplin's CodeMirror Markdown editor) expose the editor
+    as an EDITABLE entry whose Text is a single U+FFFC; each line is an
+    embedded child reached through Hypertext. The textbox therefore had no
+    value, and read/effect lines could not show what was typed into it.
+    """
+
+    def _editor(self, lines, editable=True):
+        children = [FakeNode(text=FakeTextIface(line), editable=False)
+                    for line in lines]
+        states = (STATE.EDITABLE, STATE.FOCUSED) if editable else ()
+        editor = FakeNode(states=states,
+                          text=FakeTextIface("￼" * len(lines)),
+                          children=children)
+        editor.links = children
+        return editor
+
+    def test_value_joins_the_embedded_lines(self):
+        editor = self._editor(["会议 notes", "Body 第一行"])
+
+        self.assertEqual(runtime.element_value(editor, role="entry"),
+                         "会议 notes\nBody 第一行")
+
+    def test_plain_text_is_unchanged(self):
+        node = FakeNode(states=(STATE.EDITABLE,), text=FakeTextIface("hello"))
+
+        self.assertEqual(runtime.element_value(node, role="entry"), "hello")
+
+    def test_non_editable_containers_keep_their_text(self):
+        """A web paragraph with a link also holds U+FFFC; it is not an editor."""
+        paragraph = self._editor(["link text"], editable=False)
+
+        self.assertEqual(runtime.element_value(paragraph, role="paragraph"), "")

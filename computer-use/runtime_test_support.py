@@ -379,6 +379,10 @@ class FakeNode:
     def get_text_iface(self):
         return self._text
 
+    def get_hypertext_iface(self):
+        # Tests set `links` on a node to model AT-SPI Hypertext embeds.
+        return self if getattr(self, "links", None) is not None else None
+
     def get_editable_text_iface(self):
         return self._text if (self._text is not None and self._editable) else None
 
@@ -475,6 +479,22 @@ class FakeCoordType:
 RELATION = runtime.Atspi.RelationType
 
 
+class FakeAtspiHypertext:
+    @staticmethod
+    def get_n_links(iface):
+        return len(iface.links)
+
+    @staticmethod
+    def get_link(iface, index):
+        return iface.links[index]
+
+
+class FakeAtspiHyperlink:
+    @staticmethod
+    def get_object(link, index):
+        return link
+
+
 class FakeAtspi:
     """Keep the real StateType enum; replace only calls that reach the a11y bus."""
 
@@ -487,6 +507,8 @@ class FakeAtspi:
     EditableText = FakeAtspiEditableText
     Component = FakeAtspiComponent
     Value = FakeAtspiValue
+    Hypertext = FakeAtspiHypertext
+    Hyperlink = FakeAtspiHyperlink
 
 
 class AtspiPatchedTestCase(unittest.TestCase):
