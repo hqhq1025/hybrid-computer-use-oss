@@ -26,6 +26,10 @@ var cliGolden = []struct {
 	{"observe soffice --root r5 --scope content --as diff", "AX", `{"mode":"observe","app":"soffice","root":"r5","scope":"content","observe":"diff"}`},
 	{`wait {"window":"Save"}`, "AX", `{"mode":"act","actions":[{"type":"wait","window":"Save"}],"observe":"none"}`},
 	{`wait w1 {"ref":"r3","gone":true,"timeout_ms":900} --as diff`, "AX", `{"mode":"act","window_ref":"w1","actions":[{"type":"wait","ref":"r3","gone":true,"timeout_ms":900}],"observe":"diff"}`},
+	{`wait {"query":{"role":"dialog"}} --as tree`, "AX", `{"mode":"act","actions":[{"type":"wait","query":{"role":"dialog"}}],"observe":"tree"}`},
+	{`wait w1 {"text":"Saved"}`, "AX", `{"mode":"act","window_ref":"w1","actions":[{"type":"wait","text":"Saved"}],"observe":"none"}`},
+	{"observe w1 --as full", "AX", `{"mode":"observe","window_ref":"w1","observe":"full"}`},
+	{"observe w1 --as screenshot", "AX", `{"mode":"observe","window_ref":"w1","observe":"screenshot"}`},
 	{"find w1 --role button --name-has Sort --limit 5", "AX", `{"mode":"find","window_ref":"w1","query":{"role":"button","name_contains":"Sort"},"limit":5}`},
 	{"find soffice --name OK --text-has total --state checked", "AX", `{"mode":"find","app":"soffice","query":{"name_equals":"OK","text_contains":"total","state":"checked"}}`},
 	{"find --cursor f2", "AX", `{"mode":"find","cursor":"f2"}`},
@@ -43,8 +47,14 @@ var cliGolden = []struct {
 	{"activate Calc", "AX", `{"mode":"act","actions":[{"type":"activate","title":"Calc"}]}`},
 	{"close w3", "AX", `{"mode":"act","actions":[{"type":"close","ref":"w3"}]}`},
 	{`act --json {"actions":[{"type":"click","ref":"r1"},{"type":"keypress","keys":["ENTER"]}]} --window w1`, "AX", `{"mode":"act","actions":[{"type":"click","ref":"r1"},{"type":"keypress","keys":["ENTER"]}],"window_ref":"w1"}`},
+	{"select r4", "AX", `{"mode":"act","actions":[{"type":"select","ref":"r4"}]}`},
+	{"select r4 total --as diff", "AX", `{"mode":"act","actions":[{"type":"select","ref":"r4","text":"total"}],"observe":"diff"}`},
+	{"select r4 --to r9", "AX", `{"mode":"act","actions":[{"type":"select","ref":"r4","to_ref":"r9"}]}`},
 	{"gui screenshot", "GUI", `{"actions":[{"type":"screenshot"}]}`},
+	{"gui zoom 600 60 680 100", "GUI", `{"actions":[{"type":"zoom","region":[600,60,680,100]}]}`},
 	{"gui click 120 40", "GUI", `{"actions":[{"type":"click","x":120,"y":40}]}`},
+	{"gui double_click 120 40", "GUI", `{"actions":[{"type":"double_click","x":120,"y":40}]}`},
+	{"gui move 120 40", "GUI", `{"actions":[{"type":"move","x":120,"y":40}]}`},
 	{"gui type hello", "GUI", `{"actions":[{"type":"type","text":"hello"}]}`},
 	{"gui key ctrl+s", "GUI", `{"actions":[{"type":"keypress","keys":["CTRL","S"]}]}`},
 	{`gui --json {"actions":[{"type":"drag","path":[{"x":1,"y":2},{"x":3,"y":4}]}]}`, "GUI", `{"actions":[{"type":"drag","path":[{"x":1,"y":2},{"x":3,"y":4}]}]}`},
@@ -155,7 +165,8 @@ func TestCLIUntilIsRejectedWithAWaitHint(t *testing.T) {
 }
 
 func TestCLIUsageErrorsExit64(t *testing.T) {
-	for _, line := range []string{"click", "click w1", "observe", "find w1 --limit x", "gui click 1", "wait w1"} {
+	for _, line := range []string{"click", "click w1", "observe", "find w1 --limit x", "gui click 1", "wait w1",
+		"gui zoom 1 2 3", "gui zoom a 0 80 80", "select", "select w1", "select r1 a b"} {
 		var stdout, stderr bytes.Buffer
 		words := splitCLILine(line)
 		if status := runShorthand(words[0], words[1:], &stdout, &stderr); status != exitUsage {
