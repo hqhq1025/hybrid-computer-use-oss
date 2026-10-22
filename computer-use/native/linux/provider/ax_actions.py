@@ -437,30 +437,44 @@ def focus_target_element(window, element, element_record, what, timeout=1.0):
     def target_is_focused():
         return state_contains(element, Atspi.StateType.FOCUSED)
 
+    def not_focusable(message):
+        # A classified precondition failure: an unclassified exception reached
+        # the caller as an opaque "input_failed" runtime error, so the model
+        # could not tell that the element itself refuses keyboard focus (for
+        # example a LibreOffice toolbar item group) and retried the same call.
+        return OperationFailure(
+            message + " Target a focusable child such as its text field or "
+            "combo box, or click the element first.",
+            failure_code="target_not_focusable",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="element",
+        )
+
     component = safe(element.get_component_iface)
     if component is None:
         if target_is_focused():
             return
-        raise RuntimeError(
+        raise not_focusable(
             "{} could not focus the requested element; no keyboard input was "
-            "emitted".format(what)
+            "emitted.".format(what)
         )
     accepted = safe(lambda: Atspi.Component.grab_focus(component), False)
     if not accepted and target_is_focused():
         return
     if not accepted:
-        raise RuntimeError(
+        raise not_focusable(
             "{} could not focus the requested element; no keyboard input was "
-            "emitted".format(what)
+            "emitted.".format(what)
         )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if target_is_focused():
             return
         time.sleep(0.02)
-    raise RuntimeError(
+    raise not_focusable(
         "{} requested focus for the element, but that exact target did not report "
-        "focus within {:.1f}s; no keyboard input was emitted".format(what, timeout)
+        "focus within {:.1f}s; no keyboard input was emitted.".format(what, timeout)
     )
 
 

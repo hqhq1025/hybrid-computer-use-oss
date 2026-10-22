@@ -236,6 +236,27 @@ class TargetedKeyboardFocusTests(AtspiPatchedTestCase):
                 "targeted type_text",
             )
         self.assertIn("no keyboard input was emitted", str(caught.exception))
+        # A classified precondition failure, so the caller sees why (an
+        # unclassified exception reached the model as "input_failed").
+        self.assertIsInstance(caught.exception, runtime.OperationFailure)
+        self.assertEqual(caught.exception.failure_code, "target_not_focusable")
+        self.assertEqual(caught.exception.failure_phase, "precondition")
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertEqual(caught.exception.failure_subject, "element")
+
+    def test_focus_that_never_lands_is_a_classified_failure(self):
+        component = FakeComponent()
+        component.grab_focus = lambda: True
+        element = FakeNode(states=(STATE.EDITABLE,), component=component)
+        window = FakeNode(states=(STATE.ACTIVE,), children=(element,))
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.focus_target_element(
+                window, element,
+                {"runtimeId": [0], "controlType": "", "name": ""},
+                "targeted set_value keyboard fallback", timeout=0.05,
+            )
+        self.assertEqual(caught.exception.failure_code, "target_not_focusable")
+        self.assertIn("did not report focus", str(caught.exception))
 
     def test_same_name_focused_sibling_does_not_satisfy_target_focus(self):
         target = _NamedNode(
