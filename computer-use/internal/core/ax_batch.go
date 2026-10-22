@@ -132,6 +132,9 @@ func (s *Service) axBatchDecoded(
 			"title %s -> %s %s (%s)", strconv.Quote(actions[index].title),
 			window.ref, strconv.Quote(window.title), window.appName))
 	}
+	if window := s.axNoTreeBatchWindow(actions, windowRef); window != nil {
+		return s.axNoTreeWindowBatch(actions, window, bindingNotes, requested)
+	}
 	var focus *axDesktopWindow
 	if windowRef == "" && !axBatchHasRef(actions) {
 		var argErr *axArgError
