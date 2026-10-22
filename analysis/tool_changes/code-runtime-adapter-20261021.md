@@ -1,6 +1,6 @@
 # Python code runtime interoperability
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-21 (Asia/Shanghai)
 Change ID: `code-runtime-adapter-20261021`
 Baseline: main `125189a`, package version 1.0.0.

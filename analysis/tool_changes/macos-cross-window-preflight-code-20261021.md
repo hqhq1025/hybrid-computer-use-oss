@@ -1,6 +1,7 @@
 # Classify cross-window AX batches as invalid arguments
 
-Status: `testing`
+Status: `merged`
+Paths refer to the layout before the package split (a4006c5).
 Created: 2026-10-21 (Asia/Shanghai)
 Change ID: `macos-cross-window-preflight-code-20261021`
 Baseline: native candidate r4, package version `1.0.0`; diagnostic attempt r4b.

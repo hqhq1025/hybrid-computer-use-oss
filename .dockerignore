@@ -1,7 +1,0 @@
-.git
-.venv
-external
-runs
-**/__pycache__
-**/*.pyc
-artifacts/*

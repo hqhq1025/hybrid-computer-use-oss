@@ -118,7 +118,6 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     -sdk "${sdk_path}" \
     -num-threads "${COMPUTER_USE_SWIFT_THREADS:-4}" \
     -parse-as-library \
-    -D COMPUTER_USE_PROVIDER_MINIMAL \
     -emit-library \
     -emit-module \
     -module-name ComputerUseProviderKit \
@@ -132,7 +131,6 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     -target "${swift_target}" \
     -sdk "${sdk_path}" \
     -parse-as-library \
-    -D COMPUTER_USE_PROVIDER_MINIMAL \
     -I "${swift_output}" \
     -L "${swift_output}" \
     -lComputerUseProviderKit \

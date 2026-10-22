@@ -1,6 +1,6 @@
 # Platform-specific application launch guidance
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-21
 Change ID: `macos-launch-guidance-20261021`
 Baseline version: `1.0.0`; native macOS candidate, no new release.

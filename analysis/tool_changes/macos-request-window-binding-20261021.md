@@ -1,6 +1,6 @@
 # Preserve the requested window during internal AX observations
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-21
 Change ID: `macos-request-window-binding-20261021`
 Baseline package version: `1.0.0`, unchanged.
