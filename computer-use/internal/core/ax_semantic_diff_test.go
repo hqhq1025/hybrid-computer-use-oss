@@ -29,8 +29,8 @@ func TestWeakDuplicateCohortDoesNotInventObjectContinuity(t *testing.T) {
 	}
 
 	changes := diffAXSnapshots(
-		&AXSnapshot{CanonicalRoots: []*AXNode{beforeParent}},
-		&AXSnapshot{CanonicalRoots: []*AXNode{afterParent}},
+		&AXSnapshotV1{CanonicalRoots: []*AXNode{beforeParent}},
+		&AXSnapshotV1{CanonicalRoots: []*AXNode{afterParent}},
 	)
 	added, removed, propertyChanged := 0, 0, 0
 	for _, change := range changes {
@@ -87,8 +87,8 @@ func TestWeakDuplicateContainersRequireMatchingSubtrees(t *testing.T) {
 		makeGroup("after-c", "C", afterParent),
 	}
 	changes := diffAXSnapshots(
-		&AXSnapshot{CanonicalRoots: []*AXNode{beforeParent}},
-		&AXSnapshot{CanonicalRoots: []*AXNode{afterParent}},
+		&AXSnapshotV1{CanonicalRoots: []*AXNode{beforeParent}},
+		&AXSnapshotV1{CanonicalRoots: []*AXNode{afterParent}},
 	)
 	added, removed := 0, 0
 	for _, change := range changes {
@@ -142,8 +142,8 @@ func TestWeakDuplicateContainersUseDescendantStrongIdentity(t *testing.T) {
 		makeGroup("after-r2", "r2", afterParent),
 	}
 	changes := diffAXSnapshots(
-		&AXSnapshot{CanonicalRoots: []*AXNode{beforeParent}},
-		&AXSnapshot{CanonicalRoots: []*AXNode{afterParent}},
+		&AXSnapshotV1{CanonicalRoots: []*AXNode{beforeParent}},
+		&AXSnapshotV1{CanonicalRoots: []*AXNode{afterParent}},
 	)
 	moved, added, removed := 0, 0, 0
 	for _, change := range changes {
@@ -178,14 +178,14 @@ func TestIncrementalAXSnapshotRequiresLogicalWindowIdentity(t *testing.T) {
 	}
 	before := &AppSnapshot{
 		App: AppDescriptor{Name: "Editor", PID: 7},
-		AXSnapshot: &AXSnapshot{
+		AXSnapshot: &AXSnapshotV1{
 			CanonicalRoots: []*AXNode{beforeNode},
 			Roots:          []*AXNode{beforeNode},
 		},
 	}
 	after := &AppSnapshot{
 		App: AppDescriptor{Name: "Editor", PID: 7},
-		AXSnapshot: &AXSnapshot{
+		AXSnapshot: &AXSnapshotV1{
 			CanonicalRoots: []*AXNode{afterNode},
 			Roots:          []*AXNode{afterNode},
 		},
@@ -227,8 +227,8 @@ func TestSemanticDuplicatesAreMatchedOnlyWithinTheirParent(t *testing.T) {
 	newItem.Parent = &afterRight
 	afterRight.Children = []*AXNode{&newItem}
 	changes := diffAXSnapshots(
-		&AXSnapshot{CanonicalRoots: []*AXNode{beforeLeft, beforeRight}},
-		&AXSnapshot{CanonicalRoots: []*AXNode{&afterLeft, &afterRight}},
+		&AXSnapshotV1{CanonicalRoots: []*AXNode{beforeLeft, beforeRight}},
+		&AXSnapshotV1{CanonicalRoots: []*AXNode{&afterLeft, &afterRight}},
 	)
 	var added, removed int
 	for _, change := range changes {

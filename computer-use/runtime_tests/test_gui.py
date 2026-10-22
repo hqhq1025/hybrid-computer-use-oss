@@ -37,6 +37,68 @@ class GUIScreenCoordinateTests(GUISettleAndFrameGuardCases, unittest.TestCase):
         self.assertAlmostEqual(x, 959.5, places=3)
         self.assertAlmostEqual(y, 539.5, places=3)
 
+    def test_ax_synthesis_points_are_stated_in_frame_pixels(self):
+        """AX notes state a synthesized point in GUI frame pixels, the
+        inverse of the GUI mapping, so the point can be reused as GUI x/y."""
+        dimensions = runtime.gui_model_dimensions(self.desktop)
+        model = runtime.frame(0, 0, dimensions["width"], dimensions["height"])
+        for native in ((717.0, 414.0), (959.5, 539.5), (3.0, 1070.0)):
+            frame_x, frame_y = runtime.desktop_frame_point(*native, self.desktop)
+            back = runtime.screen_absolute_point(frame_x, frame_y, model, self.desktop)
+            self.assertAlmostEqual(back[0], native[0], places=6)
+            self.assertAlmostEqual(back[1], native[1], places=6)
+        # Edge pixels clamp to the frame, within one native pixel.
+        for native in ((0.0, 0.0), (1919.0, 1079.0)):
+            back = runtime.screen_absolute_point(
+                *runtime.desktop_frame_point(*native, self.desktop), model, self.desktop)
+            self.assertLessEqual(abs(back[0] - native[0]), 1.0)
+            self.assertLessEqual(abs(back[1] - native[1]), 1.0)
+        with mock.patch.object(runtime, "desktop_bounds", return_value=self.desktop):
+            self.assertEqual(
+                runtime.frame_point_text(768.0, 425.0),
+                "at (546, 302) in full-desktop frame pixels")
+        with mock.patch.object(runtime, "desktop_bounds", return_value=None):
+            self.assertEqual(runtime.frame_point_text(1, 2), "at an unreported point")
+
+    def test_zoom_geometry_maps_back_within_two_frame_pixels(self):
+        """Every zoom image pixel maps to the frame point the crop holds,
+        per axis, for narrow, wide, tall, edge and off-grid regions."""
+        desktop = self.desktop
+        frame_size = runtime.gui_model_dimensions(desktop)
+        per_x = desktop["width"] / frame_size["width"]
+        per_y = desktop["height"] / frame_size["height"]
+        regions = [
+            [100, 0, 108, 8], [100, 0, 108, 768], [0, 300, 1365, 308],
+            [0, 30, 700, 70], [612.3, 61.7, 640.9, 83.2], [0, 0, 1365, 768],
+            [1357, 760, 1365, 768], [333.33, 444.44, 345.67, 455.55],
+        ]
+        for region in regions:
+            with self.subTest(region=region):
+                g = runtime.zoom_geometry(region, desktop)
+                x0, y0, x1, y1 = g["region"]
+                left, top, crop_w, crop_h = g["native"]
+                self.assertLessEqual(x0, region[0]); self.assertLessEqual(y0, region[1])
+                self.assertGreaterEqual(x1, region[2]); self.assertGreaterEqual(y1, region[3])
+                self.assertLessEqual(g["width"], runtime.GUI_MODEL_MAX_WIDTH)
+                self.assertLessEqual(g["height"], runtime.GUI_MODEL_MAX_HEIGHT)
+                scale_x = g["width"] / (x1 - x0)
+                scale_y = g["height"] / (y1 - y0)
+                for u in (0, g["width"] / 2, g["width"] - 0.5):
+                    for v in (0, g["height"] / 2, g["height"] - 0.5):
+                        # The native pixel the scaled crop shows at (u, v).
+                        native_x = left + u * crop_w / g["width"]
+                        native_y = top + v * crop_h / g["height"]
+                        error = max(abs(x0 + u / scale_x - native_x / per_x),
+                                    abs(y0 + v / scale_y - native_y / per_y))
+                        self.assertLessEqual(error, 2.0)
+
+    def test_zoom_geometry_rejects_small_or_outside_regions(self):
+        for region in ([100, 0, 107.9, 768], [0, 0, 1366, 100], [-1, 0, 50, 50],
+                       [50, 50, 40, 60]):
+            with self.subTest(region=region):
+                with self.assertRaises(ValueError):
+                    runtime.zoom_geometry(region, self.desktop)
+
     def test_1080p_desktop_is_delivered_at_the_size_the_model_sees(self):
         # GPT-5.4 at detail high shrinks a 1920x1080 image to 1365x768 before
         # the model sees it, so coordinates read from that image were 0.71x
@@ -613,8 +675,7 @@ class GUIScreenCoordinateTests(GUISettleAndFrameGuardCases, unittest.TestCase):
         self.assertTrue(response["effect_unknown"])
 
     def test_gui_fails_closed_when_desktop_bounds_are_unavailable(self):
-        with mock.patch.object(runtime, "desktop_bounds", return_value=None), \
-                mock.patch.object(runtime, "capture_window_image", return_value=None):
+        with mock.patch.object(runtime, "desktop_bounds", return_value=None):
             response = runtime.perform_gui([{"type": "click", "x": 1, "y": 2}])
 
         self.assertFalse(response["ok"])

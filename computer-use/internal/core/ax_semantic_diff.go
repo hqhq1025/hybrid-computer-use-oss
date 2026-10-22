@@ -322,7 +322,7 @@ func axMovedSiblingIndices(matched map[int]int, afterCount int) map[int]bool {
 	return moved
 }
 
-func diffAXSnapshots(before, after *AXSnapshot) []AXDiffChange {
+func diffAXSnapshots(before, after *AXSnapshotV1) []AXDiffChange {
 	changes := []AXDiffChange{}
 	var compareSiblings func(*AXNode, *AXNode, []*AXNode, []*AXNode)
 	compareSiblings = func(
@@ -415,7 +415,7 @@ func diffAXSnapshots(before, after *AXSnapshot) []AXDiffChange {
 	return changes
 }
 
-func axDiffRoots(snapshot *AXSnapshot) []*AXNode {
+func axDiffRoots(snapshot *AXSnapshotV1) []*AXNode {
 	if snapshot == nil {
 		return nil
 	}

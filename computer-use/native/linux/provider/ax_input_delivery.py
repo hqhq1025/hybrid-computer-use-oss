@@ -32,8 +32,8 @@ from .actionability import (
     preferred_action_index,
     require_coordinate_delivery,
     require_stable_coordinate_geometry,
+    frame_point_text,
     screen_point,
-    window_relative,
 )
 from .ax_target_notes import (
     PREFER_ELEMENT_INDEX,
@@ -158,11 +158,11 @@ def _global_click(
     notes.append(
         addressing_channel(element_record)
         + SYNTHESIS
-        + "Synthesized {} coordinate click(s) at ({:.0f}, {:.0f}) in "
-        "window-relative pixels after bringing the window to the foreground. {}{}"
+        + "Synthesized {} coordinate click(s) {} after bringing the window "
+        "to the foreground. {}{}"
         .format(
             click_count,
-            *window_relative(bounds, x, y),
+            frame_point_text(x, y),
             UNVERIFIED_SYNTHESIS,
             # Omit PREFER_ELEMENT_INDEX when the caller already named
             # an element: this route is usually taken because the
@@ -266,17 +266,14 @@ def _auto_click(
                 "This element is an item inside a drop-down popup, where the "
                 "AT-SPI action closes the popup without committing the value "
                 "and leaves nothing to verify against, so this went straight to "
-                "{} coordinate click(s) at ({:.0f}, {:.0f}) in window-relative "
-                "pixels. ".format(
-                    click_count, *window_relative(bounds, x, y))
+                "{} coordinate click(s) {}. ".format(
+                    click_count, frame_point_text(x, y))
             )
         else:
             reason = (
                 "No usable AT-SPI action was available, so this fell back to a "
-                "{} coordinate click(s) at ({:.0f}, {:.0f}) in window-relative pixels "
-                "after bringing the window to the foreground. ".format(
-                    click_count, *window_relative(bounds, x, y)
-                )
+                "{} coordinate click(s) {} after bringing the window to the "
+                "foreground. ".format(click_count, frame_point_text(x, y))
             )
         notes.append(
             addressing_channel(element_record)
@@ -331,12 +328,12 @@ def _pointer_click_for_state_only_action(
     notes.append(
         A11Y_CHANNEL
         + SYNTHESIS
-        + "Clicked the element with the pointer at ({:.0f}, {:.0f}) in "
-        "window-relative pixels after checking that the window is in front "
+        + "Clicked the element with the pointer {} after checking that "
+        "the window is in front "
         "and the point is on this element. Its only AT-SPI action is a "
         "toolkit toggle that changes the checked state without the click the "
         "application listens for, so a real click was needed. {}".format(
-            *window_relative(bounds, x, y), UNVERIFIED_SYNTHESIS)
+            frame_point_text(x, y), UNVERIFIED_SYNTHESIS)
     )
     return record, None
 
@@ -377,20 +374,17 @@ def _perform_scroll(
         action_evidence["point_owner_verified"] = True
         action_evidence["focus_verified"] = True
         action_evidence["input_emitted"] = True
-        wx, wy = window_relative(bounds, *point)
         notes.append(
             A11Y_CHANNEL
             + SYNTHESIS
-            + "Scrolled with {} wheel notch(es) at ({:.0f}, {:.0f}) in "
-            "window-relative pixels — {}. Two caveats. First, the wheel acts on the "
+            + "Scrolled with {} wheel notch(es) {} — {}. Two caveats. First, the wheel acts on the "
             "scrollable ancestor under that point, which is not necessarily the "
             "element you named. Second, one page is APPROXIMATED as {} notches; "
             "the real distance is whatever the application's scroll settings say, "
             "so do not treat pages=1 as exactly one Page_Down. This also moves the "
             "real pointer. {}".format(
                 int(math.ceil(float(pages or 1))) * WHEEL_CLICKS_PER_PAGE,
-                wx,
-                wy,
+                frame_point_text(*point),
                 # State where the position came from: without a target ref
                 # the wheel lands at the window centre, and claiming a
                 # targeted scroll would mislead every later inference.

@@ -9,7 +9,7 @@ struct ComputerUseProviderMain {
             let transport = try ProviderLineTransport(
                 arguments: CommandLine.arguments
             )
-            let server = ProviderServer(transport: transport)
+            let server = ProviderV2Server(transport: transport)
             await server.run()
             Darwin._exit(EXIT_SUCCESS)
         } catch {

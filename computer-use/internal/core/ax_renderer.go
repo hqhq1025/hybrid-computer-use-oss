@@ -245,11 +245,11 @@ func pureNonSemanticUnicode(value string, node *AXNode) bool {
 }
 
 func RenderAXSnapshotYAML(
-	snapshot *AXSnapshot,
+	snapshot *AXSnapshotV1,
 	options AXRenderOptions,
 ) ([]string, error) {
 	if snapshot == nil {
-		return nil, fmt.Errorf("cannot render nil AXSnapshot")
+		return nil, fmt.Errorf("cannot render nil AXSnapshotV1")
 	}
 	if err := snapshot.Validate(); err != nil {
 		return nil, err
@@ -319,7 +319,7 @@ func axProjectedParents(nodes []*AXNode) map[int]int {
 	return out
 }
 
-func (s *Service) BuildAndRenderAXSnapshot(
+func (s *Service) BuildAndRenderAXSnapshotV1(
 	snapshot *AppSnapshot,
 	view string,
 ) error {
@@ -331,7 +331,7 @@ func (s *Service) BuildAndRenderAXSnapshot(
 	// them before construction so provider identity is scoped by stable wN
 	// rather than by a replaceable provider top-level object.
 	s.assignWindowRefs(snapshot)
-	axSnapshot, err := buildAXSnapshot(snapshot)
+	axSnapshot, err := buildAXSnapshotV1(snapshot)
 	if err != nil {
 		return err
 	}

@@ -683,16 +683,16 @@ func projectedSubtreeLines(
 		return nil, errors.New("subtree projection requires a snapshot and root")
 	}
 	if snapshot.AXSnapshot == nil {
-		return nil, errors.New("subtree projection requires AXSnapshot")
+		return nil, errors.New("subtree projection requires AXSnapshotV1")
 	}
 	canonical := snapshot.AXSnapshot.ByIndex[root.Index]
 	if canonical == nil {
 		return nil, fmt.Errorf(
-			"subtree root %d is absent from AXSnapshot", root.Index,
+			"subtree root %d is absent from AXSnapshotV1", root.Index,
 		)
 	}
 	canonicalRoots := cloneAXForest([]*AXNode{canonical}, nil)
-	typed := &AXSnapshot{
+	typed := &AXSnapshotV1{
 		SchemaVersion:  snapshot.AXSnapshot.SchemaVersion,
 		AppRef:         snapshot.AXSnapshot.AppRef,
 		AppIdentity:    snapshot.AXSnapshot.AppIdentity,

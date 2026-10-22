@@ -89,7 +89,7 @@ func (darwinRuntimeBackend) ExecuteOrderedInput(
 		nextDarwinProviderRequestID(), core.ProviderWireOrderedInput,
 	)
 	wire.OrderedInput = &core.ProviderOrderedInputWireRequest{
-		ProtocolVersion:             core.ProviderProtocolVersion,
+		ProtocolVersion:             core.ProviderProtocolV2,
 		ProviderOrderedInputRequest: request,
 	}
 	response, err := runDarwinProvider(wire)

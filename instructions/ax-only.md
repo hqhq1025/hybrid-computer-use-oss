@@ -49,8 +49,8 @@ option. Follow the current tool schema for argument shapes and actions.
   application did not respond. When
   these lines show the result, do not read or wait again. Keep the default
   post-action diff and continue from it. Use `observe:"none"` only when readback
-  is unnecessary; then the report says `unknown`. A window screenshot is visual evidence,
-  not full-desktop control.
+  is unnecessary; then the report says `unknown`. An `observe:"full"` image shows the
+  full desktop; it is visual evidence, not a control target.
 - A `wait` step holds until its condition is true, or fails the batch with
   `wait_timeout` and the current state. Forms: `window` (a window title on
   the whole desktop), `query` (an element in any window of the application,

@@ -30,8 +30,8 @@ func largeEditSnapshots(t *testing.T) (*AppSnapshot, *AppSnapshot) {
 				Parent:              window,
 			})
 		}
-		typed := &AXSnapshot{
-			SchemaVersion: "AXSnapshot", WindowRef: "w1",
+		typed := &AXSnapshotV1{
+			SchemaVersion: "AXSnapshotV1", WindowRef: "w1",
 			CanonicalRoots: []*AXNode{window}, Roots: []*AXNode{window},
 		}
 		lines, err := RenderAXSnapshotYAML(typed, AXRenderOptions{})

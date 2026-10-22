@@ -9,7 +9,7 @@ import (
 func orderedLifecycleFailure(request ProviderOrderedInputRequest, failure ProviderFailure) ProviderOrderedInputResult {
 	first := request.Steps[0].ActionIndex
 	return ProviderOrderedInputResult{
-		ContractVersion: ProviderOrderedInputContractVersion,
+		ContractVersion: ProviderOrderedInputContractV1,
 		Steps: []ProviderOrderedInputStepResult{{
 			ActionIndex: first, Status: ProviderOrderedInputFailed,
 			Emission: ProviderOrderedInputEmissionNone, WindowContinuity: ProviderOrderedInputWindowUnknown,

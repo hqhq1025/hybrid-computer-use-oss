@@ -349,7 +349,7 @@ func TestShortRefAcceptsTheSamePublicAppAliasThatProducedIt(t *testing.T) {
 	service := NewService()
 	snapshot := &AppSnapshot{
 		App: AppDescriptor{Name: "soffice"},
-		AXSnapshot: &AXSnapshot{
+		AXSnapshot: &AXSnapshotV1{
 			AppIdentity: "soffice",
 		},
 	}
@@ -466,7 +466,7 @@ func TestTransientCommitProbeReturnsReplacementWindow(t *testing.T) {
 	dialog.actionExecution = actionEvidence
 
 	service := NewServiceWithBackend(&recordingPlatformBackend{})
-	if err := service.BuildAndRenderAXSnapshot(
+	if err := service.BuildAndRenderAXSnapshotV1(
 		dialog,
 		contract.TreeViewWorking,
 	); err != nil {

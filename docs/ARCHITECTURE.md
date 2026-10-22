@@ -111,7 +111,7 @@ computer-use/ (runtimebundle) go:embed of runtime.py and native/linux/provider
 | Package | Directory | Owns | Does not own |
 | --- | --- | --- | --- |
 | `contract` | `internal/contract` | `tool_contract.go` (tool definitions, input schemas, server instructions), `schema_validator.go` (schema validation and explanations), `tool_argument_rules.go` (tool-specific error wording), `published_values.go` (public modes, action types, error codes, limits, defaults), `contract_describe.go` (`DescribeContract`, `PublicErrorCodes`, `ContractVersion`, `ServerVersion`) | Result construction, state, I/O |
-| `core` | `internal/core` | `service.go` (`Service`, `DesktopState`, `sessionState`, `callTool`), `service_entry.go` (calls from the CLI), `ax_*.go`, `gui_service.go`, `app_snapshot.go`, `records.go`, `tool_result.go`, `argument_errors.go`, `request_replay.go`, `mcp_session_state.go`, `ax_public_request.go` (AX decoder), the platform port (`platform_contract.go`, `provider_types.go`, `provider_wire.go`, the other `provider_*.go` contracts), `platform_default.go` (backend hook), `runtime_backend_unsupported.go`, key preflight for macOS and Windows | Processes, sockets, platform calls |
+| `core` | `internal/core` | `service.go` (`Service`, `DesktopState`, `sessionState`, `callTool`), `service_entry.go` (calls from the CLI), `ax_*.go`, `gui_service.go`, `app_snapshot.go`, `records.go`, `tool_result.go`, `argument_errors.go`, `request_replay.go`, `mcp_session_state.go`, `ax_public_request.go` (AX decoder), the platform port (`platform_contract.go`, `provider_types_v2.go`, `provider_wire_v2.go`, the other `provider_*.go` contracts), `platform_default.go` (backend hook), `runtime_backend_unsupported.go`, key preflight for macOS and Windows | Processes, sockets, platform calls |
 | `provider` | `internal/provider` | `runtime_backend_{linux,darwin,windows}.go` (each installs the backend hook in `init()`), `linux_runtime_executor.go`, `linux_host_runtime.go`, `linux_runtime_bundle.go`, `darwin_sidecar_transport.go`, `darwin_timeout_diagnostic.go`, `windows_sidecar_transport*.go`, `windows_parent_death_*.go`, `provider_sidecar_buffer.go`, `provider_diagnostic_line.go`, `file_owner_*.go` | Wire types and validation (they are the port, in core) |
 | `transport` | `internal/transport` | `mcp_transport.go`, `mcp_attach.go`, `daemon.go`, `daemon_client.go`, `daemon_spawn_*.go`, `peer_cred_*.go`, `cli.go`, `cli_main.go` (`RunCLI`, `call`, help, `doctor` notes) | Argument meaning, error meaning |
 | `main` | `cmd/computer-use` | `main.go`: `version`, `main()` | Everything else |
@@ -122,7 +122,7 @@ Three choices keep the dependency direction one-way:
 1. Core owns the platform port. Core consumes `PlatformBackend` and the
    `Provider*` request and result types, and the provider implements them.
    Six of these types are aliases of core snapshot types
-   (`ProviderSnapshot = AppSnapshot`). The wire envelope and its validation
+   (`ProviderSnapshot = AppSnapshot`). The wire v2 envelope and its validation
    sit with them, so the provider package only moves bytes and runs processes.
 2. Core selects the backend through a hook. `platform_default.go` declares
    `DefaultRuntimeBackend` and `ShutdownPlatformRuntime` with the unsupported
@@ -190,10 +190,10 @@ A public error code or hint:
 8. Checks: `TestEveryPublicErrorCodeIsPublished`,
    `TestEveryPublicErrorCodeHasAHint`, the contract golden.
 
-A provider wire field or operation (private protocol):
+A provider wire field or operation (private protocol v2):
 
-1. `internal/core/provider_types.go`: request or result type and JSON tag.
-2. `internal/core/provider_wire.go`: envelope and validation.
+1. `internal/core/provider_types_v2.go`: request or result type and JSON tag.
+2. `internal/core/provider_wire_v2.go`: envelope and validation.
 3. `internal/core/provider_request_builder.go`: how core fills the request.
 4. `internal/core/platform_contract.go`: `PlatformBackend` method, for a new
    operation.
@@ -203,11 +203,11 @@ A provider wire field or operation (private protocol):
    (`recordingPlatformBackend` in `helpers_test.go` and others) and in
    `internal/transport/daemon_test.go` and `transport_helpers_test.go`;
    `go vet ./...` lists every fake that misses the method.
-7. Providers: `native/linux/provider/wire.py` and its users,
+7. Providers: `native/linux/provider/wire_v2.py` and its users,
    `native/macos/Sources/ComputerUseProviderKit/` (validator, server),
    `native/windows/` (UIA3 provider).
-8. Fixtures: `testdata/provider-wire/` (shared by Go, Swift and C# tests).
-9. Checks: `TestProviderFixtureCorpus`, `TestProviderNativeFixtureCorpus`,
+8. Fixtures: `testdata/provider-v2/` (shared by Go, Swift and C# tests).
+9. Checks: `TestProviderV2FixtureCorpus`, `TestProviderV2NativeFixtureCorpus`,
    `runtime_test.py`, Swift and .NET tests in CI.
 
 A platform backend or sidecar transport:
@@ -296,6 +296,13 @@ a private layout lease. Before each coordinate action the provider checks the
 window under that point against the lease. If that window changed, the action
 is rejected before any input with `gui_frame_stale`, and a fresh screenshot
 is returned.
+
+AX `observe:"full"` and `observe:"screenshot"` return the same frame. The core
+reads the tree, then captures the desktop through the GUI batch (one
+`screenshot` action), and registers the delivered image as the current GUI
+frame. A GUI coordinate action can follow an AX read directly and is checked
+against that frame by the same point rule. Providers never capture a window
+image.
 
 Every provider scales the desktop to fit within 1366x768 and never enlarges
 it. This is the size the model sees: GPT-5.4 at detail high shrinks a

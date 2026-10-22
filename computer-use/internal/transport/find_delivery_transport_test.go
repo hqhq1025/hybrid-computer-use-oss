@@ -56,7 +56,7 @@ func TestFindDeliveryLiteralTruncationMarkerThroughTransport(t *testing.T) {
 				snapshot.Elements[1].Value = "[TRUNCATED: context]"
 				snapshot.Elements[3].Name = "[TRUNCATED: example]"
 				snapshot.Elements[3].Value = "[TRUNCATED: value]"
-				if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
+				if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
 					t.Fatal(err)
 				}
 				backend := &transportRecordingPlatformBackend{
@@ -225,7 +225,7 @@ func TestFindDeliveryLongEscapedIdentityAndMatchedTail(t *testing.T) {
 	snapshot.Elements[2].ProcessGeneration = "42"
 	snapshot.Elements[2].Value = strings.Repeat("v", 30000)
 	snapshot.Elements[2].Description = strings.Repeat("d", 30000) + "TAIL-MATCH"
-	if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
+	if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
 		t.Fatal(err)
 	}
 	snapshot.AXSnapshot.ByIndex[2].Properties.Omitted = "provider_children_unavailable"
@@ -374,7 +374,7 @@ func TestFindDeliveryWireEscapingIsSeparateFromTextBudget(t *testing.T) {
 		matches[i].Description = ""
 		snapshot.Elements[i+2] = matches[i]
 	}
-	if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
+	if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
 		t.Fatal(err)
 	}
 	svc.Backend = &transportRecordingPlatformBackend{
@@ -419,7 +419,7 @@ func TestFindTextExcerptDeliveredWithinBudget(t *testing.T) {
 		snapshot.Elements[i].ControlType = "paragraph"
 		snapshot.Elements[i].Value = strings.Repeat("界🙂\\\"\n", 100)
 	}
-	if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
+	if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
 		t.Fatal(err)
 	}
 	svc.Backend = &transportRecordingPlatformBackend{accessibilityResponse: &core.ProviderAccessibilityResult{OK: true, Snapshot: snapshot}}

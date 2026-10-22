@@ -23,8 +23,8 @@ func TestStructuredAXYAMLSupportsValueAndChildren(t *testing.T) {
 		}},
 	}
 	root.Children[0].Parent = root
-	snapshot := &AXSnapshot{
-		SchemaVersion: "AXSnapshot",
+	snapshot := &AXSnapshotV1{
+		SchemaVersion: "AXSnapshotV1",
 		AppIdentity:   "test",
 		WindowHandle:  "window",
 		Revision:      "rev",
@@ -90,7 +90,7 @@ func TestRelationPruningRequiresUniqueLabelTarget(t *testing.T) {
 			},
 		},
 	}
-	tree, err := buildAXSnapshot(snapshot)
+	tree, err := buildAXSnapshotV1(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestRelationPruningRequiresUniqueLabelTarget(t *testing.T) {
 		ProviderBusName: ":1.10", ProviderObjectPath: "/label/other",
 		ProcessGeneration: "p1",
 	})
-	tree, err = buildAXSnapshot(snapshot)
+	tree, err = buildAXSnapshotV1(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestRelationPruningRequiresUniqueLabelTarget(t *testing.T) {
 		t.Fatal("exact provider-linked duplicate label was not pruned")
 	}
 	snapshot.Elements[2].RelationReadComplete = false
-	tree, err = buildAXSnapshot(snapshot)
+	tree, err = buildAXSnapshotV1(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestAllModelRenderersHideProviderDiagnostics(t *testing.T) {
 		Detail: "internal traversal stopped",
 	}}
 	for _, view := range []string{contract.TreeViewWorking, contract.TreeViewFull} {
-		typed, err := buildAXSnapshot(snapshot)
+		typed, err := buildAXSnapshotV1(snapshot)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -22,19 +22,19 @@ func TestRuntimeCallsRouteByPlatformDomain(t *testing.T) {
 	}{
 		{name: "observe_apps", want: "observe_apps", call: func() error {
 			_, err := service.callProviderObserveApps(ProviderObserveAppsRequest{
-				ProtocolVersion: ProviderProtocolVersion,
+				ProtocolVersion: ProviderProtocolV2,
 			})
 			return err
 		}},
 		{name: "observe", want: "observe", call: func() error {
 			_, err := service.callProviderObserve(ProviderObserveRequest{
-				ProtocolVersion: ProviderProtocolVersion, App: "Editor",
+				ProtocolVersion: ProviderProtocolV2, App: "Editor",
 			})
 			return err
 		}},
 		{name: "resolve_and_act", want: "resolve_and_act", call: func() error {
 			_, err := service.callProviderAction(ProviderActionRequest{
-				ProtocolVersion: ProviderProtocolVersion,
+				ProtocolVersion: ProviderProtocolV2,
 				Intent:          AccessibilityClick,
 				App:             "Editor",
 				Target: &ProviderSemanticTarget{
@@ -47,13 +47,13 @@ func TestRuntimeCallsRouteByPlatformDomain(t *testing.T) {
 		}},
 		{name: "desktop", want: "desktop_execute_batch", call: func() error {
 			_, err := service.callProviderDesktop(ProviderDesktopRequest{
-				ProtocolVersion: ProviderProtocolVersion,
+				ProtocolVersion: ProviderProtocolV2,
 			})
 			return err
 		}},
 		{name: "window_activate", want: "window_activate", call: func() error {
 			_, err := service.callProviderWindowAction(ProviderWindowActionRequest{
-				ProtocolVersion: ProviderProtocolVersion,
+				ProtocolVersion: ProviderProtocolV2,
 				Action:          WindowActivate,
 				App:             "Editor",
 			})
@@ -61,7 +61,7 @@ func TestRuntimeCallsRouteByPlatformDomain(t *testing.T) {
 		}},
 		{name: "window_close", want: "window_close", call: func() error {
 			_, err := service.callProviderWindowAction(ProviderWindowActionRequest{
-				ProtocolVersion: ProviderProtocolVersion,
+				ProtocolVersion: ProviderProtocolV2,
 				Action:          WindowClose,
 				App:             "Editor",
 			})
@@ -69,7 +69,7 @@ func TestRuntimeCallsRouteByPlatformDomain(t *testing.T) {
 		}},
 		{name: "window_list", want: "window_list", call: func() error {
 			_, err := service.callProviderWindowList(ProviderWindowListRequest{
-				ProtocolVersion: ProviderProtocolVersion,
+				ProtocolVersion: ProviderProtocolV2,
 				App:             "Editor",
 			})
 			return err

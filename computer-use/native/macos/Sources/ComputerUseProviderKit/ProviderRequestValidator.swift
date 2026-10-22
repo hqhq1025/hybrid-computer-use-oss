@@ -51,8 +51,8 @@ public enum ProviderRequestValidator {
                 "window_action",
             ])
         )
-        guard string(request["protocol"]) == "computer-use-provider" else {
-            throw invalid("request.protocol must equal computer-use-provider")
+        guard string(request["protocol"]) == "computer-use-provider-v2" else {
+            throw invalid("request.protocol must equal computer-use-provider-v2")
         }
         guard integer(request["schema_version"]) == 2 else {
             throw invalid("request.schema_version must equal 2")

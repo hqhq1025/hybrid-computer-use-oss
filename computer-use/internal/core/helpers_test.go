@@ -136,6 +136,20 @@ func testPNGBase64(t *testing.T, width, height int) string {
 	return base64.StdEncoding.EncodeToString(encoded.Bytes())
 }
 
+// testDesktopFrame is a GUI screenshot response: the full-desktop frame that
+// every AX image is captured as.
+func testDesktopFrame(t *testing.T, frameID string, width, height int) *ProviderDesktopResult {
+	t.Helper()
+	return &ProviderDesktopResult{OK: true, Snapshot: &AppSnapshot{
+		ScreenshotPNGBase64: testPNGBase64(t, width, height),
+		ScreenshotMimeType:  "image/png",
+		CoordinateSpace:     "screen_image_px",
+		FrameID:             frameID,
+		Width:               width,
+		Height:              height,
+	}}
+}
+
 type recordingPlatformBackend struct {
 	calls                  []string
 	actionRequests         []ProviderActionRequest
@@ -323,7 +337,7 @@ func editorFormSnapshot() *AppSnapshot {
 
 func typedTreeTextForTest(t *testing.T, snapshot *AppSnapshot) string {
 	t.Helper()
-	typed, err := buildAXSnapshot(snapshot)
+	typed, err := buildAXSnapshotV1(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}

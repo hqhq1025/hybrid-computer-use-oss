@@ -31,7 +31,7 @@ func TestWorkingProjectionHidesUnaddressableControlLeaf(t *testing.T) {
 		AddressabilityReason:    "stable_identity_unavailable",
 	}
 	roots, removed, _, err := plugin.Apply(
-		&DistillationContext{Snapshot: &AXSnapshot{
+		&DistillationContext{Snapshot: &AXSnapshotV1{
 			AppRef: "a1", WindowRef: "w1",
 		}}, []*AXNode{hidden, visible, stateful, named},
 	)
@@ -65,7 +65,7 @@ func TestWorkingProjectionKeepsUnknownAddressability(t *testing.T) {
 		AddressabilityEvaluated: true,
 	}
 	roots, removed, _, err := plugin.Apply(
-		&DistillationContext{Snapshot: &AXSnapshot{
+		&DistillationContext{Snapshot: &AXSnapshotV1{
 			AppRef: "a1", WindowRef: "w1",
 		}},
 		[]*AXNode{unknown},

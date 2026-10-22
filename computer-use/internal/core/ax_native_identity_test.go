@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func nativeIdentityFixture() (*AXSnapshot, *AXNode) {
+func nativeIdentityFixture() (*AXSnapshotV1, *AXNode) {
 	window := "w2:" + strings.Repeat("a", 32)
 	node := &AXNode{
 		ID: "save", Role: "button", ProviderRole: "button", Name: "Save",
@@ -20,7 +20,7 @@ func nativeIdentityFixture() (*AXSnapshot, *AXNode) {
 		ProviderWindowProcessGeneration: "epoch1", AutomationID: "save",
 		RuntimeID: []int{0, 1}, RuntimeIDAliases: [][]int{{0, 1}, {1, 1}},
 	}
-	return &AXSnapshot{
+	return &AXSnapshotV1{
 		AppIdentity: "fixture", AppRef: "a1", WindowRef: "w1", WindowHandle: window,
 		Revision: "c1", RefInventoryComplete: true,
 		Roots: []*AXNode{node}, ByID: map[string]*AXNode{node.ID: node},
@@ -40,7 +40,7 @@ func nativeIdentityRecord(node *AXNode) *ElementRecord {
 	}
 }
 
-func nativeIdentityAcquire(r *RefRegistry, snapshot *AXSnapshot, node *AXNode, mode string) string {
+func nativeIdentityAcquire(r *RefRegistry, snapshot *AXSnapshotV1, node *AXNode, mode string) string {
 	switch mode {
 	case "typed":
 		return r.AcquireTyped(node.LocatorKind, snapshot.AppIdentity, snapshot.WindowHandle,
@@ -100,23 +100,23 @@ func TestNativeIdentityRetainedProjection(t *testing.T) {
 }
 
 func TestNativeIdentityProjectionRejectsContradictions(t *testing.T) {
-	changes := map[string]func(*AXSnapshot, *AXNode){
-		"scope":         func(_ *AXSnapshot, n *AXNode) { n.ProviderIdentityScope = "process" },
-		"token":         func(_ *AXSnapshot, n *AXNode) { n.ProviderObjectPath = "replacement" },
-		"epoch":         func(_ *AXSnapshot, n *AXNode) { n.ProcessGeneration = "epoch2" },
-		"bus":           func(_ *AXSnapshot, n *AXNode) { n.ProviderBusName = "backend:43" },
-		"window_object": func(_ *AXSnapshot, n *AXNode) { n.ProviderWindowObjectPath = "window-two" },
-		"window_bus":    func(_ *AXSnapshot, n *AXNode) { n.ProviderWindowBusName = "backend:43" },
-		"window_epoch":  func(_ *AXSnapshot, n *AXNode) { n.ProviderWindowProcessGeneration = "epoch2" },
-		"missing_owner": func(_ *AXSnapshot, n *AXNode) { n.ProviderWindowObjectPath = "" },
-		"window_handle": func(s *AXSnapshot, _ *AXNode) { s.WindowHandle += "other" },
-		"window_ref":    func(s *AXSnapshot, _ *AXNode) { s.WindowRef = "w2" },
-		"app_ref":       func(s *AXSnapshot, _ *AXNode) { s.AppRef = "a2" },
-		"role":          func(_ *AXSnapshot, n *AXNode) { n.Role = "textbox" },
-		"provider_role": func(_ *AXSnapshot, n *AXNode) { n.ProviderRole = "entry" },
-		"name":          func(_ *AXSnapshot, n *AXNode) { n.Name = "Replacement" },
-		"automation_id": func(_ *AXSnapshot, n *AXNode) { n.AutomationID = "replacement" },
-		"missing_id":    func(_ *AXSnapshot, n *AXNode) { n.AutomationID = "" },
+	changes := map[string]func(*AXSnapshotV1, *AXNode){
+		"scope":         func(_ *AXSnapshotV1, n *AXNode) { n.ProviderIdentityScope = "process" },
+		"token":         func(_ *AXSnapshotV1, n *AXNode) { n.ProviderObjectPath = "replacement" },
+		"epoch":         func(_ *AXSnapshotV1, n *AXNode) { n.ProcessGeneration = "epoch2" },
+		"bus":           func(_ *AXSnapshotV1, n *AXNode) { n.ProviderBusName = "backend:43" },
+		"window_object": func(_ *AXSnapshotV1, n *AXNode) { n.ProviderWindowObjectPath = "window-two" },
+		"window_bus":    func(_ *AXSnapshotV1, n *AXNode) { n.ProviderWindowBusName = "backend:43" },
+		"window_epoch":  func(_ *AXSnapshotV1, n *AXNode) { n.ProviderWindowProcessGeneration = "epoch2" },
+		"missing_owner": func(_ *AXSnapshotV1, n *AXNode) { n.ProviderWindowObjectPath = "" },
+		"window_handle": func(s *AXSnapshotV1, _ *AXNode) { s.WindowHandle += "other" },
+		"window_ref":    func(s *AXSnapshotV1, _ *AXNode) { s.WindowRef = "w2" },
+		"app_ref":       func(s *AXSnapshotV1, _ *AXNode) { s.AppRef = "a2" },
+		"role":          func(_ *AXSnapshotV1, n *AXNode) { n.Role = "textbox" },
+		"provider_role": func(_ *AXSnapshotV1, n *AXNode) { n.ProviderRole = "entry" },
+		"name":          func(_ *AXSnapshotV1, n *AXNode) { n.Name = "Replacement" },
+		"automation_id": func(_ *AXSnapshotV1, n *AXNode) { n.AutomationID = "replacement" },
+		"missing_id":    func(_ *AXSnapshotV1, n *AXNode) { n.AutomationID = "" },
 	}
 	for _, mode := range []string{"typed", "node", "snapshot"} {
 		for name, change := range changes {
@@ -366,7 +366,7 @@ func TestNativeIdentityCanonicalRawLabelAndAutomationWire(t *testing.T) {
 			source := nativeAliasFixture("process_instance")
 			source.Elements = source.Elements[:2]
 			source.Elements[1].Name = "Meeting\u202fPM"
-			tree, err := buildAXSnapshot(source)
+			tree, err := buildAXSnapshotV1(source)
 			if err != nil {
 				t.Fatal(err)
 			}

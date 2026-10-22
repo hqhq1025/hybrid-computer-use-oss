@@ -27,8 +27,8 @@ func renderShortenedDescriptions(t *testing.T, actedRef string, nodes ...*AXNode
 	for _, node := range nodes {
 		node.Parent = window
 	}
-	snapshot := &AXSnapshot{
-		SchemaVersion: "AXSnapshot", Roots: []*AXNode{window},
+	snapshot := &AXSnapshotV1{
+		SchemaVersion: "AXSnapshotV1", Roots: []*AXNode{window},
 		CanonicalRoots: []*AXNode{window}, ActedRef: actedRef,
 	}
 	context := &DistillationContext{Snapshot: snapshot}

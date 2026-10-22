@@ -281,7 +281,7 @@ func (registry *RefRegistry) mintRef(key string, request refAcquisition) string 
 }
 
 func (registry *RefRegistry) AcquireNode(
-	snapshot *AXSnapshot,
+	snapshot *AXSnapshotV1,
 	node *AXNode,
 	locatorKind AXLocatorKind,
 ) string {

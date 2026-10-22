@@ -157,8 +157,8 @@ func TestGUISurfaceUsesFullDesktopImageCoordinates(t *testing.T) {
 	gui := findToolDefinition(t, "GUI")
 	if !strings.Contains(gui.Description, "Full-desktop") ||
 		!strings.Contains(gui.Description, "returns one final screenshot") ||
-		!strings.Contains(gui.Description, "never of an AX window image") {
-		t.Fatal("GUI must declare full-desktop image coordinates and a screenshot on every call")
+		!strings.Contains(gui.Description, "from GUI or AX full/screenshot, which return the same frame") {
+		t.Fatal("GUI must declare full-desktop image coordinates, shared with AX images, and a screenshot on every call")
 	}
 	for _, removed := range []string{"get_screenshot", "click_xy", "drag_xy"} {
 		if strings.Contains(gui.Description, removed) {
@@ -314,7 +314,7 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 		t.Fatal("ProviderDesktopRequest must preserve explicit settle_ms=0")
 	}
 	encoded, err := json.Marshal(ProviderDesktopRequest{
-		ProtocolVersion: ProviderProtocolVersion,
+		ProtocolVersion: ProviderProtocolV2,
 		Actions:         []ProviderDesktopAction{{Type: "screenshot"}},
 		SettleMS:        0,
 	})

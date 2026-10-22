@@ -38,7 +38,7 @@ func TestDecodeAXSelectShapes(t *testing.T) {
 
 func TestSelectRequestCarriesRangeEndAcrossProviderWire(t *testing.T) {
 	request := ProviderActionRequest{
-		ProtocolVersion: ProviderProtocolVersion,
+		ProtocolVersion: ProviderProtocolV2,
 		Intent:          AccessibilitySelect,
 		App:             "a1",
 		Target:          &ProviderSemanticTarget{Selector: "paragraph", Role: "paragraph"},

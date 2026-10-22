@@ -67,7 +67,7 @@ jobs:
         with:
           dotnet-version: "8.0.x"
       - name: Native protocol and policy tests
-        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.Provider.Tests -- computer-use/testdata/provider-wire
+        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.ProviderV2.Tests -- computer-use/testdata/provider-v2
       - name: Native visibility policy tests
         run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.VisibilityRead.Tests
       - name: Native pointer policy tests

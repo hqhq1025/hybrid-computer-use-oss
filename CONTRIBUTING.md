@@ -56,7 +56,7 @@ source text.
 - Never copy, mount or inject this repository's `AGENTS.md` or other
   documentation into an evaluated agent.
 - The Go server and native providers share a private protocol. Update affected
-  providers together and keep `computer-use/testdata/provider-wire/` consistent.
+  providers together and keep `computer-use/testdata/provider-v2/` consistent.
 - Run a setup canary before any change that needs a real task run to verify;
   real runs spend model quota.
 

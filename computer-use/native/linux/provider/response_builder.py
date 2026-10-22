@@ -1,4 +1,4 @@
-"""Typed provider failure responses for the Linux provider boundary."""
+"""Typed provider failure responses for the Linux Provider V2 boundary."""
 
 from . import action_evidence
 from .input_primitives import InputEmissionError

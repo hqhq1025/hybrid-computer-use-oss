@@ -66,7 +66,7 @@ func TestIncompleteSnapshotCannotAuthorizeProviderRebind(t *testing.T) {
 		Annotations: []axProviderAnnotation{{
 			Kind: "omitted", Reason: "provider_timeout",
 		}},
-		AXSnapshot: &AXSnapshot{
+		AXSnapshot: &AXSnapshotV1{
 			Revision:     "c1",
 			WindowHandle: windowHandle,
 			WindowRef:    "w1",
@@ -279,7 +279,7 @@ func TestCurrentRevisionSemanticRefAuthorizesOneProviderRebind(t *testing.T) {
 		App:             AppDescriptor{Name: "Editor"},
 		WindowHandle:    windowHandle,
 		publicWindowRef: "w1",
-		AXSnapshot: &AXSnapshot{
+		AXSnapshot: &AXSnapshotV1{
 			Revision:     "c1",
 			WindowHandle: windowHandle,
 			WindowRef:    "w1",
@@ -563,7 +563,7 @@ func TestCanonicalAssertionFallbackAcceptsRegistryProviderRebind(t *testing.T) {
 		Showing:            &showing,
 		Visible:            &showing,
 	}
-	tree := &AXSnapshot{
+	tree := &AXSnapshotV1{
 		AppRef:               "a1",
 		AppIdentity:          "editor",
 		WindowHandle:         "private-window",
@@ -661,7 +661,7 @@ func TestPostActionWindowIdentityStabilizationRejectedProbeIsTransactional(t *te
 			Snapshot: sibling,
 		},
 	})
-	if err := service.BuildAndRenderAXSnapshot(
+	if err := service.BuildAndRenderAXSnapshotV1(
 		before,
 		contract.TreeViewWorking,
 	); err != nil {
@@ -704,7 +704,7 @@ func TestCompleteInventoryKeepsPresentTemporarilyHiddenRef(t *testing.T) {
 		Visible:            &showing,
 	}
 	registry := NewRefRegistry(16)
-	first := &AXSnapshot{
+	first := &AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c1",
 		RefInventoryComplete: true,
@@ -722,7 +722,7 @@ func TestCompleteInventoryKeepsPresentTemporarilyHiddenRef(t *testing.T) {
 	hiddenNode.Ref = ""
 	hiddenNode.Showing = &hidden
 	hiddenNode.Visible = &hidden
-	second := &AXSnapshot{
+	second := &AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c2",
 		RefInventoryComplete: true,

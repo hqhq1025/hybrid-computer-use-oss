@@ -308,6 +308,7 @@ func compactFindSnapshot(snapshot *AppSnapshot) *AppSnapshot {
 	clone.ScreenshotPNGBase64 = ""
 	clone.ScreenshotMimeType = ""
 	clone.ScreenshotEncoding = ""
+	clone.desktopFrame = nil
 	clone.TreeLines = nil
 	clone.rawTreeLines = nil
 	clone.baselineProjectionLines = nil
@@ -370,11 +371,11 @@ func estimateFindResultSet(
 			len(match.ControlType) + len(match.ProviderObjectPath)
 	}
 	if encoded, err := json.Marshal(struct {
-		Snapshot      *AXSnapshot           `json:"snapshot"`
+		Snapshot      *AXSnapshotV1         `json:"snapshot"`
 		Matches       []ElementRecord       `json:"matches"`
 		HiddenRecords map[int]ElementRecord `json:"hidden_records"`
 	}{
-		Snapshot: func() *AXSnapshot {
+		Snapshot: func() *AXSnapshotV1 {
 			if snapshot == nil {
 				return nil
 			}

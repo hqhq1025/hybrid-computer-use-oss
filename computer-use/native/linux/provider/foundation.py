@@ -69,7 +69,6 @@ SETTLE_POLL_SECONDS = 0.02
 # the tree 35-65 ms after the input inside a continuous burst.
 SETTLE_QUIET_SECONDS = 0.05
 SETTLE_EVENT_FLOOR_SECONDS = 0.07
-SCREENSHOT_SCOPE_SCREEN = "screen"
 # Sampling stride and threshold for pixel comparison. An 8 px stride keeps
 # a full-window comparison to a few tens of milliseconds, negligible next to
 # app resolution, and still detects moved text or an opened or closed
@@ -91,6 +90,12 @@ GUI_MAX_SETTLE_MS = 3000
 # the delivered pixels. 1366x768 also fits Claude's image limit unscaled.
 GUI_MODEL_MAX_WIDTH = 1366
 GUI_MODEL_MAX_HEIGHT = 768
+# A zoom region side in frame pixels must be at least this long: a narrower
+# crop has so few output pixels that rounding moves its scale, and it
+# magnifies nothing useful. It must equal the core's GUIZoomMinSide.
+GUI_ZOOM_MIN_SIDE = 8
+# A zoom enlarges native pixels at most this much; more adds only blur.
+GUI_ZOOM_MAX_SCALE = 4.0
 GUI_SETTLE_POLL_SECONDS = 0.1
 GUI_QUIESCENT_MIN_SAMPLES = 4
 GUI_QUIESCENT_MIN_SECONDS = 0.3
@@ -104,7 +109,7 @@ MAX_SCROLL_PAGES = 100
 GUI_POINTER_KEYBOARD_BARRIER_SECONDS = 0.12
 GUI_KEYBOARD_ACTION_INTERVAL_SECONDS = 0.08
 GUI_ACTION_TYPES = {
-    "screenshot", "click", "double_click", "move", "drag",
+    "screenshot", "zoom", "click", "double_click", "move", "drag",
     "scroll", "type", "keypress", "wait",
 }
 GUI_POINTER_ACTION_TYPES = {
@@ -117,6 +122,7 @@ GUI_INPUT_ACTION_TYPES = GUI_POINTER_ACTION_TYPES | GUI_KEYBOARD_ACTION_TYPES
 GUI_MOUSE_MODIFIERS = ("CTRL", "CONTROL", "SHIFT", "ALT", "SUPER")
 GUI_ACTION_FIELDS = {
     "screenshot": {"type"},
+    "zoom": {"type", "region"},
     "click": {"type", "x", "y", "button", "keys"},
     "double_click": {"type", "x", "y", "keys"},
     "move": {"type", "x", "y", "keys"},
@@ -229,17 +235,6 @@ def inventory_complete(value):
 
 def inventory_errors(value):
     return list(getattr(value, "errors", []) or [])
-
-
-def a11y_screenshots_enabled():
-    """Return whether AX responses include a screenshot; enabled by default.
-
-    Set `COMPUTER_USE_A11Y_SCREENSHOTS=0` to disable. The switch exists for
-    experiments, not everyday use, and does not affect the GUI tool, which
-    always returns its screenshot.
-    """
-    value = os.environ.get("COMPUTER_USE_A11Y_SCREENSHOTS", "1").strip().lower()
-    return value not in {"0", "false", "no", "off"}
 
 
 # Fraction of the node budget after which unnamed structural containers with

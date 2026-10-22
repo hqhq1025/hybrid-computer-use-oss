@@ -42,7 +42,7 @@ func postInputCaptureFailurePreservesDeliveryAndReadback() {
         } catch {
             #expect(error is PostInputObservationError)
             let result = postInputObservationFailureResult(error)
-            let wire = ProviderResponseBuilder.domainResult(result, operation: "resolve_and_act")
+            let wire = ProviderV2ResponseBuilder.domainResult(result, operation: "resolve_and_act")
             let mutation = wire["mutation"] as? [String: Any]
             let failure = wire["failure"] as? [String: Any]
             let evidence = wire["action_evidence"] as? [String: Any]
@@ -117,7 +117,7 @@ func expansionObservationFailurePreservesInputEvidence() {
     } catch {
         #expect(error is PostInputObservationError)
         let result = postInputObservationFailureResult(error)
-        let wire = ProviderResponseBuilder.domainResult(result, operation: "resolve_and_act")
+        let wire = ProviderV2ResponseBuilder.domainResult(result, operation: "resolve_and_act")
         let mutation = wire["mutation"] as? [String: Any]
         let failure = wire["failure"] as? [String: Any]
         let evidence = wire["action_evidence"] as? [String: Any]

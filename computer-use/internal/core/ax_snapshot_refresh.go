@@ -122,7 +122,11 @@ func (s *Service) readSnapshot(app string, request AXServiceRequest) (*AppSnapsh
 	if result.IsError {
 		return nil, nil, result
 	}
-	return snapshot, response.Notes, ToolCallResult{}
+	notes := response.Notes
+	if request.IncludeScreenshot != nil && *request.IncludeScreenshot {
+		notes = append(notes, s.attachDesktopFrame(snapshot)...)
+	}
+	return snapshot, notes, ToolCallResult{}
 }
 
 func (s *Service) prepareProviderSnapshot(
@@ -180,7 +184,7 @@ func (s *Service) prepareProviderSnapshot(
 		baselineProjection.serializerOmitted
 	response.Snapshot.serializerBranches =
 		baselineProjection.serializerBranches
-	if err := s.BuildAndRenderAXSnapshot(
+	if err := s.BuildAndRenderAXSnapshotV1(
 		response.Snapshot,
 		request.TreeView,
 	); err != nil {
@@ -189,7 +193,7 @@ func (s *Service) prepareProviderSnapshot(
 			return nil, s.providerIdentityConflictResult(request, response, conflict)
 		}
 		return nil, TextResult(
-			"AXSnapshot pipeline failed: "+err.Error(),
+			"AXSnapshotV1 pipeline failed: "+err.Error(),
 			true,
 		).withEvidenceScope("error_only")
 	}

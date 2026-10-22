@@ -7,7 +7,7 @@ private func sharedProviderFixture(_ name: String) throws -> [String: Any] {
     for _ in 0..<5 {
         root.deleteLastPathComponent()
     }
-    let file = root.appendingPathComponent("testdata/provider-wire/\(name)")
+    let file = root.appendingPathComponent("testdata/provider-v2/\(name)")
     return try #require(
         JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
     )
@@ -17,7 +17,7 @@ private func sharedProviderFixture(_ name: String) throws -> [String: Any] {
 func sharedProviderRequestsPassNativeValidation() throws {
     for manifestName in ["manifest.json", "native-manifest.json"] {
         let manifest = try sharedProviderFixture(manifestName)
-        #expect(manifest["protocol"] as? String == "computer-use-provider")
+        #expect(manifest["protocol"] as? String == "computer-use-provider-v2")
         #expect(manifest["schema_version"] as? Int == 2)
         if manifestName == "native-manifest.json" {
             let platforms = try #require(manifest["ordered_input_platforms"] as? [String: Bool])
@@ -47,7 +47,7 @@ func sharedOptionalResponsesPreserveNativeWireContract() async throws {
             runtimeResult["providerResetRequired"] = reset
         }
         var dispatched: [[String: Any]] = []
-        let server = ProviderServer(
+        let server = ProviderV2Server(
             transport: ProviderLineTransport(inputDescriptor: -1, outputDescriptor: -1),
             executeRuntime: { operation in
                 dispatched.append(operation)

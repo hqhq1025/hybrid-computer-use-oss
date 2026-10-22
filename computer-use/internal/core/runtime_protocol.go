@@ -1,7 +1,7 @@
 package core
 
 // AXServiceRequest is common-service orchestration state. It never crosses the
-// provider boundary; operation-specific request builders translate it into
+// Provider V2 boundary; operation-specific request builders translate it into
 // typed provider requests.
 type AXServiceRequest struct {
 	Operation          axServiceOperation   `json:"-"`
@@ -22,7 +22,6 @@ type AXServiceRequest struct {
 	Prune              *bool                  `json:"prune,omitempty"`
 	Boxes              *bool                  `json:"boxes,omitempty"`
 	IncludeScreenshot  *bool                  `json:"includeScreenshot,omitempty"`
-	ScreenshotScope    string                 `json:"screenshotScope,omitempty"`
 	Observe            string                 `json:"observe,omitempty"`
 	CaptureSnapshot    *bool                  `json:"-"`
 	// LightReadback limits the post-action read to the window root. It is

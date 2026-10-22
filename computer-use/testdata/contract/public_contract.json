@@ -218,7 +218,7 @@
                 "type": "string"
               },
               "observe": {
-                "description": "Returned evidence. act: default diff; explicit tree returns the complete window tree, full adds its screenshot. observe: default tree. none only with act.",
+                "description": "Returned evidence. act: default diff; explicit tree returns the complete window tree, full adds the full-desktop GUI screenshot. observe: default tree. none only with act.",
                 "enum": [
                   "diff",
                   "tree",
@@ -264,27 +264,56 @@
             "openWorldHint": false,
             "title": "Desktop screenshot and input"
           },
-          "description": "Full-desktop screenshot and pixel input. {\"actions\":[{\"type\":\"screenshot\"}]} alone observes. Any other batch is checked before input and returns one final screenshot. x/y are pixels of the latest returned full-desktop GUI image (screen width x height), never of an AX window image. type/keypress go to the current focus, so click the field first in the same batch. Batch the actions planned from one screenshot; end the batch after an action that may open, close, or move a window, and plan the rest from the returned image. GUI cannot address windows; AX activates and closes them by title. wait is one second with no observation, at most 20 s per batch. Errors return code and hint like AX; gui_frame_stale means nothing was sent: plan again from the returned screenshot. Example: {\"actions\":[{\"type\":\"click\",\"x\":640,\"y\":412},{\"type\":\"type\",\"text\":\"hello\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}",
+          "description": "Full-desktop screenshot and pixel input. {\"actions\":[{\"type\":\"screenshot\"}]} alone observes; {\"type\":\"zoom\",\"region\":[x0,y0,x1,y1]} alone enlarges a frame region to read small text and icons. Any other batch is checked before input and returns one final screenshot. x/y are pixels of the latest full-desktop image (screen width x height) from GUI or AX full/screenshot, which return the same frame. type/keypress go to the current focus, so click the field first. Batch the actions planned from one screenshot; end the batch after an action that may open, close, or move a window, and plan the rest from the returned image. GUI cannot address windows; AX activates and closes them by title. wait is one second with no observation, at most 20 s per batch. Errors return code and hint like AX; gui_frame_stale means nothing was sent: replan from the returned screenshot. Example: {\"actions\":[{\"type\":\"click\",\"x\":640,\"y\":412},{\"type\":\"type\",\"text\":\"hello\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}",
           "inputSchema": {
-            "description": "One screenshot action observes; otherwise run an input batch.",
+            "description": "One screenshot or zoom action observes; otherwise run an input batch.",
             "oneOf": [
               {
                 "additionalProperties": false,
                 "properties": {
                   "actions": {
                     "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "screenshot",
-                          "description": "Capture the final full desktop; this must be the only action.",
-                          "type": "string"
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "type": {
+                              "const": "screenshot",
+                              "description": "Capture the final full desktop; this must be the only action.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "region": {
+                              "description": "[x0,y0,x1,y1] frame pixels; sides \u003e= 8.",
+                              "items": {
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              "maxItems": 4,
+                              "minItems": 4,
+                              "type": "array"
+                            },
+                            "type": {
+                              "const": "zoom",
+                              "description": "Look only: enlarge a frame region; alone.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "region"
+                          ],
+                          "type": "object"
                         }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
+                      ]
                     },
                     "maxItems": 1,
                     "minItems": 1,

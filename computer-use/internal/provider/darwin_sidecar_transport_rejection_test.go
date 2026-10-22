@@ -31,7 +31,7 @@ func TestDarwinRequestRejectionNativeWireReplay(t *testing.T) {
 func TestDarwinRequestRejectionPrettyCorpusUsesSingleLineFrames(t *testing.T) {
 	request := validDarwinObserveAppsRequest("pretty-corpus")
 	response := core.ProviderWireResponse{
-		Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolVersion,
+		Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolV2,
 		RequestID: request.RequestID, Operation: request.Operation,
 		RequestRejection: darwinTestRequestRejection(),
 	}
@@ -80,7 +80,7 @@ func TestDarwinRequestRejectionRequiresCorrelation(t *testing.T) {
 	for _, mismatch := range []string{"", "request_id", "operation", "invalid_dispatch"} {
 		request := validDarwinObserveAppsRequest("bound-request")
 		response := core.ProviderWireResponse{
-			Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolVersion,
+			Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolV2,
 			RequestID: request.RequestID, Operation: request.Operation,
 			RequestRejection: darwinTestRequestRejection(),
 		}
@@ -121,12 +121,12 @@ func TestDarwinRequestRejectionKeepsWorkerAndDoesNotReplay(t *testing.T) {
 	darwinProviderWorkerStarter = func(darwinProviderArtifact) (*darwinProviderWorker, error) {
 		starts++
 		rejection := core.ProviderWireResponse{
-			Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolVersion,
+			Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolV2,
 			RequestID: "reject", Operation: core.ProviderWireObserveApps,
 			RequestRejection: darwinTestRequestRejection(),
 		}
 		success := core.ProviderWireResponse{
-			Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolVersion,
+			Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolV2,
 			RequestID: "next", Operation: core.ProviderWireObserveApps,
 			Accessibility: &core.ProviderAccessibilityResult{OK: true},
 		}

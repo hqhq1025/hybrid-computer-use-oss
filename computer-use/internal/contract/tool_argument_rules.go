@@ -36,27 +36,32 @@ func guiShapeProblem(args map[string]any) *explanation {
 			message: "GUI actions must not be empty; use one screenshot action for observation",
 		}
 	}
-	screenshots := 0
+	observation := ""
 	for _, item := range actions {
-		if action, ok := item.(map[string]any); ok && action["type"] == "screenshot" {
-			screenshots++
+		if action, ok := item.(map[string]any); ok &&
+			(action["type"] == "screenshot" || action["type"] == "zoom") {
+			observation, _ = action["type"].(string)
 		}
 	}
-	if screenshots == 0 {
+	if observation == "" {
 		return nil
 	}
 	if len(actions) > 1 {
+		message := "GUI screenshot must be the only action because no intermediate screenshot is returned"
+		if observation == "zoom" {
+			message = "GUI zoom must be the only action: it reads the current frame and sends no input"
+		}
 		return &explanation{
 			path:    []string{"actions"},
 			keyword: "oneOf",
-			message: "GUI screenshot must be the only action because no intermediate screenshot is returned",
+			message: message,
 		}
 	}
 	if _, present := args["settle_ms"]; present {
 		return &explanation{
 			path:    []string{"settle_ms"},
 			keyword: "additionalProperties",
-			message: "GUI screenshot observation does not accept settle_ms",
+			message: "GUI " + observation + " observation does not accept settle_ms",
 		}
 	}
 	return nil

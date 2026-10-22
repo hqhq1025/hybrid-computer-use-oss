@@ -342,7 +342,7 @@ func (s *Service) freezeFindRefs(snapshot *AppSnapshot, matched []ElementRecord)
 
 func (s *Service) stabilizeFindRefs(
 	source *AppSnapshot,
-	findSnapshot *AXSnapshot,
+	findSnapshot *AXSnapshotV1,
 ) {
 	if s == nil || s.RefRegistry == nil ||
 		source == nil || findSnapshot == nil {

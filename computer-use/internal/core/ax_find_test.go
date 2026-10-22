@@ -125,7 +125,7 @@ func TestFindPageRendersOriginatingTextField(t *testing.T) {
 	service := NewServiceWithBackend(&recordingPlatformBackend{})
 	snapshot := editorFormSnapshot()
 	snapshot.Elements[3].Description = "Account synthetic-user@example.invalid"
-	if err := service.BuildAndRenderAXSnapshot(
+	if err := service.BuildAndRenderAXSnapshotV1(
 		snapshot,
 		contract.TreeViewWorking,
 	); err != nil {

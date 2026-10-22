@@ -138,20 +138,20 @@ class CoordinateActionabilityGateTests(unittest.TestCase):
         )
 
 
-class ProviderWireTests(unittest.TestCase):
+class ProviderWireV2Tests(unittest.TestCase):
     def test_optional_ordered_input_fixtures_reject_before_provider_startup(self):
-        fixture_root = Path(__file__).resolve().parents[1] / "testdata" / "provider-wire"
+        fixture_root = Path(__file__).resolve().parents[1] / "testdata" / "provider-v2"
         manifest = json.loads((fixture_root / "native-manifest.json").read_text())
-        self.assertEqual(manifest["protocol"], wire.PROTOCOL)
-        self.assertEqual(manifest["schema_version"], wire.SCHEMA_VERSION)
+        self.assertEqual(manifest["protocol"], wire_v2.PROTOCOL)
+        self.assertEqual(manifest["schema_version"], wire_v2.SCHEMA_VERSION)
         self.assertFalse(manifest["ordered_input_platforms"]["linux"])
         rejected = 0
         for fixture in manifest["fixtures"]:
             if fixture["direction"] not in {"request", "invalid_request"}:
                 continue
             request = json.loads((fixture_root / fixture["file"]).read_text())
-            self.assertEqual(request["protocol"], wire.PROTOCOL)
-            self.assertEqual(request["schema_version"], wire.SCHEMA_VERSION)
+            self.assertEqual(request["protocol"], wire_v2.PROTOCOL)
+            self.assertEqual(request["schema_version"], wire_v2.SCHEMA_VERSION)
             self.assertEqual(request["operation"], "ordered_input")
             # The full fixture fails strict envelope validation. Removing only
             # its optional payload also exercises unsupported-operation rejection.
@@ -162,20 +162,20 @@ class ProviderWireTests(unittest.TestCase):
                 (header_only, "unsupported provider operation 'ordered_input'"),
             ]:
                 with self.subTest(fixture=fixture["name"], message=message):
-                    with self.assertRaises(wire.ProviderRequestError) as raised:
-                        wire.validate_request(candidate)
+                    with self.assertRaises(wire_v2.ProviderRequestError) as raised:
+                        wire_v2.validate_request(candidate)
                     self.assertEqual(raised.exception.code, "invalid_provider_request")
                     self.assertIn(message, str(raised.exception))
                     with mock.patch.object(
-                        wire, "_initialize_provider"
+                        wire_v2, "_initialize_provider"
                     ) as initialize, mock.patch.object(
-                        wire, "perform_provider_request"
-                    ) as dispatch, mock.patch.object(wire, "_write_operator_exception"):
-                        response = wire._execute_serialized_request(json.dumps(candidate))
+                        wire_v2, "perform_provider_request"
+                    ) as dispatch, mock.patch.object(wire_v2, "_write_operator_exception"):
+                        response = wire_v2._execute_serialized_request(json.dumps(candidate))
                     initialize.assert_not_called()
                     dispatch.assert_not_called()
                     self.assertEqual(response["request_id"], request["request_id"])
-                    self.assertEqual(response["protocol"], wire.PROTOCOL)
+                    self.assertEqual(response["protocol"], wire_v2.PROTOCOL)
                     failure = response["accessibility"]
                     self.assertFalse(failure["ok"])
                     self.assertEqual(failure["failure"]["code"], "invalid_provider_request")
@@ -186,7 +186,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_observation_capture_snapshot_requires_boolean(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-capture",
             "operation": "resolve_and_act",
@@ -198,8 +198,8 @@ class ProviderWireTests(unittest.TestCase):
                 "observation": {"capture_snapshot": "no"},
             },
         }
-        with self.assertRaises(wire.ProviderRequestError) as raised:
-            wire.validate_request(request)
+        with self.assertRaises(wire_v2.ProviderRequestError) as raised:
+            wire_v2.validate_request(request)
         self.assertEqual(
             raised.exception.code,
             "invalid_provider_request",
@@ -207,7 +207,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_stdio_worker_initializes_provider_once(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-1",
             "operation": "observe_apps",
@@ -221,21 +221,21 @@ class ProviderWireTests(unittest.TestCase):
         )
         stdout = io.StringIO()
         with mock.patch.object(
-            wire, "_provider_initialized", False
+            wire_v2, "_provider_initialized", False
         ), mock.patch.object(
-            wire, "require_desktop_session"
+            wire_v2, "require_desktop_session"
         ) as require_session, mock.patch.object(
-            wire.Atspi, "init"
+            wire_v2.Atspi, "init"
         ) as atspi_init, mock.patch.object(
-            wire.Atspi, "set_timeout"
+            wire_v2.Atspi, "set_timeout"
         ) as set_timeout, mock.patch.object(
-            wire.ui_events, "start"
+            wire_v2.ui_events, "start"
         ) as monitor_start, mock.patch.object(
-            wire,
+            wire_v2,
             "perform_provider_request",
             return_value={"ok": True, "apps": []},
         ):
-            wire.serve_stdio(stdin, stdout)
+            wire_v2.serve_stdio(stdin, stdout)
 
         responses = [
             json.loads(line) for line in stdout.getvalue().splitlines()
@@ -248,7 +248,7 @@ class ProviderWireTests(unittest.TestCase):
         atspi_init.assert_called_once_with()
         # No startup grace: a new application gets the same bound per call.
         set_timeout.assert_called_once_with(
-            wire.ATSPI_CALL_TIMEOUT_MS, wire.ATSPI_CALL_TIMEOUT_MS
+            wire_v2.ATSPI_CALL_TIMEOUT_MS, wire_v2.ATSPI_CALL_TIMEOUT_MS
         )
         monitor_start.assert_called_once_with()
 
@@ -256,7 +256,7 @@ class ProviderWireTests(unittest.TestCase):
         fixture_path = (
             Path(__file__).resolve().parents[1]
             / "testdata"
-            / "provider-wire"
+            / "provider-v2"
             / "invalid-requests.json"
         )
         fixtures = json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -280,7 +280,7 @@ class ProviderWireTests(unittest.TestCase):
         # resolver key in resolved_element failed every until poll on a ref,
         # so each poll became observation_incomplete until the timeout.
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-resolve",
             "operation": "resolve_and_act",
@@ -318,7 +318,7 @@ class ProviderWireTests(unittest.TestCase):
         self.assertEqual(resolved["value"], "2 cm")
         json.dumps(response)
 
-    def test_provider_dispatch_keeps_operation_identity(self):
+    def test_provider_dispatch_keeps_v2_operation_identity(self):
         payload = {
             "protocol_version": 2,
             "intent": "click",
@@ -340,9 +340,9 @@ class ProviderWireTests(unittest.TestCase):
         self.assertEqual(kwargs["action_intent"], "click")
         self.assertNotIn("tool", kwargs)
 
-    def test_observe_request_uses_wire_envelope(self):
+    def test_observe_request_uses_v2_envelope(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-observe",
             "operation": "observe",
@@ -363,7 +363,7 @@ class ProviderWireTests(unittest.TestCase):
         ) as perform:
             response = runtime.execute(request)
         perform.assert_called_once_with("observe", request["observe"])
-        self.assertEqual(response["protocol"], "computer-use-provider")
+        self.assertEqual(response["protocol"], "computer-use-provider-v2")
         self.assertEqual(response["request_id"], "req-observe")
         self.assertEqual(
             response["accessibility"]["snapshot"]["windowTitle"],
@@ -372,7 +372,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_unexpected_dispatch_failure_requires_provider_reset(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-reset",
             "operation": "observe_apps",
@@ -390,7 +390,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_expected_operation_failure_does_not_require_provider_reset(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-no-reset",
             "operation": "observe_apps",
@@ -417,7 +417,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_expected_provider_disconnect_requests_reset(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-expected-reset",
             "operation": "observe_apps",
@@ -446,7 +446,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_action_failure_preserves_typed_mutation_facts(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-action",
             "operation": "resolve_and_act",
@@ -493,7 +493,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_post_action_failure_exports_typed_recovery_context(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-recovery",
             "operation": "resolve_and_act",
@@ -547,7 +547,7 @@ class ProviderWireTests(unittest.TestCase):
                 "bounded_recovery_context",
                 return_value=recovery_context,
             ) as recover,
-            mock.patch.object(wire, "_write_operator_exception"),
+            mock.patch.object(wire_v2, "_write_operator_exception"),
         ):
             response = runtime.execute(request)
 
@@ -559,7 +559,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_stale_observe_exports_read_only_recovery_context(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-stale-observe",
             "operation": "observe",
@@ -611,7 +611,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_rejects_unknown_top_level_field(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-observe",
             "operation": "observe_apps",
@@ -623,7 +623,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_rejects_unknown_payload_field(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-observe",
             "operation": "observe",
@@ -638,7 +638,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_rejects_keypress_without_key(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-keypress",
             "operation": "resolve_and_act",
@@ -670,7 +670,7 @@ class ProviderWireTests(unittest.TestCase):
 
     def test_rejects_desktop_settle_above_limit(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-desktop-settle",
             "operation": "desktop_execute_batch",
@@ -705,22 +705,22 @@ class RuntimeStartupErrorBoundaryTests(unittest.TestCase):
 
     def test_provider_initialization_failure_requires_reset(self):
         request = {
-            "protocol": "computer-use-provider",
+            "protocol": "computer-use-provider-v2",
             "schema_version": 2,
             "request_id": "req-startup-reset",
             "operation": "observe_apps",
             "observe_apps": {"protocol_version": 2},
         }
         with mock.patch.object(
-            wire, "_provider_initialized", False
+            wire_v2, "_provider_initialized", False
         ), mock.patch.object(
-            wire, "require_desktop_session"
+            wire_v2, "require_desktop_session"
         ), mock.patch.object(
-            wire.Atspi,
+            wire_v2.Atspi,
             "init",
             side_effect=RuntimeError("AT-SPI unavailable"),
-        ), mock.patch.object(wire, "_write_operator_exception"):
-            response = wire._execute_serialized_request(
+        ), mock.patch.object(wire_v2, "_write_operator_exception"):
+            response = wire_v2._execute_serialized_request(
                 json.dumps(request)
             )
 
@@ -771,7 +771,7 @@ class ExternalDesktopTransitionTests(unittest.TestCase):
 
 class WindowActionMutationBoundaryTests(unittest.TestCase):
     def test_successful_window_action_exports_typed_mutation(self):
-        result = wire._window_result({
+        result = wire_v2._window_result({
             "ok": True,
             "input_events_emitted": True,
             "desktop_state_mutated": True,
@@ -799,7 +799,7 @@ class WindowActionMutationBoundaryTests(unittest.TestCase):
             "sourceWindowStatus": "gone",
             "inventoryComplete": True,
         }
-        result = wire._window_result({
+        result = wire_v2._window_result({
             "ok": False,
             "failureCode": "effect_unknown",
             "mutation_unknown": True,

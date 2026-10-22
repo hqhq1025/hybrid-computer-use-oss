@@ -55,8 +55,8 @@ from native.linux.provider import (  # noqa: E402
     ui_events,
     window_diagnostics,
     window_resolver,
-    wire,
-    wire_request,
+    wire_v2,
+    wire_v2_request,
     x11_windows,
 )
 
@@ -95,8 +95,8 @@ PROVIDER_MODULES = (
     ax_transition_evidence,
     window_diagnostics,
     response_builder,
-    wire,
-    wire_request,
+    wire_v2,
+    wire_v2_request,
 )
 
 
@@ -157,7 +157,7 @@ def _provider_target_for_test(target):
 
 
 def perform_provider_operation(operation):
-    """Exercise behavior cases using only provider request fields."""
+    """Exercise behavior cases using only Provider V2 request fields."""
     intent = operation["intent"]
     if intent == "observe_apps":
         return runtime.perform_provider_request(
@@ -181,7 +181,6 @@ def perform_provider_operation(operation):
                         "prune": operation.get("prune"),
                         "boxes": operation.get("boxes"),
                         "include_screenshot": operation.get("include_screenshot"),
-                        "screenshot_scope": operation.get("screenshot_scope"),
                     }.items()
                     if value is not None
                 },

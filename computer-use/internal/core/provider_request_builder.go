@@ -5,14 +5,14 @@ import "github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contra
 func providerObserveAppsRequestFromOperation(
 	AXServiceRequest,
 ) ProviderObserveAppsRequest {
-	return ProviderObserveAppsRequest{ProtocolVersion: ProviderProtocolVersion}
+	return ProviderObserveAppsRequest{ProtocolVersion: ProviderProtocolV2}
 }
 
 func providerObserveRequestFromOperation(
 	operation AXServiceRequest,
 ) ProviderObserveRequest {
 	return ProviderObserveRequest{
-		ProtocolVersion: ProviderProtocolVersion,
+		ProtocolVersion: ProviderProtocolV2,
 		App:             operation.App,
 		AppIdentity:     operation.AppIdentity,
 		WindowHandle:    operation.TargetWindowHandle,
@@ -28,7 +28,7 @@ func providerActionRequestFromOperation(
 		panic("provider action request requires a typed action command")
 	}
 	request := ProviderActionRequest{
-		ProtocolVersion: ProviderProtocolVersion,
+		ProtocolVersion: ProviderProtocolV2,
 		Intent:          operation.Action.Intent(),
 		App:             operation.App,
 		AppIdentity:     operation.AppIdentity,
@@ -48,7 +48,7 @@ func providerWindowListRequestFromOperation(
 	operation AXServiceRequest,
 ) ProviderWindowListRequest {
 	return ProviderWindowListRequest{
-		ProtocolVersion: ProviderProtocolVersion,
+		ProtocolVersion: ProviderProtocolV2,
 		App:             operation.App,
 		AppIdentity:     operation.AppIdentity,
 		WindowHandle:    operation.TargetWindowHandle,
@@ -62,7 +62,7 @@ func providerWindowActionRequestFromOperation(
 		panic("provider window action request requires a typed window action")
 	}
 	return ProviderWindowActionRequest{
-		ProtocolVersion: ProviderProtocolVersion,
+		ProtocolVersion: ProviderProtocolV2,
 		Action:          *operation.WindowAction,
 		App:             operation.App,
 		AppIdentity:     operation.AppIdentity,
@@ -99,14 +99,16 @@ func providerObservationOptionsFromOperation(
 		// top-level window and settles before reading.
 		maxTreeNodes = 1
 	}
+	// AX images are full-desktop GUI frames that the service captures after
+	// the read (attachDesktopFrame), so the provider never captures one.
+	noImage := false
 	return ProviderObservationOptions{
 		TextLimit:         providerTextLimit(operation.TextLimit),
 		MaxTreeNodes:      maxTreeNodes,
 		MaxTreeDepth:      operation.MaxTreeDepth,
 		Prune:             operation.Prune,
 		Boxes:             operation.Boxes,
-		IncludeScreenshot: operation.IncludeScreenshot,
-		ScreenshotScope:   operation.ScreenshotScope,
+		IncludeScreenshot: &noImage,
 		CaptureSnapshot:   captureSnapshot,
 	}
 }

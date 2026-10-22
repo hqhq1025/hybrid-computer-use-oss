@@ -8,7 +8,7 @@ import (
 )
 
 type DistillationContext struct {
-	Snapshot                  *AXSnapshot
+	Snapshot                  *AXSnapshotV1
 	CanonicalTruth            map[string]bool
 	StageSuppressedProperties int
 	StageBudgetApplied        bool
@@ -709,9 +709,9 @@ func shortenAtWord(text string, limit int) (string, bool) {
 	return strings.TrimRight(head, " ,;:.-") + "…", true
 }
 
-func distillAXSnapshot(snapshot *AXSnapshot) error {
+func distillAXSnapshot(snapshot *AXSnapshotV1) error {
 	if snapshot == nil {
-		return errors.New("cannot distill a nil AXSnapshot")
+		return errors.New("cannot distill a nil AXSnapshotV1")
 	}
 	markAXDistinguishingAncestors(snapshot.Roots)
 	context := &DistillationContext{

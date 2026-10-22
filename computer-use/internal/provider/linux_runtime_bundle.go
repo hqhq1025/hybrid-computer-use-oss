@@ -41,8 +41,8 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/tree_reuse.py",
 	"native/linux/provider/ui_events.py",
 	"native/linux/provider/response_builder.py",
-	"native/linux/provider/wire.py",
-	"native/linux/provider/wire_request.py",
+	"native/linux/provider/wire_v2.py",
+	"native/linux/provider/wire_v2_request.py",
 }
 
 func linuxRuntimeBundle() map[string]string {

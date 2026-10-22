@@ -137,7 +137,7 @@ func TestSemanticRefReusesLogicalIdentityAcrossSamePathProviderRebuild(t *testin
 		Parent:             oldOwner,
 	}
 	oldOwner.Children = []*AXNode{oldNode}
-	firstSnapshot := &AXSnapshot{
+	firstSnapshot := &AXSnapshotV1{
 		AppRef:       "a1",
 		AppIdentity:  "editor",
 		WindowHandle: "window-1",
@@ -169,7 +169,7 @@ func TestSemanticRefReusesLogicalIdentityAcrossSamePathProviderRebuild(t *testin
 		Parent:             newOwner,
 	}
 	newOwner.Children = []*AXNode{newNode}
-	secondSnapshot := &AXSnapshot{
+	secondSnapshot := &AXSnapshotV1{
 		AppRef:       "a1",
 		AppIdentity:  "editor",
 		WindowHandle: "window-1",
@@ -215,7 +215,7 @@ func TestCompleteSnapshotReplacesSemanticRefOutsideRuntimeLineage(t *testing.T) 
 	}
 	owner.Children = []*AXNode{oldNode}
 	registry := NewRefRegistry(16)
-	first := registry.AcquireNode(&AXSnapshot{
+	first := registry.AcquireNode(&AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c1",
 		Roots: []*AXNode{owner},
@@ -237,7 +237,7 @@ func TestCompleteSnapshotReplacesSemanticRefOutsideRuntimeLineage(t *testing.T) 
 		Parent:             replacementOwner,
 	}
 	replacementOwner.Children = []*AXNode{replacement}
-	second := registry.AcquireNode(&AXSnapshot{
+	second := registry.AcquireNode(&AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c2",
 		Roots: []*AXNode{replacementOwner},
@@ -272,7 +272,7 @@ func TestIncompleteSnapshotDoesNotReplaceSemanticRefOutsideRuntimeLineage(t *tes
 		Visible:            &showing,
 	}
 	registry := NewRefRegistry(16)
-	first := registry.AcquireNode(&AXSnapshot{
+	first := registry.AcquireNode(&AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c1",
 	}, oldNode, AXLocatorSemantic)
@@ -287,7 +287,7 @@ func TestIncompleteSnapshotDoesNotReplaceSemanticRefOutsideRuntimeLineage(t *tes
 		Showing:            &showing,
 		Visible:            &showing,
 	}
-	second := registry.AcquireNode(&AXSnapshot{
+	second := registry.AcquireNode(&AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c2",
 		AcquisitionIncomplete:      true,
@@ -327,7 +327,7 @@ func TestCompleteInventoryTombstonesAbsentSemanticRef(t *testing.T) {
 		Visible:            &showing,
 	}
 	registry := NewRefRegistry(16)
-	firstSnapshot := &AXSnapshot{
+	firstSnapshot := &AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c1",
 		RefInventoryComplete: true,
@@ -340,7 +340,7 @@ func TestCompleteInventoryTombstonesAbsentSemanticRef(t *testing.T) {
 		t.Fatal("initial semantic ref was not issued")
 	}
 
-	registry.AssignSnapshotRefs(&AXSnapshot{
+	registry.AssignSnapshotRefs(&AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c2",
 		RefInventoryComplete: true,
@@ -355,7 +355,7 @@ func TestCompleteInventoryTombstonesAbsentSemanticRef(t *testing.T) {
 	newNode := *oldNode
 	newNode.Ref = ""
 	newNode.ProviderObjectPath = "/org/a11y/later-ok"
-	thirdSnapshot := &AXSnapshot{
+	thirdSnapshot := &AXSnapshotV1{
 		AppRef: "a1", AppIdentity: "editor",
 		WindowHandle: "window-1", WindowRef: "w1", Revision: "c3",
 		RefInventoryComplete: true,

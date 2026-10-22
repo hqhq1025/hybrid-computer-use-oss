@@ -251,6 +251,84 @@ class GUICapturePipelineTests(unittest.TestCase):
                     self.assertIn("changed during the batch", response["error"])
                     self.assertTrue(response["mutation_unknown"])
 
+    # Zoom is look-only and bound to the frame its region came from.
+    def zoom_after(self, published, now, region, frame_id=None):
+        frame_id = self.publish(published) if frame_id is None else frame_id
+        self.layout_mock.side_effect = [now] * 8
+        self.zoomed = []
+        def zoom(_capture, geometry):
+            self.zoomed.append(geometry)
+            return {"data": "zoom-png", "mimeType": "image/png", "encoding": "png"}
+        with mock.patch.object(runtime.CapturedGUISnapshot, "zoom", zoom):
+            return runtime.perform_gui([{"type": "zoom", "region": region}],
+                                       frame_id=frame_id)
+
+    def test_zoom_returns_a_region_of_the_named_frame_without_input(self):
+        layout = self.layouts([("0xa", 0, 0, 50, 50)])[0]
+        response = self.zoom_after(layout, layout, [10, 10, 40, 30])
+        self.assertTrue(response["ok"], response.get("error"))
+        self.execute.assert_not_called()
+        self.assertFalse(response["input_events_emitted"])
+        zoom = response["guiResult"]["zoom"]
+        self.assertEqual(zoom["region"], [10.0, 10.0, 40.0, 30.0])
+        self.assertEqual((zoom["width"], zoom["height"]), (120, 80))
+        # The zoom image is not a frame and is never remembered as one.
+        self.assertNotIn("frameId", response["snapshot"])
+        self.assertEqual(response["snapshot"]["coordinateSpace"], "zoom_image_px")
+        published = dict(gui_dispatch._published_layouts)
+        self.assertEqual(dict(gui_dispatch._published_layouts), published)
+
+    def test_zoom_rejects_an_unpublished_frame(self):
+        before, after = self.layouts(
+            [("0xa", 0, 0, 50, 50)], [("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 20, 20)])
+        response = self.zoom_after(before, after, [10, 10, 40, 30],
+                                   frame_id="not-a-published-frame")
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["failureCode"], "stale_gui_frame")
+        self.assertEqual(self.zoomed, [])
+        self.assertTrue(response["snapshot"]["frameId"])
+
+    def test_zoom_without_a_frame_is_stale(self):
+        layout = self.layouts([("0xa", 0, 0, 50, 50)])[0]
+        self.layout_mock.side_effect = [layout] * 4
+        response = runtime.perform_gui([{"type": "zoom", "region": [0, 0, 20, 20]}])
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["failureCode"], "stale_gui_frame")
+
+    def test_zoom_checks_every_window_over_the_region(self):
+        before = self.layouts([("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 30, 30)])[0]
+        for name, windows, ok in [
+            ("unrelated window moved", [("0xa", 0, 0, 50, 50), ("0xb", 65, 60, 30, 30)], True),
+            ("window over region moved", [("0xa", 2, 0, 50, 50), ("0xb", 60, 60, 30, 30)], False),
+            ("new window covers a corner", [("0xa", 0, 0, 50, 50), ("0xb", 60, 60, 30, 30),
+                                             ("0xc", 38, 28, 5, 5)], False),
+            ("stacking changed", [("0xb", 60, 60, 30, 30), ("0xa", 0, 0, 50, 50)], True),
+        ]:
+            with self.subTest(name):
+                response = self.zoom_after(before, self.layouts(windows)[0], [10, 10, 40, 30])
+                self.assertEqual(response["ok"], ok, response.get("error"))
+                self.execute.assert_not_called()
+                if not ok:
+                    self.assertEqual(response["failureCode"], "stale_gui_frame")
+                    self.assertEqual(self.zoomed, [])
+
+    def test_zoom_region_is_validated_before_capture(self):
+        for region in ([0, 0, 7, 50], [0, 0, 50, 7.9], [90, 90, 101, 99], [20, 0, 10, 10]):
+            with self.subTest(region=region):
+                self.capture.reset_mock()
+                response = runtime.perform_gui([{"type": "zoom", "region": region}],
+                                               frame_id=self.frame_id)
+                self.assertFalse(response["ok"])
+                self.assertTrue(response["preflight_only"])
+                self.capture.assert_not_called()
+
+    def test_zoom_must_be_alone(self):
+        response = runtime.perform_gui([
+            {"type": "zoom", "region": [0, 0, 20, 20]},
+            {"type": "click", "x": 1, "y": 1}], frame_id=self.frame_id)
+        self.assertFalse(response["ok"])
+        self.execute.assert_not_called()
+
     def test_absent_initial_capture_rejects_keyboard_input_too(self):
         self.capture.side_effect = None
         self.capture.return_value = None
@@ -501,22 +579,10 @@ class PixelEvidenceTests(unittest.TestCase):
             runtime.persistent_pixel_change(self._frame(10), after, after))
         self.assertIn("sampled_pixel_change=material", note)
         self.assertIn("% of sample points", note)
-        self.assertIn("concentrated in", note)
-
-    def test_gui_change_region_uses_full_desktop_image_pixels(self):
-        after = self._frame(10)
-        data = bytearray(after["data"])
-        data[0:3] = b"\xff\xff\xff"
-        after["data"] = bytes(data)
-
-        note = runtime.pixel_change_note(
-            runtime.persistent_pixel_change(self._frame(10), after, after),
-            runtime.SCREENSHOT_SCOPE_SCREEN,
-        )
-
-        self.assertIn("pre-action full desktop", note)
-        self.assertIn("% of sample points", note)
-        self.assertIn("full-desktop image pixels", note)
+        # The window comparison states no coordinates: the only clickable
+        # image is the full-desktop frame.
+        self.assertNotIn("concentrated", note)
+        self.assertNotIn("window-relative", note)
 
     def _dots(self, count, size, offset_rows=1):
         frame = self._frame(10, size=size)
@@ -553,7 +619,7 @@ class PixelEvidenceTests(unittest.TestCase):
         self.assertEqual(change["changed"], 30)
         note = runtime.pixel_change_note(change)
         self.assertIn("sampled_pixel_change=material", note)
-        self.assertIn("concentrated in", note)
+        self.assertNotIn("{", note)
 
     def test_resize_between_captures_is_reported_not_guessed(self):
         size = (1600, 1000)
@@ -715,41 +781,42 @@ class SettleWaitTests(AtspiPatchedTestCase):
 
 
 class ScreenshotPolicyTests(unittest.TestCase):
-    """Accessibility screenshot policy and the GUI screenshots it never disables.
+    """The provider captures no accessibility window image.
 
-    Accessibility screenshots are on by default because the tree alone gives
-    false negatives: right-aligning text or saving a file can take effect
-    while the tree suggests the input was delivered but ignored.
+    AX images are full-desktop GUI frames that the Go core captures with a
+    desktop batch, so they share the GUI coordinate frame. A request for a
+    provider window image is rejected before any read.
     """
 
-    def setUp(self):
-        self._saved = os.environ.get("COMPUTER_USE_A11Y_SCREENSHOTS")
-        self.addCleanup(self._restore)
+    def _observe_request(self, observation):
+        return {
+            "protocol": "computer-use-provider-v2",
+            "schema_version": 2,
+            "request_id": "req-observe",
+            "operation": "observe",
+            "observe": {
+                "protocol_version": 2,
+                "app": "Editor",
+                "observation": observation,
+            },
+        }
 
-    def _restore(self):
-        if self._saved is None:
-            os.environ.pop("COMPUTER_USE_A11Y_SCREENSHOTS", None)
-        else:
-            os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = self._saved
+    def test_observation_rejects_a_window_image_request(self):
+        with self.assertRaises(runtime.ProviderRequestError) as caught:
+            runtime.validate_request(
+                self._observe_request({"include_screenshot": True}))
+        self.assertIn("include_screenshot", str(caught.exception))
+        with self.assertRaises(runtime.ProviderRequestError):
+            runtime.validate_request(
+                self._observe_request({"screenshot_scope": "screen"}))
+        runtime.validate_request(
+            self._observe_request({"include_screenshot": False}))
 
-    def test_enabled_by_default(self):
-        os.environ.pop("COMPUTER_USE_A11Y_SCREENSHOTS", None)
-        self.assertTrue(runtime.a11y_screenshots_enabled())
+    def test_window_image_capture_was_removed(self):
+        for name in ("capture_window_image", "a11y_screenshots_enabled"):
+            self.assertFalse(hasattr(runtime, name), name)
 
-    def test_can_be_switched_off_for_the_ab_test(self):
-        for value in ("0", "false", "no", "off", "OFF", " 0 "):
-            os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = value
-            self.assertFalse(runtime.a11y_screenshots_enabled(), value)
-
-    def test_unrecognised_values_keep_screenshots_on(self):
-        """Only explicit off values disable screenshots; a typo keeps the default."""
-        for value in ("1", "true", "yes", "", "maybe"):
-            os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = value
-            self.assertTrue(runtime.a11y_screenshots_enabled(), value)
-
-    def test_gui_screenshot_is_independent_of_a11y_policy(self):
-        os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = "0"
-        self.assertFalse(runtime.a11y_screenshots_enabled())
+    def test_gui_screenshot_is_unaffected(self):
         desktop = runtime.frame(0, 0, 1600, 900)
         with mock.patch.object(runtime, "desktop_bounds", return_value=desktop), \
                 patch_gui_capture(
@@ -758,9 +825,3 @@ class ScreenshotPolicyTests(unittest.TestCase):
         self.assertTrue(response["ok"])
         self.assertEqual(response["snapshot"]["screenshotPngBase64"], "png")
         self.assertFalse(response["input_events_emitted"])
-        self.assertEqual(response["input_actions_dispatched"], 0)
-        self.assertIn(
-            "0 input-producing action(s) completed event emission",
-            response["text"],
-        )
-        self.assertNotIn("settle_ms=0", response["text"])

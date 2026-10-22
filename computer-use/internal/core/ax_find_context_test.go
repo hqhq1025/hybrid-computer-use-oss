@@ -3,8 +3,8 @@ package core
 import "testing"
 
 func TestFindSnapshotPreservesAppAndWindowOwnership(t *testing.T) {
-	source := &AXSnapshot{
-		SchemaVersion:              "AXSnapshot",
+	source := &AXSnapshotV1{
+		SchemaVersion:              "AXSnapshotV1",
 		AppRef:                     "a7",
 		AppIdentity:                "libreoffice",
 		WindowHandle:               "private-window",

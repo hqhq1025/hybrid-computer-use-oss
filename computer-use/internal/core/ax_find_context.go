@@ -170,14 +170,14 @@ func buildAXFindContext(
 }
 
 func newAXFindSnapshot(
-	source *AXSnapshot,
+	source *AXSnapshotV1,
 	roots []*AXNode,
-) *AXSnapshot {
+) *AXSnapshotV1 {
 	if source == nil {
 		return nil
 	}
-	snapshot := &AXSnapshot{
-		SchemaVersion:              "AXSnapshot",
+	snapshot := &AXSnapshotV1{
+		SchemaVersion:              "AXSnapshotV1",
 		AppRef:                     source.AppRef,
 		AppIdentity:                source.AppIdentity,
 		WindowHandle:               source.WindowHandle,
@@ -193,7 +193,7 @@ func newAXFindSnapshot(
 	return snapshot
 }
 
-func indexAXSnapshot(snapshot *AXSnapshot) {
+func indexAXSnapshot(snapshot *AXSnapshotV1) {
 	if snapshot == nil {
 		return
 	}

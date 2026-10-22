@@ -165,7 +165,7 @@ func TestEmptyCompactFallbackDoesNotClaimFinalObservation(t *testing.T) {
 		WindowTitle:  "Document",
 		WindowHandle: "window-1",
 		TreeLines:    []string{"ax:"},
-		AXSnapshot: &AXSnapshot{
+		AXSnapshot: &AXSnapshotV1{
 			CanonicalRoots: nil,
 			Roots:          nil,
 		},
@@ -199,7 +199,7 @@ func TestSharedDiffFallbackDoesNotClaimEmptyObservation(t *testing.T) {
 		WindowTitle:  "Document",
 		WindowHandle: "window-1",
 		TreeLines:    []string{"ax:"},
-		AXSnapshot: &AXSnapshot{
+		AXSnapshot: &AXSnapshotV1{
 			CanonicalRoots: nil,
 			Roots:          nil,
 		},

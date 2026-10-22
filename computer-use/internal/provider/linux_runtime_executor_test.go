@@ -43,7 +43,7 @@ with open(os.environ["FAKE_PROVIDER_STARTS"], "a", encoding="utf-8") as out:
 for line in sys.stdin:
     request = json.loads(line)
     response = {
-        "protocol": "computer-use-provider",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -56,7 +56,7 @@ for line in sys.stdin:
 
 	request := core.NewProviderWireRequest("reuse-1", core.ProviderWireObserveApps)
 	request.ObserveApps = &core.ProviderObserveAppsRequest{
-		ProtocolVersion: core.ProviderProtocolVersion,
+		ProtocolVersion: core.ProviderProtocolV2,
 	}
 	if _, err := runLinuxProvider(request, linuxRuntimeBackend{}); err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ for line in sys.stdin:
         print("not-json", flush=True)
         sys.exit(0)
     print(json.dumps({
-        "protocol": "computer-use-provider",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -112,7 +112,7 @@ for line in sys.stdin:
 
 	request := core.NewProviderWireRequest("restart-1", core.ProviderWireObserveApps)
 	request.ObserveApps = &core.ProviderObserveAppsRequest{
-		ProtocolVersion: core.ProviderProtocolVersion,
+		ProtocolVersion: core.ProviderProtocolV2,
 	}
 	if _, err := runLinuxProvider(request, linuxRuntimeBackend{}); err == nil {
 		t.Fatal("invalid worker response must fail")
@@ -155,7 +155,7 @@ for line in sys.stdin:
     if starts == 1:
         time.sleep(2)
     print(json.dumps({
-        "protocol": "computer-use-provider",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -168,7 +168,7 @@ for line in sys.stdin:
 
 	request := core.NewProviderWireRequest("timeout-1", core.ProviderWireObserveApps)
 	request.ObserveApps = &core.ProviderObserveAppsRequest{
-		ProtocolVersion: core.ProviderProtocolVersion,
+		ProtocolVersion: core.ProviderProtocolV2,
 	}
 	if _, err := runLinuxProvider(request, linuxRuntimeBackend{}); err == nil {
 		t.Fatal("timed-out worker call must fail")
@@ -208,7 +208,7 @@ with open(path, "w", encoding="utf-8") as out:
 for line in sys.stdin:
     request = json.loads(line)
     print(json.dumps({
-        "protocol": "computer-use-provider",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -227,7 +227,7 @@ for line in sys.stdin:
 
 	request := core.NewProviderWireRequest("reset-read", core.ProviderWireObserveApps)
 	request.ObserveApps = &core.ProviderObserveAppsRequest{
-		ProtocolVersion: core.ProviderProtocolVersion,
+		ProtocolVersion: core.ProviderProtocolV2,
 	}
 	response, err := runLinuxProvider(request, linuxRuntimeBackend{})
 	if err != nil {
@@ -263,7 +263,7 @@ for line in sys.stdin:
     with open(os.environ["FAKE_PROVIDER_REQUESTS"], "a", encoding="utf-8") as out:
         out.write(request["request_id"] + "\n")
     print(json.dumps({
-        "protocol": "computer-use-provider",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -287,7 +287,7 @@ for line in sys.stdin:
 
 	request := core.NewProviderWireRequest("reset-mutation", core.ProviderWireResolveAndAct)
 	request.Action = &core.ProviderActionRequest{
-		ProtocolVersion: core.ProviderProtocolVersion,
+		ProtocolVersion: core.ProviderProtocolV2,
 		Intent:          core.AccessibilityClick,
 		App:             "Editor",
 		Target: &core.ProviderSemanticTarget{
@@ -341,7 +341,7 @@ for line in sys.stdin:
     with open(os.environ["FAKE_PROVIDER_REQUESTS"], "a", encoding="utf-8") as out:
         out.write(request["request_id"] + "\n")
     print(json.dumps({
-        "protocol": "computer-use-provider",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -367,7 +367,7 @@ for line in sys.stdin:
 		core.ProviderWireResolveAndAct,
 	)
 	request.Action = &core.ProviderActionRequest{
-		ProtocolVersion: core.ProviderProtocolVersion,
+		ProtocolVersion: core.ProviderProtocolV2,
 		Intent:          core.AccessibilityResolveTarget,
 		App:             "Editor",
 		Target: &core.ProviderSemanticTarget{
@@ -421,7 +421,7 @@ for line in sys.stdin:
         "diagnostic": "Traceback: /secret/provider.py",
     }, separators=(",", ":")), file=sys.stderr, flush=True)
     print(json.dumps({
-        "protocol": "computer-use-provider",
+        "protocol": "computer-use-provider-v2",
         "schema_version": 2,
         "request_id": request["request_id"],
         "operation": request["operation"],
@@ -433,7 +433,7 @@ for line in sys.stdin:
 
 	request := core.NewProviderWireRequest("stderr-1", core.ProviderWireObserveApps)
 	request.ObserveApps = &core.ProviderObserveAppsRequest{
-		ProtocolVersion: core.ProviderProtocolVersion,
+		ProtocolVersion: core.ProviderProtocolV2,
 	}
 	response, err := runLinuxProvider(request, linuxRuntimeBackend{})
 	if err != nil {
@@ -548,7 +548,7 @@ time.sleep(10)
 
 	request := core.NewProviderWireRequest("write-timeout", core.ProviderWireObserve)
 	request.Observe = &core.ProviderObserveRequest{
-		ProtocolVersion: core.ProviderProtocolVersion,
+		ProtocolVersion: core.ProviderProtocolV2,
 		App:             strings.Repeat("application-", 1<<18),
 	}
 	started := time.Now()

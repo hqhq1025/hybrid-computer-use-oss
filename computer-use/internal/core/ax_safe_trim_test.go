@@ -53,7 +53,7 @@ func TestFindTextExcerptBoundaries(t *testing.T) {
 func TestAbsentRefRangesPreserveEveryRefAndGap(t *testing.T) {
 	// r8 remains current; nested removed nodes include a duplicate r3.
 	root := &AXNode{Ref: "r3", Children: []*AXNode{{Ref: "r4"}, {Ref: "r5"}, {Ref: "r7"}, {Ref: "r8"}, {Ref: "r9"}, {Ref: "r10"}, {Ref: "r11"}, {Ref: "r3"}}}
-	refs := compactAbsentRefs([]AXDiffChange{{Kind: AXDiffRemoved, Before: root}}, &AXSnapshot{CanonicalRoots: []*AXNode{{Ref: "r8"}}})
+	refs := compactAbsentRefs([]AXDiffChange{{Kind: AXDiffRemoved, Before: root}}, &AXSnapshotV1{CanonicalRoots: []*AXNode{{Ref: "r8"}}})
 	rendered := joinAXRefRuns(refs)
 	expanded := []string{}
 	for _, part := range strings.Split(rendered, ", ") {
@@ -132,7 +132,7 @@ func TestRemovedNodesCarryNoAddressabilityMarker(t *testing.T) {
 	menu.Children = items
 	closed := *menu
 	closed.Children = nil
-	before := &AppSnapshot{WindowHandle: "window-1", AXSnapshot: &AXSnapshot{
+	before := &AppSnapshot{WindowHandle: "window-1", AXSnapshot: &AXSnapshotV1{
 		CanonicalRoots: []*AXNode{menu}, Roots: []*AXNode{menu},
 	}}
 	after := &AppSnapshot{
@@ -141,7 +141,7 @@ func TestRemovedNodesCarryNoAddressabilityMarker(t *testing.T) {
 			"ax:", ` - menu "Sheet"`,
 			`  - text "` + strings.Repeat("unchanged context ", 30) + `"`,
 		},
-		AXSnapshot: &AXSnapshot{
+		AXSnapshot: &AXSnapshotV1{
 			CanonicalRoots: []*AXNode{&closed}, Roots: []*AXNode{&closed},
 		},
 	}
@@ -180,7 +180,7 @@ func TestFindShowsTextOfTextBearingMatches(t *testing.T) {
 		},
 		Scope: contract.AXScopeWindow,
 	}
-	if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
+	if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
 		t.Fatal(err)
 	}
 	result := svc.RenderFindPage(snapshot, snapshot.Elements[2:], 0, 10,

@@ -10,8 +10,8 @@ func TestFindCursorPagesAreBoundedAndStable(t *testing.T) {
 	registry := NewFindCursorRegistry(4)
 	snapshot := &AppSnapshot{
 		WindowTitle: "Results",
-		AXSnapshot: &AXSnapshot{
-			SchemaVersion: "AXSnapshot",
+		AXSnapshot: &AXSnapshotV1{
+			SchemaVersion: "AXSnapshotV1",
 			AppIdentity:   "app",
 			WindowHandle:  "window",
 			Revision:      "c1",
@@ -55,8 +55,8 @@ func TestFindCursorDoesNotReuseFreshProviderResultsAndExpiresByTTL(t *testing.T)
 	snapshot := &AppSnapshot{
 		SnapshotID:   "snapshot-1",
 		WindowHandle: "window-1",
-		AXSnapshot: &AXSnapshot{
-			SchemaVersion: "AXSnapshot",
+		AXSnapshot: &AXSnapshotV1{
+			SchemaVersion: "AXSnapshotV1",
 			WindowHandle:  "window-1",
 			Revision:      "c1",
 		},
@@ -90,7 +90,7 @@ func TestFindCursorExpiresAtAbsoluteDeadlineDespiteContinuedUse(t *testing.T) {
 	registry.idleTTL = time.Hour
 	registry.absoluteTTL = time.Millisecond
 	snapshot := &AppSnapshot{
-		AXSnapshot: &AXSnapshot{SchemaVersion: "AXSnapshot"},
+		AXSnapshot: &AXSnapshotV1{SchemaVersion: "AXSnapshotV1"},
 	}
 	cursor := registry.Create(
 		snapshot,
@@ -117,7 +117,7 @@ func TestFindCursorRejectsOversizedResultSet(t *testing.T) {
 	root.Children = []*AXNode{{ID: "0/0", Name: "child", Parent: root}}
 	snapshot := &AppSnapshot{
 		SnapshotID: "snapshot-1",
-		AXSnapshot: &AXSnapshot{CanonicalRoots: []*AXNode{root}},
+		AXSnapshot: &AXSnapshotV1{CanonicalRoots: []*AXNode{root}},
 	}
 	if cursor := registry.Create(
 		snapshot,
