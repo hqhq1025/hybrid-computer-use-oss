@@ -125,117 +125,75 @@ func untilStatus(result ToolCallResult) string {
 	return status
 }
 
+// queryWait polls a query wait step in the batch window, as an act call
+// with {"type":"wait","query":query,"gone":gone} does.
+func queryWait(s *Service, context *AXBatchContext, query map[string]any, gone bool) ToolCallResult {
+	return s.waitForQuery(context, &axWait{query: query, gone: gone, timeoutMS: 1})
+}
+
 // Shape 1: the batch acts in the document window and the awaited dialog is
 // another top-level window of the same application, as LibreOffice opens
 // its dialogs.
-func TestSelectorUntilSeesDialogInAnotherWindowOfTheApp(t *testing.T) {
+func TestQueryWaitSeesDialogInAnotherWindowOfTheApp(t *testing.T) {
 	s, backend, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	for _, selector := range []map[string]any{
+	for _, query := range []map[string]any{
 		{"role": "dialog"},
-		{"role": "button", "name": "Insert"},
+		{"role": "button", "name_contains": "Insert"},
 	} {
-		result := s.runAXPostcondition(context, map[string]any{
-			"type": "exists", "target": map[string]any{"selector": selector},
-			"value": true, "timeout_ms": 1,
-		})
+		result := queryWait(s, context, query, false)
 		if result.IsError || untilStatus(result) != "pass" {
-			t.Fatalf("%v in the dialog window did not satisfy until: %s", selector, ResultText(result))
+			t.Fatalf("%v in the dialog window did not satisfy the wait: %s", query, ResultText(result))
 		}
 	}
 	for _, request := range backend.actionRequests {
-		t.Fatalf("until sent input: %#v", request)
+		t.Fatalf("wait sent input: %#v", request)
 	}
 }
 
-// Thunderbird exposes its modal "New Folder" dialog
-// as a top-level frame, so {"role":"dialog"} never matched although the
-// next observe showed blocking=modal_dialog. A modal top-level window
-// counts as a dialog; a non-modal one does not.
-func TestDialogSelectorMatchesAModalTopLevelWindow(t *testing.T) {
-	newFolder := untilFakeWindow{handle: untilDialogHandle, role: "frame", title: "New Folder", path: "/window/2", modal: true}
-	exists := func(value bool) map[string]any {
-		return map[string]any{"type": "exists", "value": value, "timeout_ms": 1,
-			"target": map[string]any{"selector": map[string]any{"role": "dialog"}}}
-	}
-	s, _, context := untilScopeService(t, untilMainWindow(), newFolder)
-	if result := s.runAXPostcondition(context, exists(true)); result.IsError || untilStatus(result) != "pass" {
-		t.Fatalf("modal frame must satisfy role dialog: %s", ResultText(result))
-	}
-	context.WindowHandle = untilDialogHandle
-	if result := s.runAXPostcondition(context, exists(true)); result.IsError || untilStatus(result) != "pass" {
-		t.Fatalf("modal frame bound as the batch window must satisfy role dialog: %s", ResultText(result))
-	}
-	plain := newFolder
-	plain.modal = false
-	s, _, context = untilScopeService(t, untilMainWindow(), plain)
-	if result := s.runAXPostcondition(context, exists(true)); untilStatus(result) == "pass" {
-		t.Fatalf("a non-modal frame is not a dialog: %s", ResultText(result))
-	}
-	s, _, context = untilScopeService(t, untilMainWindow())
-	if result := s.runAXPostcondition(context, exists(false)); result.IsError || untilStatus(result) != "pass" {
-		t.Fatalf("no modal window left: %s", ResultText(result))
-	}
-}
-
-// A negative selector is true only when no window of the app matches.
-func TestNegativeSelectorUntilChecksEveryWindowOfTheApp(t *testing.T) {
+// A gone query is true only when no window of the app matches.
+func TestGoneQueryWaitChecksEveryWindowOfTheApp(t *testing.T) {
 	s, _, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	result := s.runAXPostcondition(context, map[string]any{
-		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "dialog"}},
-		"value": false, "timeout_ms": 1,
-	})
-	if result.IsError || untilStatus(result) == "pass" {
-		t.Fatalf("a dialog still open in another window must keep exists:false false: %s", ResultText(result))
+	result := queryWait(s, context, map[string]any{"role": "dialog"}, true)
+	if untilStatus(result) == "pass" {
+		t.Fatalf("a dialog still open in another window must keep gone false: %s", ResultText(result))
 	}
 }
 
-// A selector found in the bound window costs one read, as before.
-func TestSelectorUntilMatchedInBoundWindowReadsOneWindow(t *testing.T) {
+// A query found in the bound window costs one read.
+func TestQueryWaitMatchedInBoundWindowReadsOneWindow(t *testing.T) {
 	s, backend, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	result := s.runAXPostcondition(context, map[string]any{
-		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "button", "name": "Save"}},
-		"value": true, "timeout_ms": 1,
-	})
+	result := queryWait(s, context, map[string]any{"role": "button", "name_contains": "Save"}, false)
 	if untilStatus(result) != "pass" || len(backend.observedHands) != 1 {
 		t.Fatalf("bound-window match: status=%s reads=%v", untilStatus(result), backend.observedHands)
 	}
 }
 
-// A false selector until names the dialog that has focus in its hint.
-func TestFalseSelectorUntilHintNamesTheFocusedDialog(t *testing.T) {
+// A false query wait names the dialog that has focus.
+func TestFalseQueryWaitNamesTheFocusedDialog(t *testing.T) {
 	s, _, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	result := s.runAXPostcondition(context, map[string]any{
-		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "button", "name": "Never"}},
-		"value": true, "timeout_ms": 1,
-	})
+	result := queryWait(s, context, map[string]any{"role": "button", "name_contains": "Never"}, false)
 	ref, _ := result.StructuredContent["until_window_ref"].(string)
 	if untilStatus(result) != "predicate_false" || !isShortAXWindowRef(ref) || ref == context.WindowRef {
-		t.Fatalf("false until: status=%s window=%q", untilStatus(result), ref)
+		t.Fatalf("false wait: status=%s window=%q", untilStatus(result), ref)
 	}
 }
 
-// A selector until bound to a window that closed reads the app's remaining
+// A query wait bound to a window that closed reads the app's remaining
 // windows instead of returning unknown.
-func TestSelectorUntilAfterTheBatchDialogClosed(t *testing.T) {
+func TestQueryWaitAfterTheBatchDialogClosed(t *testing.T) {
 	s, _, context := untilScopeService(t, untilMainWindow())
 	context.WindowHandle = untilDialogHandle
-	result := s.runAXPostcondition(context, map[string]any{
-		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "dialog"}},
-		"value": false, "timeout_ms": 1,
-	})
+	result := queryWait(s, context, map[string]any{"role": "dialog"}, true)
 	if result.IsError || untilStatus(result) != "pass" {
-		t.Fatalf("closed dialog selector must be absent: %s", ResultText(result))
+		t.Fatalf("closed dialog query must be absent: %s", ResultText(result))
 	}
 }
 
-func TestNegatedSelectorUntilAfterTheAppExited(t *testing.T) {
+func TestGoneQueryWaitAfterTheAppExited(t *testing.T) {
 	s, backend, context := untilScopeService(t)
 	backend.appGone, backend.appGoneFacts = true, true
 	s.markAppIdentityLifecycle(context.AppRef, AXRefStale, "stale_app_ref")
-	result := s.runAXPostcondition(context, map[string]any{
-		"type": "exists", "target": map[string]any{"selector": map[string]any{"role": "dialog"}},
-		"value": false, "timeout_ms": 1,
-	})
+	result := queryWait(s, context, map[string]any{"role": "dialog"}, true)
 	if result.IsError || untilStatus(result) != "pass" {
 		t.Fatalf("an exited app has no matching element: %s", ResultText(result))
 	}

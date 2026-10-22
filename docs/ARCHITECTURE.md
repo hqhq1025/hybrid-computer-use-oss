@@ -82,6 +82,14 @@ and consumes per-action continuity and emission evidence. Other providers use
 the existing per-action path. Provider argument rejection is distinct from a
 transport failure and does not imply input or restart a healthy worker.
 
+Application discovery responses can include `inventory_issues`, a list of
+`{app, reason}` objects. An omitted `app` means application enumeration itself
+was incomplete. Known windows remain usable, but the Go core permits partial
+inventories only for `AX mode=apps`. Title selection, implicit focus, and
+window waits require a complete inventory. Missing windows never prove absence.
+Linux retains its existing human-readable notes alongside these typed facts.
+Native window-close verification uses its separate exact-window evidence.
+
 ## Go packages
 
 The Go module in `computer-use/` has six packages. Arrows point from a

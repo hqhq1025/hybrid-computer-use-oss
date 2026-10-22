@@ -48,7 +48,8 @@ flowchart LR
 | AX `act` | `click`, `type`, `keypress`, `set_value`, `select`, `scroll`, `activate`, `close` and `wait` steps. The first failed step stops the batch. A `wait` step sends no input and waits for a window, a `find` query, a ref's state or text. `select` reads the selection back. |
 | AX results | An `effect:` line per targeted element, a `windows:` line for opened, closed and focused windows, and a compact diff by default. |
 | Errors | Every result starts with one JSON line: `ok`, `code`, `path`, `message`, `hint` (a corrected call), `input_emitted`, `completed`. 12 public codes. |
-| GUI screenshots | Every provider scales the desktop to fit 1366x768, the size the model sees. Coordinates are pixels of that image, mapped back to the native desktop per axis. |
+| GUI screenshots | Every provider scales the desktop to fit 1366x768, the size the model sees. Coordinates are pixels of that image, mapped back to the native desktop per axis. An AX `observe:"full"` or `"screenshot"` image is the same frame, so GUI input may follow it without another screenshot. |
+| GUI zoom | `zoom` enlarges a region of the current frame to read small text and icons. It only looks, and its result states how a zoom pixel maps back to frame pixels. |
 | GUI input | Click, double click, move, drag, scroll, type, keypress and one-second wait, batched up to 64 actions with one final screenshot. |
 | GUI stale protection | Before each coordinate action, the provider checks the window under that point against the screenshot. A change returns `gui_frame_stale` with nothing sent and a fresh screenshot. |
 | Entry points | MCP over stdio; a per-desktop daemon shared by the CLI, the Python SDK (`hcu_sdk`) and the programmatic tool calling (PTC) adapter. All of them call the same core and return the same text or JSON records. |
@@ -108,6 +109,7 @@ computer-use apps                                    # list windows (w1, w2, ...
 computer-use find w1 --role button --name-has Save   # find refs (r12, ...)
 computer-use click r12 --wait '{"window":"Save"}'    # act, then wait for a window
 computer-use gui screenshot                          # screenshot written to a file
+computer-use gui zoom 600 60 680 100                 # enlarge a frame region
 ```
 
 One daemon per desktop keeps refs valid between commands;

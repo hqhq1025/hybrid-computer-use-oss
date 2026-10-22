@@ -53,7 +53,6 @@ const (
 	axRuleRefKind         = "ax_ref_kind_for_action_type"
 	axRuleObserveNone     = "ax_observe_none"
 	axRuleFindFilterPair  = "ax_find_filter_pair"
-	axRuleValueMatch      = "ax_value_match"
 	axRuleBlankValue      = "ax_blank_value"
 )
 

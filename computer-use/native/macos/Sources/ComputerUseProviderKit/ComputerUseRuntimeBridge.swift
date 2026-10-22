@@ -92,12 +92,13 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
         let tool = string(operation["tool"])
         switch tool {
         case "list_apps":
-            let apps = try macApplicationListing(AppDiscovery.runningApps())
+            let inventory = try macApplicationListing(AppDiscovery.runningApps())
             return [
                 "ok": true,
-                "text": apps.compactMap { $0["displayText"] as? String }
+                "text": inventory.apps.compactMap { $0["displayText"] as? String }
                     .joined(separator: "\n"),
-                "apps": apps,
+                "apps": inventory.apps,
+                "inventory_issues": inventory.issues,
             ]
         case "get_app_state":
             let snapshot = try getAppStateSnapshot(operation)
@@ -217,21 +218,37 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
 
 func macApplicationListing(
     _ apps: [RunningAppDescriptor],
+    accessibilityTrusted: () -> Bool = AXIsProcessTrusted,
     inputCapable: (RunningAppDescriptor) -> Bool = { $0.runningApplication.activationPolicy != .prohibited },
     windows: (RunningAppDescriptor) throws -> [[String: Any]] = { app in
         let inventory = axWindowInventory(pid: app.pid)
+        if inventory.status == .apiDisabled {
+            throw ComputerUseError.permissionDenied("Accessibility permission is unavailable. Enable Accessibility for Computer Use Provider.")
+        }
         guard inventory.complete else {
-            throw ComputerUseError.stateUnavailable("The window inventory for \(app.name) is incomplete. Missing windows cannot be treated as closed.")
+            throw ComputerUseError.stateUnavailable("AXWindows could not be read completely (AX \(inventory.status.rawValue)). Missing windows remain unknown.")
         }
         guard let records = try windowInventorySnapshot(app: app, windows: inventory.windows)["windows"] as? [[String: Any]] else {
             throw ComputerUseError.stateUnavailable("The window inventory could not be encoded completely.")
         }
         return records
     }
-) throws -> [[String: Any]] {
-    try apps.map { app in
+) throws -> (apps: [[String: Any]], issues: [[String: String]]) {
+    guard accessibilityTrusted() else {
+        throw ComputerUseError.permissionDenied("Accessibility permission is unavailable. Enable Accessibility for Computer Use Provider.")
+    }
+    var issues: [[String: String]] = []
+    let listed = try apps.map { app -> [String: Any] in
         let capable = inputCapable(app)
-        let records = capable ? try windows(app) : []
+        let records: [[String: Any]]
+        do {
+            records = capable ? try windows(app) : []
+        } catch ComputerUseError.stateUnavailable(let reason) {
+            // Keep other applications discoverable. This is not an empty,
+            // complete inventory and cannot prove that a window disappeared.
+            issues.append(["app": app.name, "reason": String(reason.prefix(512))])
+            records = []
+        }
         return [
             "name": app.name,
             "bundleIdentifier": app.bundleIdentifier ?? "",
@@ -243,6 +260,10 @@ func macApplicationListing(
             "windows": appListingWindows(records),
         ]
     }
+    guard accessibilityTrusted() else {
+        throw ComputerUseError.permissionDenied("Accessibility permission changed during enumeration. Enable Accessibility for Computer Use Provider.")
+    }
+    return (listed, issues)
 }
 
 func runtimeAppIdentity(_ operation: [String: Any]) throws -> [String: Any]? {

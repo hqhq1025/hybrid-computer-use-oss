@@ -55,7 +55,12 @@ schema, type or error files:
   every entry against the decoder and the published schema.
 
 Drift tests: SDK helpers produce calls the core accepts
-(`sdk/python/tests/test_sdk.py`), MCP and `call` return byte-identical text
+(`sdk/python/tests/test_sdk.py`). The CLI shorthands
+(`TestCLIReachesEveryPublishedItem`) and the SDK helpers
+(`test_helpers_reach_every_published_item`) each reach every AX mode, observe
+value, act step type, wait step kind and GUI action type read from the
+published schemas. The few items not covered are listed by name as reachable
+only through `--json` or the generic `act`/`gui`/`call`. MCP and `call` return byte-identical text
 (`TestCallOutputMatchesMCPToolResult`), the CLI prints the MCP text
 (`TestCLITextMatchesMCPOverTheDaemon`), attached MCP matches in-process MCP
 (`TestAttachedMCPMatchesInProcessAndSharesRefs`), and every public code is in
@@ -82,6 +87,15 @@ evidence line. Records differ from text in four ways, all aimed at code:
 - `since: "<snapshot_id>"` on `observe` returns added, removed and changed
   elements against an earlier records snapshot of the same session.
 - Images are files; the record holds their paths.
+- `screen{width,height,coordinate_space,image}` names the current GUI frame:
+  GUI `x`/`y` are pixels of that image. GUI screenshots and input batches
+  set it, and so do AX `observe:"full"` and `observe:"screenshot"`, because
+  their image is the same full-desktop frame. A GUI input call may follow
+  either without a new screenshot.
+- A GUI `zoom` record has `images[0]` (the zoom image) and
+  `evidence.zoom{frame,region,width,height,scale_x,scale_y}`, and no
+  `screen`: the zoom image is not a frame. Zoom pixel `(u, v)` is frame pixel
+  `x = region[0] + u/scale_x`, `y = region[1] + v/scale_y`.
 
 `{"mode":"read","refs":["r1",...]}` is a records-only AX mode: one live
 resolve per ref, no tree walk. It is not in the MCP schema and MCP rejects it.
@@ -115,7 +129,7 @@ prevent startup. Preserve the counter file when restarting the daemon.
 
 ```text
 computer-use apps | observe | wait | find | read | click | type | key | set |
-             scroll | activate | close | act | gui     shorthand calls
+             select | scroll | activate | close | act | gui   shorthand calls
 computer-use batch [FILE|-] [--keep-going] [--text]     JSON array of {"tool","args"}
 computer-use schema                                     contract as JSON
 computer-use serve [--socket PATH] [--idle-timeout 30m] daemon in the foreground
@@ -126,7 +140,14 @@ computer-use help cli                                   full usage and exit code
 
 Input shorthands also take `--window wN`, `--as none|diff|tree` and
 `--wait STEP_JSON`, one wait step that runs after the action, for example
-`--wait '{"window":"Save"}'`. Common options are `--session NAME`
+`--wait '{"window":"Save"}'`. `select rN [TEXT] [--to rN]` selects an
+element, a substring of it, or a range. `gui` has `screenshot`,
+`zoom X0 Y0 X1 Y1`, `click|double_click|move X Y`, `type TEXT` and
+`key CHORD`. GUI `drag`, `scroll` and `wait` take `gui --json`, and an AX
+batch takes `act --json`. `observe --as full|screenshot` prints an
+`image: full desktop WxH, the current GUI frame` line before the image path.
+After that line, `gui click` may use the image's pixels. `gui zoom` prints the
+mapping line and the zoom image path. Common options are `--session NAME`
 (`HCU_SESSION`), `--socket PATH` (`HCU_SOCKET`), `--request-id ID` and
 `--since SNAPSHOT_ID`.
 
@@ -169,8 +190,22 @@ name `hcu`.
 
 - `Desktop.call(tool, args)` is the whole API; helpers (`apps`, `observe`,
   `find`, `find_all`, `read`, `act`, `click`, `type`, `key`, `set_value`,
-  `scroll`, `activate`, `close_window`, `screenshot`, `gui`, `wait`) only
-  build argument dicts.
+  `select`, `scroll`, `activate`, `close_window`, `screenshot`, `zoom`, `gui`,
+  `wait`) only build argument dicts. GUI input actions go through
+  `gui(actions)`, with `x`/`y` in pixels of the latest `screen` image.
+- `zoom(region)` returns the zoom record. `hcu.zoom_point(record, u, v)`
+  converts a zoom image pixel to the frame pixel that GUI `x`/`y` take, using
+  the record's `evidence.zoom`. Code does not parse the mapping text:
+
+  ```python
+  frame = d.screenshot()                        # or d.observe(w, observe="full")
+  z = d.zoom([600, 60, 680, 100])               # frame pixels
+  x, y = hcu.zoom_point(z, 212, 96)             # a point seen in the zoom image
+  d.gui([{"type": "click", "x": x, "y": y}])
+  ```
+
+- `screenshot()` and `zoom()` only look: they get no `request_id`, and a
+  dropped connection retries them like any other read.
 - Records are dicts with attribute access. `ok:false` raises `HcuError`; the
   subclass is named after the code (`hcu.StaleRef`).
 - `observe` and `find` accept a positional `target`, or one named `window_ref`
@@ -246,7 +281,10 @@ Successful calls return records without automatically displaying them.
 `await d.emit(value)` displays selected text or JSON. `await d.emit_image(record)`
 reads the existing `screen.image` and sends PNG/JPEG bytes to the sink; it
 does not repeat the desktop call. The sink must send actual image content to
-the model and preserve the delivered pixel coordinates.
+the model and preserve the delivered pixel coordinates. A GUI frame image
+(GUI screenshot, AX `full`/`screenshot`) has `coordinate_space:
+"image_pixels"`. A zoom image has `coordinate_space: "zoom_pixels"` and its
+`zoom` mapping; GUI `x`/`y` never take zoom pixels directly.
 
 ```python
 frame = await d.screenshot()
@@ -358,4 +396,11 @@ text(JSON.stringify({ok: evidence.ok, refs}));
 ```
 
 Records are not offered through MCP, so code mode parses the evidence line
-and the `ref="rN"` units; a records option for MCP is an open decision.
+and the `ref="rN"` units; a records option for MCP is an open decision. A GUI
+zoom's evidence line carries its mapping, so code mode reads it the same way:
+
+```js
+const z = await tools.mcp__computer_use__GUI({actions: [{type: "zoom", region: [600, 60, 680, 100]}]});
+const {zoom} = JSON.parse(z.content[0].text.split("\n")[0]);   // {region, scale_x, scale_y, ...}
+const x = zoom.region[0] + 212 / zoom.scale_x, y = zoom.region[1] + 96 / zoom.scale_y;
+```

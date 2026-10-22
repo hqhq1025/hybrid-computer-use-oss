@@ -36,19 +36,49 @@ import Testing
     #expect(windows.allSatisfy { $0["inputTarget"] as? Bool == true })
 }
 
-@Test func incompleteWindowReadFailsInsteadOfProvingAbsence() throws {
+@Test func incompleteWindowReadPreservesDiscoveryWithoutProvingAbsence() throws {
     let app = RunningAppDescriptor(name: "Test", bundleIdentifier: "test.inventory", pid: getpid(), runningApplication: NSRunningApplication.current)
-    let empty = try macApplicationListing([app], inputCapable: { _ in true }, windows: { _ in [] })
-    #expect((empty[0]["windows"] as? [[String: Any]])?.isEmpty == true)
+    let empty = try macApplicationListing([app], accessibilityTrusted: { true }, inputCapable: { _ in true }, windows: { _ in [] })
+    #expect((empty.apps[0]["windows"] as? [[String: Any]])?.isEmpty == true)
+    #expect(empty.issues.isEmpty)
+    let healthy = RunningAppDescriptor(name: "Editor", bundleIdentifier: "test.editor", pid: getpid(), runningApplication: NSRunningApplication.current)
+    let result = try macApplicationListing([app, healthy], accessibilityTrusted: { true }, inputCapable: { _ in true }, windows: { current in
+        if current.name == app.name {
+            throw ComputerUseError.stateUnavailable("AXWindows unavailable (AX -25204)")
+        }
+        return [macWindowInventoryRecord(pid: getpid(), generation: "test", windowID: 77, title: "Document", focusedHandle: nil, modal: false)]
+    })
+    #expect(result.apps.count == 2)
+    #expect((result.apps[1]["windows"] as? [[String: Any]])?.first?["title"] as? String == "Document")
+    #expect(result.issues == [["app": "Test", "reason": "AXWindows unavailable (AX -25204)"]])
+    let wire = ProviderResponseBuilder.domainResult(["ok": true, "apps": result.apps, "inventory_issues": result.issues], operation: "observe_apps")
+    #expect(wire["inventory_issues"] as? [[String: String]] == result.issues)
+}
+
+@Test func applicationDiscoveryDoesNotHideGlobalPermissionFailures() throws {
+    let app = RunningAppDescriptor(name: "Test", bundleIdentifier: "test.inventory", pid: getpid(), runningApplication: NSRunningApplication.current)
+    var reads = 0
     do {
-        _ = try macApplicationListing([app], inputCapable: { _ in true }, windows: { _ in
-            throw ComputerUseError.stateUnavailable("inventory incomplete")
+        _ = try macApplicationListing([app], accessibilityTrusted: { false }, inputCapable: { _ in true }, windows: { _ in
+            reads += 1
+            return []
         })
-        Issue.record("Incomplete enumeration must not become an empty successful listing")
+        Issue.record("Denied Accessibility must fail before enumeration")
     } catch {
-        let result = runtimeFailureResult(error)
-        #expect(result["ok"] as? Bool == false)
-        #expect(result["input_events_emitted"] as? Bool == false)
+        #expect(runtimeFailureResult(error)["failureCode"] as? String == "permission_denied")
+    }
+    #expect(reads == 0)
+    for failure in [ComputerUseError.permissionDenied("permission revoked"), .invalidArguments("invalid provider state")] {
+        #expect(throws: (any Error).self) {
+            try macApplicationListing([app], accessibilityTrusted: { true }, inputCapable: { _ in true }, windows: { _ in throw failure })
+        }
+    }
+    var checks = 0
+    #expect(throws: (any Error).self) {
+        try macApplicationListing([app], accessibilityTrusted: {
+            checks += 1
+            return checks == 1
+        }, inputCapable: { _ in true }, windows: { _ in [] })
     }
 }
 

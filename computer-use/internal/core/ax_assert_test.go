@@ -694,30 +694,6 @@ func TestAssertAXDoesNotTreatAmbiguityAsAbsence(t *testing.T) {
 }
 
 func TestValueEqualsAssertionUsesExactTrimmedValue(t *testing.T) {
-	assertion := map[string]any{
-		"type":   "value",
-		"target": map[string]any{"ref": "r17"},
-		"value":  "5",
-	}
-	spec, err := parseAXAssertionSpec(assertion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if spec.assertionType != "value_equals" {
-		t.Fatalf("assertion type = %q", spec.assertionType)
-	}
-	containsSpec, err := parseAXAssertionSpec(map[string]any{
-		"type":   "value",
-		"target": map[string]any{"ref": "r17"},
-		"value":  "5",
-		"match":  "contains",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if containsSpec.assertionType != "value_contains" {
-		t.Fatalf("contains assertion type = %q", containsSpec.assertionType)
-	}
 	goal := verifyGoal{valueEquals: "5"}
 	if ok, _ := goal.check(&ElementRecord{Value: " 5 "}, nil); !ok {
 		t.Fatal("trimmed exact value did not match")

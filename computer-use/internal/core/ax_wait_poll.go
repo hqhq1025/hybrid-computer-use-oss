@@ -33,7 +33,7 @@ func (s *Service) waitForDesktopWindow(context *AXBatchContext, wait *axWait) To
 	lastError := ""
 	for {
 		attempts++
-		inventory, failure := s.listDesktopWindows()
+		inventory, failure := s.listDesktopWindows(false)
 		matched := []axDesktopWindow{}
 		titleMatches := 0
 		if inventory == nil {
@@ -148,7 +148,7 @@ func (s *Service) waitOnApplication(
 	timeoutMS int,
 ) ToolCallResult {
 	app := FirstNonEmpty(context.AppRef, context.AppToken)
-	result := s.verifyLookup(app, lookup, display, hint, false, goal, timeoutMS, 0,
+	result := s.verifyLookup(app, lookup, display, hint, goal, timeoutMS, 0,
 		contract.AXScopeWindow, context.WindowHandle)
 	return axWaitResultText(result)
 }
@@ -156,31 +156,17 @@ func (s *Service) waitOnApplication(
 // waitForRef polls one element ref for a value, state, or text, or for its
 // absence.
 func (s *Service) waitForRef(context *AXBatchContext, wait *axWait) ToolCallResult {
-	predicate := map[string]any{"ref": wait.ref, "timeout_ms": float64(wait.timeoutMS)}
-	switch {
-	case wait.value != "":
-		predicate["type"], predicate["value"] = "value", wait.value
-	case wait.state != "":
-		predicate["type"], predicate["state"] = "state", wait.state
-	case wait.text != "":
-		predicate["type"], predicate["text"] = "text", wait.text
-	default:
-		predicate["type"] = "exists"
+	predicate, err := axRefWaitPredicate(wait)
+	if err != nil {
+		return TextResult(err.Error(), true)
 	}
-	if wait.gone {
-		predicate["negate"] = true
-	}
-	assertion, argErr := decodeAXPredicate(predicate, "wait")
-	if argErr != nil {
-		return TextResult(argErr.Message, true)
-	}
-	if err := s.preflightAXPostcondition(context, assertion); err != nil {
+	if err := s.preflightAXPostcondition(context, wait.ref); err != nil {
 		return axStaleRefResult(wait.ref, err)
 	}
-	if held, ok := s.waitHoldsInLatestRead(context, wait.ref, assertion); ok {
+	if held, ok := s.waitHoldsInLatestRead(context, wait.ref, predicate.goal); ok {
 		return held
 	}
-	return axWaitResultText(s.runAXPostcondition(context, assertion))
+	return axWaitResultText(s.runAXPostcondition(context, predicate))
 }
 
 // waitHoldsInLatestRead checks a ref wait against the read the previous
@@ -191,7 +177,7 @@ func (s *Service) waitForRef(context *AXBatchContext, wait *axWait) ToolCallResu
 func (s *Service) waitHoldsInLatestRead(
 	context *AXBatchContext,
 	ref string,
-	assertion map[string]any,
+	goal verifyGoal,
 ) (ToolCallResult, bool) {
 	snapshot := s.currentSnapshot(context.AppToken)
 	expected, err := s.RefRegistry.Resolve(ref, "")
@@ -202,7 +188,6 @@ func (s *Service) waitHoldsInLatestRead(
 	if err != nil || record == nil {
 		return ToolCallResult{}, false
 	}
-	goal := assertionGoal(assertion)
 	held, observed := goal.check(record, nil)
 	if !held {
 		return ToolCallResult{}, false

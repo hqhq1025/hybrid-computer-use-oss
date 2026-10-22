@@ -108,14 +108,6 @@ func (s *Service) callProviderDesktop(
 	return &result, err
 }
 
-func (s *Service) callProviderWindowList(
-	request ProviderWindowListRequest,
-) (*ProviderWindowResult, error) {
-	defer s.countProviderTime(time.Now())
-	result, err := s.platformBackend().ListWindows(request)
-	return &result, err
-}
-
 func (s *Service) callProviderWindowAction(
 	request ProviderWindowActionRequest,
 ) (*ProviderWindowResult, error) {

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Bring the CLI, Python SDK, code mode and PTC adapter up to the MCP
+  contract. The CLI adds `gui zoom X0 Y0 X1 Y1`, `gui double_click|move X Y`
+  and `select rN [TEXT] [--to rN]`. The SDK adds `zoom(region)`,
+  `hcu.zoom_point(record, u, v)` and `select()`. Zoom counts as an
+  observation everywhere: it gets no `request_id`, retries like a read, and
+  is allowed by an in-process MCP server while a daemon runs. Records of AX
+  `observe:"full"`/`"screenshot"` now carry `screen`, the GUI frame, like a
+  GUI screenshot. `CodeDesktop.emit_image` delivers a zoom image labelled
+  `zoom_pixels` with its mapping. MCP output is unchanged. Two tests read the
+  AX modes, observe values, act steps, wait kinds and GUI actions from the
+  published schemas. They fail when the CLI or the SDK neither supports a new
+  item nor lists it as reachable only through generic JSON calls.
 - GUI `zoom` returns an enlarged region of the current full-desktop frame
   for small text and dense icons, with the same contract on Linux, macOS and
   Windows. A zoom is look-only: it is bound to the frame it enlarges, fails
@@ -44,6 +56,13 @@
 - Cross-window AX batches fail as `invalid_argument` with a hint to split
   them by window. An ordered-input request that never reached the provider
   reports that no input was sent.
+- macOS application discovery reads the workspace on the main thread, so
+  a long-running provider sees newly launched applications, and it drops
+  processes that have exited. When one application's windows cannot be
+  read, `AX apps` lists the others and marks the inventory incomplete; title
+  resolution and window waits still require a complete inventory. After a
+  close whose final snapshot fails, the provider rechecks the window briefly
+  before it reports the close as unknown.
 - Drop history-only version markers from names: `AXSnapshotV1` is
   `AXSnapshot`, `ProviderV2*` is `Provider*`, `provider_wire_v2.go` is
   `provider_wire.go`, `wire_v2.py` is `wire.py`, the Windows test project is

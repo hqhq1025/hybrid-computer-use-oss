@@ -244,6 +244,8 @@ func compactAXModelEvidence(
 		"next_identical_observation_required",
 		"screenshot_returned",
 		"target_window_absent",
+		"inventory_complete",
+		"inventory_issues",
 		"close_effect_verified",
 		"final_observation_kind",
 		"source_window_status",
@@ -277,6 +279,7 @@ func compactAXModelEvidence(
 				key != "postcondition_verified" &&
 				key != "final_observation_returned" &&
 				key != "screenshot_returned" &&
+				key != "inventory_complete" &&
 				key != "observation_required" &&
 				key != "next_identical_observation_required" {
 				continue
