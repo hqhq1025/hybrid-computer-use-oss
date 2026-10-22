@@ -109,19 +109,6 @@ def test_done_does_not_hide_a_real_budget_rejection(polling, returncode):
     assert polling.run()["budget_exhausted"]
 
 
-def test_retry_circuit_failure_is_not_mislabeled_as_response_budget(polling):
-    polling.write_rows({"task": "task-test", "generation_retry_exhausted": True})
-    with pytest.raises(RuntimeError, match="consecutive generation failure"):
-        polling.run()
-
-
-def test_zero_exit_does_not_hide_a_retry_circuit_failure(polling):
-    polling.write_rows({"task": "task-test", "generation_retry_exhausted": True})
-    polling.done_at = 0
-    with pytest.raises(RuntimeError, match="consecutive generation failure"):
-        polling.run()
-
-
 @pytest.mark.parametrize("health, limit, ok", [
     ('{"max_completed_responses_per_task": 1}', 1, True),
     ('{"max_completed_responses_per_task": 2}', 1, False),

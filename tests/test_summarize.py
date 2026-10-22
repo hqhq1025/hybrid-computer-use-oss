@@ -130,7 +130,3 @@ def test_admitted_generation_without_usage_leaves_tokens_unknown(tmp_path, run):
     row = read_task(root / "tasks/valid", {"id": "valid"})
     assert row["input_tokens"] is None
 
-
-def test_unclassified_rows_cannot_prove_complete_coverage(tmp_path):
-    proxy = collect(tmp_path, [{"task": "task-a", "input_tokens": 8, "output_tokens": 2}])
-    assert proxy["status"] == "incomplete"

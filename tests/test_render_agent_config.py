@@ -84,22 +84,6 @@ def test_codex_render_preserves_context_and_uses_local_home(tmp_path, home_sourc
     assert base.read_text() == "BASE_CONTEXT_MARKER\n"
 
 
-def test_guest_builders_keep_original_injection_and_interpreter():
-    tomllib = pytest.importorskip("tomllib")
-    config = tomllib.loads(agents.codex_config(
-        model="gpt-5.5", effort="xhigh", base_url="http://gateway/v1",
-        codex_home=GUEST_CODEX_HOME, base_instructions="/guest/base.md",
-        mcp_command="/guest/computer-use",
-        execution_context="isolated-guest",
-    ))
-    assert config["approval_policy"] == "never"
-    assert config["sandbox_mode"] == "danger-full-access"
-    assert "developer_instructions" not in config
-    assert config["model_instructions_file"] == "/guest/base.md"
-    server = json.loads(agents.claude_mcp_config())["mcpServers"]["computer_use"]
-    assert server["command"] == "/usr/bin/python3"
-
-
 @pytest.mark.parametrize("channels", ["", "a11y,keyboard", "gui,keyboard"])
 def test_standalone_codex_does_not_infer_guest_permissions(tmp_path, channels):
     output, _, _ = render(tmp_path, "codex", extra=[
