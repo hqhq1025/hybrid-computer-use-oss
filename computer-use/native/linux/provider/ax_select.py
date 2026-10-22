@@ -24,6 +24,7 @@ import time
 
 from .foundation import (
     Atspi,
+    OBJECT_REPLACEMENT,
     OperationFailure,
     node_name,
     node_role,
@@ -32,6 +33,7 @@ from .foundation import (
     state_contains,
 )
 from .ax_actions import send_key
+from .ax_node_properties import embedded_editor_nodes
 from .input_primitives import require_window_focus
 
 # Each ctrl+shift+Down extends a Writer selection by one paragraph; the
@@ -174,6 +176,30 @@ def select_text_range(node, start, end):
             "may have changed.".format(start, end, spans[0]),
             code="effect_unknown", emitted=True, phase="readback")
     return spans[0]
+
+
+def _selection_text_owners(element, content):
+    """Map displayed editor text to the native objects owning its offsets."""
+    if not content or content.strip(OBJECT_REPLACEMENT):
+        return content, [(element, 0, len(content))]
+    nodes = embedded_editor_nodes(element)
+    if not nodes or len(nodes) != len(content):
+        raise _failure(
+            "select_unavailable: the embedded editor text could not be read "
+            "completely; no input was emitted.")
+    lines, owners = [], []
+    offset = 0
+    for node in nodes:
+        iface = _text_iface(node)
+        line = safe(lambda: Atspi.Text.get_text(iface, 0, -1))
+        if not isinstance(line, str) or OBJECT_REPLACEMENT in line:
+            raise _failure(
+                "select_unavailable: an embedded text object is unreadable "
+                "or contains nested objects; no input was emitted.")
+        lines.append(line)
+        owners.append((node, offset, offset + len(line)))
+        offset += len(line) + 1
+    return "\n".join(lines), owners
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +572,8 @@ def perform_select(action_input, window, element, element_record, to_element,
         action_evidence["route"] = "semantic_action"
     elif text is not None or _text_iface(element) is not None and role not in (
             "list item", "table cell", "cell", "tree item", "icon"):
-        content = text_between(element, 0, -1)
+        content, owners = _selection_text_owners(
+            element, text_between(element, 0, -1))
         if text is None:
             start, end = 0, len(content)
             if not content:
@@ -566,10 +593,25 @@ def perform_select(action_input, window, element, element_record, to_element,
                     "element; no input was emitted.".format(_quote(text)),
                     code="invalid_argument")
             end = start + len(text)
-        spans = select_text_range(element, start, end)
+        owner = next(((node, offset) for node, offset, limit in owners
+                      if offset <= start and end <= limit), None)
+        if owner is None:
+            raise _failure(
+                "select_unavailable: the requested text crosses embedded "
+                "text objects; select text within one object or use GUI "
+                "keyboard selection. No input was emitted.")
+        node, offset = owner
+        spans = select_text_range(node, start - offset, end - offset)
         got_start, got_end = spans[0]
+        selected_text = text_between(node, got_start, got_end)
+        if selected_text != content[start:end]:
+            raise _failure(
+                "select_unverified: the selected text changed during the "
+                "operation; the selection may have changed.",
+                code="effect_unknown", emitted=True, phase="readback")
         summary = "selected {}..{} {}".format(
-            got_start, got_end, _quote(text_between(element, got_start, got_end)))
+            got_start + offset, got_end + offset,
+            _quote(selected_text))
         action_evidence["route"] = "semantic_action"
     else:
         select_item(element)
