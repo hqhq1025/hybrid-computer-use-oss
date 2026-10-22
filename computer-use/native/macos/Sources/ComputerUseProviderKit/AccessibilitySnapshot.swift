@@ -610,6 +610,32 @@ enum SnapshotBuilder {
         treeLimits: AccessibilityTreeLimits
     ) throws -> AppSnapshot {
         let generation = macProcessGeneration(pid: app.pid)
+        return try AXNodeFactsCache.withSnapshotScope {
+            try renderAccessibilitySnapshot(
+                app: app,
+                appElement: appElement,
+                rootElement: rootElement,
+                windowCapture: windowCapture,
+                focusedApplication: focusedApplication,
+                systemWide: systemWide,
+                textLimit: textLimit,
+                treeLimits: treeLimits,
+                generation: generation
+            )
+        }
+    }
+
+    private static func renderAccessibilitySnapshot(
+        app: RunningAppDescriptor,
+        appElement: AXUIElement,
+        rootElement: AXUIElement,
+        windowCapture: WindowCapture?,
+        focusedApplication: AXUIElement?,
+        systemWide: AXUIElement,
+        textLimit: SnapshotTextLimit,
+        treeLimits: AccessibilityTreeLimits,
+        generation: String
+    ) throws -> AppSnapshot {
         let windowBounds = windowCapture?.bounds ??
             resolveLocalFrame(of: rootElement, windowBounds: nil)
         let focusedElement = focusedElementInSnapshotWindow(
