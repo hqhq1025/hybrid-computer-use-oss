@@ -1,4 +1,4 @@
-"""Dispatch of Provider V2 operations to AX and GUI handlers."""
+"""Dispatch of provider operations to AX and GUI handlers."""
 
 from .foundation import (
     Atspi,
@@ -128,7 +128,7 @@ from .ax_input_delivery import (
 
 
 def perform_provider_request(operation_kind, payload):
-    """Dispatch one Provider V2 operation that validate_request() accepted."""
+    """Dispatch one provider operation that validate_request() accepted."""
     action_intent = None
     if operation_kind == "resolve_and_act":
         action_intent = payload.get("intent")

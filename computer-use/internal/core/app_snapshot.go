@@ -192,7 +192,7 @@ type AppSnapshot struct {
 	contentRoot             *ElementRecord
 	contentCanonicalCount   int
 	contentRevision         string
-	AXSnapshot              *AXSnapshotV1 `json:"-"`
+	AXSnapshot              *AXSnapshot `json:"-"`
 	findHiddenRecords       map[int]ElementRecord
 	shadowAST               AXShadowStats
 	actionExecution         *RuntimeActionEvidence

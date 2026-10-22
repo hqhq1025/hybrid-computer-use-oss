@@ -26,7 +26,7 @@ func TestComboEditRefBindsPartnerThroughProviderWire(t *testing.T) {
 		SemanticTarget: `combobox "Find"`, RuntimeID: []int{0, 1},
 		SourceRecord: &ElementRecord{EditTarget: identity},
 	}
-	snapshot := &AXSnapshotV1{AppIdentity: "Editor", AppRef: "a1", WindowRef: "w1", WindowHandle: "private-window", Revision: "c1"}
+	snapshot := &AXSnapshot{AppIdentity: "Editor", AppRef: "a1", WindowRef: "w1", WindowHandle: "private-window", Revision: "c1"}
 	ref := registry.AcquireNode(snapshot, node, AXLocatorSemantic)
 	entry, err := registry.Resolve(ref, "")
 	if err != nil {
@@ -67,7 +67,7 @@ func TestComboEditRefBindsPartnerThroughProviderWire(t *testing.T) {
 }
 
 func TestComboEditPrivateWireFixture(t *testing.T) {
-	request, err := DecodeProviderWireRequest(readProviderV2Fixture(t, "combo-edit.request.json"))
+	request, err := DecodeProviderWireRequest(readProviderFixture(t, "combo-edit.request.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

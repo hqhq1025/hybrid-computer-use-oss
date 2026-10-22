@@ -38,7 +38,7 @@ func (s *Service) gui(actions any, settleMS int) ToolCallResult {
 			// Observe only: the provider wire rejects an empty batch, and an
 			// explicit screenshot action is the one batch that emits no input.
 			observed, err := s.callProviderDesktop(ProviderDesktopRequest{
-				ProtocolVersion: ProviderProtocolV2,
+				ProtocolVersion: ProviderProtocolVersion,
 				Actions:         []ProviderDesktopAction{{Type: "screenshot"}},
 			})
 			if err != nil {
@@ -62,7 +62,7 @@ func (s *Service) gui(actions any, settleMS int) ToolCallResult {
 		privateFrameID = s.guiSnapshot.FrameID
 	}
 	response, err := s.callProviderDesktop(ProviderDesktopRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		Actions:         providerActions,
 		SettleMS:        settleMS,
 		FrameID:         privateFrameID,

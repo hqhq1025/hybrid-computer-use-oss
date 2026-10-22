@@ -349,7 +349,7 @@ func TestFindStatesMatchTheirRenderedNames(t *testing.T) {
 }
 
 func buildAXSnapshotForTest(snapshot *AppSnapshot) error {
-	return NewService().BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking)
+	return NewService().BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking)
 }
 
 // A successful earlier sample cannot prove the current state after the

@@ -5,14 +5,14 @@ import "github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contra
 func providerObserveAppsRequestFromOperation(
 	AXServiceRequest,
 ) ProviderObserveAppsRequest {
-	return ProviderObserveAppsRequest{ProtocolVersion: ProviderProtocolV2}
+	return ProviderObserveAppsRequest{ProtocolVersion: ProviderProtocolVersion}
 }
 
 func providerObserveRequestFromOperation(
 	operation AXServiceRequest,
 ) ProviderObserveRequest {
 	return ProviderObserveRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		App:             operation.App,
 		AppIdentity:     operation.AppIdentity,
 		WindowHandle:    operation.TargetWindowHandle,
@@ -28,7 +28,7 @@ func providerActionRequestFromOperation(
 		panic("provider action request requires a typed action command")
 	}
 	request := ProviderActionRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		Intent:          operation.Action.Intent(),
 		App:             operation.App,
 		AppIdentity:     operation.AppIdentity,
@@ -48,7 +48,7 @@ func providerWindowListRequestFromOperation(
 	operation AXServiceRequest,
 ) ProviderWindowListRequest {
 	return ProviderWindowListRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		App:             operation.App,
 		AppIdentity:     operation.AppIdentity,
 		WindowHandle:    operation.TargetWindowHandle,
@@ -62,7 +62,7 @@ func providerWindowActionRequestFromOperation(
 		panic("provider window action request requires a typed window action")
 	}
 	return ProviderWindowActionRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		Action:          *operation.WindowAction,
 		App:             operation.App,
 		AppIdentity:     operation.AppIdentity,

@@ -49,11 +49,11 @@ private func rejectionTestRequest(_ operation: String) -> [String: Any] {
         break
     }
     return [
-        "protocol": "computer-use-provider-v2",
+        "protocol": "computer-use-provider",
         "schema_version": 2,
         "request_id": " \tvalidation-\(operation)\n",
         "operation": operation,
-        ProviderV2OperationAdapter.payloadName(for: operation): payload,
+        ProviderOperationAdapter.payloadName(for: operation): payload,
     ]
 }
 
@@ -66,8 +66,8 @@ private func requestLine(_ request: [String: Any]) throws -> String {
 
 private func rejectionTestServer(
     executeRuntime: @escaping ([String: Any]) async -> [String: Any]
-) -> ProviderV2Server {
-    ProviderV2Server(
+) -> ProviderServer {
+    ProviderServer(
         transport: ProviderLineTransport(
             inputDescriptor: -1,
             outputDescriptor: -1
@@ -91,7 +91,7 @@ private func expectRequestRejection(
         "protocol", "schema_version", "request_id", "operation",
         "request_rejection",
     ])
-    #expect(response["protocol"] as? String == "computer-use-provider-v2")
+    #expect(response["protocol"] as? String == "computer-use-provider")
     #expect(response["schema_version"] as? Int == 2)
     #expect(response["request_id"] as? String == request["request_id"] as? String)
     #expect(response["operation"] as? String == request["operation"] as? String)
@@ -118,7 +118,7 @@ private func expectRequestRejection(
 func knownOperationValidationFailuresRemainCorrelated(_ operation: String) async throws {
     var request = rejectionTestRequest(operation)
     try ProviderRequestValidator.validate(request)
-    let payloadName = ProviderV2OperationAdapter.payloadName(for: operation)
+    let payloadName = ProviderOperationAdapter.payloadName(for: operation)
     var payload = try #require(request[payloadName] as? [String: Any])
     let message: String
     switch operation {
@@ -148,7 +148,7 @@ func knownOperationValidationFailuresRemainCorrelated(_ operation: String) async
 @Test(arguments: ProviderRequestValidator.operations)
 func trustedHeadersSurviveEnvelopePayloadErrors(_ operation: String) async throws {
     let original = rejectionTestRequest(operation)
-    let payloadName = ProviderV2OperationAdapter.payloadName(for: operation)
+    let payloadName = ProviderOperationAdapter.payloadName(for: operation)
     var request = original
     request["unexpected"] = true
     try await expectRequestRejection(request, messageContains: "unexpected")
@@ -173,7 +173,7 @@ func unsupportedKeysRejectBeforeAnyRuntimeDispatch(_ key: String) async throws {
     for operation in ["resolve_and_act", "ordered_input"] {
         var request = rejectionTestRequest(operation)
         try ProviderRequestValidator.validate(request)
-        let payloadName = ProviderV2OperationAdapter.payloadName(for: operation)
+        let payloadName = ProviderOperationAdapter.payloadName(for: operation)
         var payload = try #require(request[payloadName] as? [String: Any])
         if operation == "resolve_and_act" {
             payload["input"] = ["key": key]
@@ -208,7 +208,7 @@ func malformedDesktopKeysRejectTheEntireBatchBeforeDispatch() async throws {
 func untrustedHeadersKeepTheHistoricalInvalidEnvelope() async throws {
     let invalidHeaders: [(String, Any)] = [
         ("protocol", NSNull()), ("protocol", 2), ("protocol", "computer-use-provider-v1"),
-        ("protocol", " computer-use-provider-v2"), ("protocol", ["computer-use-provider-v2"]),
+        ("protocol", " computer-use-provider"), ("protocol", ["computer-use-provider"]),
         ("schema_version", NSNull()), ("schema_version", true),
         ("schema_version", "2"), ("schema_version", 1),
         ("schema_version", 2.5), ("schema_version", ["version": 2]),
@@ -243,7 +243,7 @@ func untrustedHeadersKeepTheHistoricalInvalidEnvelope() async throws {
             try ProviderRequestValidator.validate(request)
             Issue.record("Expected invalid headers or payload to fail validation")
         } catch {
-            let expected = ProviderV2ResponseBuilder.invalidEnvelope(error)
+            let expected = ProviderResponseBuilder.invalidEnvelope(error)
             #expect(NSDictionary(dictionary: response).isEqual(to: expected))
         }
         #expect(response["request_id"] as? String == "invalid")
@@ -322,7 +322,7 @@ func dispatchedRuntimeFailuresAreNeverRequestRejections(_ operation: String) asy
         == request["request_id"] as? String)
     #expect(response["request_rejection"] == nil)
     #expect(response["provider_reset_required"] as? Bool == true)
-    let expected = ProviderV2ResponseBuilder.envelope(
+    let expected = ProviderResponseBuilder.envelope(
         requestID: try #require(request["request_id"] as? String),
         operation: operation,
         runtimeResult: runtime
@@ -342,7 +342,7 @@ func requestRejectionDoesNotResetOrStopTheServerLoop() async throws {
         dispatched.append($0)
         return ["ok": true, "apps": []]
     }
-    try await ProviderV2Server.runLoop(
+    try await ProviderServer.runLoop(
         readLine: { lines.isEmpty ? nil : lines.removeFirst() },
         writeLine: { data in
             let object = try JSONSerialization.jsonObject(with: data)

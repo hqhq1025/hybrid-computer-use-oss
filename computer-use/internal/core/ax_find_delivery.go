@@ -56,7 +56,7 @@ func findDisplayNode(source *AXNode) *AXNode {
 	return &node
 }
 
-func FindMatchUnit(snapshot *AXSnapshotV1, record ElementRecord, ordinal int) string {
+func FindMatchUnit(snapshot *AXSnapshot, record ElementRecord, ordinal int) string {
 	node := snapshot.ByIndex[record.Index]
 	var out strings.Builder
 	if node != nil {
@@ -386,7 +386,7 @@ func boundFindContextNodes(nodes []*AXNode) []*AXNode {
 // check establish exposure. Ref assignment alone is not delivery evidence.
 func (s *Service) rememberDeliveredFindExposure(
 	snapshot *AppSnapshot, delivered []ElementRecord,
-	contextSnapshot *AXSnapshotV1, deliveredContext []string,
+	contextSnapshot *AXSnapshot, deliveredContext []string,
 ) {
 	remember := func(node *AXNode) {
 		if node == nil || !isShortAXRef(node.Ref) {

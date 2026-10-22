@@ -186,7 +186,7 @@ func (s *Service) writeErrorContext(app, tool, message string) (string, bool) {
 	}
 	noRefs := false
 	response, err := s.callProviderObserve(ProviderObserveRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		App:             app,
 		Observation: ProviderObservationOptions{
 			Boxes: &noRefs,

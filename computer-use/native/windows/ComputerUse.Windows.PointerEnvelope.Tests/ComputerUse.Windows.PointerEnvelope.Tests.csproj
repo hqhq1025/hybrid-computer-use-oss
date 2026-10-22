@@ -10,9 +10,9 @@
     <Compile Include="../ComputerUse.Windows.Runtime/ProviderRequestValidation.cs" Link="ProviderRequestValidation.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/ProviderActionValidation.cs" Link="ProviderActionValidation.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/ProviderDesktopValidation.cs" Link="ProviderDesktopValidation.cs" />
-    <Compile Include="../ComputerUse.Windows.ProviderV2.Tests/NativeManifestTests.cs" Link="NativeManifestTests.cs" />
+    <Compile Include="../ComputerUse.Windows.Provider.Tests/NativeManifestTests.cs" Link="NativeManifestTests.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/ProviderProtocolSupport.cs" Link="ProviderProtocolSupport.cs" />
-    <Compile Include="../ComputerUse.Windows.ProviderV2.Tests/ProviderStubs.cs" Link="ProviderStubs.cs" />
+    <Compile Include="../ComputerUse.Windows.Provider.Tests/ProviderStubs.cs" Link="ProviderStubs.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/PointerPreparationState.cs" Link="PointerPreparationState.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/PointerPreparationFailureAttribution.cs" Link="PointerPreparationFailureAttribution.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/ExactFocusSettlement.cs" Link="ExactFocusSettlement.cs" />

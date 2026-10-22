@@ -1,7 +1,7 @@
 package core
 
 // AXServiceRequest is common-service orchestration state. It never crosses the
-// Provider V2 boundary; operation-specific request builders translate it into
+// provider boundary; operation-specific request builders translate it into
 // typed provider requests.
 type AXServiceRequest struct {
 	Operation          axServiceOperation   `json:"-"`

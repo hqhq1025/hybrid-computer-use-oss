@@ -26,7 +26,7 @@ func TestProviderRequestRejectionWireIsExclusiveAndComplete(t *testing.T) {
 		ProviderWireOrderedInput, ProviderWireDesktopBatch, ProviderWireWindowList, ProviderWireWindowAction,
 	} {
 		response := ProviderWireResponse{
-			Protocol: ProviderProtocolName, SchemaVersion: ProviderProtocolV2,
+			Protocol: ProviderProtocolName, SchemaVersion: ProviderProtocolVersion,
 			RequestID: "bound-request", Operation: operation,
 			RequestRejection: &testRequestRejection().Rejection,
 		}
@@ -38,7 +38,7 @@ func TestProviderRequestRejectionWireIsExclusiveAndComplete(t *testing.T) {
 			t.Fatalf("%s rejection rejected: %v", operation, err)
 		}
 	}
-	base := `{"protocol":"computer-use-provider-v2","schema_version":2,"request_id":"r","operation":"ordered_input","request_rejection":{"code":"invalid_arguments","phase":"request_validation","dispatch_attempted":false,"message":"bad key"}}`
+	base := `{"protocol":"computer-use-provider","schema_version":2,"request_id":"r","operation":"ordered_input","request_rejection":{"code":"invalid_arguments","phase":"request_validation","dispatch_attempted":false,"message":"bad key"}}`
 	if _, err := DecodeProviderWireResponse([]byte(base)); err != nil {
 		t.Fatalf("valid rejection fixture rejected: %v", err)
 	}

@@ -370,11 +370,11 @@ func estimateFindResultSet(
 			len(match.ControlType) + len(match.ProviderObjectPath)
 	}
 	if encoded, err := json.Marshal(struct {
-		Snapshot      *AXSnapshotV1         `json:"snapshot"`
+		Snapshot      *AXSnapshot           `json:"snapshot"`
 		Matches       []ElementRecord       `json:"matches"`
 		HiddenRecords map[int]ElementRecord `json:"hidden_records"`
 	}{
-		Snapshot: func() *AXSnapshotV1 {
+		Snapshot: func() *AXSnapshot {
 			if snapshot == nil {
 				return nil
 			}

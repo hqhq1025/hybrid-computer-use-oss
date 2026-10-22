@@ -26,7 +26,7 @@ func findDeliverySnapshot(t testing.TB, value string) (*Service, *AppSnapshot) {
 		},
 		Scope: contract.AXScopeWindow,
 	}
-	if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
+	if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
 		t.Fatal(err)
 	}
 	return svc, snapshot
@@ -43,7 +43,7 @@ func findDeliveryMany(t testing.TB, count int) (*Service, *AppSnapshot, []Elemen
 			Description: strings.Repeat("d", 240),
 		})
 	}
-	if err := svc.BuildAndRenderAXSnapshotV1(snapshot, contract.TreeViewWorking); err != nil {
+	if err := svc.BuildAndRenderAXSnapshot(snapshot, contract.TreeViewWorking); err != nil {
 		t.Fatal(err)
 	}
 	return svc, snapshot, snapshot.Elements[2:]

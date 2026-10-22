@@ -45,7 +45,7 @@ earlier traces or cross-task memory to an evaluated agent.
   evaluation attempt. Do not mix instruction revisions within a run or claim
   that a text migration proves performance.
 - Change the Go server and the Python provider together when you touch their
-  private protocol, and update `computer-use/testdata/provider-v2/`.
+  private protocol, and update `computer-use/testdata/provider-wire/`.
 - Real OSWorld runs spend model quota. Ask before starting one, and run a
   setup canary first.
 - `VERSION` holds the release version; do not hard-code versions elsewhere.

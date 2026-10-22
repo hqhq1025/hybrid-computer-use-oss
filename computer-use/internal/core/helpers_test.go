@@ -323,7 +323,7 @@ func editorFormSnapshot() *AppSnapshot {
 
 func typedTreeTextForTest(t *testing.T, snapshot *AppSnapshot) string {
 	t.Helper()
-	typed, err := buildAXSnapshotV1(snapshot)
+	typed, err := buildAXSnapshot(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}

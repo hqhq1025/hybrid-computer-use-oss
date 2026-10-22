@@ -129,7 +129,7 @@ func (windowsRuntimeBackend) WindowForPID(pid int) (known, alive bool) {
 	}
 	result, err := (windowsRuntimeBackend{}).ListWindows(
 		core.ProviderWindowListRequest{
-			ProtocolVersion: core.ProviderProtocolV2,
+			ProtocolVersion: core.ProviderProtocolVersion,
 			App:             strconv.Itoa(pid),
 		},
 	)
