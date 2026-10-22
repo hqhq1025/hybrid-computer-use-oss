@@ -395,11 +395,12 @@ JSON evidence line; images are `ImageContent` blocks, and `image(block)` shows
 one to the model from the same `exec`, without another model turn.
 `instructions/hybrid-code.md` is the guide for this mode.
 
-- Codex renders each MCP input schema as a TypeScript declaration. The
-  renderer does not resolve `$ref` in every version and shows a composition
-  next to properties as untyped branches, so the published schemas keep both
-  out of the fields code writes: the AX schema writes the `query` object out
-  at each use, and the core enforces the scroll delta rule.
+- Codex renders each MCP input schema as a TypeScript declaration. Some
+  versions do not resolve `$ref`, so the AX `query` field appears as
+  `unknown`, and the GUI scroll branch, an object with an `anyOf`, appears
+  only as `{ scroll_x: unknown } | { scroll_y: unknown }`. The tool
+  descriptions and `instructions/hybrid-code.md` show both shapes as
+  examples.
 - Codex can defer MCP tools in code mode. A deferred tool is still callable as
   `tools.mcp__computer_use__AX` and listed in `ALL_TOOLS`, but its declaration
   is left out of the `exec` description. `omit_tools_from = ["deferred"]` in

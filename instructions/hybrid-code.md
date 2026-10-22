@@ -93,6 +93,17 @@ print(d.screenshot().images[0])                # open this path in the same code
   `code`, `hint`, `input_emitted` and `completed`.
 - Print the fields you need, not whole records or trees.
 
+## Argument Shapes
+
+Code declarations of the tools can show some fields as `unknown`. Their
+shapes are:
+
+```js
+{mode: "find", window_ref: "w2", query: {role: "button", name_contains: "Save"}}
+// query fields: role, name_equals, name_contains, text_equals, text_contains, state
+{actions: [{type: "scroll", x: 640, y: 412, scroll_y: -3}]}   // GUI; scroll_x or scroll_y, non-zero
+```
+
 ## Images And Coordinates
 
 - A record's `screen` is the current GUI frame: a GUI screenshot, or an AX
