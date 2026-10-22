@@ -86,9 +86,6 @@ extension ComputerUseRuntimeBridge {
             finalSnapshot: {
                 Thread.current.threadDictionary["computer-use.liveness.phase"] =
                     "ordered_final"
-                let includeScreenshot = bool(
-                    finalObservation["include_screenshot"]
-                )
                 let snapshot = try self.refreshIdentityBoundSnapshot(
                     for: app,
                     appIdentity: appIdentity,
@@ -109,14 +106,11 @@ extension ComputerUseRuntimeBridge {
                                 ) ?? AccessibilityTreeLimits.defaultMaxDepth
                             ),
                             recoveryPolicy: .readOnly,
-                            includeScreenshot: includeScreenshot,
                             expectedWindowHandle: windowHandle
                         )
                     }
                 )
-                return try snapshot.providerDictionary(
-                    includeScreenshot: includeScreenshot
-                )
+                return try snapshot.providerDictionary()
             }
         )
         return executeOrderedInputTransaction(

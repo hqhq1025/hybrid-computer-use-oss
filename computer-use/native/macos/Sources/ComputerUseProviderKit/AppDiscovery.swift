@@ -44,11 +44,6 @@ private struct SpotlightAppRecord {
     let uses: Int?
 }
 
-private struct ResolvedAppInfo {
-    let bundleIdentifier: String
-    let name: String
-}
-
 enum AppDiscovery {
     static let internalProviderBundleIdentifiers: Set<String> = [
         "org.computer-use.provider.v2",

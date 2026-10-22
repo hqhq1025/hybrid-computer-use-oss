@@ -421,7 +421,7 @@ extension ComputerUseService {
 
     private func hitTestElement(at point: CGPoint, in snapshot: AppSnapshot) throws -> ElementRecord? {
         let appElement = AXUIElementCreateApplication(snapshot.app.pid)
-        let globalPoint = try screenshotToGlobalPoint(snapshot: snapshot, x: Double(point.x), y: Double(point.y))
+        let globalPoint = try windowPointToGlobalPoint(snapshot: snapshot, point: point)
         var hitElement: AXUIElement?
         let result = AXUIElementCopyElementAtPosition(appElement, Float(globalPoint.x), Float(globalPoint.y), &hitElement)
         guard result == .success, let hitElement else {

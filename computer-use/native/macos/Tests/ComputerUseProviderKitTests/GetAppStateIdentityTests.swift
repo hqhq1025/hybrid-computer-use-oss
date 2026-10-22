@@ -35,7 +35,6 @@ private func stateReadSnapshot(
         targetWindowID: nil,
         targetWindowHandle: window,
         targetWindowLayer: nil,
-        screenshotPNGData: nil,
         treeLines: [],
         focusedSummary: nil,
         focusedElement: nil,
