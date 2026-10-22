@@ -181,3 +181,73 @@ func TestActionFallbackPrefersChangedContentWhenFocusIsNavigation(t *testing.T) 
 			result.StructuredContent)
 	}
 }
+
+func popupMenuSnapshot(t *testing.T, menuOpen bool) *AppSnapshot {
+	t.Helper()
+	snapshot := &AppSnapshot{
+		App:          AppDescriptor{Name: "Paint", PID: 42},
+		WindowTitle:  "Paint",
+		WindowHandle: "0x42",
+		SnapshotID:   "paint-menu",
+		Elements: []ElementRecord{
+			{Index: 0, RuntimeID: []int{0}, ControlType: "frame", Name: "Paint"},
+			{Index: 1, RuntimeID: []int{0, 0}, ControlType: "menu bar"},
+			{Index: 2, RuntimeID: []int{0, 0, 0}, ControlType: "menu item", Name: "Settings", States: "[has-click-action]"},
+			{Index: 3, RuntimeID: []int{0, 1}, ControlType: "panel", Name: "Canvas", States: "[focused]"},
+			{Index: 4, RuntimeID: []int{0, 1, 0}, ControlType: "scroll bar", Name: "Horizontal"},
+		},
+		Scope: contract.AXScopeWindow,
+	}
+	if menuOpen {
+		snapshot.Elements = append(snapshot.Elements,
+			ElementRecord{Index: 5, RuntimeID: []int{0, 0, 0, 0}, ControlType: "menu item", Name: "Configure Paint...", States: "[has-click-action]"},
+			ElementRecord{Index: 6, RuntimeID: []int{0, 0, 0, 1}, ControlType: "check menu item", Name: "Show Rulers", States: "[has-click-action]"},
+		)
+	}
+	typedTreeTextForTest(t, snapshot)
+	for _, node := range snapshot.AXSnapshot.ByIndex {
+		if node != nil && node.Name == "Settings" {
+			if node.Ref == "" {
+				// The fixture only needs the acted element to be addressable.
+				node.Ref = "r90"
+			}
+			snapshot.actedRef = node.Ref
+		}
+	}
+	if snapshot.actedRef == "" {
+		t.Fatal("fixture has no Settings menu item")
+	}
+	return snapshot
+}
+
+// A click that opens a menu leaves focus on the canvas or the opener; the
+// compact result must list the opened items instead, so the caller does not
+// need another find to see them.
+func TestCompactActionObservationShowsOpenedPopupItems(t *testing.T) {
+	snapshot := popupMenuSnapshot(t, true)
+	lines := compactActionObservationLines(snapshot, nil)
+	text := strings.Join(lines, "\n")
+	if len(lines) == 0 || lines[0] != "popup:" ||
+		!strings.Contains(text, `menuitem "Configure Paint..."`) ||
+		!strings.Contains(text, `"Show Rulers"`) {
+		t.Fatalf("opened menu items missing from compact result:\n%s", text)
+	}
+	if strings.Contains(text, "Canvas") {
+		t.Fatalf("compact result kept the focused canvas instead of the popup:\n%s", text)
+	}
+	service := NewService()
+	result, _, returned, compact, _ :=
+		service.renderAXDiffOrCompactObservation(snapshot, nil)
+	if !returned || !compact ||
+		result.StructuredContent["final_observation_kind"] != "popup" {
+		t.Fatalf("popup observation kind is inconsistent: %#v", result.StructuredContent)
+	}
+}
+
+func TestCompactActionObservationKeepsFocusWhenNoPopupOpened(t *testing.T) {
+	snapshot := popupMenuSnapshot(t, false)
+	lines := compactActionObservationLines(snapshot, nil)
+	if len(lines) == 0 || lines[0] != "focus:" {
+		t.Fatalf("an action that opened nothing must keep the focus view, got %v", lines)
+	}
+}
