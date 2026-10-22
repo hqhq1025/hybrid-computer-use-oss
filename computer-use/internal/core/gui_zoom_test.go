@@ -174,17 +174,33 @@ func TestZoomStaleOverTheRegionDeliversAFreshFrame(t *testing.T) {
 	}
 }
 
-func TestZoomIsUnsupportedOnMacOSAndWindows(t *testing.T) {
-	for _, platform := range []string{"darwin", "windows"} {
+func TestZoomRunsOnEveryPlatform(t *testing.T) {
+	for _, platform := range []string{"linux", "darwin", "windows"} {
 		backend := &platformRecordingBackend{recordingPlatformBackend: zoomBackend(t), platform: platform}
+		s := NewServiceWithBackend(backend)
+		s.guiSnapshot = &AppSnapshot{FrameID: "f1", Width: 1365, Height: 768}
+		result := s.CallForModel(contract.PublicToolGUI, map[string]any{
+			"actions": []any{map[string]any{"type": "zoom", "region": []any{100.0, 0.0, 108.0, 768.0}}},
+		}, false)
+		if result.IsError || len(backend.desktopRequests) != 1 || backend.desktopRequests[0].FrameID != "f1" {
+			t.Fatalf("%s: zoom must reach the provider with the frame: %s", platform, ResultText(result))
+		}
+	}
+}
+
+func TestZoomProviderRegionRejectionIsInvalidArgument(t *testing.T) {
+	for _, code := range []string{"invalid_gui_action", "invalid_zoom_region"} {
+		backend := &recordingPlatformBackend{desktopResponse: &ProviderDesktopResult{
+			OK: false, Error: "zoom region sides must be at least 8 frame pixels",
+			Failure: &ProviderFailure{Code: code, Phase: "precondition"},
+		}}
 		s := NewServiceWithBackend(backend)
 		s.guiSnapshot = &AppSnapshot{FrameID: "f1", Width: 1365, Height: 768}
 		result := s.CallForModel(contract.PublicToolGUI, map[string]any{
 			"actions": []any{map[string]any{"type": "zoom", "region": []any{0.0, 0.0, 100.0, 100.0}}},
 		}, false)
-		if !result.IsError || len(backend.desktopRequests) != 0 ||
-			!strings.Contains(ResultText(result), "Linux provider only") {
-			t.Fatalf("%s: zoom must be rejected before the provider: %s", platform, ResultText(result))
+		if !strings.Contains(ResultText(result), `"code":"invalid_argument","path":"actions[0].region"`) {
+			t.Fatalf("%s: %s", code, ResultText(result))
 		}
 	}
 }
