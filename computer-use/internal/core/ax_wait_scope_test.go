@@ -132,8 +132,8 @@ func queryWait(s *Service, context *AXBatchContext, query map[string]any, gone b
 }
 
 // Shape 1: the batch acts in the document window and the awaited dialog is
-// another top-level window of the same application (panel tasks 1d17d234,
-// 04d9aeaf, a434992a).
+// another top-level window of the same application, as LibreOffice opens
+// its dialogs.
 func TestQueryWaitSeesDialogInAnotherWindowOfTheApp(t *testing.T) {
 	s, backend, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
 	for _, query := range []map[string]any{

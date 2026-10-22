@@ -97,7 +97,7 @@ func TestContentScopeUsesFocusToDisambiguateTopLevelRoots(t *testing.T) {
 // A window without exactly one content area is read whole, and the read
 // says why it is wider than asked: a dialog is all content, a settings
 // window has no document, and two documents without focus in either have
-// no single one. Recorded runs failed 12 content finds on dialogs.
+// no single one. Without this, content finds on dialogs fail.
 func TestContentScopeReadsTheWindowWithoutOneContentArea(t *testing.T) {
 	for name, test := range map[string]struct {
 		snapshot *AppSnapshot

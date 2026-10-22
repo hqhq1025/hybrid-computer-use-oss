@@ -1,7 +1,5 @@
 # Instructions
 
-Last verified against commit `a4006c5`.
-
 The agent receives common base policy and, by default, one selected operating
 profile. These files are plain text injected at startup, not skills that a
 client discovers or activates. Every supported agent receives the same selected
