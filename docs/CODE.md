@@ -24,18 +24,21 @@ The picture shows the entry points; the core sits below all of them.
 
 ## Core boundary
 
+Go paths are relative to `computer-use/`.
+
 | Role | Files |
 | --- | --- |
-| Core: contract | `tool_contract.go` (schemas, descriptions), `ax_public_request.go` (decoder, public codes), `schema_validator.go`, `tool_argument_rules.go`, `contract_describe.go` (contract version, error table, `describeContract`) |
-| Core: state | `service.go` (`desktopState`, `sessionState`), `ax_ref_registry.go`, `ax_find_cursor.go`, `ax_snapshot_store.go`, `ax_failure_recovery.go` |
-| Core: operations | `ax_*.go`, `gui_service.go`, `app_snapshot.go` |
-| Core: rendering | `ax_renderer.go`, `ax_evidence.go`, `ax_response_budget.go`, `tool_result.go` (`finalizeForModel`), `records.go` (records) |
-| Provider boundary | `platform_contract.go`, `runtime_backend*.go`, `provider_*.go`, `linux_*.go`, `darwin_*.go`, `windows_*.go`, `native/` |
-| Adapters | `mcp_transport.go`, `mcp_attach.go` (MCP); `daemon.go`, `daemon_client.go`, `daemon_spawn_*.go`, `peer_cred_*.go` (socket); `cli.go`, `main.go` (command line); `sdk/python/` (SDK, PTC) |
+| Contract | `internal/contract/`: `tool_contract.go` (schemas, descriptions), `published_values.go` (public enums, codes, limits), `schema_validator.go`, `tool_argument_rules.go`, `contract_describe.go` (contract version, error table, `DescribeContract`) |
+| Core: decoding | `internal/core/ax_public_request.go` (decoder, public codes), `internal/core/argument_errors.go` |
+| Core: state | `internal/core/service.go` (`DesktopState`, `sessionState`), `ax_ref_registry.go`, `ax_find_cursor.go`, `ax_snapshot_store.go`, `ax_failure_recovery.go`, `request_replay.go` |
+| Core: operations | `internal/core/ax_*.go`, `gui_service.go`, `app_snapshot.go` |
+| Core: rendering | `internal/core/ax_renderer.go`, `ax_evidence.go`, `ax_response_budget.go`, `tool_result.go` (`finalizeForModel`), `records.go` (records) |
+| Provider port | `internal/core/platform_contract.go`, `platform_default.go`, `provider_*.go` |
+| Provider backends | `internal/provider/`: `runtime_backend_<os>.go`, `linux_*.go`, `darwin_*.go`, `windows_*.go`; `native/` |
+| Adapters | `internal/transport/`: `mcp_transport.go`, `mcp_attach.go` (MCP); `daemon.go`, `daemon_client.go`, `daemon_spawn_*.go`, `peer_cred_*.go` (socket); `cli.go`, `cli_main.go` (command line); `cmd/computer-use/main.go`; `sdk/python/` (SDK, PTC) |
 
-All Go code is still in `package main`; the table is the boundary that adapter
-code keeps. Moving the core into its own package is a mechanical follow-up
-and was not done to avoid conflicts with the branches that edit it.
+Each role sits in its own Go package; [Architecture](ARCHITECTURE.md#go-packages)
+lists the packages, their import direction and which files change together.
 
 ## Single source
 
@@ -43,11 +46,11 @@ The core is the only implementation of the contract. There are no generated
 schema, type or error files:
 
 - `computer-use schema` and the daemon's `schema` method return the exact
-  published tool schemas and the error table (`describeContract`).
+  published tool schemas and the error table (`DescribeContract`).
 - The SDK creates its exception classes from code names; a test checks that
   every code in `schema` has one.
 - The PTC adapter builds `hcu_ax` and `hcu_gui` from `schema` at runtime.
-- The CLI shorthand table (`cliShorthands` in `cli.go`) is the only
+- The CLI shorthand table (`cliShorthands` in `internal/transport/cli.go`) is the only
   hand-maintained mapping; `TestCLIShorthandsProduceSchemaValidCalls` checks
   every entry against the decoder and the published schema.
 

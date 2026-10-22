@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Split the `computer-use` Go module from one `package main` into layered
+  packages: `internal/contract`, `internal/core`, `internal/provider`,
+  `internal/transport` and `cmd/computer-use`; the embedded Linux provider
+  stays at the module root. Build scripts build `./cmd/computer-use` and keep
+  `-X main.version`. MCP `initialize`, `tools/list`, `help` and `schema`
+  output is byte-identical; `scripts/maint/split_packages.sh` reproduces
+  the split.
 - Route edits of composite Linux drop-downs to their verified editable
   partner, while keeping clicks on the list toggle. Reject missing,
   ambiguous, or replaced editing targets before input.
