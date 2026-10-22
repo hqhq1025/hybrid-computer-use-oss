@@ -86,7 +86,12 @@ class CodeDesktop(AsyncDesktop):
             self._output({"type": "record", "record": value}, value)
 
     async def emit_image(self, record):
-        """Publish a call's existing screenshot without repeating its actions.
+        """Publish a call's existing image without repeating its actions.
+
+        A GUI screenshot or AX full/screenshot record carries the GUI frame
+        in screen; its pixels are GUI coordinates (image_pixels). A GUI zoom
+        record carries its image in images[0] and the mapping back to frame
+        pixels in evidence.zoom (zoom_pixels); GUI x/y never take zoom pixels.
 
         On image failure, emit an output_error event with the original record
         before raising OutputError. Screen dimensions are provider metadata;
@@ -94,7 +99,11 @@ class CodeDesktop(AsyncDesktop):
         """
         try:
             screen = record.get("screen") or {}
+            zoom = (record.get("evidence") or {}).get("zoom")
             path = screen.get("image")
+            if zoom and not path:
+                path = (record.get("images") or [None])[0]
+                screen = {"width": zoom.get("width"), "height": zoom.get("height"), "image": path}
             if not isinstance(path, str) or not path:
                 raise ValueError("record has no screen.image path")
             if self.image_reader is None:
@@ -111,9 +120,11 @@ class CodeDesktop(AsyncDesktop):
                      or (media_type == "image/jpeg" and data.startswith(b"\xff\xd8\xff")))
             if not valid:
                 raise ValueError("image_reader must return matching PNG/JPEG media_type and bytes")
-            self._output({"type": "image", "media_type": media_type,
-                          "data": data, "screen": screen,
-                          "coordinate_space": "image_pixels"}, record)
+            event = {"type": "image", "media_type": media_type, "data": data, "screen": screen,
+                     "coordinate_space": "zoom_pixels" if zoom else "image_pixels"}
+            if zoom:
+                event["zoom"] = zoom
+            self._output(event, record)
         except Exception as error:
             if isinstance(error, OutputError):
                 raise

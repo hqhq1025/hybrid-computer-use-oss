@@ -78,6 +78,24 @@ class CodeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.events[0]["coordinate_space"], "image_pixels")
             self.assertEqual(len(self.calls), 1)
 
+    async def test_zoom_image_is_labelled_with_its_mapping(self):
+        mapping = {"frame": "89abcdef", "region": [600, 60, 680, 100], "width": 1, "height": 1,
+                   "scale_x": 0.0125, "scale_y": 0.025}
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "zoom.png")
+            with open(path, "wb") as stream:
+                stream.write(PNG)
+            self.record.update(images=[path], evidence={"zoom": mapping})
+            d = self.desktop(image_reader=local_image_reader(root))
+            result = await d.zoom([600, 60, 680, 100])
+            await d.emit_image(result)
+            event = self.events[0]
+            self.assertEqual((event["coordinate_space"], event["zoom"]), ("zoom_pixels", mapping))
+            self.assertEqual((event["screen"]["width"], event["screen"]["height"]), (1, 1))
+            self.assertEqual(self.calls[0]["args"], {"actions": [{"type": "zoom", "region": [600, 60, 680, 100]}]})
+            self.assertNotIn("request_id", self.calls[0])
+            self.assertEqual(hcu.zoom_point(result, 40, 20), (600 + 40 / 0.0125, 60 + 20 / 0.025))
+
     async def test_mismatched_image_type_reports_failure(self):
         d = self.desktop(image_reader=lambda path: ("image/jpeg", PNG))
         with self.assertRaises(OutputError):

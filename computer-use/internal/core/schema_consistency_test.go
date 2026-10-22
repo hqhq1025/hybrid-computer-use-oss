@@ -29,11 +29,10 @@ import (
 // declared cross-field rules below; each must carry its own error code.
 
 var crossFieldRuleCodes = map[string]bool{
-	contract.ArgumentRuleCloseNotLast:       true,
-	contract.ArgumentRuleTextBudget:         true,
-	contract.ArgumentRulePostconditionIndex: true,
-	contract.ArgumentRuleRefOwnsIdentity:    true,
-	contract.ArgumentRuleWaitBudget:         true,
+	contract.ArgumentRuleCloseNotLast:    true,
+	contract.ArgumentRuleTextBudget:      true,
+	contract.ArgumentRuleRefOwnsIdentity: true,
+	contract.ArgumentRuleWaitBudget:      true,
 	// The flat AX schema has no oneOf or if/then, so rules that depend on
 	// the value of mode or of an action type are declared rules of
 	// the AX decoder: which fields a mode or type accepts or requires,
@@ -48,7 +47,6 @@ var crossFieldRuleCodes = map[string]bool{
 	axRuleRefKind:         true,
 	axRuleObserveNone:     true,
 	axRuleFindFilterPair:  true,
-	axRuleValueMatch:      true,
 }
 
 // axConsistencySeeds are valid calls for each AX mode and action type. The

@@ -44,17 +44,6 @@ func providerActionRequestFromOperation(
 	return request
 }
 
-func providerWindowListRequestFromOperation(
-	operation AXServiceRequest,
-) ProviderWindowListRequest {
-	return ProviderWindowListRequest{
-		ProtocolVersion: ProviderProtocolVersion,
-		App:             operation.App,
-		AppIdentity:     operation.AppIdentity,
-		WindowHandle:    operation.TargetWindowHandle,
-	}
-}
-
 func providerWindowActionRequestFromOperation(
 	operation AXServiceRequest,
 ) ProviderWindowActionRequest {

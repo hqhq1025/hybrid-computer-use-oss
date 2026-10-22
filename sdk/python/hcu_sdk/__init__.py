@@ -41,6 +41,7 @@ import uuid
 __all__ = [
     "AsyncDesktop", "CallCancelled", "Desktop", "HcuError", "Record", "SocketTransport",
     "TransportClosed", "TransportEffectUnknown", "connect", "error_class", "ptc_transport",
+    "zoom_point",
 ]
 
 PROTOCOL = 1
@@ -458,6 +459,15 @@ class _Builders:
         action = {"type": "set_value", "ref": ref, "value": value}
         return self.call("AX", _act(action, **options), request_id=request_id)
 
+    def select(self, ref, text=None, to_ref=None, request_id=None, **options):
+        """Select ref, the substring text of ref, or the range ref..to_ref."""
+        action = {"type": "select", "ref": ref}
+        if text is not None:
+            action["text"] = text
+        if to_ref is not None:
+            action["to_ref"] = to_ref
+        return self.call("AX", _act(action, **options), request_id=request_id)
+
     def scroll(self, ref, direction, pages=None, request_id=None, **options):
         action = {"type": "scroll", "ref": ref, "direction": direction}
         if pages is not None:
@@ -473,7 +483,17 @@ class _Builders:
         return self.call("AX", _act(action, **options), request_id=request_id)
 
     def screenshot(self):
+        """The current GUI frame: screen{width,height,image}. GUI x/y are
+        pixels of this image. An AX observe "full" or "screenshot" record
+        carries the same frame in its screen."""
         return self.call("GUI", {"actions": [{"type": "screenshot"}]})
+
+    def zoom(self, region):
+        """Look only: an enlarged [x0,y0,x1,y1] region of the current GUI
+        frame, in frame pixels. images[0] is the zoom image, evidence.zoom
+        its mapping; zoom_point(record, u, v) converts a zoom pixel to the
+        frame pixel that GUI x/y take."""
+        return self.call("GUI", {"actions": [{"type": "zoom", "region": list(region)}]})
 
     def gui(self, actions, settle_ms=None, request_id=None):
         args = {"actions": list(actions)}
@@ -488,15 +508,32 @@ def _window_action(kind, window):
     return {"type": kind, "title": window}
 
 
+def zoom_point(record, u, v):
+    """The GUI frame pixel (x, y) shown at pixel (u, v) of a zoom image.
+
+    Applies the mapping the core returned with that zoom:
+    x = x0 + u/scale_x, y = y0 + v/scale_y.
+    """
+    zoom = (record.get("evidence") or {}).get("zoom")
+    if not zoom:
+        raise ValueError("record is not a GUI zoom result")
+    return zoom["region"][0] + u / zoom["scale_x"], zoom["region"][1] + v / zoom["scale_y"]
+
+
+# GUI actions that only look (the observation branch of the GUI schema):
+# they send no input, so they take no request_id and are safe to retry.
+_GUI_LOOK = ("screenshot", "zoom")
+
+
 def _wants_request_id(tool, args):
     if tool == "GUI":
-        return any(action.get("type") != "screenshot" for action in args.get("actions", []))
+        return any(action.get("type") not in _GUI_LOOK for action in args.get("actions", []))
     return args.get("mode") == "act"
 
 
 def _may_emit_input(tool, args):
     if tool == "GUI":
-        return any(action.get("type") not in ("screenshot", "wait")
+        return any(action.get("type") not in _GUI_LOOK + ("wait",)
                    for action in args.get("actions", []))
     return args.get("mode") == "act" and any(
         action.get("type") != "wait" for action in args.get("actions", []))
