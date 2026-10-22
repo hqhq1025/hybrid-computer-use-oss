@@ -2,6 +2,7 @@
 
 import time
 from .foundation import (
+    AX_WINDOW_ROLES,
     Atspi,
     BUDGET_PRESSURE_RATIO,
     DEFAULT_TEXT_LIMIT,
@@ -310,6 +311,24 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 child_count_hint = unknown_child_count
             probe_frame = probe["frame"]
             probe_role = probe["role"]
+            # A window nested in this window that is neither SHOWING nor
+            # VISIBLE is closed, and so is everything in it. Krita keeps 30+
+            # closed Qt dockers as such frames; their subtrees held half of
+            # the window's nodes and records (Qt reports SHOWING on their
+            # combo-popup items), so the budgets ran out before the menu
+            # bar and neither observe nor find saw "Settings". Skip the
+            # whole subtree and count it as filtered.
+            if (
+                probe_role in AX_WINDOW_ROLES
+                and not probe_errors
+                and not facts.has_state(Atspi.StateType.SHOWING)
+                and not facts.has_state(Atspi.StateType.VISIBLE)
+            ):
+                dropped["count"] += 1
+                dropped["filtered"] += 1
+                if focus_probe is not None:
+                    focus_probe.skipped()
+                return
             # Keep every visible named node, even with a non-interactive role.
             # The toggle button of LibreOffice's line-spacing combo has no
             # name and can be identified only through its parent, the
