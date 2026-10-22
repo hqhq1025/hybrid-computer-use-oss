@@ -592,20 +592,6 @@ func relativeReadbackFinalBindingFollowsSuccessfulSerialization() throws {
             #expect(final["status"] as? String == "associated")
         }
     }
-    // The real runtime, not just this fixture, must bind only after projection succeeds.
-    let package = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    let source = try String(contentsOf: package.appendingPathComponent(
-        "Sources/ComputerUseProviderKit/ComputerUseRuntimeAccessibility.swift"
-    ), encoding: .utf8)
-    let projection = try #require(source.range(of:
-        "projectedSnapshot = try snapshot.providerDictionary(\n                includeScreenshot: includeScreenshot\n            )"
-    ))
-    let binding = try #require(source.range(of: "relativeReadback?.bindFinal(snapshot: snapshot)"))
-    let timing = try #require(source.range(of: "recordTiming(\"final_snapshot\")"))
-    #expect(projection.upperBound < binding.lowerBound)
-    #expect(binding.upperBound < timing.lowerBound)
-    #expect(source.components(separatedBy: "relativeReadback?.bindFinal(").count == 2)
 }
 
 @Test

@@ -1,0 +1,4 @@
+# Declarations whose target package differs from their file's package, used
+# by split_layering.py while planning. split_packages.py prepare-moves
+# performs these moves (FIXED_MOVES), so after that step the file map alone
+# decides every declaration and this list matches nothing.

@@ -9,6 +9,7 @@ token log that the harness reads back after the run.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -314,8 +315,11 @@ class GenerationBudget:
     def __init__(self, limit: int) -> None:
         self.limit = limit
         self._lock = threading.Lock()
+        # Signalled when a task has no response left between delivery and finish().
+        self._settled = threading.Condition(self._lock)
         self._completed: dict[str, int] = {}
         self._inflight: dict[str, int] = {}
+        self._delivering: dict[str, int] = {}
         self._failures: dict[str, int] = {}
         self._exhausted: set[str] = set()
 
@@ -339,10 +343,17 @@ class GenerationBudget:
 
     def admit(self, row: dict, generation: bool) -> str | None:
         row["generation_request"] = generation
-        if not generation or not is_budgeted_task(row["task"]):
-            return None
         task = row["task"]
         with self._lock:
+            # The agent may send its next request as soon as it has read the
+            # previous response, before that response's outcome and log row
+            # are committed. Decide only once every relayed response of the
+            # task is finished, so the budget and the log follow the order
+            # in which the agent saw its responses.
+            while task is not None and self._delivering.get(task):
+                self._settled.wait()
+            if not generation or not is_budgeted_task(task):
+                return None
             completed = self._completed.get(task, 0)
             inflight = self._inflight.get(task, 0)
             row["request_ordinal"] = completed + inflight + 1
@@ -359,6 +370,27 @@ class GenerationBudget:
                 return None
             row[reason] = True
             return reason
+
+    @contextmanager
+    def delivering(self, row: dict):
+        """Hold the task's next admission until this response is relayed and finished.
+
+        Wrap the relay and ``finish()``; the agent can read the response and
+        send its next request before this thread reaches ``finish()``.
+        """
+        task = row["task"]
+        if task is not None:
+            with self._lock:
+                self._delivering[task] = self._delivering.get(task, 0) + 1
+        try:
+            yield
+        finally:
+            if task is not None:
+                with self._lock:
+                    self._delivering[task] -= 1
+                    if not self._delivering[task]:
+                        del self._delivering[task]
+                        self._settled.notify_all()
 
     def finish(self, row: dict, token_log: TokenLog, succeeded: bool = False) -> None:
         # Serialize completion and evidence so restart replay sees the same
@@ -582,20 +614,23 @@ def make_passthrough_handler(
             except Exception as exc:
                 row["accounting_error"] = f"{type(exc).__name__}: {exc}"
                 gateway.stats["errors"] += 1
-            delivered = relay_response(
-                self, response.status, response.headers, response_body
-            )
-            if not delivered:
-                row["client_disconnected"] = True
-            succeeded = False
-            if delivered and 200 <= response.status < 300 and row["generation_request"]:
-                try:
-                    succeeded = gateway.generation_succeeded(response_body, response.headers)
-                except (ValueError, TypeError, KeyError, AttributeError):
-                    pass
-                if not succeeded:
-                    row["generation_error"] = "missing successful generation terminal"
-            gateway.budget.finish(row, gateway.token_log, succeeded)
+            with gateway.budget.delivering(row):
+                delivered = relay_response(
+                    self, response.status, response.headers, response_body
+                )
+                if not delivered:
+                    row["client_disconnected"] = True
+                succeeded = False
+                if delivered and 200 <= response.status < 300 and row["generation_request"]:
+                    try:
+                        succeeded = gateway.generation_succeeded(
+                            response_body, response.headers,
+                        )
+                    except (ValueError, TypeError, KeyError, AttributeError):
+                        pass
+                    if not succeeded:
+                        row["generation_error"] = "missing successful generation terminal"
+                gateway.budget.finish(row, gateway.token_log, succeeded)
 
     return Handler
 

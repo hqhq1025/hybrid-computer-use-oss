@@ -101,16 +101,35 @@ def action_only_sets_state(node, index):
     return normalized_action(name) == "toggle"
 
 
-def window_relative(window_bounds, x, y):
-    """Convert an AX input-synthesis screen point to window coordinates.
+def desktop_frame_point(x, y, native_bounds=None):
+    """Convert an X root point to pixels of the delivered full-desktop frame.
 
-    AX tree frames and the optional window screenshot use window-relative
-    coordinates. The GUI tool accepts only coordinates in its own full-desktop
-    image and never uses this conversion.
+    Notes about AX input synthesis state their point in the coordinate space
+    of the GUI frame, which AX full/screenshot images share, so that a point
+    the model reads can be reused as GUI x/y. This is the inverse of
+    screen_absolute_point.
     """
-    if window_bounds is None:
-        return x, y
-    return x - window_bounds["x"], y - window_bounds["y"]
+    native_bounds = native_bounds or desktop_bounds()
+    if native_bounds is None:
+        return None
+    dimensions = gui_model_dimensions(native_bounds)
+    scale_x = float(native_bounds["width"]) / dimensions["width"]
+    scale_y = float(native_bounds["height"]) / dimensions["height"]
+    frame_x = (x - native_bounds["x"] + 0.5) / scale_x - 0.5
+    frame_y = (y - native_bounds["y"] + 0.5) / scale_y - 0.5
+    return (
+        min(dimensions["width"] - 1, max(0.0, frame_x)),
+        min(dimensions["height"] - 1, max(0.0, frame_y)),
+    )
+
+
+def frame_point_text(x, y):
+    """`at (X, Y) in full-desktop frame pixels`, or a plain statement when
+    the desktop bounds are unavailable."""
+    point = desktop_frame_point(x, y)
+    if point is None:
+        return "at an unreported point"
+    return "at ({:.0f}, {:.0f}) in full-desktop frame pixels".format(*point)
 
 
 # An element is stable once two consecutive samples report the same bounding
@@ -191,12 +210,9 @@ def current_geometry(element, element_record, window_bounds):
     if abs(dx) <= 2 and abs(dy) <= 2:
         return updated, None
     return updated, (
-        "The element MOVED since the snapshot: it was at {{{:.0f},{:.0f}}} and is now "
-        "at {{{:.0f},{:.0f}}} (window-relative). This action used its CURRENT position, "
-        "not the one in the tree you read. Any other coordinate you took from that "
-        "snapshot is stale by the same amount.".format(
-            old["x"], old["y"], live["x"], live["y"]
-        )
+        "The element MOVED since the snapshot. This action used its CURRENT "
+        "position, not the one in the tree you read. Any coordinate you took "
+        "from an earlier image is stale."
     )
 
 

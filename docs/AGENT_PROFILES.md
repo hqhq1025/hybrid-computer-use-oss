@@ -1,5 +1,7 @@
 # Task Agent Profiles
 
+Last verified against commit `a4006c5`.
+
 `hcu/osworld/agents.py` builds one profile per agent; `python3 -m
 hcu.render_agent_config` writes these configurations for use outside
 OSWorld. Four agents are supported: Codex, Claude Code, Gemini CLI and Grok
@@ -98,7 +100,7 @@ original discriminated unions before any side effect.
 
 ## Gemini CLI
 
-The npm package from the artifact lock is uploaded as a tarball and unpacked
+The npm package `artifacts/gemini-cli.tgz` is uploaded and unpacked
 into `/opt/agent-runtime/gemini/cli` in the guest, and the pinned Node binary
 runs it as `~/.local/bin/gemini-node` so the watchdog can find the agent
 process by name. `settings.json` keeps only this MCP server.

@@ -76,13 +76,6 @@ func shouldRecoverMissingWindowCapture(
     includeScreenshot && recoveryPolicy == .allowActivation
 }
 
-func isSystemFocusedElementOwnedByTarget(
-    appPID: pid_t,
-    focusedElementPID: pid_t?
-) -> Bool {
-    focusedElementPID == appPID
-}
-
 func cachedWindowFallbackMatches(
     appPID: pid_t,
     candidatePID: pid_t?,
@@ -287,20 +280,12 @@ public struct AccessibilityTreeLimits: Equatable, Sendable {
         self.maxNodeCount = maxNodeCount
         self.maxDepth = maxDepth
     }
-
-    public func replacing(maxNodeCount: Int? = nil, maxDepth: Int? = nil) -> AccessibilityTreeLimits {
-        AccessibilityTreeLimits(
-            maxNodeCount: maxNodeCount ?? self.maxNodeCount,
-            maxDepth: maxDepth ?? self.maxDepth
-        )
-    }
 }
 
 @usableFromInline
 let defaultTextLimit = 500
 
 public struct SnapshotTextLimit: Equatable, Sendable {
-    public static let maxKeyword = "max"
     public static let defaults = SnapshotTextLimit(maxCount: defaultTextLimit)
     public static let max = SnapshotTextLimit(maxCount: nil)
 
@@ -315,9 +300,6 @@ public struct SnapshotTextLimit: Equatable, Sendable {
         self.maxCount = maxCount
     }
 }
-
-let accessibilityTreeMaxNodeCount = AccessibilityTreeLimits.defaultMaxNodeCount
-let accessibilityTreeMaxDepth = AccessibilityTreeLimits.defaultMaxDepth
 let screenshotCaptureTimeout: TimeInterval = 5
 let screenshotResultMaxPNGBytes = 900_000
 let screenshotResultMaxDimension: CGFloat = 1280

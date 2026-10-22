@@ -1,6 +1,6 @@
 # AX correctness and selection integration
 
-Status: `testing`
+Status: `merged`
 Created: 2026-10-20
 
 Baseline: main development snapshot after gui-scale-generic-instructions-20261020;

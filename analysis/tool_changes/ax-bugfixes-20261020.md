@@ -1,6 +1,7 @@
 # AX editing, final evidence, recovery, and preflight fixes
 
-Status: `testing`
+Status: `merged`
+Paths refer to the layout before the package split (a4006c5).
 Created: 2026-10-20
 Change ID: `ax-bugfixes-20261020`
 Baseline: main `9dfaf36`, package VERSION 1.0.0.

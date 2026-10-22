@@ -17,13 +17,6 @@ mkdir -p "$log_dir"
 osworld=${OSWORLD_V2_ROOT:-/datadrive2/hcu-eval-runner/OSWorld-V2}
 baseline_binary=${1:-}
 
-# The Go module may sit in computer-use/ (single package) or keep its main
-# package under cmd/computer-use after the package split.
-main_pkg=.
-if [ -d "$repo/computer-use/cmd/computer-use" ]; then
-	main_pkg=./cmd/computer-use
-fi
-
 step() {
 	local name=$1
 	shift
@@ -52,13 +45,12 @@ gofmt_clean() {
 
 cd "$repo/computer-use"
 step gofmt gofmt_clean
-step go-build-linux env GOOS=linux go build ./...
-step go-build-darwin env GOOS=darwin go build ./...
-step go-build-windows env GOOS=windows go build ./...
+# go vet type-checks every package and test of the target OS, so separate
+# go build steps add nothing. The sidecar tags only add test transports, so
+# the tagged run covers every test of the untagged one.
 step go-vet go vet ./...
 step go-vet-darwin env GOOS=darwin go vet ./...
 step go-vet-windows env GOOS=windows go vet ./...
-step go-test go test -count=1 ./...
 step go-test-sidecar go test -count=1 -tags 'darwin_sidecar_test windows_sidecar_test' ./...
 step runtime-test /usr/bin/python3 runtime_test.py
 cd "$repo"
@@ -66,6 +58,9 @@ step pytest env OSWORLD_V2_ROOT="$osworld" "$osworld/.venv/bin/python" -m pytest
 
 if [ -n "$baseline_binary" ]; then
 	candidate="$log_dir/computer-use.candidate"
-	(cd "$repo/computer-use" && CGO_ENABLED=0 go build -trimpath -o "$candidate" "$main_pkg")
+	# Stamp the version like make build-local does, so a baseline built by
+	# make reports the same serverInfo.version.
+	(cd "$repo/computer-use" && CGO_ENABLED=0 go build -trimpath \
+		-ldflags "-X main.version=$(cat "$repo/VERSION")" -o "$candidate" ./cmd/computer-use)
 	step mcp-bytes python3 "$repo/scripts/maint/compare_mcp_bytes.py" "$baseline_binary" "$candidate"
 fi

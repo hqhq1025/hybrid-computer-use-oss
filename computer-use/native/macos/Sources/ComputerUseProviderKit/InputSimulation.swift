@@ -262,29 +262,6 @@ enum InputSimulation {
         }
     }
 
-    static func typeText(
-        _ text: String,
-        pid: pid_t,
-        pasteboard: NSPasteboard = .general,
-        performPaste: ((pid_t) throws -> Void)? = nil
-    ) throws {
-        guard !text.isEmpty else {
-            return
-        }
-
-        try withTemporaryPasteboardText(
-            text,
-            pasteboard: pasteboard,
-            consumptionDelay: pasteConsumptionDelay
-        ) {
-            if let performPaste {
-                try performPaste(pid)
-            } else {
-                try pressKey("CMD+V", pid: pid)
-            }
-        }
-    }
-
     static func typeTextGlobally(
         _ text: String,
         awaitConsumption: (() throws -> Void)? = nil

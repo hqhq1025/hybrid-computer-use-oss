@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Drop history-only version markers from names: `AXSnapshotV1` is
+  `AXSnapshot`, `ProviderV2*` is `Provider*`, `provider_wire_v2.go` is
+  `provider_wire.go`, `wire_v2.py` is `wire.py`, the Windows test project is
+  `ComputerUse.Windows.Provider.Tests` and the shared fixtures are in
+  `testdata/provider-wire/`. The private Go-to-provider wire value is
+  `computer-use-provider` in all four implementations; `schema_version` and
+  `protocol_version` stay 2. MCP output is byte-identical.
+  `scripts/maint/drop_version_names.sh` reproduces the rename. Add
+  `scripts/maint/check_layout.sh` to CI and a file layout section to
+  `AGENTS.md`.
+- Rewrite the README as a short overview with a feature table, a platform
+  matrix and client, CLI and SDK quick starts. Update the docs for the
+  package split, the 1366x768 screenshot size, the current error table, CLI
+  commands and environment variables, and replace duplicated setup text with
+  links.
+- Split the `computer-use` Go module from one `package main` into layered
+  packages: `internal/contract`, `internal/core`, `internal/provider`,
+  `internal/transport` and `cmd/computer-use`; the embedded Linux provider
+  stays at the module root. Build scripts build `./cmd/computer-use` and keep
+  `-X main.version`. MCP `initialize`, `tools/list`, `help` and `schema`
+  output is byte-identical; `scripts/maint/split_packages.sh` reproduces
+  the split.
 - Route edits of composite Linux drop-downs to their verified editable
   partner, while keeping clicks on the list toggle. Reject missing,
   ambiguous, or replaced editing targets before input.

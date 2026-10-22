@@ -120,20 +120,6 @@ extension AppSnapshot {
     }
 }
 
-func parsedTreeLinesByIndex(
-    _ treeLines: [String]
-) -> [Int: ParsedTreeLine] {
-    var parsedByIndex: [Int: ParsedTreeLine] = [:]
-    for line in treeLines {
-        guard let parsed = parseTreeLine(line),
-              parsedByIndex[parsed.index] == nil else {
-            continue
-        }
-        parsedByIndex[parsed.index] = parsed
-    }
-    return parsedByIndex
-}
-
 func validateRequestedIdentity(
     _ operation: [String: Any],
     app: RunningAppDescriptor

@@ -27,6 +27,7 @@ from native.linux.provider import (  # noqa: E402
     app_resolver,
     atspi_inventory,
     ax_dispatch,
+    ax_input_delivery,
     ax_actions,
     ax_node_properties,
     ax_records,
@@ -37,7 +38,10 @@ from native.linux.provider import (  # noqa: E402
     ax_transition_evidence,
     ax_virtual_table,
     element_resolver,
+    semantic_window_candidates,
+    semantic_scan,
     foundation,
+    node_facts,
     gui_capture,
     gui_dispatch,
     gui_input,
@@ -51,12 +55,14 @@ from native.linux.provider import (  # noqa: E402
     ui_events,
     window_diagnostics,
     window_resolver,
-    wire_v2,
+    wire,
+    wire_request,
     x11_windows,
 )
 
 PROVIDER_MODULES = (
     foundation,
+    node_facts,
     action_evidence,
     phase_timing,
     app_resolver,
@@ -74,6 +80,8 @@ PROVIDER_MODULES = (
     ref_continuity,
     recovery,
     element_resolver,
+    semantic_window_candidates,
+    semantic_scan,
     window_resolver,
     actionability,
     gui_input,
@@ -81,12 +89,14 @@ PROVIDER_MODULES = (
     ax_actions,
     ax_select,
     ax_dispatch,
+    ax_input_delivery,
     ax_snapshot_diagnostics,
     ax_target_notes,
     ax_transition_evidence,
     window_diagnostics,
     response_builder,
-    wire_v2,
+    wire,
+    wire_request,
 )
 
 
@@ -147,7 +157,7 @@ def _provider_target_for_test(target):
 
 
 def perform_provider_operation(operation):
-    """Exercise behavior cases using only Provider V2 request fields."""
+    """Exercise behavior cases using only provider request fields."""
     intent = operation["intent"]
     if intent == "observe_apps":
         return runtime.perform_provider_request(
@@ -171,7 +181,6 @@ def perform_provider_operation(operation):
                         "prune": operation.get("prune"),
                         "boxes": operation.get("boxes"),
                         "include_screenshot": operation.get("include_screenshot"),
-                        "screenshot_scope": operation.get("screenshot_scope"),
                     }.items()
                     if value is not None
                 },

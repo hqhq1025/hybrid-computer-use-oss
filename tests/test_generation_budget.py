@@ -209,6 +209,60 @@ def test_success_resets_failure_streak_and_survives_restart(tmp_path, kind):
 
 
 @pytest.mark.parametrize("kind", PATHS)
+def test_next_requests_wait_until_previous_response_is_finished(tmp_path, monkeypatch, kind):
+    # The agent can read a response and send its next requests before the
+    # gateway thread that relayed it has committed the outcome. Hold that
+    # thread after the first relay until the next generation admission has
+    # decided. A correct gateway defers later requests of the task until the
+    # outcome is committed, so the hold can only end at its bound. The old
+    # order logged the GET first and rejected the generation as in flight.
+    module = openai_proxy if kind in {"azure", "grok"} else common
+    original = module.relay_response
+    next_generation_decided = threading.Event()
+    held = []
+
+    def relay(*args):
+        delivered = original(*args)
+        if not held:
+            held.append(next_generation_decided.wait(1))
+        return delivered
+
+    monkeypatch.setattr(module, "relay_response", relay)
+    responses = [
+        FakeResponse(503, b'{"error":"unavailable"}'),
+        success_response(kind),
+        success_response(kind),
+    ]
+    with gateway_server(tmp_path, kind, responses, limit=1) as (
+        gateway, upstream, base, path,
+    ):
+        admit = gateway.budget.admit
+        generations = []
+
+        def observed_admit(row, generation):
+            try:
+                return admit(row, generation)
+            finally:
+                generations.append(generation)
+                if generations.count(True) == 2:
+                    next_generation_decided.set()
+
+        gateway.budget.admit = observed_admit
+        assert post(base, path, {}) == 503
+        with urllib.request.urlopen(base + path, timeout=10) as response:
+            assert response.status == 200
+        assert [post(base, path, {}) for _ in range(2)] == [200, 429]
+    assert held == [False]
+    assert len(upstream.calls) == 3
+    rows = log_rows(gateway.token_log.path)
+    assert [(row["method"], row.get("http_status")) for row in rows] == [
+        ("POST", 503), ("GET", 200), ("POST", 200), ("POST", 429),
+    ]
+    assert not any(row.get("budget_inflight") for row in rows)
+    assert read_task_log(gateway.token_log.path, "task-test").completed_responses == 1
+
+
+@pytest.mark.parametrize("kind", PATHS)
 def test_concurrent_last_slot_is_reserved_without_terminal_rejection(tmp_path, kind):
     entered = threading.Event()
     release = threading.Event()

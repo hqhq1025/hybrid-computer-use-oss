@@ -427,12 +427,8 @@ internal sealed partial class UiaProvider : IDisposable
 
     private NativeWindowProjection ProjectNativeWindows(
         Process process,
-        IReadOnlyList<NativeDesktop.WindowRecord> windows,
-        nint preferredLogicalHandle = 0)
+        IReadOnlyList<NativeDesktop.WindowRecord> windows)
     {
-        // Retained as an internal call-site compatibility parameter only.
-        // Selection must never alter a native surface's logical ownership.
-        _ = preferredLogicalHandle;
         var candidates = windows.Select(
             window => new OwnedNativeWindowCandidate(
                 window.Handle.ToInt64(),
@@ -474,8 +470,7 @@ internal sealed partial class UiaProvider : IDisposable
     {
         var projection = ProjectNativeWindows(
             process,
-            NativeDesktop.ListWindows(process.Id),
-            selectedWindow.Handle);
+            NativeDesktop.ListWindows(process.Id));
         var logical = projection.LogicalRecord(selectedWindow);
         return LogicalAutomationRoots(process, projection, logical);
     }
@@ -639,50 +634,4 @@ internal sealed partial class UiaProvider : IDisposable
         _automation.UnregisterAllEvents();
         _automation.Dispose();
     }
-}
-
-internal sealed class ProviderFailureException : Exception
-{
-    internal ProviderFailureException(
-        string code,
-        string phase,
-        string message,
-        bool inputEventsEmitted = false,
-        bool mutationUnknown = false,
-        int dispatchedActions = 0,
-        int dispatchedInputActions = 0,
-        JsonObject? actionEvidence = null,
-        bool? factsComplete = null,
-        string subject = "",
-        JsonObject? recoveryContext = null,
-        FocusPreparationState? focusPreparation = null,
-        PointerPreparationState? pointerPreparation = null)
-        : base(message)
-    {
-        Code = code;
-        Phase = phase;
-        InputEventsEmitted = inputEventsEmitted;
-        MutationUnknown = mutationUnknown;
-        DispatchedActions = dispatchedActions;
-        DispatchedInputActions = dispatchedInputActions;
-        ActionEvidence = actionEvidence;
-        FactsComplete = factsComplete;
-        Subject = subject;
-        RecoveryContext = recoveryContext;
-        FocusPreparation = focusPreparation;
-        PointerPreparation = pointerPreparation;
-    }
-
-    internal string Code { get; }
-    internal string Phase { get; }
-    internal bool InputEventsEmitted { get; }
-    internal bool MutationUnknown { get; }
-    internal int DispatchedActions { get; }
-    internal int DispatchedInputActions { get; }
-    internal JsonObject? ActionEvidence { get; }
-    internal bool? FactsComplete { get; }
-    internal string Subject { get; }
-    internal JsonObject? RecoveryContext { get; }
-    internal FocusPreparationState? FocusPreparation { get; }
-    internal PointerPreparationState? PointerPreparation { get; }
 }

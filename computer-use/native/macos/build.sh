@@ -105,7 +105,7 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     "${runtime_root}/Sources/ComputerUseProviderKit/ProviderRequestStructureValidation.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ProviderRequestValidator.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ProviderSnapshotProjection.swift"
-    "${runtime_root}/Sources/ComputerUseProviderKit/ProviderV2Server.swift"
+    "${runtime_root}/Sources/ComputerUseProviderKit/ProviderServer.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/RelativeReadbackDiagnostic.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/SkyClickSimulation.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/SkyLightSPI.swift"
@@ -118,7 +118,6 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     -sdk "${sdk_path}" \
     -num-threads "${COMPUTER_USE_SWIFT_THREADS:-4}" \
     -parse-as-library \
-    -D COMPUTER_USE_PROVIDER_MINIMAL \
     -emit-library \
     -emit-module \
     -module-name ComputerUseProviderKit \
@@ -132,7 +131,6 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     -target "${swift_target}" \
     -sdk "${sdk_path}" \
     -parse-as-library \
-    -D COMPUTER_USE_PROVIDER_MINIMAL \
     -I "${swift_output}" \
     -L "${swift_output}" \
     -lComputerUseProviderKit \
@@ -182,7 +180,7 @@ codesign --verify --deep --strict "${bundle_root}"
   -trimpath \
   -ldflags "-s -w -X main.version=${version}" \
   -o "${output_dir}/computer-use" \
-  .
+  ./cmd/computer-use
 )
 codesign --force --sign "${codesign_identity}" \
   "${output_dir}/computer-use"

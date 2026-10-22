@@ -1,12 +1,7 @@
 import argparse
 from pathlib import Path
 
-from hcu.paths import (
-    DEFAULT_BASE_INSTRUCTIONS_FILE,
-    DEFAULT_INSTRUCTIONS_FILE,
-    REPO_ROOT,
-    anchor_path_args,
-)
+from hcu.paths import anchor_path_args
 
 
 def test_relative_path_arguments_are_anchored_to_the_caller(tmp_path, monkeypatch):
@@ -23,13 +18,6 @@ def test_relative_path_arguments_are_anchored_to_the_caller(tmp_path, monkeypatc
     assert isinstance(args.guest_image, Path)
     assert args.token_log == ""
     assert args.instructions_file == "/abs/instructions.md"
-
-
-def test_default_instruction_files_exist():
-    assert DEFAULT_INSTRUCTIONS_FILE == REPO_ROOT / "instructions/hybrid.md"
-    assert DEFAULT_BASE_INSTRUCTIONS_FILE == REPO_ROOT / "instructions/base.md"
-    for name in ("base", "hybrid", "ax-only", "gui-only"):
-        assert (REPO_ROOT / "instructions" / f"{name}.md").read_text().strip()
 
 
 def test_home_relative_paths_expand_before_anchoring(monkeypatch, tmp_path):

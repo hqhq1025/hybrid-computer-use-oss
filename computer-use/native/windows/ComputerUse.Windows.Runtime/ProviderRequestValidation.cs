@@ -5,7 +5,7 @@ namespace ComputerUse.Windows.Runtime;
 
 internal sealed partial class ProviderServer
 {
-    private const string Protocol = "computer-use-provider-v2";
+    private const string Protocol = "computer-use-provider";
     private const int SchemaVersion = 2;
     private static readonly IReadOnlySet<string> EnvelopeFields =
         new HashSet<string>(StringComparer.Ordinal)

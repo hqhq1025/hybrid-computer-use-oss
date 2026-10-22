@@ -56,8 +56,7 @@ internal sealed partial class UiaProvider
     {
         var projection = ProjectNativeWindows(
             process,
-            NativeDesktop.ListWindows(process.Id),
-            selectedWindow.Handle);
+            NativeDesktop.ListWindows(process.Id));
         selectedWindow = projection.LogicalRecord(selectedWindow);
         var roots = LogicalAutomationRoots(
             process,
