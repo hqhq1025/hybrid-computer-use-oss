@@ -53,9 +53,21 @@ Use repeated `--phase` options to select `gtk`, `qt`, `joplin`, `special`,
 refuses to replace an existing installation. Use a fresh base copy when changing
 the selected software rather than rerunning over an unknown partial image.
 
-5. Start a fresh desktop session and verify application startup and input.
-6. Remove the copied scripts, archives and extracted staging files.
-7. Shut down the guest and export a new image without replacing the base.
+5. Hold automatic Snap refreshes before the final application checks:
+
+```bash
+sudo snap refresh --hold=forever
+snap refresh --time
+snap list
+```
+
+Confirm that the refresh schedule reports `hold: forever`. Record the installed
+Snap revisions with the image. The hold prevents automatic refreshes; an explicit
+manual refresh that names a Snap can still update that application.
+
+6. Start a fresh desktop session and verify application startup and input.
+7. Remove the copied scripts, archives and extracted staging files.
+8. Shut down the guest and export a new image without replacing the base.
 
 `--check` validates the operating system, architecture and required filenames.
 It does not run apt, verify archive contents or prove application behavior.
