@@ -43,7 +43,7 @@ func (s *Service) guiZoom(action ProviderDesktopAction) ToolCallResult {
 		return guiError(contract.AXCodeInvalidArgument, path, message, zoomRegionHint(frame))
 	}
 	response, err := s.callProviderDesktop(ProviderDesktopRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		Actions:         []ProviderDesktopAction{action},
 		FrameID:         frame.FrameID,
 	})

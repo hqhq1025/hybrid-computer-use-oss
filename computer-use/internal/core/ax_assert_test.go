@@ -327,7 +327,7 @@ func TestCanonicalAssertionFallbackRequiresTheSameIssuedRefIdentity(t *testing.T
 		Showing:            &showing,
 		Visible:            &showing,
 	}
-	tree := &AXSnapshotV1{
+	tree := &AXSnapshot{
 		AppRef:               "a1",
 		AppIdentity:          "editor",
 		WindowHandle:         "private-window",
@@ -470,7 +470,7 @@ func TestCanonicalAssertionFallbackAcceptsSemanticProviderWrapperChurn(t *testin
 		Showing:            &showing,
 		Visible:            &showing,
 	}
-	tree := &AXSnapshotV1{
+	tree := &AXSnapshot{
 		AppRef:               "a1",
 		AppIdentity:          "editor",
 		WindowHandle:         "private-window",

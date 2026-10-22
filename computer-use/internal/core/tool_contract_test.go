@@ -314,7 +314,7 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 		t.Fatal("ProviderDesktopRequest must preserve explicit settle_ms=0")
 	}
 	encoded, err := json.Marshal(ProviderDesktopRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		Actions:         []ProviderDesktopAction{{Type: "screenshot"}},
 		SettleMS:        0,
 	})

@@ -8,7 +8,7 @@ private func envelope(
     payload: [String: Any]
 ) -> [String: Any] {
     [
-        "protocol": "computer-use-provider-v2",
+        "protocol": "computer-use-provider",
         "schema_version": 2,
         "request_id": "validation-test",
         "operation": operation,
@@ -25,7 +25,7 @@ private func envelope(
         ])
         try ProviderRequestValidator.validate(request)
         var dispatched: [[String: Any]] = []
-        let server = ProviderV2Server(
+        let server = ProviderServer(
             transport: ProviderLineTransport(inputDescriptor: -1, outputDescriptor: -1),
             executeRuntime: { operation in
                 dispatched.append(operation)

@@ -51,7 +51,7 @@ func TestWindowsProviderRuntimeTimeoutIncludesDesktopExecutionCost(
 		core.ProviderWireDesktopBatch,
 	)
 	desktop.Desktop = &core.ProviderDesktopRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 		Actions:         actions,
 		SettleMS:        1200,
 	}
@@ -71,7 +71,7 @@ func TestWindowsProviderRuntimeTimeoutIncludesExplicitWaits(t *testing.T) {
 	t.Setenv("COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS", "")
 	request := core.NewProviderWireRequest("wait-timeout", core.ProviderWireDesktopBatch)
 	request.Desktop = &core.ProviderDesktopRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 		Actions: []core.ProviderDesktopAction{
 			{Type: "wait"},
 			{Type: "keypress"},
@@ -275,7 +275,7 @@ func TestWindowsProviderManagerNeverReplaysMutationReset(t *testing.T) {
 
 	request := core.NewProviderWireRequest("reset-mutation", core.ProviderWireResolveAndAct)
 	request.Action = &core.ProviderActionRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 		Intent:          core.AccessibilityClick,
 		App:             "Editor",
 		Target: &core.ProviderSemanticTarget{
@@ -334,7 +334,7 @@ func TestWindowsProviderTimeoutPreservesSideEffectAndRecoversWithNewWorker(
 		core.ProviderWireResolveAndAct,
 	)
 	request.Action = &core.ProviderActionRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 		Intent:          core.AccessibilityClick,
 		App:             "Editor",
 		Target: &core.ProviderSemanticTarget{
@@ -460,7 +460,7 @@ func TestWindowsProviderManagerDestroysWorkerAfterProtocolError(t *testing.T) {
 func TestWindowsProviderCallDeadlineCoversWriteAndRead(t *testing.T) {
 	request := validWindowsObserveAppsRequest("deadline")
 	request.ObserveApps = &core.ProviderObserveAppsRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 	}
 
 	blockedWrite := &windowsProviderWorker{
@@ -560,7 +560,7 @@ func TestWindowsProviderValidatesResponseIdentity(t *testing.T) {
 			request := validWindowsObserveAppsRequest("identity")
 			response := core.ProviderWireResponse{
 				Protocol:      core.ProviderProtocolName,
-				SchemaVersion: core.ProviderProtocolV2,
+				SchemaVersion: core.ProviderProtocolVersion,
 				RequestID:     request.RequestID,
 				Operation:     request.Operation,
 				Accessibility: &core.ProviderAccessibilityResult{OK: true},
@@ -622,7 +622,7 @@ func TestWindowsProviderResetRetryClassification(t *testing.T) {
 		func() core.ProviderWireRequest {
 			request := core.NewProviderWireRequest("observe", core.ProviderWireObserve)
 			request.Observe = &core.ProviderObserveRequest{
-				ProtocolVersion: core.ProviderProtocolV2,
+				ProtocolVersion: core.ProviderProtocolVersion,
 				App:             "Editor",
 			}
 			return request
@@ -630,7 +630,7 @@ func TestWindowsProviderResetRetryClassification(t *testing.T) {
 		func() core.ProviderWireRequest {
 			request := core.NewProviderWireRequest("windows", core.ProviderWireWindowList)
 			request.WindowList = &core.ProviderWindowListRequest{
-				ProtocolVersion: core.ProviderProtocolV2,
+				ProtocolVersion: core.ProviderProtocolVersion,
 				App:             "Editor",
 			}
 			return request
@@ -638,7 +638,7 @@ func TestWindowsProviderResetRetryClassification(t *testing.T) {
 		func() core.ProviderWireRequest {
 			request := core.NewProviderWireRequest("resolve", core.ProviderWireResolveAndAct)
 			request.Action = &core.ProviderActionRequest{
-				ProtocolVersion: core.ProviderProtocolV2,
+				ProtocolVersion: core.ProviderProtocolVersion,
 				Intent:          core.AccessibilityResolveTarget,
 				App:             "Editor",
 				Target: &core.ProviderSemanticTarget{
@@ -662,7 +662,7 @@ func TestWindowsProviderResetRetryClassification(t *testing.T) {
 
 	mutation := core.NewProviderWireRequest("click", core.ProviderWireResolveAndAct)
 	mutation.Action = &core.ProviderActionRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 		Intent:          core.AccessibilityClick,
 		App:             "Editor",
 		Target: &core.ProviderSemanticTarget{
@@ -740,7 +740,7 @@ func TestWindowsProviderProtocolHelper(t *testing.T) {
 			(mode == "reset-read" && starts == 1)
 		response := core.ProviderWireResponse{
 			Protocol:              core.ProviderProtocolName,
-			SchemaVersion:         core.ProviderProtocolV2,
+			SchemaVersion:         core.ProviderProtocolVersion,
 			RequestID:             request.RequestID,
 			Operation:             request.Operation,
 			ProviderResetRequired: resetRequired,
@@ -801,7 +801,7 @@ func providerHelperStartCount(path string) int {
 func validWindowsObserveAppsRequest(requestID string) core.ProviderWireRequest {
 	request := core.NewProviderWireRequest(requestID, core.ProviderWireObserveApps)
 	request.ObserveApps = &core.ProviderObserveAppsRequest{
-		ProtocolVersion: core.ProviderProtocolV2,
+		ProtocolVersion: core.ProviderProtocolVersion,
 	}
 	return request
 }

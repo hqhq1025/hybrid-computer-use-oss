@@ -425,7 +425,7 @@ func nearestFocusedEditableTarget<Node>(
 
 public final class ComputerUseService {
     var snapshotsByApp: [String: AppSnapshot] = [:]
-    // ProviderV2Server awaits requests serially. The synchronous request owns
+    // ProviderServer awaits requests serially. The synchronous request owns
     // this binding, including captures
     // performed inside service actions. Never rediscover a bound app by name
     // or replace its requested window with a focused sibling.

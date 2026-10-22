@@ -183,7 +183,7 @@ func TestPostActionWindowIdentityStabilizationReturnsActionableNewWindow(t *test
 		},
 	}
 	service := NewServiceWithBackend(backend)
-	if err := service.BuildAndRenderAXSnapshotV1(
+	if err := service.BuildAndRenderAXSnapshot(
 		immediate,
 		contract.TreeViewWorking,
 	); err != nil {
@@ -315,7 +315,7 @@ func TestTransientCommitProbeDoesNotAdoptSiblingWindow(t *testing.T) {
 		dialog.Elements[index].ProviderWindowRole = "dialog"
 	}
 	service := NewServiceWithBackend(&recordingPlatformBackend{})
-	if err := service.BuildAndRenderAXSnapshotV1(
+	if err := service.BuildAndRenderAXSnapshot(
 		dialog,
 		contract.TreeViewWorking,
 	); err != nil {
@@ -376,7 +376,7 @@ func TestTransientCommitProbeDoesNotCommitFailedReplacementRead(t *testing.T) {
 		dialog.Elements[index].ProviderWindowRole = "dialog"
 	}
 	service := NewServiceWithBackend(&recordingPlatformBackend{})
-	if err := service.BuildAndRenderAXSnapshotV1(
+	if err := service.BuildAndRenderAXSnapshot(
 		dialog,
 		contract.TreeViewWorking,
 	); err != nil {
@@ -493,7 +493,7 @@ func TestPostActionWindowIdentityStabilizationSkipsReadyWindow(t *testing.T) {
 	before := windowTransitionSnapshot(oldHandle, "Document", true)
 	ready := windowTransitionSnapshot(newHandle, "Rename", true)
 	service := NewServiceWithBackend(&recordingPlatformBackend{})
-	if err := service.BuildAndRenderAXSnapshotV1(
+	if err := service.BuildAndRenderAXSnapshot(
 		ready,
 		contract.TreeViewWorking,
 	); err != nil {
@@ -533,7 +533,7 @@ func TestPostActionWindowIdentityStabilizationRecoversStaleActionHandle(t *testi
 		},
 	}
 	service := NewServiceWithBackend(backend)
-	if err := service.BuildAndRenderAXSnapshotV1(
+	if err := service.BuildAndRenderAXSnapshot(
 		immediate,
 		contract.TreeViewWorking,
 	); err != nil {
@@ -657,7 +657,7 @@ func TestPostActionWindowIdentityStabilizationRecoversProviderReplacement(t *tes
 			Snapshot: stable,
 		},
 	})
-	if err := service.BuildAndRenderAXSnapshotV1(
+	if err := service.BuildAndRenderAXSnapshot(
 		before,
 		contract.TreeViewWorking,
 	); err != nil {
@@ -684,7 +684,7 @@ func TestPostActionWindowIdentityStabilizationRecoversProviderReplacement(t *tes
 	if cursor == "" {
 		t.Fatal("find cursor fixture was not created")
 	}
-	if err := service.BuildAndRenderAXSnapshotV1(
+	if err := service.BuildAndRenderAXSnapshot(
 		immediate,
 		contract.TreeViewWorking,
 	); err != nil {
