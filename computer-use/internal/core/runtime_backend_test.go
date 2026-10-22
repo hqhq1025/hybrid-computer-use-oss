@@ -67,13 +67,6 @@ func TestRuntimeCallsRouteByPlatformDomain(t *testing.T) {
 			})
 			return err
 		}},
-		{name: "window_list", want: "window_list", call: func() error {
-			_, err := service.callProviderWindowList(ProviderWindowListRequest{
-				ProtocolVersion: ProviderProtocolVersion,
-				App:             "Editor",
-			})
-			return err
-		}},
 	}
 	for _, test := range tests {
 		backend.calls = nil

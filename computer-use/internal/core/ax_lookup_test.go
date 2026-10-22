@@ -514,3 +514,18 @@ func TestObservationRootShortRefExpandsThroughRegistry(t *testing.T) {
 		)
 	}
 }
+
+// Words such as "the" and "dialog" name no element, so an intent made only
+// of them lists no closest elements.
+func TestClosestElementsIgnoresGenericWords(t *testing.T) {
+	snapshot := &AppSnapshot{Elements: []ElementRecord{
+		{Index: 1, ControlType: "dialog", Name: "The dialog"},
+		{Index: 2, ControlType: "push button", Name: "Save"},
+	}}
+	if got := closestElements(snapshot, "the dialog", 5); got != nil {
+		t.Fatalf("generic words listed %q", got)
+	}
+	if got := closestElements(snapshot, "save dialog", 5); len(got) != 1 || !strings.Contains(got[0], "Save") {
+		t.Fatalf("closest elements for save = %q", got)
+	}
+}
