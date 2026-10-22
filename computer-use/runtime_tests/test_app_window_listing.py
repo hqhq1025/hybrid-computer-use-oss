@@ -464,6 +464,67 @@ class ListAppsTopLevelWindowTests(AtspiPatchedTestCase):
         self.assertTrue(windows[0]["active"])
 
 
+class HiddenFrameCorrelationTests(AtspiPatchedTestCase):
+    """An AX frame without a native window must not take the app's only one.
+
+    Krita (Qt 5.15) exposes a frame "Offscreen" that has no extents, no
+    SHOWING state and no X11 window, next to its document window. Both
+    correlated to the single managed X11 window: the title did not match
+    and the sole-candidate fallback accepted any frame. The window then had
+    two AX claimants, neither got a strong handle, and the document window
+    was listed "(not addressable)", so no AX action could target Krita.
+    """
+
+    def _krita(self):
+        offscreen = _TreeNode(role="frame", name="Offscreen", w=0, h=0)
+        offscreen.states = {STATE.SENSITIVE}
+        offscreen.component = None
+        document = _TreeNode(
+            role="frame", name="src.jpg (3.9 MiB) ", x=320, y=202, w=1280,
+            h=702)
+        document.states = {STATE.SHOWING, STATE.VISIBLE, STATE.ACTIVE}
+        app = _TreeNode(role="application", name="krita",
+                        kids=(offscreen, document))
+        app.get_process_id = lambda: 4242
+        return app, offscreen, document
+
+    def _patches(self):
+        native = [{"id": "0xe00012", "x": 325, "y": 231, "width": 1280,
+                   "height": 702, "title": "src.jpg (3.9 MiB)  — Krita"}]
+        return (
+            mock.patch.object(
+                runtime, "x11_window_inventory_for_pid",
+                return_value=runtime.InventoryResult(native, complete=True)),
+            mock.patch.object(
+                runtime, "correlation_root_window_state",
+                return_value={"windowIds": {"0xe00012"},
+                              "activeWindow": "0xe00012"}),
+            mock.patch.object(runtime, "process_generation",
+                              return_value="99123"),
+        )
+
+    def test_frame_without_native_presence_gets_no_window(self):
+        app, offscreen, document = self._krita()
+        patches = self._patches()
+        with patches[0], patches[1], patches[2]:
+            self.assertIsNone(
+                runtime.x11_window_id_for_accessible(app, offscreen))
+            self.assertEqual(
+                runtime.x11_window_id_for_accessible(app, document),
+                "0xe00012")
+
+    def test_document_window_keeps_a_strong_handle(self):
+        app, _offscreen, _document = self._krita()
+        patches = self._patches()
+        with patches[0], patches[1], patches[2]:
+            handles = runtime.strong_window_instance_handles(
+                app, runtime.InventoryResult(
+                    [(0, app.children[0]), (1, app.children[1])],
+                    complete=True))
+        self.assertEqual(list(handles), [1])
+        self.assertTrue(handles[1].startswith("w2:"))
+
+
 class ProviderInventoryCompletenessTests(AtspiPatchedTestCase):
     def test_incomplete_application_enumeration_reaches_apps_evidence(self):
         root = _TreeNode(role="desktop", name="Desktop")

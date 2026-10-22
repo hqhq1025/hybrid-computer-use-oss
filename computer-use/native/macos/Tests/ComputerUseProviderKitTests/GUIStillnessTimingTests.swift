@@ -148,3 +148,99 @@ func guiStillnessPropagatesInitialAndLaterCaptureFailures() {
         #expect(now <= 0.2 + 1e-9)
     }
 }
+
+@Test
+func guiStillnessRetriesInitialLayoutChangesWithinOneBudget() throws {
+    var now = 0.0
+    var captures = 0
+    let result = try sampleGUIStillness(settleMS: 800, capture: { timeout -> Int in
+        #expect(timeout == screenshotCaptureTimeout)
+        captures += 1
+        if captures <= 2 { throw DesktopCaptureLayoutChangedError() }
+        return captures
+    }, identical: { _, _ in true }, clock: { now }, sleep: { now += $0 })
+    #expect(result.quiescent)
+    #expect(result.sample == 6)
+    #expect(captures == 6)
+    #expect(abs(now - 0.5) < 1e-9)
+}
+
+@Test
+func guiStillnessLayoutChangeBreaksConsecutiveStabilityEvidence() throws {
+    var now = 0.0
+    var captures = 0
+    let result = try sampleGUIStillness(settleMS: 800, capture: { _ -> Int in
+        captures += 1
+        if captures == 3 { throw DesktopCaptureLayoutChangedError() }
+        return captures
+    }, identical: { _, _ in true }, clock: { now }, sleep: { now += $0 })
+    #expect(result.quiescent)
+    #expect(result.sample == 7)
+    #expect(abs(now - 0.6) < 1e-9)
+}
+
+@Test
+func guiStillnessRepeatedLayoutChangesDoNotExtendDeadline() {
+    var now = 0.0
+    var captures = 0
+    #expect(throws: DesktopCaptureLayoutChangedError.self) {
+        _ = try sampleGUIStillness(settleMS: 250, capture: { _ -> Int in
+            captures += 1
+            throw DesktopCaptureLayoutChangedError()
+        }, identical: ==, clock: { now }, sleep: { now += $0 })
+    }
+    #expect(captures == 4)
+    #expect(abs(now - 0.25) < 1e-9)
+}
+
+@Test
+func guiStillnessDoesNotRetryZeroBudgetOrExpiredCapture() {
+    for budget in [0, 200] {
+        var now = 0.0
+        var captures = 0
+        #expect(throws: DesktopCaptureLayoutChangedError.self) {
+            _ = try sampleGUIStillness(settleMS: budget, capture: { _ -> Int in
+                captures += 1
+                if captures > 1 { now += 0.2 }
+                if budget == 0 || captures > 1 { throw DesktopCaptureLayoutChangedError() }
+                return 0
+            }, identical: ==, clock: { now }, sleep: { now += $0 })
+        }
+        #expect(captures == (budget == 0 ? 1 : 2))
+    }
+}
+
+@Test
+func guiStillnessReturnsValidFinalSampleAfterEarlierLayoutChange() throws {
+    var now = 0.0
+    var captures = 0
+    let result = try sampleGUIStillness(settleMS: 100, capture: { _ -> TimeInterval in
+        captures += 1
+        if captures == 1 { throw DesktopCaptureLayoutChangedError() }
+        return now
+    }, identical: ==, clock: { now }, sleep: { now += $0 })
+    #expect(!result.quiescent)
+    #expect(captures == 2)
+    #expect(abs(result.sample - 0.1) < 1e-9)
+}
+
+@Test
+func guiStillnessDoesNotRetryMatchingErrorTextOrPermissionFailures() {
+    for failure in [
+        ComputerUseError.message("Desktop layout changed during screenshot capture."),
+        ComputerUseError.permissionDenied("permission denied"),
+        ComputerUseError.providerResetRequired("capture stalled"),
+    ] {
+        var now = 0.0
+        var captures = 0
+        #expect(throws: ComputerUseError.self) {
+            _ = try sampleGUIStillness(settleMS: 800, capture: { _ -> Int in
+                captures += 1
+                if captures == 1 { throw DesktopCaptureLayoutChangedError() }
+                throw failure
+            }, identical: ==, clock: { now }, sleep: { now += $0 })
+        }
+        #expect(captures == 2)
+        #expect(abs(now - 0.1) < 1e-9)
+    }
+}

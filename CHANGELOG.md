@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- macOS: when the screenshot after GUI input catches a desktop layout
+  change, the provider discards that sample and captures again within the
+  same `settle_ms` budget. Input is not replayed and the layout checks are
+  unchanged; if the budget runs out, the call fails as before.
 - Linux: GTK, LibreOffice and Qt applications are easier to address. Editable
   text fields and document editors appear as `textbox` with their value and a
   ref; unnamed list rows take their visible label as name; Qt top-level
