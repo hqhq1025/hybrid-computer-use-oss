@@ -87,6 +87,20 @@ the image. That option adds `/usr/local/bin/libreoffice` and `soffice` symlinks;
 the distribution commands remain in `/usr/bin`. Close candidate applications
 before installation, then verify Writer, Calc and Impress in a fresh session.
 
+## Optional WPS installation
+
+`install_wps.py` installs the upstream package selected in `wps.json`. It does
+not run as part of `install.py`. The download URL can advance to another
+release, so the installer rejects a different package name, version or
+architecture. Run `python3 install_wps.py --package /path/to/wps-office.deb
+--check` to inspect the dependency plan. Remove `--check` and run as root to
+install. The installer refuses package removals and verifies the installed
+version and dpkg state.
+
+Close WPS before installation. The script does not copy profiles, accept license
+terms or change input-method settings. Confirm the license through WPS's normal
+first-launch interface, then verify Writer, Spreadsheets and Presentation.
+
 ## Repairs and configuration
 
 | Component | Installed behavior |
