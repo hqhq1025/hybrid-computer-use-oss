@@ -9,7 +9,12 @@ applications. [Computer Use MCP](MCP.md#desktop-runtime) lists the Linux
 session variables and packages, and [Platform support](PLATFORMS.md) covers
 macOS permissions and Windows session requirements.
 
-OSWorld guests provide `/home/user/a11y-env.sh`; runners source it before
+On Linux the provider switches session accessibility on itself, so
+applications started by the user need no flags such as
+`--force-renderer-accessibility`. Applications that were already running
+may need a restart; `AX apps` names them.
+[Accessibility on Linux](MCP.md#accessibility-on-linux) lists what each
+toolkit needs. OSWorld guests also source `/home/user/a11y-env.sh` before
 starting the agent. When session variables are missing, the server tries to
 discover them from `/run/user/<uid>` and desktop processes, but explicit
 session binding is more reliable. [Troubleshooting](MCP.md#troubleshooting)
