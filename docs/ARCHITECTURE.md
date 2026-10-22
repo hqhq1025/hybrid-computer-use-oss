@@ -297,6 +297,13 @@ window under that point against the lease. If that window changed, the action
 is rejected before any input with `gui_frame_stale`, and a fresh screenshot
 is returned.
 
+AX `observe:"full"` and `observe:"screenshot"` return the same frame. The core
+reads the tree, then captures the desktop through the GUI batch (one
+`screenshot` action), and registers the delivered image as the current GUI
+frame. A GUI coordinate action can follow an AX read directly and is checked
+against that frame by the same point rule. Providers never capture a window
+image.
+
 Every provider scales the desktop to fit within 1366x768 and never enlarges
 it. This is the size the model sees: GPT-5.4 at detail high shrinks a
 1920x1080 image to 1365x768, so a larger image would put the model's

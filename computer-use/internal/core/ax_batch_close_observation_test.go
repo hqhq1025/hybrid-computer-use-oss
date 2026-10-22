@@ -85,6 +85,7 @@ func testFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T, mod
 			},
 		},
 	}
+	backend.desktopResponse = testDesktopFrame(t, "desktop-frame", 64, 36)
 	service.Backend = backend
 	context := &AXBatchContext{
 		AppRef:       appRef,
@@ -115,11 +116,14 @@ func testFinalObservationFollowsVerifiedTransientWindowClosure(t *testing.T, mod
 	if mode == contract.ObserveFull || mode == contract.ObserveScreenshot {
 		foundImage := false
 		for _, item := range result.Content {
-			foundImage = foundImage || item.Type == "image" && item.Data == "current-image"
+			foundImage = foundImage || item.Type == "image" &&
+				item.Data == backend.desktopResponse.Snapshot.ScreenshotPNGBase64
 		}
-		if !foundImage || backend.observeRequests[1].Observation.IncludeScreenshot == nil ||
-			!*backend.observeRequests[1].Observation.IncludeScreenshot {
-			t.Fatal("replacement window final screenshot not requested or returned")
+		// The provider read returns no image; the image is one desktop frame
+		// captured after the replacement window was read.
+		if !foundImage || len(backend.desktopRequests) != 1 {
+			t.Fatalf("replacement window final screenshot not captured or returned: %d captures",
+				len(backend.desktopRequests))
 		}
 	}
 	if backend.observeRequests[0].WindowHandle != context.WindowHandle ||

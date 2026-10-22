@@ -22,7 +22,6 @@ type AXServiceRequest struct {
 	Prune              *bool                  `json:"prune,omitempty"`
 	Boxes              *bool                  `json:"boxes,omitempty"`
 	IncludeScreenshot  *bool                  `json:"includeScreenshot,omitempty"`
-	ScreenshotScope    string                 `json:"screenshotScope,omitempty"`
 	Observe            string                 `json:"observe,omitempty"`
 	CaptureSnapshot    *bool                  `json:"-"`
 	// LightReadback limits the post-action read to the window root. It is

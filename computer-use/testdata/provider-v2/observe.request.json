@@ -11,8 +11,7 @@
       "max_tree_nodes": 1200,
       "max_tree_depth": 64,
       "prune": true,
-      "include_screenshot": false,
-      "screenshot_scope": "window"
+      "include_screenshot": false
     }
   }
 }

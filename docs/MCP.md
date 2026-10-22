@@ -305,7 +305,7 @@ change canonical text, selectors, refs, or the response budget.
   before input. The published schema advertises only the canonical names.
 - `observe` selects the evidence returned after the batch. The default is a
   compact `diff`. An explicit `tree` returns the complete final window tree,
-  and `full` also returns its screenshot. These requests have the same
+  and `full` also returns a screenshot. These requests have the same
   meaning after a mutation, an ordered input sequence, or a final wait;
   evidence is captured after the wait finishes.
 - The removed `until` field, and its older spellings `postcondition` and
@@ -450,6 +450,12 @@ private layout lease for the full desktop; a coordinate action fails before
 input with `gui_frame_stale` when the window under one of its points no
 longer matches the screenshot. Nothing is sent, and the result carries a
 fresh screenshot.
+
+An AX image (`observe:"full"` or `observe:"screenshot"`) is the same
+full-desktop frame. The core captures it through the GUI batch after the AX
+read and registers it as the current GUI frame, so `x` and `y` may come from
+it and a following GUI call needs no new screenshot. The AX result states
+the image size on a line before the image.
 
 Every GUI result starts with the same JSON line as AX, followed by `screen`
 (the returned image's size and coordinate space) and `actions` (pixel-change

@@ -388,7 +388,10 @@ func (s *Service) executePlannedOrderedInputRun(
 			),
 		}
 	}
-	request.FinalObservation.IncludeScreenshot = &includeScreenshot
+	// The provider reads the tree only; the image is a desktop frame
+	// captured after the run (attachDesktopFrame).
+	noImage := false
+	request.FinalObservation.IncludeScreenshot = &noImage
 	providerStarted := time.Now()
 	nativeResult, err := backend.ExecuteOrderedInput(request)
 	s.countProviderTime(providerStarted)
@@ -493,11 +496,15 @@ func (s *Service) executePlannedOrderedInputRun(
 			result:       preparationResult,
 		}
 	}
+	var frameNotes []string
+	if includeScreenshot {
+		frameNotes = s.attachDesktopFrame(snapshot)
+	}
 	snapshot, notes, commitResult := s.commitPreparedSnapshot(
 		context.AppToken,
 		snapshotRequest,
 		snapshot,
-		nil,
+		frameNotes,
 	)
 	if commitResult.IsError {
 		return orderedInputRunExecution{

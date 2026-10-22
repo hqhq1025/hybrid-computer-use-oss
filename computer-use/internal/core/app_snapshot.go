@@ -197,6 +197,9 @@ type AppSnapshot struct {
 	shadowAST               AXShadowStats
 	actionExecution         *RuntimeActionEvidence
 	deliveryOnly            bool
+	// desktopFrame is the full-desktop GUI frame whose image this snapshot
+	// carries; see attachDesktopFrame.
+	desktopFrame *AppSnapshot
 	// lightReadback answers window identity without reading window content.
 	// Tree comparisons must not use this root-only observation.
 	lightReadback             bool
@@ -341,6 +344,7 @@ func (s *AppSnapshot) withoutScreenshot() *AppSnapshot {
 	clone.ScreenshotPNGBase64 = ""
 	clone.ScreenshotMimeType = ""
 	clone.ScreenshotEncoding = ""
+	clone.desktopFrame = nil
 	return &clone
 }
 
@@ -365,7 +369,7 @@ func (s *AppSnapshot) screenshotOnlyResult(notes []string) ToolCallResult {
 	}
 	if s == nil || s.ScreenshotPNGBase64 == "" {
 		lines = append(lines, "",
-			"(observe=\"screenshot\": no image came back for this window. On GNOME "+
+			"(observe=\"screenshot\": no full-desktop image came back. On GNOME "+
 				"Wayland the capture can return blank. The tree was refreshed "+
 				"server-side. Existing rN refs remain usable only while their logical "+
 				"targets remain valid; use AX mode=observe or find after a stale ref.)")
@@ -379,7 +383,7 @@ func (s *AppSnapshot) screenshotOnlyResult(notes []string) ToolCallResult {
 			"remain valid; use AX mode=observe or find after a stale ref.)")
 	return ToolCallResult{Content: []ContentItem{
 		{Type: "text", Text: capInline(strings.Join(lines, "\n"))},
-		{Type: "image", Data: s.ScreenshotPNGBase64, MimeType: s.screenshotMimeType()},
+		{Type: "image", Data: s.ScreenshotPNGBase64, MimeType: s.screenshotMimeType(), frame: s.desktopFrame},
 	}}
 }
 
@@ -409,6 +413,7 @@ func (s *AppSnapshot) textWithNotes(text string, notes []string) ToolCallResult 
 			Type:     "image",
 			Data:     s.ScreenshotPNGBase64,
 			MimeType: s.screenshotMimeType(),
+			frame:    s.desktopFrame,
 		})
 	}
 	return result

@@ -188,7 +188,7 @@ func axInputSchema() map[string]any {
 			"scope": map[string]any{"type": "string", "enum": AXScopeValues, "description": "observe/find; default window."},
 			"observe": map[string]any{
 				"type": "string", "enum": ObserveValues,
-				"description": "Returned evidence. act: default diff; explicit tree returns the complete window tree, full adds its screenshot. observe: default tree. none only with act.",
+				"description": "Returned evidence. act: default diff; explicit tree returns the complete window tree, full adds the full-desktop GUI screenshot. observe: default tree. none only with act.",
 			},
 			"root": map[string]any{
 				"type": "string", "pattern": "^(focused|r[1-9][0-9]*)$",
@@ -420,8 +420,8 @@ const axToolDescription = "Accessibility for application windows. Modes: " +
 
 var guiToolDescription = fmt.Sprintf("Full-desktop screenshot and pixel input. "+
 	`{"actions":[{"type":"screenshot"}]} alone observes. Any other batch is checked before `+
-	"input and returns one final screenshot. x/y are pixels of the latest returned full-desktop GUI "+
-	"image (screen width x height), never of an AX window image. type/keypress go to the current focus, so click "+
+	"input and returns one final screenshot. x/y are pixels of the latest full-desktop image (screen "+
+	"width x height) from GUI or AX full/screenshot, which return the same frame. type/keypress go to the current focus, so click "+
 	"the field first in the same batch. Batch the actions planned from one screenshot; end "+
 	"the batch after an action that may open, close, or move a window, and plan the rest "+
 	"from the returned image. GUI cannot address windows; AX activates and closes them by "+

@@ -184,12 +184,13 @@ func (s *Service) writeErrorContext(app, tool, message string) (string, bool) {
 	if !errorContextEnabled() || strings.TrimSpace(app) == "" {
 		return "", false
 	}
-	noRefs := false
+	noRefs, noImage := false, false
 	response, err := s.callProviderObserve(ProviderObserveRequest{
 		ProtocolVersion: ProviderProtocolV2,
 		App:             app,
 		Observation: ProviderObservationOptions{
-			Boxes: &noRefs,
+			Boxes:             &noRefs,
+			IncludeScreenshot: &noImage,
 		},
 	})
 	if err != nil || response == nil || !response.OK || response.Snapshot == nil {
@@ -215,10 +216,12 @@ func (s *Service) writeErrorContext(app, tool, message string) (string, bool) {
 		return "", true
 	}
 	parts := []string{textPath}
-	if snapshot.ScreenshotPNGBase64 != "" {
-		if raw, decodeErr := base64.StdEncoding.DecodeString(snapshot.ScreenshotPNGBase64); decodeErr == nil {
+	// The file holds the full desktop, like every AX image. It is not
+	// delivered as an image, so it does not become the GUI frame.
+	if frame, frameErr := s.captureDesktopFrame(); frameErr == nil {
+		if raw, decodeErr := base64.StdEncoding.DecodeString(frame.ScreenshotPNGBase64); decodeErr == nil {
 			extension := ".png"
-			if snapshot.screenshotMimeType() == "image/jpeg" {
+			if frame.screenshotMimeType() == "image/jpeg" {
 				extension = ".jpg"
 			}
 			shotPath := filepath.Join(dir, fmt.Sprintf("error-context-%d%s", stamp, extension))
@@ -262,6 +265,9 @@ func (s *Service) callTool(
 ) (result ToolCallResult) {
 	defer func() {
 		result = enforceAXImageOutputPolicy(name, args, result)
+		if name == contract.PublicToolAX {
+			result = s.registerDeliveredDesktopFrames(result)
+		}
 	}()
 
 	s.syncSessionWithDesktop()

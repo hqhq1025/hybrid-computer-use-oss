@@ -231,17 +231,6 @@ def inventory_errors(value):
     return list(getattr(value, "errors", []) or [])
 
 
-def a11y_screenshots_enabled():
-    """Return whether AX responses include a screenshot; enabled by default.
-
-    Set `COMPUTER_USE_A11Y_SCREENSHOTS=0` to disable. The switch exists for
-    experiments, not everyday use, and does not affect the GUI tool, which
-    always returns its screenshot.
-    """
-    value = os.environ.get("COMPUTER_USE_A11Y_SCREENSHOTS", "1").strip().lower()
-    return value not in {"0", "false", "no", "off"}
-
-
 # Fraction of the node budget after which unnamed structural containers with
 # no actions and no value are dropped. Plain depth-first truncation drops
 # whatever the traversal reaches last, so late subtrees vanish entirely.

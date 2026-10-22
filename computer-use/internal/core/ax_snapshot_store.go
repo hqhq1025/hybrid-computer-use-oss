@@ -53,8 +53,8 @@ func (s *Service) getAppState(
 		request.MaxTreeDepth = *maxTreeDepth
 	}
 	request.Prune = prune
-	// AX returns only the semantic tree by default. A window screenshot is
-	// opt-in visual evidence, never a source of GUI coordinates.
+	// AX returns only the semantic tree by default. An image is opt-in; it
+	// is the full-desktop GUI frame (attachDesktopFrame).
 	if includeScreenshot == nil {
 		off := false
 		request.IncludeScreenshot = &off

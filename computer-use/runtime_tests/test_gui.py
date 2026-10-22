@@ -622,8 +622,7 @@ class GUIScreenCoordinateTests(GUISettleAndFrameGuardCases, unittest.TestCase):
         self.assertTrue(response["effect_unknown"])
 
     def test_gui_fails_closed_when_desktop_bounds_are_unavailable(self):
-        with mock.patch.object(runtime, "desktop_bounds", return_value=None), \
-                mock.patch.object(runtime, "capture_window_image", return_value=None):
+        with mock.patch.object(runtime, "desktop_bounds", return_value=None):
             response = runtime.perform_gui([{"type": "click", "x": 1, "y": 2}])
 
         self.assertFalse(response["ok"])

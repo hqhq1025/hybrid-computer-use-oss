@@ -715,41 +715,42 @@ class SettleWaitTests(AtspiPatchedTestCase):
 
 
 class ScreenshotPolicyTests(unittest.TestCase):
-    """Accessibility screenshot policy and the GUI screenshots it never disables.
+    """The provider captures no accessibility window image.
 
-    Accessibility screenshots are on by default because the tree alone gives
-    false negatives: right-aligning text or saving a file can take effect
-    while the tree suggests the input was delivered but ignored.
+    AX images are full-desktop GUI frames that the Go core captures with a
+    desktop batch, so they share the GUI coordinate frame. A request for a
+    provider window image is rejected before any read.
     """
 
-    def setUp(self):
-        self._saved = os.environ.get("COMPUTER_USE_A11Y_SCREENSHOTS")
-        self.addCleanup(self._restore)
+    def _observe_request(self, observation):
+        return {
+            "protocol": "computer-use-provider-v2",
+            "schema_version": 2,
+            "request_id": "req-observe",
+            "operation": "observe",
+            "observe": {
+                "protocol_version": 2,
+                "app": "Editor",
+                "observation": observation,
+            },
+        }
 
-    def _restore(self):
-        if self._saved is None:
-            os.environ.pop("COMPUTER_USE_A11Y_SCREENSHOTS", None)
-        else:
-            os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = self._saved
+    def test_observation_rejects_a_window_image_request(self):
+        with self.assertRaises(runtime.ProviderRequestError) as caught:
+            runtime.validate_request(
+                self._observe_request({"include_screenshot": True}))
+        self.assertIn("include_screenshot", str(caught.exception))
+        with self.assertRaises(runtime.ProviderRequestError):
+            runtime.validate_request(
+                self._observe_request({"screenshot_scope": "screen"}))
+        runtime.validate_request(
+            self._observe_request({"include_screenshot": False}))
 
-    def test_enabled_by_default(self):
-        os.environ.pop("COMPUTER_USE_A11Y_SCREENSHOTS", None)
-        self.assertTrue(runtime.a11y_screenshots_enabled())
+    def test_window_image_capture_was_removed(self):
+        for name in ("capture_window_image", "a11y_screenshots_enabled"):
+            self.assertFalse(hasattr(runtime, name), name)
 
-    def test_can_be_switched_off_for_the_ab_test(self):
-        for value in ("0", "false", "no", "off", "OFF", " 0 "):
-            os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = value
-            self.assertFalse(runtime.a11y_screenshots_enabled(), value)
-
-    def test_unrecognised_values_keep_screenshots_on(self):
-        """Only explicit off values disable screenshots; a typo keeps the default."""
-        for value in ("1", "true", "yes", "", "maybe"):
-            os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = value
-            self.assertTrue(runtime.a11y_screenshots_enabled(), value)
-
-    def test_gui_screenshot_is_independent_of_a11y_policy(self):
-        os.environ["COMPUTER_USE_A11Y_SCREENSHOTS"] = "0"
-        self.assertFalse(runtime.a11y_screenshots_enabled())
+    def test_gui_screenshot_is_unaffected(self):
         desktop = runtime.frame(0, 0, 1600, 900)
         with mock.patch.object(runtime, "desktop_bounds", return_value=desktop), \
                 patch_gui_capture(
@@ -758,9 +759,3 @@ class ScreenshotPolicyTests(unittest.TestCase):
         self.assertTrue(response["ok"])
         self.assertEqual(response["snapshot"]["screenshotPngBase64"], "png")
         self.assertFalse(response["input_events_emitted"])
-        self.assertEqual(response["input_actions_dispatched"], 0)
-        self.assertIn(
-            "0 input-producing action(s) completed event emission",
-            response["text"],
-        )
-        self.assertNotIn("settle_ms=0", response["text"])

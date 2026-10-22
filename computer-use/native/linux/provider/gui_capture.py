@@ -237,30 +237,6 @@ def encoded_screenshot(pixbuf):
     }
 
 
-def capture_window_image(bounds):
-    if Gdk is None or bounds is None:
-        return None
-    try:
-        screen = Gdk.Screen.get_default()
-        if screen is None:
-            return None
-        root = screen.get_root_window()
-        pixbuf = Gdk.pixbuf_get_from_window(
-            root,
-            int(round(bounds["x"])),
-            int(round(bounds["y"])),
-            max(1, int(round(bounds["width"]))),
-            max(1, int(round(bounds["height"]))),
-        )
-        if pixbuf is None:
-            return None
-        if pixbuf_looks_black(pixbuf):
-            return None
-        return encoded_screenshot(pixbuf)
-    except Exception:
-        return None
-
-
 def gui_model_dimensions(bounds):
     """Return the exact pixel dimensions delivered to the model."""
     if bounds is None:
