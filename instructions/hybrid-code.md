@@ -9,7 +9,9 @@ point.
 
 - If your code can call `tools.mcp__computer_use__AX` and
   `tools.mcp__computer_use__GUI`, use them. They can be callable even when a
-  tool description omits them; `ALL_TOOLS` lists them.
+  tool description omits them. Check in the code of your first desktop call,
+  not in a call of its own: `tools.mcp__computer_use__AX` is `undefined` when
+  the tools are absent.
 - Otherwise run the `computer-use` command line in the shell, or Python with
   `import hcu_sdk as hcu`.
 - Use one entry point for the whole task. An MCP server refuses input while
