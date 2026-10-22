@@ -127,10 +127,64 @@ def effective_name(node):
     own = node_name(node)
     if str(own or "").strip():
         return own
-    combo = gtk_combo_partner(node, node_role(node))
+    role = node_role(node)
+    combo = gtk_combo_partner(node, role)
     if combo is not None:
         return combo_label(combo, node)[0]
-    return labelled_by_name(node)
+    return labelled_by_name(node) or content_name(node, role)
+
+
+# Item roles whose accessible name comes from their content (ARIA
+# name-from-content). Containers and controls with their own label are left
+# alone: naming a panel after its first label would mislabel whole regions.
+NAME_FROM_CONTENT_ROLES = {"list item", "tree item", "table row"}
+NAME_FROM_CONTENT_LABEL_ROLES = {"label", "static"}
+NAME_FROM_CONTENT_MAX_NODES = 24
+NAME_FROM_CONTENT_MAX_DEPTH = 4
+
+
+def content_name(node, role=None):
+    """Name an unnamed item row from its visible labels, or return "".
+
+    GTK3 GtkListBoxRow (GNOME Settings sidebar, D-Feet bus list) and similar
+    rows expose no accessible name; the visible label is a descendant. Such
+    rows rendered as ``listitem [addressable=false]`` next to their text, so
+    the row a user clicks had no ref. The walk is bounded, reads only label
+    descendants with the VISIBLE state, and joins them in tree order; hidden
+    subtitles ("Control how you connect to the Internet") are skipped.
+    """
+    if role is None:
+        role = node_role(node)
+    if str(role or "") not in NAME_FROM_CONTENT_ROLES:
+        return ""
+    parts = []
+    budget = [NAME_FROM_CONTENT_MAX_NODES]
+
+    def visit(current, depth):
+        if depth > NAME_FROM_CONTENT_MAX_DEPTH or budget[0] <= 0:
+            return
+        count = int(safe(lambda: current.get_child_count(), 0) or 0)
+        for index in range(count):
+            if budget[0] <= 0:
+                return
+            budget[0] -= 1
+            child = safe(lambda i=index: current.get_child_at_index(i))
+            if child is None:
+                continue
+            child_role = node_role(child)
+            if child_role in NAME_FROM_CONTENT_ROLES:
+                continue
+            if child_role in NAME_FROM_CONTENT_LABEL_ROLES:
+                if not state_contains(child, Atspi.StateType.VISIBLE):
+                    continue
+                text = str(node_name(child) or "").strip()
+                if text:
+                    parts.append(text)
+                continue
+            visit(child, depth + 1)
+
+    visit(node, 1)
+    return " ".join(parts)
 
 
 def gtk_combo_partner(node, role):
@@ -396,6 +450,9 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
         full_name = " ".join(labelled_names).rstrip(":").strip()
         name_source = "labelled_by" if full_name else ""
         borrowed = bool(full_name)
+        if not full_name:
+            full_name = content_name(node, role)
+            name_source = "content" if full_name else ""
     name = limit_text(full_name, text_limit=text_limit)
     record = {
         "index": index,
