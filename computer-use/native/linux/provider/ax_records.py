@@ -6,7 +6,6 @@
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
     DEFAULT_TEXT_LIMIT,
-    NodeFacts,
     has_editable_text_iface,
     has_text_iface,
     limit_text,
@@ -19,6 +18,7 @@ from .foundation import (
     safe,
     state_contains,
 )
+from .node_facts import NodeFacts
 from .primitives import name_fingerprint
 from .ax_node_properties import (
     accessible_id,

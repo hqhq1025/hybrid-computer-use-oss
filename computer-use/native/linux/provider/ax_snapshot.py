@@ -11,7 +11,6 @@ from .foundation import (
     MAX_RENDERED_CHARS,
     FIND_FIRST_BUDGET,
     MENU_ROLES,
-    NodeFacts,
     TREE_DEADLINE_SECONDS,
     is_interactive_role,
     node_role,
@@ -22,6 +21,9 @@ from .foundation import (
     should_enumerate_children,
     showing_state,
     state_contains,
+)
+from .node_facts import (
+    NodeFacts,
     strict_prune_probe,
 )
 

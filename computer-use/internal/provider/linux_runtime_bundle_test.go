@@ -36,6 +36,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/gui_dispatch.py",
 		"native/linux/provider/gui_input.py",
 		"native/linux/provider/input_primitives.py",
+		"native/linux/provider/node_facts.py",
 		"native/linux/provider/phase_timing.py",
 		"native/linux/provider/primitives.py",
 		"native/linux/provider/recovery.py",
