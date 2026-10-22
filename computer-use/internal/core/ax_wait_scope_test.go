@@ -126,8 +126,8 @@ func untilStatus(result ToolCallResult) string {
 }
 
 // Shape 1: the batch acts in the document window and the awaited dialog is
-// another top-level window of the same application (panel tasks 1d17d234,
-// 04d9aeaf, a434992a).
+// another top-level window of the same application, as LibreOffice opens
+// its dialogs.
 func TestSelectorUntilSeesDialogInAnotherWindowOfTheApp(t *testing.T) {
 	s, backend, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
 	for _, selector := range []map[string]any{
@@ -147,7 +147,7 @@ func TestSelectorUntilSeesDialogInAnotherWindowOfTheApp(t *testing.T) {
 	}
 }
 
-// Full-e a10b69e1 #19: Thunderbird exposes its modal "New Folder" dialog
+// Thunderbird exposes its modal "New Folder" dialog
 // as a top-level frame, so {"role":"dialog"} never matched although the
 // next observe showed blocking=modal_dialog. A modal top-level window
 // counts as a dialog; a non-modal one does not.

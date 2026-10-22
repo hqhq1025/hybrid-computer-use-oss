@@ -14,7 +14,7 @@ repo=$(git rev-parse --show-toplevel)
 export PATH="$HOME/.local/bin:$PATH"
 log_dir=${LOG_DIR:-/tmp/hcu-maint-check}
 mkdir -p "$log_dir"
-osworld=${OSWORLD_V2_ROOT:-/datadrive2/hcu-eval-runner/OSWorld-V2}
+osworld=${OSWORLD_V2_ROOT:-$repo/external/OSWorld-V2}
 baseline_binary=${1:-}
 
 step() {

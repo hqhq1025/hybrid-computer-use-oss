@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+- GUI `zoom` returns an enlarged region of the current full-desktop frame
+  for small text and dense icons, with the same contract on Linux, macOS and
+  Windows. A zoom is look-only: it is bound to the frame it enlarges, fails
+  as stale when a window over the region changed, and never becomes the
+  frame that later coordinates refer to.
+- AX `observe` and `act` with `full` or `screenshot` return the same
+  full-desktop image as GUI, and that image becomes the current GUI frame,
+  so a GUI coordinate action can follow an AX read without another
+  screenshot.
+- The gateways finish accounting for a response before they admit the
+  agent's next request of the same task, so a fast follow-up request is no
+  longer rejected as in flight.
+- The Python SDK serializes concurrent calls on one socket, closes the
+  socket after a rejected hello, and binds input retries to the daemon
+  instance that received the first attempt: after a daemon restart, an
+  uncertain input is reported as unknown instead of being sent again.
+  Attached MCP calls keep element refs unique across daemon restarts.
+- The PTC adapter keeps each tool event's outcome for the conversation and
+  returns it for a repeated event instead of sending the input again. Direct
+  screenshot results include images when the operator supplies an image
+  reader.
+- The Python SDK accepts named `window_ref` and `app` targets and the
+  published find field names, and handles cancellation without sending input
+  after the cancelled call. `CodeDesktop` publishes errors to the host before
+  raising them. `sdk/python/examples/open_gcua_worker.py` shows the OpenGCUA
+  integration.
+- The CLI rejects unknown options and trailing JSON content before it
+  contacts the daemon.
+- The GUI schema declares `actions` and `settle_ms` at its root, so clients
+  that close the root object (OpenCode) accept legal calls. Gemini CLI uses
+  the MCP server key `computer-use`; trace summaries read both the old and
+  the new key.
+- macOS permission checks use only the running process's grants. A Screen
+  Recording denial is reported as `permission_denied` with recovery advice.
+- macOS AX writes and window close that fail with an uncertain native error
+  report `effect_unknown`. Explicitly selected background windows are
+  observed without activating them, internal reads keep the window the
+  request selected, and a verified native close is reported as such.
+- The hybrid guide uses `open -a APP` to launch applications on macOS.
+- Cross-window AX batches fail as `invalid_argument` with a hint to split
+  them by window. An ordered-input request that never reached the provider
+  reports that no input was sent.
 - Drop history-only version markers from names: `AXSnapshotV1` is
   `AXSnapshot`, `ProviderV2*` is `Provider*`, `provider_wire_v2.go` is
   `provider_wire.go`, `wire_v2.py` is `wire.py`, the Windows test project is
@@ -60,12 +102,11 @@
   partial effects when readback disagrees with the requested range.
 - Fit GUI screenshots into 1366 x 768 and map input coordinates back to the
   native desktop using the exact delivered width and height. This aligns
-  screenshot pixels with the GPT-5.4 high-detail image used in validation.
+  screenshot pixels with the image GPT-5.4 sees at high detail.
 - Update base and hybrid instructions to stop after sufficient evidence,
   bound application discovery, and save/close/reopen documents when a needed
-  property requires direct file editing. The combined changes have not yet
-  received a new model evaluation; separate candidate results are not a
-  combined performance measurement.
+  property requires direct file editing. These instruction changes need a
+  new model evaluation.
 - On Linux, an AX click on a Qt control whose only accessibility action is
   `Toggle` (checkable buttons, radio buttons, item-view cells) uses a real
   pointer click when the window is in front, the geometry is stable, and a
@@ -82,9 +123,9 @@
   nothing else changed, and counts the nodes that changed when the element
   itself did not, instead of `no visible change`.
 - AX act results start with an effect line and a windows line, and return a
-  diff when it is shorter than the tree. On the paper OSWorld 1.0 harness
-  (20-task panel, GPT-5.4, two rounds), the median input per solved task is about 0.6 of
-  v0.14 with the same steps; scores are within one task of v0.14.
+  diff when it is shorter than the tree. On OSWorld tasks this reduced the
+  median model input per solved task at the same step count; scores stayed
+  within one task.
 - `until` is replaced by ordered `wait` steps inside an act batch. The
   computer-use daemon serves the same core to the CLI and to the `hcu_sdk`
   Python module, which includes a PTC adapter.
@@ -93,8 +134,8 @@
   under its point changed after the screenshot.
 - On Linux, an unchanged window's AX tree is reused across calls by evidence
   (no UI event, same fingerprint, visible content re-read) instead of a
-  10-second age limit, within a 64 MB cache. A Calc observe drops from about
-  550 ms to about 195 ms on a real desktop.
+  10-second age limit, within a 64 MB cache, so repeated reads of an
+  unchanged window are faster.
 - Internal identifiers use `ax` instead of `a11y`; wire names and MCP output
   are unchanged. Long functions are split into named, tested steps.
 - Model guidance says to start GUI applications from the shell with

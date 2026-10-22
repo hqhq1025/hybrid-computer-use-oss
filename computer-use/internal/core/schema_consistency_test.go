@@ -884,8 +884,8 @@ func TestGUIActionSamplesMatchSchema(t *testing.T) {
 	}
 }
 
-// historicalArgumentShapes returns AX arguments recorded in evaluation runs
-// (October 2026 panels), with refs renumbered to the fixture's r1/w1/a1/f1
+// historicalArgumentShapes returns AX arguments recorded in evaluation runs,
+// with refs renumbered to the fixture's r1/w1/a1/f1
 // and every free-text value replaced, so only the argument shapes remain.
 func historicalArgumentShapes(t testing.TB) []map[string]any {
 	t.Helper()

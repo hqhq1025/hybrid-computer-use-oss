@@ -46,7 +46,7 @@ func TestStructuredSelectorAcceptsStandardOrProviderRole(t *testing.T) {
 // is its real match rather than the last quote in the selector, including when
 // the name contains quotes or backslashes. Taking the last quote only works
 // without a suffix; a trailing [desc="..."] would be swallowed into the name.
-// Full-e 0810415c #6 wrote role "menu item"; the model sees "menuitem" in
+// Models write role "menu item"; the model sees "menuitem" in
 // the tree and models also write "menu_item". Every spelling must name the
 // same role, in an until selector and in find, without widening to other
 // roles.

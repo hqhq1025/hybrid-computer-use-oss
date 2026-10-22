@@ -1,6 +1,7 @@
 """Inject HCU into the existing OpenGCUA persistent Python worker.
 
-Operator example tested against OpenGCUA ae34bba, using private bootstrap and
+Operator example tested against OpenGCUA revision
+ae34bba0643598638232103c32dbfa017f3b84c8, using private bootstrap and
 cleanup hooks, not a public plugin API. Set OPEN_GCUA_RUNTIME_DIR to that
 checkout's packages/harness/runtime and pass this file as CodeExecutor's
 runtime_path. Set HCU_SOCKET, HCU_SESSION, and HCU_OUTPUT_ROOT explicitly.

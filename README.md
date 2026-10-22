@@ -152,7 +152,6 @@ enforces the model-call budget; the official evaluator scores the guest.
 | `osworld-overlay/` | Files installed into a pinned OSWorld-V2 checkout |
 | `configs/` | Example OSWorld V1 and V2 queue configs |
 | `scripts/`, `scripts/maint/` | OSWorld-V2 installer, MCP smoke test; maintenance checks |
-| `analysis/tool_changes/` | Design and evaluation notes for individual tool changes |
 | `tests/` | Python tests for the runner, gateways and configs |
 
 ## Documentation
@@ -169,8 +168,6 @@ enforces the model-call budget; the official evaluator scores the guest.
 | [Instructions](docs/INSTRUCTIONS.md) | Which plain-text guidance reaches the model, and how is it selected? |
 | [AX, GUI and CDP](docs/AX_AND_CDP.md) | How do the desktop channels and the browser channel start and divide work? |
 | [Isolation](docs/ISOLATION.md) | What may an evaluated agent see? |
-
-The documents were last verified against commit `a4006c5`.
 
 ## Contributing
 

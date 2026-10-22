@@ -1,7 +1,5 @@
 # Architecture
 
-Last verified against commit `a4006c5`.
-
 ## Control plane
 
 The OSWorld runner creates one isolated desktop per task, installs one task
@@ -269,7 +267,7 @@ not hide a fragment from them; a fragment that names a cross-package
 identifier includes the package qualifier.
 
 `scripts/maint/split_packages.sh all --commit` reproduces the split from the
-single-package tree at `db6a59c`; `scripts/maint/package_map.txt` assigns
+single-package tree before the split; `scripts/maint/package_map.txt` assigns
 each file to its package.
 
 ## AX state model
