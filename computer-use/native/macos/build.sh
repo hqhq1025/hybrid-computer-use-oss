@@ -182,7 +182,7 @@ codesign --verify --deep --strict "${bundle_root}"
   -trimpath \
   -ldflags "-s -w -X main.version=${version}" \
   -o "${output_dir}/computer-use" \
-  .
+  ./cmd/computer-use
 )
 codesign --force --sign "${codesign_identity}" \
   "${output_dir}/computer-use"
