@@ -247,7 +247,44 @@ def effective_role(node, role=None):
     role = str(role or "")
     if gtk_combo_partner(node, role) is not None:
         return "combo box"
-    return role
+    return editable_text_role(node, role)
+
+
+def editable_text_role(node, role):
+    """Project an editable AT-SPI ``text`` node to ``entry`` or ``text area``.
+
+    AT-SPI uses role ``text`` for static text and for input fields alike.
+    GTK2/GTK3 (GtkEntry, GtkTextView), Qt (QLineEdit, QPlainTextEdit) and
+    LibreOffice dialog fields all report ``text``; labels use ``label``. The
+    field differs only by the EDITABLE state and the Text interface.
+    Without the projection the gedit document, the LibreOffice Find field
+    and GTK file name entries were rendered as static text: no ref, no value,
+    and a find for role ``textbox`` returned nothing.
+
+    MULTI_LINE marks a text area; anything else is a single-line entry. The
+    editor of a projected LibreOffice combo keeps its role: the combo box
+    already exposes it as its edit target.
+    """
+    if role != "text":
+        return role
+    states = safe(node.get_state_set)
+    if states is None or not states.contains(Atspi.StateType.EDITABLE):
+        return role
+    # KTextEditor (Kate) exposes Text without EditableText; keyboard input
+    # still edits it, so the Text interface is enough.
+    if not (has_editable_text_iface(node) or has_text_iface(node)):
+        return role
+    parent = safe(lambda: node.get_parent())
+    if parent is not None:
+        count = int(safe(lambda: parent.get_child_count(), 0) or 0)
+        if 2 <= count <= 3:
+            for index in range(count):
+                sibling = safe(lambda i=index: parent.get_child_at_index(i))
+                if sibling is not None and node_role(sibling) == "combo box":
+                    return role
+    if states.contains(Atspi.StateType.MULTI_LINE):
+        return "text area"
+    return "entry"
 
 
 def semantic_relations(node, text_limit=DEFAULT_TEXT_LIMIT):
@@ -344,6 +381,7 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
         if str(target.get("name") or "").strip()
     ]
     combo = gtk_combo_partner(node, role)
+    role = editable_text_role(node, role)
     if combo is not None:
         # See gtk_combo_partner(): the drawn toggle button stands for the
         # hidden combo box, so it takes the combo's role and label.

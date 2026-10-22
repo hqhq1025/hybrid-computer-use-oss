@@ -105,6 +105,71 @@ class ComboProjectionTests(AtspiPatchedTestCase):
 
 
 
+class EditableTextRoleTests(AtspiPatchedTestCase):
+    """AT-SPI role "text" names both static text and editable fields.
+
+    GTK (GtkEntry, GtkTextView), Qt (QLineEdit) and LibreOffice dialog fields
+    report role "text" with EDITABLE and EditableText; labels use "label". The
+    model saw the gedit document and the LibreOffice Find field as static
+    text: no ref in the tree, no value, and find role "textbox" missed them.
+    """
+
+    def _field(self, states, editable_iface=True, text="alpha"):
+        node = _Node(role="text", states=states)
+        node.text_iface = FakeTextIface(text)
+        if not editable_iface:
+            node.get_editable_text_iface = lambda: None
+        else:
+            node.get_editable_text_iface = lambda: node.text_iface
+        return node
+
+    def test_editable_single_line_text_is_an_entry(self):
+        node = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE,
+                            STATE.SINGLE_LINE))
+        _Node(role="filler").add(node)
+        record = runtime.record_for(node, 0, [0], None)
+        self.assertEqual(record["controlType"], "entry")
+        self.assertEqual(runtime.effective_role(node), "entry")
+        self.assertTrue(runtime.record_still_matches(node, record, None))
+
+    def test_editable_multi_line_text_is_a_text_area(self):
+        node = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE,
+                            STATE.MULTI_LINE))
+        _Node(role="scroll pane").add(node)
+        record = runtime.record_for(node, 0, [0], None)
+        self.assertEqual(record["controlType"], "text area")
+
+    def test_read_only_text_stays_text(self):
+        node = self._field((STATE.SHOWING, STATE.VISIBLE))
+        _Node(role="filler").add(node)
+        self.assertEqual(runtime.record_for(node, 0, [0], None)["controlType"], "text")
+
+    def test_editable_text_without_editable_interface_is_an_entry(self):
+        # KTextEditor (Kate) reports EDITABLE and Text but no EditableText;
+        # keyboard input still edits it.
+        node = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE),
+                           editable_iface=False)
+        _Node(role="filler").add(node)
+        self.assertEqual(runtime.record_for(node, 0, [0], None)["controlType"], "entry")
+
+    def test_editable_state_without_text_interface_stays_text(self):
+        node = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE),
+                           editable_iface=False)
+        node.text_iface = None
+        _Node(role="filler").add(node)
+        self.assertEqual(runtime.record_for(node, 0, [0], None)["controlType"], "text")
+
+    def test_combo_editor_keeps_its_role(self):
+        # The LibreOffice combo projection already exposes this editor through
+        # the combo box (editTarget); a second textbox would duplicate it.
+        editor = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE))
+        combo = _Node(role="combo box", states=())
+        toggle = _Node(role="toggle button")
+        _Node(role="filler").add(editor, combo, toggle)
+        self.assertEqual(runtime.record_for(editor, 0, [0], None)["controlType"], "text")
+
+
+
 class _Span:
     def __init__(self, start, end):
         self.start_offset, self.end_offset = start, end
