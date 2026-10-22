@@ -20,6 +20,8 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/ref_continuity.py",
 	"native/linux/provider/recovery.py",
 	"native/linux/provider/element_resolver.py",
+	"native/linux/provider/semantic_window_candidates.py",
+	"native/linux/provider/semantic_scan.py",
 	"native/linux/provider/gui_capture.py",
 	"native/linux/provider/gui_dispatch.py",
 	"native/linux/provider/snapshot.py",
