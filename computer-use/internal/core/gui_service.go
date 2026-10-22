@@ -24,6 +24,10 @@ func (s *Service) gui(actions any, settleMS int) ToolCallResult {
 	if err := checkGUIWaitBudget(providerActions); err != nil {
 		return withArgumentRule(guiError(contract.AXCodeInvalidArgument, "actions", err.Error(), GUIScreenshotCall), err)
 	}
+	if index, err := checkGUIScrollDelta(providerActions); err != nil {
+		path := fmt.Sprintf("actions[%d]", index)
+		return withArgumentRule(guiError(contract.AXCodeInvalidArgument, path, err.Error(), guiActionHints["scroll"]), err)
+	}
 	if err := s.preflightPlatformGUIKeys(providerActions); err != nil {
 		return guiArgumentError(err, actions)
 	}
@@ -742,6 +746,22 @@ func guiObservationFailure(
 	}
 	SetGUIPublicError(&result, code, path, detail, guiProviderFailureHint(response))
 	return result
+}
+
+// checkGUIScrollDelta rejects a scroll that would not move: the schema
+// gives both deltas as optional numbers and leaves "at least one non-zero"
+// to this rule, so code-declaration clients see plain number fields.
+func checkGUIScrollDelta(actions []ProviderDesktopAction) (int, error) {
+	for index, action := range actions {
+		if action.Type != "scroll" {
+			continue
+		}
+		if (action.ScrollX == nil || *action.ScrollX == 0) && (action.ScrollY == nil || *action.ScrollY == 0) {
+			return index, contract.NewArgumentRuleError(contract.ArgumentRuleScrollDelta,
+				"scroll needs a non-zero scroll_x or scroll_y. No action was emitted")
+		}
+	}
+	return 0, nil
 }
 
 // checkGUIWaitBudget enforces the cumulative wait limit that the GUI

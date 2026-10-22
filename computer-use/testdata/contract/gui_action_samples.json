@@ -80,7 +80,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/:alias_action",
+  "origin": "action6/:alias_action",
   "action": {
    "action": "keypress",
    "keys": [
@@ -128,7 +128,6 @@
   "origin": "action4/:alias_action",
   "action": {
    "action": "scroll",
-   "scroll_x": 1,
    "x": 1,
    "y": 1
   },
@@ -137,23 +136,13 @@
  {
   "origin": "action5/:alias_action",
   "action": {
-   "action": "scroll",
-   "scroll_y": 1,
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action6/:alias_action",
-  "action": {
    "action": "type",
    "text": "libreoffice"
   },
   "accepted": false
  },
  {
-  "origin": "action8/:alias_action",
+  "origin": "action7/:alias_action",
   "action": {
    "action": "wait"
   },
@@ -236,7 +225,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/:legacy_actions",
+  "origin": "action6/:legacy_actions",
   "action": {
    "actions": [],
    "keys": [
@@ -265,29 +254,7 @@
   "accepted": false
  },
  {
-  "origin": "action4/:legacy_actions",
-  "action": {
-   "actions": [],
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
   "origin": "action5/:legacy_actions",
-  "action": {
-   "actions": [],
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action6/:legacy_actions",
   "action": {
    "actions": [],
    "text": "libreoffice",
@@ -326,7 +293,17 @@
   "accepted": false
  },
  {
-  "origin": "action8/:legacy_actions",
+  "origin": "action4/:legacy_actions",
+  "action": {
+   "actions": [],
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/:legacy_actions",
   "action": {
    "actions": [],
    "type": "wait"
@@ -410,7 +387,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/:legacy_app",
+  "origin": "action6/:legacy_app",
   "action": {
    "app": "libreoffice",
    "keys": [
@@ -439,29 +416,7 @@
   "accepted": false
  },
  {
-  "origin": "action4/:legacy_app",
-  "action": {
-   "app": "libreoffice",
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
   "origin": "action5/:legacy_app",
-  "action": {
-   "app": "libreoffice",
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action6/:legacy_app",
   "action": {
    "app": "libreoffice",
    "text": "libreoffice",
@@ -500,7 +455,17 @@
   "accepted": false
  },
  {
-  "origin": "action8/:legacy_app",
+  "origin": "action4/:legacy_app",
+  "action": {
+   "app": "libreoffice",
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/:legacy_app",
   "action": {
    "app": "libreoffice",
    "type": "wait"
@@ -584,7 +549,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/:unknown_field",
+  "origin": "action6/:unknown_field",
   "action": {
    "bogus": 1,
    "keys": [
@@ -613,29 +578,7 @@
   "accepted": false
  },
  {
-  "origin": "action4/:unknown_field",
-  "action": {
-   "bogus": 1,
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
   "origin": "action5/:unknown_field",
-  "action": {
-   "bogus": 1,
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action6/:unknown_field",
   "action": {
    "bogus": 1,
    "text": "libreoffice",
@@ -674,7 +617,17 @@
   "accepted": false
  },
  {
-  "origin": "action8/:unknown_field",
+  "origin": "action4/:unknown_field",
+  "action": {
+   "bogus": 1,
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/:unknown_field",
   "action": {
    "bogus": 1,
    "type": "wait"
@@ -1612,7 +1565,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/:legacy_expect",
+  "origin": "action6/:legacy_expect",
   "action": {
    "expect": {
     "appears": "Save"
@@ -1645,33 +1598,7 @@
   "accepted": false
  },
  {
-  "origin": "action4/:legacy_expect",
-  "action": {
-   "expect": {
-    "appears": "Save"
-   },
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
   "origin": "action5/:legacy_expect",
-  "action": {
-   "expect": {
-    "appears": "Save"
-   },
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action6/:legacy_expect",
   "action": {
    "expect": {
     "appears": "Save"
@@ -1718,7 +1645,19 @@
   "accepted": false
  },
  {
-  "origin": "action8/:legacy_expect",
+  "origin": "action4/:legacy_expect",
+  "action": {
+   "expect": {
+    "appears": "Save"
+   },
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/:legacy_expect",
   "action": {
    "expect": {
     "appears": "Save"
@@ -1786,7 +1725,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/:alias_key",
+  "origin": "action6/:alias_key",
   "action": {
    "key": [
     "libreoffice"
@@ -1846,7 +1785,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys:bare_item",
+  "origin": "action6/keys:bare_item",
   "action": {
    "keys": "libreoffice",
    "type": "keypress"
@@ -1894,7 +1833,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys:string",
+  "origin": "action6/keys:string",
   "action": {
    "keys": "x",
    "type": "keypress"
@@ -1958,7 +1897,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys/0:blank",
+  "origin": "action6/keys/0:blank",
   "action": {
    "keys": [
     "  "
@@ -2038,7 +1977,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys/0:lead_space",
+  "origin": "action6/keys/0:lead_space",
   "action": {
    "keys": [
     " libreoffice"
@@ -2094,7 +2033,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys/0:empty",
+  "origin": "action6/keys/0:empty",
   "action": {
    "keys": [
     ""
@@ -2162,7 +2101,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys/0:numeric_string",
+  "origin": "action6/keys/0:numeric_string",
   "action": {
    "keys": [
     "3"
@@ -2218,32 +2157,6 @@
   "accepted": true
  },
  {
-  "origin": "action4//keys:add3",
-  "action": {
-   "keys": [
-    "ALT"
-   ],
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5//keys:add3",
-  "action": {
-   "keys": [
-    "ALT"
-   ],
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
   "origin": "action0//keys:add3",
   "action": {
    "keys": [
@@ -2280,6 +2193,18 @@
   "accepted": true
  },
  {
+  "origin": "action4//keys:add3",
+  "action": {
+   "keys": [
+    "ALT"
+   ],
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
   "origin": "action3//keys:add1",
   "action": {
    "keys": [
@@ -2306,32 +2231,6 @@
     "CONTROL"
    ],
    "scroll_x": 1,
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4//keys:add1",
-  "action": {
-   "keys": [
-    "CONTROL"
-   ],
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5//keys:add1",
-  "action": {
-   "keys": [
-    "CONTROL"
-   ],
    "scroll_y": 1,
    "type": "scroll",
    "x": 1,
@@ -2374,6 +2273,18 @@
    "y": 1
   },
   "accepted": true
+ },
+ {
+  "origin": "action4//keys:add1",
+  "action": {
+   "keys": [
+    "CONTROL"
+   ],
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
  },
  {
   "origin": "action3/keys/0:trail_space",
@@ -4256,7 +4167,7 @@
   "accepted": false
  },
  {
-  "origin": "action4//keys:add0",
+  "origin": "action4/scroll_y:missing",
   "action": {
    "keys": [
     "CTRL"
@@ -4928,6 +4839,18 @@
   "accepted": false
  },
  {
+  "origin": "action4//keys:add0",
+  "action": {
+   "keys": [
+    "CTRL"
+   ],
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
   "origin": "action1/type:number",
   "action": {
    "keys": [
@@ -4991,7 +4914,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys/0:upper",
+  "origin": "action6/keys/0:upper",
   "action": {
    "keys": [
     "LIBREOFFICE"
@@ -5001,7 +4924,7 @@
   "accepted": true
  },
  {
-  "origin": "action7/keys/0:title",
+  "origin": "action6/keys/0:title",
   "action": {
    "keys": [
     "Libreoffice"
@@ -5037,32 +4960,6 @@
     "SHIFT"
    ],
    "scroll_x": 1,
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4//keys:add2",
-  "action": {
-   "keys": [
-    "SHIFT"
-   ],
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5//keys:add2",
-  "action": {
-   "keys": [
-    "SHIFT"
-   ],
    "scroll_y": 1,
    "type": "scroll",
    "x": 1,
@@ -5107,6 +5004,18 @@
   "accepted": true
  },
  {
+  "origin": "action4//keys:add2",
+  "action": {
+   "keys": [
+    "SHIFT"
+   ],
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
   "origin": "action3//keys:add4",
   "action": {
    "keys": [
@@ -5133,32 +5042,6 @@
     "SUPER"
    ],
    "scroll_x": 1,
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4//keys:add4",
-  "action": {
-   "keys": [
-    "SUPER"
-   ],
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5//keys:add4",
-  "action": {
-   "keys": [
-    "SUPER"
-   ],
    "scroll_y": 1,
    "type": "scroll",
    "x": 1,
@@ -5203,7 +5086,19 @@
   "accepted": true
  },
  {
-  "origin": "action7/keys/0:trail_space",
+  "origin": "action4//keys:add4",
+  "action": {
+   "keys": [
+    "SUPER"
+   ],
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action6/keys/0:trail_space",
   "action": {
    "keys": [
     "libreoffice "
@@ -5213,7 +5108,7 @@
   "accepted": true
  },
  {
-  "origin": "action7/keys:repeat_item",
+  "origin": "action6/keys:repeat_item",
   "action": {
    "keys": [
     "libreoffice",
@@ -5224,7 +5119,7 @@
   "accepted": true
  },
  {
-  "origin": "action7/:legacy_limit",
+  "origin": "action6/:legacy_limit",
   "action": {
    "keys": [
     "libreoffice"
@@ -5235,7 +5130,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/:legacy_settle_ms",
+  "origin": "action6/:legacy_settle_ms",
   "action": {
    "keys": [
     "libreoffice"
@@ -5246,7 +5141,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:blank",
+  "origin": "action6/type:blank",
   "action": {
    "keys": [
     "libreoffice"
@@ -5256,7 +5151,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:lead_space",
+  "origin": "action6/type:lead_space",
   "action": {
    "keys": [
     "libreoffice"
@@ -5266,7 +5161,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:empty",
+  "origin": "action6/type:empty",
   "action": {
    "keys": [
     "libreoffice"
@@ -5276,7 +5171,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:numeric_string",
+  "origin": "action6/type:numeric_string",
   "action": {
    "keys": [
     "libreoffice"
@@ -5286,7 +5181,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:upper",
+  "origin": "action6/type:upper",
   "action": {
    "keys": [
     "libreoffice"
@@ -5296,7 +5191,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:title",
+  "origin": "action6/type:title",
   "action": {
    "keys": [
     "libreoffice"
@@ -5306,7 +5201,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:trail_space",
+  "origin": "action6/type:trail_space",
   "action": {
    "keys": [
     "libreoffice"
@@ -5316,7 +5211,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/:legacy_view",
+  "origin": "action6/:legacy_view",
   "action": {
    "keys": [
     "libreoffice"
@@ -5327,7 +5222,7 @@
   "accepted": false
  },
  {
-  "origin": "action7",
+  "origin": "action6",
   "action": {
    "keys": [
     "libreoffice"
@@ -5337,7 +5232,7 @@
   "accepted": true
  },
  {
-  "origin": "action7/type:number",
+  "origin": "action6/type:number",
   "action": {
    "keys": [
     "libreoffice"
@@ -5347,7 +5242,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:bool",
+  "origin": "action6/type:bool",
   "action": {
    "keys": [
     "libreoffice"
@@ -5357,7 +5252,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:object",
+  "origin": "action6/type:object",
   "action": {
    "keys": [
     "libreoffice"
@@ -5369,7 +5264,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/type:missing",
+  "origin": "action6/type:missing",
   "action": {
    "keys": [
     "libreoffice"
@@ -5424,7 +5319,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys/0:number",
+  "origin": "action6/keys/0:number",
   "action": {
    "keys": [
     7
@@ -5486,7 +5381,7 @@
   "accepted": true
  },
  {
-  "origin": "action7/keys:empty_array",
+  "origin": "action6/keys:empty_array",
   "action": {
    "keys": [],
    "type": "keypress"
@@ -5550,7 +5445,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys/0:bool",
+  "origin": "action6/keys/0:bool",
   "action": {
    "keys": [
     true
@@ -5638,7 +5533,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys/0:object",
+  "origin": "action6/keys/0:object",
   "action": {
    "keys": [
     {
@@ -5668,29 +5563,7 @@
   "accepted": false
  },
  {
-  "origin": "action4/:legacy_limit",
-  "action": {
-   "limit": 5,
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
   "origin": "action5/:legacy_limit",
-  "action": {
-   "limit": 5,
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action6/:legacy_limit",
   "action": {
    "limit": 5,
    "text": "libreoffice",
@@ -5729,7 +5602,17 @@
   "accepted": false
  },
  {
-  "origin": "action8/:legacy_limit",
+  "origin": "action4/:legacy_limit",
+  "action": {
+   "limit": 5,
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/:legacy_limit",
   "action": {
    "limit": 5,
    "type": "wait"
@@ -6628,19 +6511,10 @@
   "accepted": false
  },
  {
-  "origin": "action4/scroll_x:string",
+  "origin": "action4/keys:missing",
   "action": {
-   "scroll_x": "1",
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/scroll_x:negative",
-  "action": {
-   "scroll_x": -1,
+   "scroll_x": 1,
+   "scroll_y": 1,
    "type": "scroll",
    "x": 1,
    "y": 1
@@ -6648,800 +6522,27 @@
   "accepted": true
  },
  {
-  "origin": "action4/scroll_x:bound+1(-2000)",
+  "origin": "action4//scroll_x:add0",
   "action": {
-   "scroll_x": -1999,
+   "scroll_x": 1,
    "type": "scroll",
    "x": 1,
    "y": 1
   },
   "accepted": true
- },
- {
-  "origin": "action4/scroll_x:bound+0(-2000)",
-  "action": {
-   "scroll_x": -2000,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/scroll_x:bound-1(-2000)",
-  "action": {
-   "scroll_x": -2001,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/scroll_x:zero",
-  "action": {
-   "scroll_x": 0,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
  },
  {
   "origin": "action4//scroll_y:add0",
   "action": {
-   "scroll_x": 1,
    "scroll_y": 1,
    "type": "scroll",
    "x": 1,
    "y": 1
   },
   "accepted": true
- },
- {
-  "origin": "action4/:legacy_settle_ms",
-  "action": {
-   "scroll_x": 1,
-   "settle_ms": 800,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:blank",
-  "action": {
-   "scroll_x": 1,
-   "type": "  ",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:lead_space",
-  "action": {
-   "scroll_x": 1,
-   "type": " scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:empty",
-  "action": {
-   "scroll_x": 1,
-   "type": "",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:numeric_string",
-  "action": {
-   "scroll_x": 1,
-   "type": "3",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:upper",
-  "action": {
-   "scroll_x": 1,
-   "type": "SCROLL",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:title",
-  "action": {
-   "scroll_x": 1,
-   "type": "Scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:trail_space",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll ",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/:legacy_view",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "view": "full",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/x:string",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": "1",
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/x:negative",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": -1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/x:zero",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 0,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/y:string",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": "1"
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/y:negative",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": -1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/y:zero",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 0
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/y:float_integral",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1.0
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/y:fraction",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1.5
-  },
-  "accepted": true
- },
- {
-  "origin": "action4",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/y:bool",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": true
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/x:float_integral",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1.0,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/x:fraction",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1.5,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/y:missing",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/x:bool",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "x": true,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/x:missing",
-  "action": {
-   "scroll_x": 1,
-   "type": "scroll",
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:number",
-  "action": {
-   "scroll_x": 1,
-   "type": 7,
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:bool",
-  "action": {
-   "scroll_x": 1,
-   "type": true,
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:object",
-  "action": {
-   "scroll_x": 1,
-   "type": {
-    "value": "scroll"
-   },
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/type:missing",
-  "action": {
-   "scroll_x": 1,
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/scroll_x:float_integral",
-  "action": {
-   "scroll_x": 1.0,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/scroll_x:fraction",
-  "action": {
-   "scroll_x": 1.5,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/scroll_x:bound-1(2000)",
-  "action": {
-   "scroll_x": 1999,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/scroll_x:bound+0(2000)",
-  "action": {
-   "scroll_x": 2000,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action4/scroll_x:bound+1(2000)",
-  "action": {
-   "scroll_x": 2001,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action4/scroll_x:bool",
-  "action": {
-   "scroll_x": true,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/scroll_y:string",
-  "action": {
-   "scroll_y": "1",
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/scroll_y:negative",
-  "action": {
-   "scroll_y": -1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/scroll_y:bound+1(-2000)",
-  "action": {
-   "scroll_y": -1999,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/scroll_y:bound+0(-2000)",
-  "action": {
-   "scroll_y": -2000,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/scroll_y:bound-1(-2000)",
-  "action": {
-   "scroll_y": -2001,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/scroll_y:zero",
-  "action": {
-   "scroll_y": 0,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
  },
  {
   "origin": "action5/:legacy_settle_ms",
-  "action": {
-   "scroll_y": 1,
-   "settle_ms": 800,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:blank",
-  "action": {
-   "scroll_y": 1,
-   "type": "  ",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:lead_space",
-  "action": {
-   "scroll_y": 1,
-   "type": " scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:empty",
-  "action": {
-   "scroll_y": 1,
-   "type": "",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:numeric_string",
-  "action": {
-   "scroll_y": 1,
-   "type": "3",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:upper",
-  "action": {
-   "scroll_y": 1,
-   "type": "SCROLL",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:title",
-  "action": {
-   "scroll_y": 1,
-   "type": "Scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:trail_space",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll ",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/:legacy_view",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "view": "full",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/x:string",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": "1",
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/x:negative",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": -1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/x:zero",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 0,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/y:string",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": "1"
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/y:negative",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": -1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/y:zero",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 0
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/y:float_integral",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1.0
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/y:fraction",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1.5
-  },
-  "accepted": true
- },
- {
-  "origin": "action5",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/y:bool",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1,
-   "y": true
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/x:float_integral",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1.0,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/x:fraction",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1.5,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/y:missing",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/x:bool",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "x": true,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/x:missing",
-  "action": {
-   "scroll_y": 1,
-   "type": "scroll",
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:number",
-  "action": {
-   "scroll_y": 1,
-   "type": 7,
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:bool",
-  "action": {
-   "scroll_y": 1,
-   "type": true,
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:object",
-  "action": {
-   "scroll_y": 1,
-   "type": {
-    "value": "scroll"
-   },
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/type:missing",
-  "action": {
-   "scroll_y": 1,
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/scroll_y:float_integral",
-  "action": {
-   "scroll_y": 1.0,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/scroll_y:fraction",
-  "action": {
-   "scroll_y": 1.5,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/scroll_y:bound-1(2000)",
-  "action": {
-   "scroll_y": 1999,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/scroll_y:bound+0(2000)",
-  "action": {
-   "scroll_y": 2000,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": true
- },
- {
-  "origin": "action5/scroll_y:bound+1(2000)",
-  "action": {
-   "scroll_y": 2001,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action5/scroll_y:bool",
-  "action": {
-   "scroll_y": true,
-   "type": "scroll",
-   "x": 1,
-   "y": 1
-  },
-  "accepted": false
- },
- {
-  "origin": "action6/:legacy_settle_ms",
   "action": {
    "settle_ms": 800,
    "text": "libreoffice",
@@ -7480,7 +6581,17 @@
   "accepted": false
  },
  {
-  "origin": "action8/:legacy_settle_ms",
+  "origin": "action4/:legacy_settle_ms",
+  "action": {
+   "settle_ms": 800,
+   "type": "scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/:legacy_settle_ms",
   "action": {
    "settle_ms": 800,
    "type": "wait"
@@ -7488,7 +6599,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/text:blank",
+  "origin": "action5/text:blank",
   "action": {
    "text": "  ",
    "type": "type"
@@ -7496,7 +6607,7 @@
   "accepted": true
  },
  {
-  "origin": "action6/text:lead_space",
+  "origin": "action5/text:lead_space",
   "action": {
    "text": " libreoffice",
    "type": "type"
@@ -7504,7 +6615,7 @@
   "accepted": true
  },
  {
-  "origin": "action6/text:empty",
+  "origin": "action5/text:empty",
   "action": {
    "text": "",
    "type": "type"
@@ -7512,7 +6623,7 @@
   "accepted": true
  },
  {
-  "origin": "action6/text:numeric_string",
+  "origin": "action5/text:numeric_string",
   "action": {
    "text": "3",
    "type": "type"
@@ -7520,7 +6631,7 @@
   "accepted": true
  },
  {
-  "origin": "action6/text:upper",
+  "origin": "action5/text:upper",
   "action": {
    "text": "LIBREOFFICE",
    "type": "type"
@@ -7528,7 +6639,7 @@
   "accepted": true
  },
  {
-  "origin": "action6/text:title",
+  "origin": "action5/text:title",
   "action": {
    "text": "Libreoffice",
    "type": "type"
@@ -7536,7 +6647,7 @@
   "accepted": true
  },
  {
-  "origin": "action6/text:trail_space",
+  "origin": "action5/text:trail_space",
   "action": {
    "text": "libreoffice ",
    "type": "type"
@@ -7544,7 +6655,7 @@
   "accepted": true
  },
  {
-  "origin": "action6/type:blank",
+  "origin": "action5/type:blank",
   "action": {
    "text": "libreoffice",
    "type": "  "
@@ -7552,7 +6663,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:lead_space",
+  "origin": "action5/type:lead_space",
   "action": {
    "text": "libreoffice",
    "type": " type"
@@ -7560,7 +6671,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:empty",
+  "origin": "action5/type:empty",
   "action": {
    "text": "libreoffice",
    "type": ""
@@ -7568,7 +6679,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:numeric_string",
+  "origin": "action5/type:numeric_string",
   "action": {
    "text": "libreoffice",
    "type": "3"
@@ -7576,7 +6687,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:upper",
+  "origin": "action5/type:upper",
   "action": {
    "text": "libreoffice",
    "type": "TYPE"
@@ -7584,7 +6695,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:title",
+  "origin": "action5/type:title",
   "action": {
    "text": "libreoffice",
    "type": "Type"
@@ -7592,7 +6703,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:trail_space",
+  "origin": "action5/type:trail_space",
   "action": {
    "text": "libreoffice",
    "type": "type "
@@ -7600,7 +6711,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/:legacy_view",
+  "origin": "action5/:legacy_view",
   "action": {
    "text": "libreoffice",
    "type": "type",
@@ -7609,7 +6720,7 @@
   "accepted": false
  },
  {
-  "origin": "action6",
+  "origin": "action5",
   "action": {
    "text": "libreoffice",
    "type": "type"
@@ -7617,7 +6728,7 @@
   "accepted": true
  },
  {
-  "origin": "action6/type:number",
+  "origin": "action5/type:number",
   "action": {
    "text": "libreoffice",
    "type": 7
@@ -7625,7 +6736,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:bool",
+  "origin": "action5/type:bool",
   "action": {
    "text": "libreoffice",
    "type": true
@@ -7633,7 +6744,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:object",
+  "origin": "action5/type:object",
   "action": {
    "text": "libreoffice",
    "type": {
@@ -7643,14 +6754,14 @@
   "accepted": false
  },
  {
-  "origin": "action6/type:missing",
+  "origin": "action5/type:missing",
   "action": {
    "text": "libreoffice"
   },
   "accepted": false
  },
  {
-  "origin": "action6/text:number",
+  "origin": "action5/text:number",
   "action": {
    "text": 7,
    "type": "type"
@@ -7658,7 +6769,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/text:bool",
+  "origin": "action5/text:bool",
   "action": {
    "text": true,
    "type": "type"
@@ -7666,7 +6777,7 @@
   "accepted": false
  },
  {
-  "origin": "action6/text:object",
+  "origin": "action5/text:object",
   "action": {
    "text": {
     "value": "libreoffice"
@@ -7685,7 +6796,7 @@
   "accepted": false
  },
  {
-  "origin": "action8/type:blank",
+  "origin": "action7/type:blank",
   "action": {
    "type": "  "
   },
@@ -7719,7 +6830,16 @@
   "accepted": false
  },
  {
-  "origin": "action8/type:lead_space",
+  "origin": "action4/type:lead_space",
+  "action": {
+   "type": " scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/type:lead_space",
   "action": {
    "type": " wait"
   },
@@ -7735,7 +6855,7 @@
   "accepted": false
  },
  {
-  "origin": "action8/type:empty",
+  "origin": "action7/type:empty",
   "action": {
    "type": ""
   },
@@ -7751,7 +6871,7 @@
   "accepted": false
  },
  {
-  "origin": "action8/type:numeric_string",
+  "origin": "action7/type:numeric_string",
   "action": {
    "type": "3"
   },
@@ -7812,14 +6932,32 @@
   "accepted": false
  },
  {
-  "origin": "action8/type:upper",
+  "origin": "action4/type:upper",
+  "action": {
+   "type": "SCROLL",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/type:title",
+  "action": {
+   "type": "Scroll",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/type:upper",
   "action": {
    "type": "WAIT"
   },
   "accepted": false
  },
  {
-  "origin": "action8/type:title",
+  "origin": "action7/type:title",
   "action": {
    "type": "Wait"
   },
@@ -8137,7 +7275,7 @@
   "accepted": false
  },
  {
-  "origin": "action7/keys:missing",
+  "origin": "action6/keys:missing",
   "action": {
    "type": "keypress"
   },
@@ -8305,7 +7443,98 @@
   "accepted": false
  },
  {
-  "origin": "action4/scroll_x:missing",
+  "origin": "action4/type:trail_space",
+  "action": {
+   "type": "scroll ",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/:legacy_view",
+  "action": {
+   "type": "scroll",
+   "view": "full",
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/x:string",
+  "action": {
+   "type": "scroll",
+   "x": "1",
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/x:negative",
+  "action": {
+   "type": "scroll",
+   "x": -1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/x:zero",
+  "action": {
+   "type": "scroll",
+   "x": 0,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/y:string",
+  "action": {
+   "type": "scroll",
+   "x": 1,
+   "y": "1"
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/y:negative",
+  "action": {
+   "type": "scroll",
+   "x": 1,
+   "y": -1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/y:zero",
+  "action": {
+   "type": "scroll",
+   "x": 1,
+   "y": 0
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/y:float_integral",
+  "action": {
+   "type": "scroll",
+   "x": 1,
+   "y": 1.0
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/y:fraction",
+  "action": {
+   "type": "scroll",
+   "x": 1,
+   "y": 1.5
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4",
   "action": {
    "type": "scroll",
    "x": 1,
@@ -8314,21 +7543,73 @@
   "accepted": false
  },
  {
-  "origin": "action6/text:missing",
+  "origin": "action4/y:bool",
+  "action": {
+   "type": "scroll",
+   "x": 1,
+   "y": true
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/x:float_integral",
+  "action": {
+   "type": "scroll",
+   "x": 1.0,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/x:fraction",
+  "action": {
+   "type": "scroll",
+   "x": 1.5,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/y:missing",
+  "action": {
+   "type": "scroll",
+   "x": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/x:bool",
+  "action": {
+   "type": "scroll",
+   "x": true,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action4/x:missing",
+  "action": {
+   "type": "scroll",
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action5/text:missing",
   "action": {
    "type": "type"
   },
   "accepted": false
  },
  {
-  "origin": "action8/type:trail_space",
+  "origin": "action7/type:trail_space",
   "action": {
    "type": "wait "
   },
   "accepted": false
  },
  {
-  "origin": "action8/:legacy_view",
+  "origin": "action7/:legacy_view",
   "action": {
    "type": "wait",
    "view": "full"
@@ -8336,7 +7617,7 @@
   "accepted": false
  },
  {
-  "origin": "action8",
+  "origin": "action7",
   "action": {
    "type": "wait"
   },
@@ -8352,7 +7633,7 @@
   "accepted": false
  },
  {
-  "origin": "action8/type:number",
+  "origin": "action7/type:number",
   "action": {
    "type": 7
   },
@@ -8368,7 +7649,7 @@
   "accepted": false
  },
  {
-  "origin": "action8/type:bool",
+  "origin": "action7/type:bool",
   "action": {
    "type": true
   },
@@ -8408,7 +7689,18 @@
   "accepted": false
  },
  {
-  "origin": "action8/type:object",
+  "origin": "action4/type:object",
+  "action": {
+   "type": {
+    "value": "scroll"
+   },
+   "x": 1,
+   "y": 1
+  },
+  "accepted": false
+ },
+ {
+  "origin": "action7/type:object",
   "action": {
    "type": {
     "value": "wait"

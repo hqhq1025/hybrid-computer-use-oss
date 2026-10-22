@@ -476,11 +476,16 @@ func TestAXSchemaSurvivesClientCompaction(t *testing.T) {
 	if len(types) != len(contract.AXActionTypes) {
 		t.Fatalf("action type enum lost values: %v", types)
 	}
-	query := visible["$defs"].(map[string]any)["query"].(map[string]any)["properties"].(map[string]any)
-	for _, field := range contract.AXFindFilters {
-		if _, ok := query[field]; !ok {
-			t.Fatalf("query field %q is not visible: %v", field, contract.SortedKeys(query))
+	for name, holder := range map[string]map[string]any{"query": properties, "actions[].query": actionFields} {
+		query := holder["query"].(map[string]any)["properties"].(map[string]any)
+		for _, field := range contract.AXFindFilters {
+			if _, ok := query[field]; !ok {
+				t.Fatalf("%s field %q is not visible: %v", name, field, contract.SortedKeys(query))
+			}
 		}
+	}
+	if _, present := visible["$defs"]; present {
+		t.Fatal("AX schema uses $defs; code-declaration clients show an unresolved $ref as unknown")
 	}
 	if _, present := properties["until"]; present {
 		t.Fatal("the removed until field is still published")

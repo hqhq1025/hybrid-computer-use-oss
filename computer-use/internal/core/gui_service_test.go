@@ -394,3 +394,26 @@ func TestGUIWaitBudgetIsRejectedBeforeProvider(t *testing.T) {
 		t.Fatal("wait budget rejection reached the provider")
 	}
 }
+
+// A scroll with no non-zero delta would not move. The schema keeps both
+// deltas as plain optional numbers, so the core rejects it as a declared
+// rule before any provider request.
+func TestGUIScrollWithoutDeltaIsRejectedBeforeProvider(t *testing.T) {
+	for _, action := range []map[string]any{
+		{"type": "scroll", "x": 10, "y": 10},
+		{"type": "scroll", "x": 10, "y": 10, "scroll_y": 0},
+		{"type": "scroll", "x": 10, "y": 10, "scroll_x": 0, "scroll_y": 0},
+	} {
+		backend := &recordingPlatformBackend{}
+		result := NewServiceWithBackend(backend).callTool(contract.PublicToolGUI, map[string]any{"actions": []any{action}})
+		if !result.IsError || !strings.Contains(ResultText(result), "non-zero scroll_x or scroll_y") {
+			t.Fatalf("%v was not rejected: %#v", action, result)
+		}
+		if result.StructuredContent["argument_error_code"] != contract.ArgumentRuleScrollDelta {
+			t.Fatalf("%v: rejection lacks its rule code: %#v", action, result.StructuredContent)
+		}
+		if len(backend.desktopRequests) != 0 {
+			t.Fatalf("%v reached the provider", action)
+		}
+	}
+}

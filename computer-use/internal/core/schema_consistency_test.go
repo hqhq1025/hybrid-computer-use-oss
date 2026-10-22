@@ -33,6 +33,7 @@ var crossFieldRuleCodes = map[string]bool{
 	contract.ArgumentRuleTextBudget:      true,
 	contract.ArgumentRuleRefOwnsIdentity: true,
 	contract.ArgumentRuleWaitBudget:      true,
+	contract.ArgumentRuleScrollDelta:     true,
 	// The flat AX schema has no oneOf or if/then, so rules that depend on
 	// the value of mode or of an action type are declared rules of
 	// the AX decoder: which fields a mode or type accepts or requires,
@@ -803,10 +804,11 @@ var updateGUISamples = flag.Bool("update-gui-samples", false,
 	"rewrite testdata/contract/gui_action_samples.json from the GUI schema")
 
 // TestGUIActionSamplesMatchSchema keeps the provider-side GUI validators
-// honest. It writes every generated GUI action sample with the schema
-// verdict to a fixture; runtime_tests/test_gui.py replays the fixture
-// through validate_gui_actions and asserts the same verdict, so the Go
-// schema and the Python provider cannot drift apart unnoticed.
+// honest. It writes every generated GUI action sample with the core's
+// verdict (the schema, then the declared GUI rules such as the scroll delta)
+// to a fixture; runtime_tests/test_gui.py replays the fixture through
+// validate_gui_actions and asserts the same verdict, so the Go core and the
+// Python provider cannot drift apart unnoticed.
 func TestGUIActionSamplesMatchSchema(t *testing.T) {
 	type sample struct {
 		Origin   string `json:"origin"`
@@ -829,7 +831,15 @@ func TestGUIActionSamplesMatchSchema(t *testing.T) {
 		t.Fatal("GUI input-batch item schema not found")
 	}
 	accepts := func(action map[string]any) bool {
-		return schemaAccepts(t, contract.PublicToolGUI, map[string]any{"actions": []any{action}})
+		if !schemaAccepts(t, contract.PublicToolGUI, map[string]any{"actions": []any{action}}) {
+			return false
+		}
+		decoded, err := decodeProviderDesktopActions([]any{action})
+		if err != nil {
+			return true
+		}
+		_, ruleErr := checkGUIScrollDelta(decoded)
+		return ruleErr == nil
 	}
 	var samples []sample
 	seen := map[string]bool{}

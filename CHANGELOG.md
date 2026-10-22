@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The AX schema writes the find `query` object out where it is used instead
+  of sharing it through `$defs`, and the GUI scroll action lists `scroll_x`
+  and `scroll_y` as plain numbers; the core rejects a scroll without a
+  non-zero delta before any input. Clients that render tool schemas as code
+  declarations, such as Codex code mode, now show the query fields and the
+  scroll deltas with their types instead of `unknown`.
 - Bring the CLI, Python SDK, code mode and PTC adapter up to the MCP
   contract. The CLI adds `gui zoom X0 Y0 X1 Y1`, `gui double_click|move X Y`
   and `select rN [TEXT] [--to rN]`. The SDK adds `zoom(region)`,
