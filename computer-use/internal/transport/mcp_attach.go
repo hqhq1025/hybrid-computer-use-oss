@@ -90,7 +90,8 @@ func callMayEmitInput(name string, args map[string]any) bool {
 		actions, _ := args["actions"].([]any)
 		for _, item := range actions {
 			action, _ := item.(map[string]any)
-			if kind, _ := action["type"].(string); kind != "screenshot" {
+			// screenshot and zoom only look at the desktop.
+			if kind, _ := action["type"].(string); kind != "screenshot" && kind != "zoom" {
 				return true
 			}
 		}

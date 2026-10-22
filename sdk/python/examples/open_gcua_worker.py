@@ -60,9 +60,11 @@ def install(runtime, *, transport, image_reader):
             directory.mkdir(parents=True, exist_ok=True)
             path = directory / ("hcu-" + uuid.uuid4().hex + (".png" if event["media_type"] == "image/png" else ".jpg"))
             path.write_bytes(data)
+            # A zoom image is look-only: coordinate_space zoom_pixels tells the
+            # host that GUI x/y come from the mapping, not from these pixels.
             runtime._emit({"type": "screenshot", "path": str(path.resolve()),
                            "width": width, "height": height,
-                           "coordinate_space": "image_pixels"})
+                           "coordinate_space": event["coordinate_space"]})
         else:
             runtime._emit({"type": "display", "kind": "text",
                            "text": json.dumps(event, ensure_ascii=False),
