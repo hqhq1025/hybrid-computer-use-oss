@@ -10,6 +10,7 @@ from .foundation import (
     has_text_iface,
     node_name,
     node_role,
+    safe,
     state_contains,
 )
 from .ax_actions import (
@@ -191,14 +192,21 @@ def _auto_click(
     action_evidence,
 ):
     """Prefer the element's AT-SPI action; fall back to a coordinate click."""
-    if (
+    semantic_click = (
         element is not None
         and action_input.get("mouse_button", "left") == "left"
         and click_count == 1
+        and not is_dropdown_item(element, window)
+    )
+    action_index = preferred_action_index(element) if semantic_click else None
+    if (
+        action_index is not None
         and node_role(element) in {"entry", "text", "password text"}
         and state_contains(element, Atspi.StateType.EDITABLE)
         and has_editable_text_iface(element)
         and has_text_iface(element)
+        and str(safe(lambda: element.get_action_name(action_index), "")
+                or "").strip().lower() == "activate"
     ):
         # Entry.activate means submit/Enter, not editor focus. In a freshly
         # opened dialog it can leave focus on an outer row, consuming the
@@ -227,13 +235,7 @@ def _auto_click(
         return element_record
     handled = False
     state_only_note = ""
-    if (
-        element is not None
-        and action_input.get("mouse_button", "left") == "left"
-        and click_count == 1
-        and not is_dropdown_item(element, window)
-    ):
-        action_index = preferred_action_index(element)
+    if semantic_click:
         if action_only_sets_state(element, action_index):
             pointer_record, refused = _pointer_click_for_state_only_action(
                 window, bounds, element, element_record, notes,
