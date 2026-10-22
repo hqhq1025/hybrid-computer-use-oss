@@ -149,6 +149,33 @@ class CoordinateActionabilityGateTests(unittest.TestCase):
 
 
 class ProviderWireTests(unittest.TestCase):
+    def test_target_automation_id_reaches_action_dispatch_unchanged(self):
+        fixture = Path(__file__).resolve().parents[1] / "testdata/provider-wire/resolve-and-act.request.json"
+        request = json.loads(fixture.read_text())
+        with mock.patch.object(wire, "_initialize_provider"), mock.patch.object(
+            wire, "perform_provider_request", return_value={"ok": True}
+        ) as dispatch:
+            response = wire._execute_serialized_request(json.dumps(request))
+        self.assertTrue(response["accessibility"]["ok"])
+        dispatch.assert_called_once_with("resolve_and_act", request["action"])
+        self.assertEqual(dispatch.call_args.args[1]["target"]["automationId"], "name-entry")
+
+    def test_invalid_target_identity_rejected_before_dispatch(self):
+        fixture = Path(__file__).resolve().parents[1] / "testdata/provider-wire/resolve-and-act.request.json"
+        for field, value in (("automationId", 123), ("automationId", []),
+                             ("automationId", False), ("automationID", "name-entry")):
+            with self.subTest(field=field, value=value):
+                request = json.loads(fixture.read_text())
+                request["action"]["target"][field] = value
+                with mock.patch.object(wire, "_initialize_provider") as initialize, mock.patch.object(
+                    wire, "perform_provider_request"
+                ) as dispatch, mock.patch.object(wire, "_write_operator_exception"):
+                    response = wire._execute_serialized_request(json.dumps(request))
+                initialize.assert_not_called()
+                dispatch.assert_not_called()
+                self.assertEqual(response["accessibility"]["failure"]["code"], "invalid_provider_request")
+                self.assertFalse(any(response["accessibility"].get("mutation", {}).values()))
+
     def test_optional_ordered_input_fixtures_reject_before_provider_startup(self):
         fixture_root = Path(__file__).resolve().parents[1] / "testdata" / "provider-wire"
         manifest = json.loads((fixture_root / "native-manifest.json").read_text())
