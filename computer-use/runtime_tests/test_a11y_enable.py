@@ -320,6 +320,8 @@ class WindowWithoutTreeNoteTests(AtspiPatchedTestCase):
              "height": 208, "title": "Visual Studio Code"},
             {"pid": 2980, "id": "0x1e00090", "x": -9999, "y": -9999,
              "width": 306, "height": 3, "title": "offscreen helper"},
+            {"pid": 2980, "id": "0xe00005", "x": 240, "y": 90, "width": 1440,
+             "height": 900, "title": "a.txt - Visual Studio Code  — Code"},
         ])
         with mock.patch.object(runtime, "_x11_managed_windows",
                                return_value=managed), \

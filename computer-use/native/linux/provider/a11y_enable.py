@@ -304,8 +304,12 @@ def untracked_window_notes(managed_windows, accessible_titles):
         title = str(window.get("title") or "").strip()
         titled = {name for name in accessible_titles.get(pid, ()) if name}
         # Desktop components (panels) expose only untitled frames while
-        # X11 titles them; only applications with titled trees qualify.
-        if not titled or not title or title in titled:
+        # X11 titles them; only applications with titled trees qualify. The
+        # window manager title may add the application name to the
+        # accessible one (Qt: "Untitled" vs "Untitled  — Kate"), so a
+        # contained title counts as the same window.
+        if not titled or not title or any(
+                name == title or name in title for name in titled):
             continue
         if int(window.get("x", 0)) + int(window.get("width", 0)) <= 0 or (
                 int(window.get("y", 0)) + int(window.get("height", 0)) <= 0):
