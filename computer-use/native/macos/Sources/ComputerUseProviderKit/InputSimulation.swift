@@ -366,31 +366,6 @@ enum InputSimulation {
         }
     }
 
-    private static func typeText(
-        _ text: String,
-        post: (CGEvent) -> Void
-    ) throws {
-        for chunk in keyboardUnicodeChunks(for: text) {
-            var mutableChunk = chunk
-            guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-                  let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
-                throw ComputerUseError.message("Failed to create keyboard event.")
-            }
-
-            mutableChunk.withUnsafeMutableBufferPointer { buffer in
-                guard let baseAddress = buffer.baseAddress else {
-                    return
-                }
-
-                down.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: baseAddress)
-                up.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: baseAddress)
-            }
-            post(down)
-            post(up)
-            Thread.sleep(forTimeInterval: 0.02)
-        }
-    }
-
     static func keyboardUnicodeChunks(for text: String, maxUTF16Units: Int = maxKeyboardUnicodeChunkLength) -> [[UniChar]] {
         precondition(maxUTF16Units > 0, "maxUTF16Units must be positive")
 

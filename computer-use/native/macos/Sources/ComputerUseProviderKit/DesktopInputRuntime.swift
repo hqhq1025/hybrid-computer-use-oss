@@ -298,9 +298,11 @@ func validateGUIPoint(
             "gui coordinate action requires numeric x and y"
         )
     }
+    // The delivered image has pixels 0...D-1 on each axis, as on Linux and
+    // Windows; a point past the last pixel center is outside the image.
     guard x >= 0, y >= 0,
-          x < desktopBounds.width,
-          y < desktopBounds.height else {
+          x <= desktopBounds.width - 1,
+          y <= desktopBounds.height - 1 else {
         throw ComputerUseError.invalidArguments(
             "gui coordinate (\(x), \(y)) is outside the current desktop image bounds \(Int(desktopBounds.width))x\(Int(desktopBounds.height))"
         )

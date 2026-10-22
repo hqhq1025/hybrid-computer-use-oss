@@ -521,6 +521,24 @@ def focus_target_element(window, element, element_record, what, timeout=1.0):
         if target_is_focused():
             return
         time.sleep(0.02)
+    if node_role(element) == "table cell":
+        # Spreadsheet cells accept grab_focus and move the cell cursor, but
+        # the cell objects never report FOCUSED, so the cursor position
+        # cannot be confirmed. Selecting the cell does not move the cursor
+        # either. A cell has no focusable child, so name the routes that do
+        # work: the cell cursor moved by keys, or set_value for a number.
+        raise OperationFailure(
+            "{} requested focus for the cell, but the cell did not report "
+            "focus within {:.1f}s, so the cell cursor position is unconfirmed; "
+            "no keyboard input was emitted. Move the cell cursor there with "
+            "keypress (or click the cell with GUI), then type without a ref. "
+            "For a number, set_value on the cell ref writes it directly."
+            .format(what, timeout),
+            failure_code="target_not_focusable",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="element",
+        )
     raise not_focusable(
         "{} requested focus for the element, but that exact target did not report "
         "focus within {:.1f}s; no keyboard input was emitted.".format(what, timeout)

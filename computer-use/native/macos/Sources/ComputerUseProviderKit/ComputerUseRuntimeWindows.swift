@@ -125,13 +125,11 @@ extension ComputerUseRuntimeBridge {
             appIdentity: appIdentity,
             windowHandle: selectedHandle,
             capture: {
-                let includeScreenshot = bool(operation["includeScreenshot"])
                 let snapshot = try self.service.refreshSnapshot(
                     for: query,
-                    recoveryPolicy: .readOnly,
-                    includeScreenshot: includeScreenshot
+                    recoveryPolicy: .readOnly
                 )
-                return try snapshot.providerDictionary(includeScreenshot: includeScreenshot)
+                return try snapshot.providerDictionary()
             },
             validateWindow: {
                 try validateClosingWindow(
@@ -393,16 +391,3 @@ private func runtimeWindowTitle(_ operation: [String: Any]) -> String? {
     return nil
 }
 
-private func runtimeElementIndex(_ operation: [String: Any]) -> String? {
-    if let element = operation["element"] as? [String: Any],
-       let index = int(element["index"])
-    {
-        return String(index)
-    }
-    if let target = operation["semanticTarget"] as? [String: Any],
-       let index = int(target["sourceIndex"])
-    {
-        return String(index)
-    }
-    return nil
-}

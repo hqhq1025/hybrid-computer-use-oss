@@ -50,8 +50,8 @@ extension ComputerUseService {
 
     public func drag(app query: String, fromX: Double, fromY: Double, toX: Double, toY: Double) throws -> ToolCallResult {
         let snapshot = try currentSnapshot(for: query)
-        let start = try screenshotToGlobalPoint(snapshot: snapshot, x: fromX, y: fromY)
-        let end = try screenshotToGlobalPoint(snapshot: snapshot, x: toX, y: toY)
+        let start = try windowPointToGlobalPoint(snapshot: snapshot, point: CGPoint(x: fromX, y: fromY))
+        let end = try windowPointToGlobalPoint(snapshot: snapshot, point: CGPoint(x: toX, y: toY))
         try performDragEvent(
             from: start,
             to: end,
@@ -286,7 +286,6 @@ extension ComputerUseService {
         textLimit: SnapshotTextLimit = .defaults,
         treeLimits: AccessibilityTreeLimits = .defaults,
         recoveryPolicy: SnapshotRecoveryPolicy = .allowActivation,
-        includeScreenshot: Bool = false,
         fallbackWindow: AXUIElement? = nil,
         expectedWindowHandle: String? = nil
     ) throws -> AppSnapshot {
@@ -297,7 +296,6 @@ extension ComputerUseService {
             textLimit: textLimit,
             treeLimits: treeLimits,
             recoveryPolicy: recoveryPolicy,
-            includeScreenshot: includeScreenshot,
             fallbackWindow: fallbackWindow,
             expectedWindowHandle: windowHandle
         )
@@ -322,11 +320,7 @@ extension ComputerUseService {
 
 
     func snapshotResult(for snapshot: AppSnapshot, style: SnapshotTextStyle) -> ToolCallResult {
-        var content = [ToolResultContentItem.text(snapshot.renderedText(style: style))]
-        if let screenshotPNGData = snapshot.screenshotPNGData {
-            content.append(.pngImage(screenshotPNGData))
-        }
-        return ToolCallResult(content: content)
+        ToolCallResult(content: [.text(snapshot.renderedText(style: style))])
     }
 }
 

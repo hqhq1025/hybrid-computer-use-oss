@@ -122,7 +122,7 @@ var cliShorthands = map[string]cliShorthand{
 	"scroll":   singleAction("scroll rN up|down|left|right [--pages N]", "scroll", "ref", "direction"),
 	"activate": singleAction("activate wN|TITLE", "activate", "window"),
 	"close":    singleAction("close wN|TITLE", "close", "window"),
-	"act": {"act --json '{\"actions\":[...]}' [--window wN] [--wait STEP_JSON] [--as none|diff|tree]",
+	"act": {"act --json '{\"actions\":[...]}'|-|@FILE [--window wN] [--wait STEP_JSON] [--as none|diff|tree]",
 		func(p []string, f cliFlags) (string, map[string]any, error) {
 			if len(p) != 0 || !f.has("json") {
 				return "", nil, usageError("act needs --json with an object holding actions")
@@ -160,7 +160,7 @@ var cliShorthands = map[string]cliShorthand{
 			}
 			return contract.PublicToolAX, args, nil
 		}},
-	"gui": {"gui screenshot | gui zoom X0 Y0 X1 Y1 | gui click|double_click|move X Y | gui type TEXT | gui key CTRL+S | gui --json '{\"actions\":[...]}'",
+	"gui": {"gui screenshot | gui zoom X0 Y0 X1 Y1 | gui click|double_click|move X Y | gui type TEXT | gui key CTRL+S | gui --json '{\"actions\":[...]}'|-|@FILE",
 		func(p []string, f cliFlags) (string, map[string]any, error) {
 			if f.has("json") {
 				var body map[string]any
@@ -338,6 +338,31 @@ func appendWaitFlag(args map[string]any, f cliFlags) error {
 	return nil
 }
 
+// cliStdin is where `--json -` reads its body; tests replace it.
+var cliStdin io.Reader = os.Stdin
+
+// jsonFlagSource returns the body of an act or gui --json flag: "-" reads
+// standard input and "@PATH" reads a file. A JSON value never starts with
+// either, so an inline body is returned unchanged. Reading the body keeps
+// it out of shell quoting, which matters when code builds the command.
+func jsonFlagSource(value string) (string, error) {
+	switch {
+	case value == "-":
+		data, err := io.ReadAll(cliStdin)
+		if err != nil {
+			return "", usageError("--json -: " + err.Error())
+		}
+		return string(data), nil
+	case strings.HasPrefix(value, "@"):
+		data, err := os.ReadFile(value[1:])
+		if err != nil {
+			return "", usageError("--json " + value + ": " + err.Error())
+		}
+		return string(data), nil
+	}
+	return value, nil
+}
+
 func decodeJSONArg(raw string, out any) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()
@@ -453,10 +478,14 @@ func runShorthand(command string, args []string, stdout, stderr io.Writer) int {
 		}
 		if command != "act" && command != "gui" {
 			delete(flags, "json")
+		} else if body, ok := flags["json"]; ok {
+			flags["json"], err = jsonFlagSource(body)
 		}
 		var tool string
 		var callArgs map[string]any
-		tool, callArgs, err = shorthand.build(positional, flags)
+		if err == nil {
+			tool, callArgs, err = shorthand.build(positional, flags)
+		}
 		if err == nil {
 			return runDaemonCall(output, tool, callArgs, options, stdout, stderr)
 		}
@@ -736,7 +765,8 @@ Output: model text by default, identical to the MCP result; --json (or
 GUI x/y and zoom regions are pixels of the current GUI frame: the latest gui
 screenshot or observe --as full|screenshot image. gui zoom only looks; its
 result states how a zoom pixel maps back to frame pixels. Other GUI actions
-(drag, scroll, wait) and other AX steps take --json.
+(drag, scroll, wait) and other AX steps take --json; --json - reads the body
+from standard input and --json @FILE from a file.
 Options: --session NAME (or HCU_SESSION), --socket PATH (or HCU_SOCKET),
 --request-id ID (act retries return the first result), --since SNAPSHOT_ID.
 Input commands also take --window wN, --as none|diff|tree, and --wait STEP_JSON:

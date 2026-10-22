@@ -29,7 +29,7 @@ extension ProviderRequestValidator {
             path: path,
             allowed: [
                 "text_limit", "max_tree_nodes", "max_tree_depth",
-                "prune", "boxes", "include_screenshot", "screenshot_scope",
+                "prune", "boxes", "include_screenshot",
                 "capture_snapshot",
             ]
         )
@@ -39,10 +39,12 @@ extension ProviderRequestValidator {
         if let depth = integer(value["max_tree_depth"]), depth < 0 {
             throw invalid("\(path).max_tree_depth must be non-negative")
         }
-        if let scope = value["screenshot_scope"] as? String,
-           !["screen", "window"].contains(scope)
-        {
-            throw invalid("\(path).screenshot_scope is unsupported")
+        if (value["include_screenshot"] as? Bool) == true {
+            // AX images are full-desktop GUI frames that the core captures
+            // with a desktop batch; this provider never captures a window image.
+            throw invalid(
+                "\(path).include_screenshot is not supported; request a desktop batch screenshot"
+            )
         }
         if let capture = value["capture_snapshot"], !(capture is Bool) {
             throw invalid("\(path).capture_snapshot must be a boolean")

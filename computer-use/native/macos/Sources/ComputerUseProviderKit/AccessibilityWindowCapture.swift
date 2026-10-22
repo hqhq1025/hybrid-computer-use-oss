@@ -17,13 +17,11 @@ struct WindowCapture {
     let windowHandle: String
     let layer: Int
     let bounds: CGRect
-    let image: CGImage?
 
     static func resolve(
         for pid: pid_t,
         windowIDHint: CGWindowID?,
-        titleHint: String?,
-        includeScreenshot: Bool
+        titleHint: String?
     ) -> WindowCapture? {
         guard let infoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
             return nil
@@ -61,16 +59,11 @@ struct WindowCapture {
             return nil
         }
 
-        let image = includeScreenshot
-            ? captureImage(windowID: best.windowID, bounds: best.bounds)
-            : nil
-
         return WindowCapture(
             windowID: best.windowID,
             windowHandle: macWindowHandle(pid: pid, windowID: best.windowID),
             layer: best.layer,
-            bounds: best.bounds,
-            image: image
+            bounds: best.bounds
         )
     }
 
@@ -88,44 +81,8 @@ struct WindowCapture {
             windowID: windowNumber(window),
             windowHandle: macAXWindowHandle(pid: pid, window: window),
             layer: 0,
-            bounds: bounds,
-            image: nil
+            bounds: bounds
         )
-    }
-
-    private static func captureImage(windowID: CGWindowID, bounds: CGRect) -> CGImage? {
-        try? BlockingAsyncBridge.run(timeout: screenshotCaptureTimeout) {
-            let shareableContent = try await SCShareableContent.current
-            guard let window = shareableContent.windows.first(where: { $0.windowID == windowID }) else {
-                return nil
-            }
-
-            let configuration = SCStreamConfiguration()
-            let scaleFactor = bestEffortScaleFactor(for: bounds)
-            let captureSize = window.frame.isEmpty ? bounds.size : window.frame.size
-            configuration.width = max(1, Int(ceil(captureSize.width * scaleFactor)))
-            configuration.height = max(1, Int(ceil(captureSize.height * scaleFactor)))
-            configuration.showsCursor = false
-            configuration.scalesToFit = false
-            configuration.ignoreShadowsSingleWindow = true
-
-            let filter = SCContentFilter(desktopIndependentWindow: window)
-            return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-        }
-    }
-
-    private static func bestEffortScaleFactor(for bounds: CGRect) -> CGFloat {
-        NSScreen.screens.first(where: { $0.frame.intersects(bounds) })?.backingScaleFactor
-            ?? NSScreen.main?.backingScaleFactor
-            ?? 1
-    }
-
-    func pngDataIfAvailable() -> Data? {
-        guard windowID != nil, let image else {
-            return nil
-        }
-
-        return boundedScreenshotPNGData(for: image)
     }
 }
 

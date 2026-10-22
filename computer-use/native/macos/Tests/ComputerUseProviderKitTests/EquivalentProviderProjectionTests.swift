@@ -27,7 +27,7 @@ private func projectionFixture(
         windowTitle: nil, windowBounds: nil,
         rootWindowElement: AXUIElementCreateApplication(getpid()),
         targetWindowID: nil, targetWindowHandle: "fixture-window", targetWindowLayer: nil,
-        screenshotPNGData: nil, treeLines: [], focusedSummary: nil,
+        treeLines: [], focusedSummary: nil,
         focusedElement: nil, selectedText: nil,
         elements: Dictionary(uniqueKeysWithValues: records.map { ($0.index, $0) }),
         providerProcessGeneration: "fixture-generation"

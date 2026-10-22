@@ -31,7 +31,6 @@ private func orderedIdentitySnapshot(
         targetWindowID: nil,
         targetWindowHandle: windowHandle,
         targetWindowLayer: nil,
-        screenshotPNGData: nil,
         treeLines: [],
         focusedSummary: nil,
         focusedElement: nil,

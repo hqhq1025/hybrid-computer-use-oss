@@ -101,7 +101,7 @@ private func livenessSnapshot(windowID: CGWindowID) -> AppSnapshot {
         rootWindowElement: AXUIElementCreateSystemWide(),
         targetWindowID: windowID,
         targetWindowHandle: macWindowHandle(pid: getpid(), windowID: windowID),
-        targetWindowLayer: nil, screenshotPNGData: nil, treeLines: [],
+        targetWindowLayer: nil, treeLines: [],
         focusedSummary: nil, focusedElement: nil, selectedText: nil,
         elements: [:]
     )

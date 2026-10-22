@@ -104,9 +104,7 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
             let snapshot = try getAppStateSnapshot(operation)
             return [
                 "ok": true,
-                "snapshot": try snapshot.providerDictionary(
-                    includeScreenshot: bool(operation["includeScreenshot"])
-                ),
+                "snapshot": try snapshot.providerDictionary(),
             ]
         case "gui":
             throw ComputerUseError.unsupportedTool(tool)
@@ -139,7 +137,6 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
             maxDepth: positiveInt(operation["max_tree_depth"])
                 ?? AccessibilityTreeLimits.defaultMaxDepth
         )
-        let includeScreenshot = bool(operation["includeScreenshot"])
         if let rawIdentity = operation["appIdentity"] {
             guard let identity = rawIdentity as? [String: Any] else {
                 throw ComputerUseError.invalidArguments(
@@ -161,7 +158,6 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
                         textLimit: limit,
                         treeLimits: limits,
                         recoveryPolicy: .readOnly,
-                        includeScreenshot: includeScreenshot,
                         expectedWindowHandle: windowHandle
                     )
                 },
@@ -177,8 +173,7 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
             snapshot = try service.refreshSnapshot(
                 for: app,
                 textLimit: limit,
-                treeLimits: limits,
-                includeScreenshot: includeScreenshot
+                treeLimits: limits
             )
         }
         try validateRequestedWindow(operation, snapshot: snapshot)

@@ -252,6 +252,11 @@ func compactActionObservationLines(
 	if snapshot == nil {
 		return nil
 	}
+	if popup := openedPopupRoot(snapshot); popup != nil {
+		if lines, err := projectedSubtreeLines(snapshot, popup); err == nil && len(lines) > 0 {
+			return append([]string{"popup:"}, lines...)
+		}
+	}
 	root := focusedObservationRoot(snapshot)
 	if root == nil {
 		return nil
@@ -275,4 +280,47 @@ func compactActionObservationLines(
 		return nil
 	}
 	return append([]string{label}, lines...)
+}
+
+// Roles that open a popup of items under themselves when clicked, and the
+// item roles such a popup holds.
+var (
+	popupOwnerRoles = map[CanonicalRole]bool{
+		"menu": true, "menuitem": true, "combobox": true, "button": true,
+	}
+	popupItemRoles = map[CanonicalRole]bool{
+		"menuitem": true, "menuitemcheckbox": true, "menuitemradio": true,
+		"option": true, "listitem": true,
+	}
+)
+
+// openedPopupRoot returns the acted element when its popup is open in this
+// snapshot: the element is a menu, menu item, combo box or button, is not
+// collapsed, and has menu or option items under it. Closed menus and combo
+// boxes render no items, so items under the acted element mean the action
+// opened (or kept open) its popup, and the compact result must show them
+// instead of the focused element, which stays on the opener or the canvas.
+func openedPopupRoot(snapshot *AppSnapshot) *ElementRecord {
+	if snapshot == nil || snapshot.actedRef == "" {
+		return nil
+	}
+	node := axSnapshotNodeByRef(snapshot, snapshot.actedRef)
+	if node == nil || !popupOwnerRoles[node.Role] ||
+		node.States.Expanded == TriFalse ||
+		!axSubtreeHasRole(node.Children, popupItemRoles) {
+		return nil
+	}
+	return recordByIndex(snapshot, node.ProviderIndex)
+}
+
+func axSubtreeHasRole(nodes []*AXNode, roles map[CanonicalRole]bool) bool {
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		if roles[node.Role] || axSubtreeHasRole(node.Children, roles) {
+			return true
+		}
+	}
+	return false
 }

@@ -53,6 +53,9 @@ func (s *Service) resolveAXReadIdentity(
 		if err != nil {
 			return nil, err
 		}
+		if entry.NoAccessibilityTree {
+			return nil, &axNoTreeWindowError{ref: entry.Ref}
+		}
 		context.appRef = entry.AppRef
 		context.windowRef = entry.Ref
 		context.windowHandle = entry.WindowHandle
@@ -258,6 +261,9 @@ func (s *Service) axAct(
 
 // axIdentityErrorResult reports a read identity that could not be bound.
 func axIdentityErrorResult(err error) ToolCallResult {
+	if noTree, ok := asNoTreeWindowError(err); ok {
+		return axNoTreeWindowResult(noTree, "window_ref", 0)
+	}
 	var lifecycle *axRefLifecycleError
 	if errors.As(err, &lifecycle) {
 		return axStaleRefResult("", err)
