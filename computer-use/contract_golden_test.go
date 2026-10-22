@@ -247,8 +247,8 @@ func withoutServerVersion(t *testing.T, response map[string]any) map[string]any 
 	decoded := roundTripJSON(t, response).(map[string]any)
 	result := decoded["result"].(map[string]any)
 	serverInfo := result["serverInfo"].(map[string]any)
-	if serverInfo["version"] != version {
-		t.Fatalf("serverInfo.version = %#v, want %q", serverInfo["version"], version)
+	if serverInfo["version"] != serverVersion {
+		t.Fatalf("serverInfo.version = %#v, want %q", serverInfo["version"], serverVersion)
 	}
 	serverInfo["version"] = "<version>"
 	return decoded

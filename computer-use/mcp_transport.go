@@ -221,7 +221,7 @@ func handleMCPRequest(request map[string]any, svc *service) map[string]any {
 			"protocolVersion": svc.protocolVersion,
 			"serverInfo": map[string]any{
 				"name":    "computer-use",
-				"version": version,
+				"version": serverVersion,
 			},
 			"capabilities": map[string]any{"tools": map[string]any{"listChanged": false}},
 			"instructions": serverInstructions,

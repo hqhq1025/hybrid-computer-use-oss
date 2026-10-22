@@ -478,7 +478,7 @@ func (d *daemon) handleRequest(line []byte, sessionName *string) map[string]any 
 		d.session(*sessionName)
 		return jsonRPCResult(id, map[string]any{
 			"protocol":         daemonProtocolVersion,
-			"version":          version,
+			"version":          serverVersion,
 			"contract_version": contractVersion,
 			"session":          *sessionName,
 			"desktop":          d.environment,
@@ -497,7 +497,7 @@ func (d *daemon) handleRequest(line []byte, sessionName *string) map[string]any 
 		d.mu.Unlock()
 		sort.Strings(names)
 		return jsonRPCResult(id, map[string]any{
-			"version": version, "contract_version": contractVersion, "pid": os.Getpid(),
+			"version": serverVersion, "contract_version": contractVersion, "pid": os.Getpid(),
 			"socket": d.socket, "desktop": d.environment, "sessions": names, "connections": active,
 		})
 	case "stop":

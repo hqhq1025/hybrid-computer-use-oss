@@ -60,7 +60,7 @@ func describeContract() map[string]any {
 	}
 	return map[string]any{
 		"contract_version": contractVersion,
-		"version":          version,
+		"version":          serverVersion,
 		"tools":            tools,
 		"errors":           publicErrorCodes,
 		"usage_exit_code":  64,
@@ -72,6 +72,10 @@ func describeContract() map[string]any {
 		},
 	}
 }
+
+// serverVersion is the version the server reports. main sets it from the
+// release build's -X main.version value before any command runs.
+var serverVersion = "dev"
 
 // storedRequest is the response to a call that carried a request_id.
 type storedRequest struct {

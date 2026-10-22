@@ -21,6 +21,7 @@ import (
 var version = "dev"
 
 func main() {
+	serverVersion = version
 	err := runCLI(os.Args[1:], os.Stdout)
 	shutdownPlatformRuntime()
 	if err != nil {
@@ -47,7 +48,7 @@ func runCLI(args []string, stdout io.Writer) error {
 		fmt.Fprint(stdout, helpText(topic))
 		return nil
 	case "-v", "--version", "version":
-		fmt.Fprintln(stdout, version)
+		fmt.Fprintln(stdout, serverVersion)
 		return nil
 	case "mcp":
 		return runMCPCommand(args[1:], os.Stdin, stdout)
