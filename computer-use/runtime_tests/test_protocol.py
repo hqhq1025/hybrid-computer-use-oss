@@ -231,6 +231,9 @@ class ProviderWireTests(unittest.TestCase):
         ) as set_timeout, mock.patch.object(
             wire.ui_events, "start"
         ) as monitor_start, mock.patch.object(
+            wire, "enable_session_accessibility",
+            return_value={"changed": [], "errors": []},
+        ), mock.patch.object(
             wire,
             "perform_provider_request",
             return_value={"ok": True, "apps": []},
