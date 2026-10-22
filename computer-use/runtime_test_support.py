@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runtime as runtime_entrypoint  # noqa: E402
 
 from native.linux.provider import (  # noqa: E402
+    a11y_enable,
     actionability,
     action_evidence,
     app_resolver,
@@ -62,6 +63,7 @@ from native.linux.provider import (  # noqa: E402
 
 PROVIDER_MODULES = (
     foundation,
+    a11y_enable,
     node_facts,
     action_evidence,
     phase_timing,
