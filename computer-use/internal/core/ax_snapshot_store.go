@@ -112,13 +112,6 @@ func deliveredTreeKey(snapshot *AppSnapshot) string {
 		snapshot.projection.Root
 }
 
-func repeatedTreeReferenceLines(snapshot *AppSnapshot) []string {
-	if snapshot == nil {
-		return nil
-	}
-	return treeUnchangedReferenceLines(len(snapshot.TreeLines))
-}
-
 // treeUnchangedReferenceLines replaces a tree the model already holds. The
 // model's copy is the last full tree plus every diff delivered after it, so
 // the reference says where the state came from and how to get it again.

@@ -178,18 +178,6 @@ func (registry *AppRefRegistry) Resolve(ref string) (*AXAppRefEntry, error) {
 	return &copy, nil
 }
 
-// DisplayName returns the application name an issued aN was listed under,
-// whatever its lifecycle, or "" when the ref is unknown.
-func (registry *AppRefRegistry) DisplayName(ref string) string {
-	if registry == nil {
-		return ""
-	}
-	if entry := registry.entries[strings.TrimSpace(ref)]; entry != nil {
-		return entry.DisplayName
-	}
-	return ""
-}
-
 // ProviderIdentity returns the exact process identity an issued aN named,
 // whatever its lifecycle. It is for read-only absence checks of that same
 // process; it never revives the ref or binds input.

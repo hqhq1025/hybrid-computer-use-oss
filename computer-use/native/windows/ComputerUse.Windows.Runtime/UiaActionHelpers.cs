@@ -222,66 +222,6 @@ internal sealed partial class UiaProvider
         }
     }
 
-    private static (string Route, string RouteClass) SecondaryRoute(string action)
-    {
-        return Normalize(action) switch
-        {
-            "invoke" => ("uia.pattern.invoke", "provider_semantic"),
-            "toggle" => ("uia.pattern.toggle", "provider_semantic"),
-            "select" => ("uia.pattern.selection_item", "provider_semantic"),
-            "expand" => ("uia.pattern.expand_collapse", "provider_semantic"),
-            "collapse" => ("uia.pattern.expand_collapse", "provider_semantic"),
-            "scrollintoview" => ("uia.scroll", "provider_semantic"),
-            "setfocus" => ("uia.pattern", "provider_semantic"),
-            _ => throw new ProviderFailureException(
-                "capability_unsupported",
-                "precondition",
-                $"The target does not support secondary action {action}."),
-        };
-    }
-
-    private static void InvokeSecondary(
-        AutomationElement? element,
-        string action)
-    {
-        if (element is null)
-        {
-            throw new ProviderFailureException(
-                "semantic_target_not_found",
-                "precondition",
-                "The secondary action requires an exact target.");
-        }
-        switch (Normalize(action))
-        {
-            case "invoke":
-                element.Patterns.Invoke.Pattern.Invoke();
-                return;
-            case "toggle":
-                element.Patterns.Toggle.Pattern.Toggle();
-                return;
-            case "select":
-                element.Patterns.SelectionItem.Pattern.Select();
-                return;
-            case "expand":
-                element.Patterns.ExpandCollapse.Pattern.Expand();
-                return;
-            case "collapse":
-                element.Patterns.ExpandCollapse.Pattern.Collapse();
-                return;
-            case "scrollintoview":
-                element.Patterns.ScrollItem.Pattern.ScrollIntoView();
-                return;
-            case "setfocus":
-                element.Focus();
-                return;
-            default:
-                throw new ProviderFailureException(
-                    "capability_unsupported",
-                    "precondition",
-                    $"The target does not support secondary action {action}.");
-        }
-    }
-
     private static bool TryScroll(
         AutomationElement? element,
         string direction,

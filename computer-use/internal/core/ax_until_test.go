@@ -7,23 +7,6 @@ import (
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 )
 
-func untilTitleService(t *testing.T, titles ...string) (*Service, *recordingPlatformBackend, string) {
-	t.Helper()
-	s, _, window, _ := orderedInputTestService(t)
-	backend := &recordingPlatformBackend{
-		accessibilityResponse: &ProviderAccessibilityResult{
-			OK: true, Snapshot: mixedOrderedInputBatchTestSnapshot(),
-			Mutation:       &ProviderMutationFacts{InputEventsEmitted: true},
-			ActionEvidence: &ProviderActionEvidence{InputEmitted: true, Route: "keyboard_synthesis"},
-		},
-		windowResponse: &ProviderWindowResult{
-			OK: true, AppName: "LibreOffice", AppPID: 10, WindowTitles: titles,
-		},
-	}
-	s.Backend = backend
-	return s, backend, window
-}
-
 func publicLine(t *testing.T, result ToolCallResult) string {
 	t.Helper()
 	visible := WithAXTextEvidence(PrepareAXEvidence(result))

@@ -39,10 +39,6 @@ public enum ComputerUseError: Error, LocalizedError {
             return message
         }
     }
-
-    var toolResultIsError: Bool {
-        true
-    }
 }
 
 extension ComputerUseError {

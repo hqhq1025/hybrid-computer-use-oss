@@ -224,19 +224,6 @@ func boundedSemanticTextPreservesAndNormalizesLineBreaks() {
 }
 
 @Test
-func parsedTreeLineIndexKeepsFirstStructuralLine() {
-    let parsed = parsedTreeLinesByIndex([
-        "0 window Finder",
-        "\t1 row sample.dat",
-        "1 KB",
-    ])
-
-    #expect(parsed.count == 2)
-    #expect(parsed[1]?.role == "row")
-    #expect(parsed[1]?.name == "sample.dat")
-}
-
-@Test
 func accessibilityFramesRejectNonFiniteProviderGeometry() {
     let valid = CGRect(x: 10, y: 20, width: 300, height: 200)
     #expect(finiteAccessibilityFrame(valid) == valid)

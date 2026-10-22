@@ -413,7 +413,7 @@ func TestContentAndRepeatedTreeOutputKeepRevisionPrivate(t *testing.T) {
 		Name:        "Example",
 	}
 	rendered := snapshot.renderedText()
-	repeated := strings.Join(repeatedTreeReferenceLines(snapshot), "\n")
+	repeated := strings.Join(treeUnchangedReferenceLines(len(snapshot.TreeLines)), "\n")
 	for _, output := range []string{rendered, repeated} {
 		for _, private := range []string{"c1:deadbeef", "revision:"} {
 			if strings.Contains(output, private) {

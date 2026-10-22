@@ -9,7 +9,6 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <DefineConstants>$(DefineConstants);PROVIDER_SUITE</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -154,6 +153,9 @@
     <Compile
       Include="../ComputerUse.Windows.Runtime/WindowsProviderFailures.cs"
       Link="WindowsProviderFailures.cs" />
+    <Compile
+      Include="../ComputerUse.Windows.Runtime/ProviderFailureException.cs"
+      Link="ProviderFailureException.cs" />
     <Compile
       Include="../ComputerUse.Windows.Runtime/WindowsUiaAutomationFactory.cs"
       Link="WindowsUiaAutomationFactory.cs" />

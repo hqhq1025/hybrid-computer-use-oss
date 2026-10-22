@@ -156,16 +156,6 @@ func (s *Service) axBatchDecoded(
 	return result
 }
 
-// axBatchHasInputRef reports whether an input action names a ref.
-func axBatchHasInputRef(actions []axBatchAction) bool {
-	for _, action := range actions {
-		if action.actionType != "wait" && action.targetRef != "" {
-			return true
-		}
-	}
-	return false
-}
-
 func axBatchHasRef(actions []axBatchAction) bool {
 	for _, action := range actions {
 		if action.targetRef != "" {
@@ -495,5 +485,5 @@ func (s *Service) axBatchRun(
 			)
 		}
 	}
-	panic("normalizeA11yBatchActions returned an empty sequence")
+	panic("decodeAXActions returned an empty action sequence")
 }

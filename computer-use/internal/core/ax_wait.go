@@ -37,32 +37,6 @@ type axWait struct {
 	timeoutMS int
 }
 
-func (w *axWait) describe() string {
-	var subject string
-	switch {
-	case w.window != "":
-		subject = "window " + strconv.Quote(w.window)
-	case w.query != nil:
-		subject = "element " + axWaitQueryText(w.query)
-	case w.ref != "":
-		subject = w.ref
-		switch {
-		case w.value != "":
-			subject += " value " + strconv.Quote(w.value)
-		case w.state != "":
-			subject += " " + w.state
-		case w.text != "":
-			subject += " text " + strconv.Quote(w.text)
-		}
-	default:
-		subject = "text " + strconv.Quote(w.text)
-	}
-	if w.gone {
-		return subject + " gone"
-	}
-	return subject
-}
-
 func axWaitQueryText(query map[string]any) string {
 	name := OptionalString(query, "name_contains")
 	_, nameExact := query["name_equals"]
