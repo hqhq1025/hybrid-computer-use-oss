@@ -172,8 +172,8 @@ _attribute_requested = set()
 
 
 # Time Chromium needs after the first GetAttributes to insert the web
-# document below its frame. Measured on Chrome 150: 17-18 ms in 5 of 5
-# launches; the read that follows the call missed the page without a pause.
+# document below its frame (about 20 ms); a read right after the call
+# misses the page.
 CHROMIUM_WAKE_SETTLE_SECONDS = 0.15
 
 
@@ -182,8 +182,8 @@ def request_full_tree(app):
 
     Chromium and Electron treat GetAttributes on any of their objects as the
     sign that an assistive technology is present and only then build the
-    tree below their frames (Chrome 150: 2 nodes before, 238 after; VS Code
-    1.130: 2 before, 679 after). Other toolkits answer it as an ordinary
+    tree below their frames; before the call a browser window exposes only
+    its frame. Other toolkits answer it as an ordinary
     read. One call per application connection keeps the cost to one round
     trip.
     """

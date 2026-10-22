@@ -88,7 +88,7 @@ Sessions that already have accessibility on see only reads.
 | Toolkit | Started after the provider | Already running when the provider starts |
 | --- | --- | --- |
 | GTK 3, GTK 4 (including LibreOffice with the gtk3 plugin) | Visible | Visible |
-| GTK 2 (GIMP 2.10) | Visible | Visible within seconds when an XSETTINGS manager runs (measured on Xfce) |
+| GTK 2 (GIMP) | Visible | Visible within seconds when an XSETTINGS manager runs (Xfce, GNOME) |
 | Qt 5/6 (VLC, Kate, Okular) | Visible | Not visible; restart the application |
 | Gecko (Firefox) | Visible | Not visible; restart the application |
 | Chromium, Electron (Chrome, VS Code, Joplin, XMind) | Visible | Not visible; quit every window and start it again |

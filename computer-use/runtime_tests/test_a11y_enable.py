@@ -159,8 +159,8 @@ class ProviderStartupEnablesAccessibilityTests(unittest.TestCase):
 class ChromiumTreeRequestTests(AtspiPatchedTestCase):
     """Chromium builds the tree below its frames only for a screen reader.
 
-    Chrome 150 and Electron apps started after IsEnabled exposed only their
-    application and frame (2 nodes) until an AT called GetAttributes.
+    Chrome and Electron apps started after IsEnabled expose only their
+    application and frame until an AT calls GetAttributes.
     """
 
     def setUp(self):
