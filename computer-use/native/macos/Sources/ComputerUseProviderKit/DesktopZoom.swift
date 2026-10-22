@@ -192,7 +192,8 @@ func desktopZoomStale(_ message: String) -> [String: Any] {
 func executeDesktopZoom(
     _ action: [String: Any], frameID: String
 ) -> [String: Any] {
-    let region = (action["region"] as? [Any] ?? []).map(desktopZoomNumber)
+    let rawRegion: [Any] = action["region"] as? [Any] ?? []
+    let region: [Double] = rawRegion.map { desktopZoomNumber($0) }
     let bounds = desktopBounds()
     let geometry: DesktopZoomGeometry
     do {
