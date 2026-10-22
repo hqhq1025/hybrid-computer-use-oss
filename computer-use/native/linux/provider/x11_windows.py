@@ -695,6 +695,31 @@ def strong_window_instance_handles(app, windows=None):
     return dict(strong_window_instance_handle_inventory(app, windows))
 
 
+def unmapped_window_indices(app, windows, strong):
+    """Return the indices of windows that cannot be on screen.
+
+    A window without a strong native handle is listed as not addressable.
+    When every managed window of the process is already bound to another
+    window of the application, nothing on screen is left that it could be:
+    it is a hidden window the toolkit keeps in its tree (Electron keeps
+    unmapped BrowserWindows that AT-SPI reports SHOWING; Qt keeps a
+    frameless "Offscreen" frame). Such entries are dropped from the listing.
+    A process without any managed window (its windows report another pid)
+    keeps every window, because the binding itself is what failed.
+    """
+    unbound = {index for index, _ in windows if not strong.get(index)}
+    if not unbound or not strong:
+        return set()
+    native = x11_window_inventory_for_pid(node_pid(app))
+    if not inventory_complete(native) or not list(native):
+        return set()
+    bound = set(strong.values())
+    for item in native:
+        if opaque_window_instance_handle_for_id(app, item.get("id")) not in bound:
+            return set()
+    return unbound
+
+
 def window_instance_handle(app, window_index, window, strong_handles=None):
     """Return a stable native handle, or a scoped weak inventory identity.
 

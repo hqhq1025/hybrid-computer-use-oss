@@ -28,8 +28,10 @@ from .x11_windows import (
     strong_window_instance_handles,
     window_instance_handle,
     correlation_root_window_state,
+    unmapped_window_indices,
 )
 from .window_diagnostics import is_infrastructure_window
+
 
 
 def app_top_level_windows(app, windows, active_handle):
@@ -100,6 +102,11 @@ def list_apps_inventory():
         if not windows:
             continue
         strong = strong_window_instance_handles(app, windows)
+        hidden = unmapped_window_indices(app, windows, strong)
+        if hidden:
+            windows = [item for item in windows if item[0] not in hidden]
+            strong = {index: handle for index, handle in strong.items()
+                      if index not in hidden}
         titles = [
             accessible_window_title(app, window, strong) or "untitled"
             for _, window in windows
