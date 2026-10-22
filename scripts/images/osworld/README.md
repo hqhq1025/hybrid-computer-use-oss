@@ -60,6 +60,17 @@ the selected software rather than rerunning over an unknown partial image.
 `--check` validates the operating system, architecture and required filenames.
 It does not run apt, verify archive contents or prove application behavior.
 
+## Chrome repository keys
+
+If apt reports a missing Chrome signing key, run
+`sudo python3 repair_chrome_repository.py` inside the guest before installing
+packages. The script downloads Google's current Linux signing keys over HTTPS,
+writes a dedicated keyring and binds the active Chrome source with `signed-by`.
+It refreshes only that repository's index and rejects signature or download
+errors. It checks that Chrome's installed version stays unchanged. It does not
+upgrade Chrome or disable signature verification. Other repository entries and
+legacy key files remain unchanged.
+
 ## Optional LibreOffice installation
 
 `install_libreoffice.py` installs the official release selected in
