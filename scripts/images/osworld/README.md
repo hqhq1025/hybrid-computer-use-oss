@@ -72,6 +72,19 @@ manual refresh that names a Snap can still update that application.
 `--check` validates the operating system, architecture and required filenames.
 It does not run apt, verify archive contents or prove application behavior.
 
+## Validate the guest filesystem before export
+
+`qemu-img check` validates the QCOW container structure. It does not establish
+that the guest filesystem is healthy. After a clean guest shutdown, expose the
+image's filesystem partition through an offline image tool and run
+`e2fsck -fn /dev/<guest-filesystem-partition>` for an ext filesystem. Confirm the
+partition belongs to the offline guest image, not the host or a mounted guest.
+
+Keep the original image unchanged. If the filesystem check finds errors, preserve
+the output and repair a separate writable image copy. Run the read-only check
+again after repair. Export a new image, then cold-boot it and verify affected
+applications. A successful QCOW check alone is not a release readiness check.
+
 ## Chrome repository keys
 
 If apt reports a missing Chrome signing key, run
@@ -90,6 +103,10 @@ legacy key files remain unchanged.
 not run as part of `install.py`. It validates the exact package set, versions
 and architecture before installing. It creates an isolated profile and sets
 ordinary preferences to suppress welcome, tip and template dialogs.
+For a profile without Impress Navigator preferences, it initializes the complete
+docking record so the first Navigator window has usable dimensions. Existing
+window preferences remain unchanged. This changes application configuration;
+it does not patch LibreOffice's source or executable.
 
 Download the archive from the manifest's source, then run the installer as root
 with `--archive /path/to/the/archive.tar.gz --desktop-user user`. The archive's

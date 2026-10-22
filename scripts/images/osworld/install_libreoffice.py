@@ -20,6 +20,8 @@ import xml.etree.ElementTree as ET
 
 
 OOR = "http://openoffice.org/2001/registry"
+XS = "http://www.w3.org/2001/XMLSchema"
+XSI = "http://www.w3.org/2001/XMLSchema-instance"
 
 
 def command(args, timeout=60):
@@ -41,10 +43,33 @@ def require_stopped(prefix):
             raise RuntimeError("Close the candidate's desktop windows before installation")
 
 
+def initialize_navigator(root):
+    """Seed the complete docking record only when no window preference exists."""
+    windows_path = "/org.openoffice.Office.Views/Windows"
+    items = [item for item in root if item.get(f"{{{OOR}}}path") == windows_path]
+    if any(node.tag == "node" and node.get(f"{{{OOR}}}name") == "simpress/10366"
+           for item in items for node in item):
+        return
+    item = items[0] if items else ET.SubElement(root, "item", {f"{{{OOR}}}path": windows_path})
+    node = ET.SubElement(item, "node", {f"{{{OOR}}}name": "simpress/10366", f"{{{OOR}}}op": "replace"})
+    visible = ET.SubElement(node, "prop", {f"{{{OOR}}}name": "Visible", f"{{{OOR}}}op": "fuse"})
+    ET.SubElement(visible, "value", {f"{{{XSI}}}nil": "true"})
+    user_data = ET.SubElement(node, "node", {f"{{{OOR}}}name": "UserData"})
+    data = ET.SubElement(user_data, "prop", {
+        f"{{{OOR}}}name": "Data", f"{{{OOR}}}op": "fuse", f"{{{OOR}}}type": "xs:string"})
+    ET.SubElement(data, "value").text = "V2,H,128,AL:(16,4,0/0/270/240,270;240)"
+    state = ET.SubElement(node, "prop", {f"{{{OOR}}}name": "WindowState", f"{{{OOR}}}op": "fuse"})
+    ET.SubElement(state, "value").text = "80,109,301,401;1;,,,;"
+
+
 def prepare_preferences(path, uid, gid):
     """Set ordinary first-start preferences without copying diagnostic documents."""
     ET.register_namespace("oor", OOR)
+    ET.register_namespace("xsi", XSI)
     root = ET.parse(path).getroot() if path.exists() else ET.Element(f"{{{OOR}}}items")
+    initialize_navigator(root)
+    # ElementTree cannot infer namespaces used only in attribute values.
+    root.set("xmlns:xs", XS)
     settings = [
         # FirstRun controls initialization jobs. WhatsNew controls the welcome UI.
         ("/org.openoffice.Setup/Product", "WhatsNew"),

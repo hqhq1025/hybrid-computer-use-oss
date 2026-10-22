@@ -124,6 +124,42 @@ class SetupTests(unittest.TestCase):
                     install_libreoffice.extract_packages(archive, extracted, manifest)
                 self.assertTrue(all(call.args[0][0] == "dpkg-deb" for call in run.call_args_list))
 
+    def test_libreoffice_new_navigator_has_complete_typed_docking_record(self):
+        oor = install_libreoffice.OOR
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(install_libreoffice.os, "chown"):
+            path = Path(directory) / "profile/user/registrymodifications.xcu"
+            install_libreoffice.prepare_preferences(path, 1000, 1000)
+            namespaces = dict(value for _, value in ET.iterparse(path, events=["start-ns"]))
+            self.assertEqual(namespaces["xs"], install_libreoffice.XS)
+            root = ET.parse(path).getroot()
+            node = next(node for item in root for node in item
+                        if node.get(f"{{{oor}}}name") == "simpress/10366")
+            names = {element.get(f"{{{oor}}}name") for element in node}
+            self.assertEqual(names, {"Visible", "UserData", "WindowState"})
+            data = next(prop for child in node for prop in child
+                        if prop.get(f"{{{oor}}}name") == "Data")
+            self.assertEqual(data.get(f"{{{oor}}}type"), "xs:string")
+            self.assertTrue(data.findtext("value"))
+
+    def test_libreoffice_preserves_existing_navigator_preferences(self):
+        oor = install_libreoffice.OOR
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(install_libreoffice.os, "chown"):
+            path = Path(directory) / "profile/user/registrymodifications.xcu"
+            path.parent.mkdir(parents=True)
+            path.write_text(f'<oor:items xmlns:oor="{oor}">'
+                '<item oor:path="/org.openoffice.Office.Views/Windows">'
+                '<node oor:name="simpress/10366"><prop oor:name="WindowState">'
+                '<value>user-selected geometry</value></prop></node></item></oor:items>')
+            before = ET.tostring(ET.parse(path).getroot()[0])
+            for _ in range(2):
+                install_libreoffice.prepare_preferences(path, 1000, 1000)
+            root = ET.parse(path).getroot()
+            items = [item for item in root if item.get(f"{{{oor}}}path") == "/org.openoffice.Office.Views/Windows"]
+            self.assertEqual(len(items), 1)
+            self.assertEqual(ET.tostring(items[0]), before)
+
     def test_libreoffice_rejects_package_architecture_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
