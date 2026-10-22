@@ -205,6 +205,7 @@ foreach (var (name, json) in validSchemaCases)
 
 TargetResolutionPolicyTests.Run();
 DesktopLayoutPolicyTests.Run();
+DesktopZoomTests.Run(fixtureRoot);
 
 var validIntents = new Dictionary<string, string>
 {

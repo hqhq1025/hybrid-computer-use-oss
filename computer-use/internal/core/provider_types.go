@@ -401,6 +401,13 @@ type ProviderMutationFacts struct {
 	MutationUnknown      bool   `json:"mutation_unknown,omitempty"`
 }
 
+// ProviderInventoryIssue marks an unobserved part of an applications listing.
+// An empty App means the provider could not enumerate every application.
+type ProviderInventoryIssue struct {
+	App    string `json:"app,omitempty"`
+	Reason string `json:"reason"`
+}
+
 type ProviderAccessibilityResult struct {
 	OK                        bool                      `json:"ok"`
 	Text                      string                    `json:"text,omitempty"`
@@ -412,6 +419,7 @@ type ProviderAccessibilityResult struct {
 	Mutation                  *ProviderMutationFacts    `json:"mutation,omitempty"`
 	ActionEvidence            *ProviderActionEvidence   `json:"action_evidence,omitempty"`
 	Apps                      []ProviderAppDescriptor   `json:"apps,omitempty"`
+	InventoryIssues           []ProviderInventoryIssue  `json:"inventory_issues,omitempty"`
 	ResolvedElement           *ProviderElement          `json:"resolved_element,omitempty"`
 	Candidates                []ProviderTargetCandidate `json:"candidates,omitempty"`
 	CandidateCount            int                       `json:"candidate_count,omitempty"`

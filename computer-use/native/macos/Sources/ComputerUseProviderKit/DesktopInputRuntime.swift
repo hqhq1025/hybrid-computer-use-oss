@@ -103,6 +103,7 @@ func guiExecutionFailure(
     ]
     if let snapshot {
         result["snapshot"] = snapshot
+        DesktopPublishedLayouts.shared.remember(snapshot)
     }
     return result
 }

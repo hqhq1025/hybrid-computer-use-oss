@@ -37,7 +37,6 @@ const (
 	AXModeApps             = "apps"
 	AXDefaultFindPageSize  = 20
 	AXDefaultWaitTimeout   = 5000
-	AXMaxUntilStableMS     = 5000
 	AXPublicErrorCodeKey   = "public_error_code"
 	AXPublicErrorPathKey   = "public_error_path"
 	AXPublicErrorHintKey   = "public_error_hint"

@@ -201,6 +201,43 @@ func TestEveryPublicErrorCodeIsPublished(t *testing.T) {
 	}
 }
 
+// An AX full or screenshot record names its image as the GUI frame, in the
+// same screen field a GUI screenshot record uses, so code reads one shape.
+func TestAXImageRecordCarriesTheGUIFrameScreen(t *testing.T) {
+	t.Setenv("COMPUTER_USE_OUTPUT_DIR", t.TempDir())
+	for _, observe := range []string{contract.ObserveFull, contract.ObserveScreenshot} {
+		s := NewServiceWithBackend(desktopFrameBackend(t))
+		record := s.CallRecord(contract.PublicToolAX, map[string]any{
+			"mode": "observe", "app": "Editor", "observe": observe,
+		}, CallOptions{})
+		if !record.OK || record.Screen == nil || len(record.Images) != 1 {
+			t.Fatalf("%s record: %+v", observe, record)
+		}
+		if record.Screen.Width != 136 || record.Screen.Height != 77 ||
+			record.Screen.CoordinateSpace != "screen_image_px" || record.Screen.Image != record.Images[0] {
+			t.Fatalf("%s screen is not the delivered frame: %+v", observe, record.Screen)
+		}
+	}
+}
+
+// A zoom record gives code the mapping as data: evidence.zoom and the zoom
+// image path, and no screen, because the zoom image is not a GUI frame.
+func TestGUIZoomRecordCarriesTheMapping(t *testing.T) {
+	t.Setenv("COMPUTER_USE_OUTPUT_DIR", t.TempDir())
+	s := NewServiceWithBackend(zoomBackend(t))
+	s.guiSnapshot = &AppSnapshot{FrameID: "layout-v1-0123456789abcdef", Width: 1365, Height: 768}
+	record := s.CallRecord(contract.PublicToolGUI, map[string]any{
+		"actions": []any{map[string]any{"type": "zoom", "region": []any{100.0, 0.0, 108.0, 768.0}}},
+	}, CallOptions{})
+	zoom, _ := record.Evidence["zoom"].(map[string]any)
+	if !record.OK || record.InputEmitted || record.Screen != nil || len(record.Images) != 1 || zoom == nil {
+		t.Fatalf("zoom record: %+v", record)
+	}
+	if zoom["scale_x"] != 5.6264 || zoom["frame"] != "89abcdef" || !strings.Contains(record.Text, "x = 99.5313 + u/5.6264") {
+		t.Fatalf("zoom record mapping differs from its text: %+v", record)
+	}
+}
+
 // GUI records carry the image path and screen size, never base64.
 func TestGUIRecordWritesImageFile(t *testing.T) {
 	t.Setenv("COMPUTER_USE_OUTPUT_DIR", t.TempDir())

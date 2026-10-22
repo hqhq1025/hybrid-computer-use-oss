@@ -32,7 +32,7 @@ values = d.read(["r31", "r32"]).read          # live value and states, no tree
 computer-use apps --json
 computer-use find w1 --role button --name-has Save --json
 computer-use click r12 --wait '{"window":"Saved"}'; echo $?
-computer-use wait '{"window":"Export","gone":true}
+computer-use wait '{"window":"Export","gone":true}'
 ```
 
 - Refs (`aN`, `wN`, `rN`) stay valid across commands and scripts. Copy them
@@ -45,6 +45,13 @@ computer-use wait '{"window":"Export","gone":true}
   follows it.
 - Screenshots are files; the record holds the path. Open the image only when
   the question is visual.
+- A record's `screen` is the current GUI frame: a GUI screenshot or an AX
+  `observe` with `full` or `screenshot`. GUI `x`/`y` are pixels of that image,
+  and GUI input may follow either one without another screenshot.
+- To read small text or icons, zoom a frame region:
+  `z = d.zoom([x0, y0, x1, y1])` or `computer-use gui zoom X0 Y0 X1 Y1`.
+  Zoom only looks. Convert a point seen in the zoom image with
+  `hcu.zoom_point(z, u, v)` and click those frame pixels.
 
 ## Retries
 
