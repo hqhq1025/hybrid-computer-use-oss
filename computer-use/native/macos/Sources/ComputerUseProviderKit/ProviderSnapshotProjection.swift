@@ -42,6 +42,17 @@ extension AppSnapshot {
                 "showing": true,
             ]]
         }
+        if !omissions.isEmpty {
+            result["annotations"] = omissions.map { omission in
+                [
+                    "parentRuntimeId": [0],
+                    "kind": "provider_omission",
+                    "count": omission.count,
+                    "reason": omission.reason,
+                    "detail": omission.detail,
+                ] as [String: Any]
+            }
+        }
         if let focusedSummary {
             result["focusedSummary"] = focusedSummary
         }

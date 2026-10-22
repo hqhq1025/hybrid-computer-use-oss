@@ -26,8 +26,15 @@ func singleAttributeRead(_ element: AXUIElement, _ attribute: String) -> AXRead 
     return AXRead(status: status, value: value)
 }
 
-/// Returns one read per attribute, or nil when the request as a whole fails.
-func multipleAttributeRead(_ element: AXUIElement, _ attributes: [String]) -> [AXRead]? {
+enum BatchedAttributeRead {
+    case values([AXRead])
+    case failed(AXError)
+}
+
+func multipleAttributeRead(
+    _ element: AXUIElement,
+    _ attributes: [String]
+) -> BatchedAttributeRead {
     var values: CFArray?
     let status = AXUIElementCopyMultipleAttributeValues(
         element, attributes as CFArray, [], &values
@@ -35,9 +42,9 @@ func multipleAttributeRead(_ element: AXUIElement, _ attributes: [String]) -> [A
     guard status == .success,
           let raw = values as? [AnyObject],
           raw.count == attributes.count else {
-        return nil
+        return .failed(status == .success ? .failure : status)
     }
-    return raw.map(decodeBatchedAttribute)
+    return .values(raw.map(decodeBatchedAttribute))
 }
 
 /// The batched request reports a per-attribute failure as an AXValue of type
@@ -74,6 +81,9 @@ final class AXNodeFactsCache {
     }
 
     private final class Node {
+        /// The application did not answer within the messaging timeout.
+        /// Later reads of this node fail at once instead of waiting again.
+        var unresponsive = false
         var attributes: [String: AXRead] = [:]
         var names: AXRead?
         var actions: AXRead?
@@ -82,14 +92,17 @@ final class AXNodeFactsCache {
 
     private static let threadKey = "computer-use.ax-node-facts"
     private var nodes: [Key: Node] = [:]
+    /// Nodes whose attributes could not be read because the application
+    /// did not answer; their descendants are missing from the snapshot.
+    private(set) var unresponsiveNodeCount = 0
     private let attributes: [String]
-    private let multiRead: (AXUIElement, [String]) -> [AXRead]?
+    private let multiRead: (AXUIElement, [String]) -> BatchedAttributeRead
     private let singleRead: (AXUIElement, String) -> AXRead
     private let settableRead: (AXUIElement, String) -> Bool
 
     init(
         attributes: [String] = snapshotNodeAttributes,
-        multiRead: @escaping (AXUIElement, [String]) -> [AXRead]? = multipleAttributeRead,
+        multiRead: @escaping (AXUIElement, [String]) -> BatchedAttributeRead = multipleAttributeRead,
         singleRead: @escaping (AXUIElement, String) -> AXRead = singleAttributeRead,
         settableRead: @escaping (AXUIElement, String) -> Bool = { element, attribute in
             var settable = DarwinBoolean(false)
@@ -123,12 +136,24 @@ final class AXNodeFactsCache {
             return node
         }
         let node = Node()
-        if let reads = multiRead(element, attributes), reads.count == attributes.count {
+        nodes[key] = node
+        switch multiRead(element, attributes) {
+        case .values(let reads) where reads.count == attributes.count:
             for (attribute, read) in zip(attributes, reads) {
                 node.attributes[attribute] = read
             }
+        case .failed(.cannotComplete):
+            // One probe tells a slow attribute from an application that does
+            // not answer at all; only the latter stops reading this node.
+            let role = singleRead(element, kAXRoleAttribute)
+            node.attributes[kAXRoleAttribute] = role
+            if role.status == .cannotComplete {
+                node.unresponsive = true
+                unresponsiveNodeCount += 1
+            }
+        default:
+            break
         }
-        nodes[key] = node
         return node
     }
 
@@ -137,7 +162,9 @@ final class AXNodeFactsCache {
         if let read = node.attributes[attribute] {
             return read
         }
-        let read = singleRead(element, attribute)
+        let read = node.unresponsive
+            ? AXRead(status: .cannotComplete, value: nil)
+            : singleRead(element, attribute)
         node.attributes[attribute] = read
         return read
     }
@@ -146,6 +173,9 @@ final class AXNodeFactsCache {
         let node = node(element)
         if let names = node.names {
             return names
+        }
+        if node.unresponsive {
+            return AXRead(status: .cannotComplete, value: nil)
         }
         var names: CFArray?
         let status = AXUIElementCopyAttributeNames(element, &names)
@@ -158,6 +188,9 @@ final class AXNodeFactsCache {
         let node = node(element)
         if let actions = node.actions {
             return actions
+        }
+        if node.unresponsive {
+            return AXRead(status: .cannotComplete, value: nil)
         }
         var actions: CFArray?
         let status = AXUIElementCopyActionNames(element, &actions)
@@ -172,7 +205,8 @@ final class AXNodeFactsCache {
             return settable
         }
         // An attribute the element does not support cannot be set.
-        let settable = node.attributes[attribute]?.status == .attributeUnsupported
+        let settable = node.unresponsive
+            || node.attributes[attribute]?.status == .attributeUnsupported
             ? false
             : settableRead(element, attribute)
         node.settable[attribute] = settable

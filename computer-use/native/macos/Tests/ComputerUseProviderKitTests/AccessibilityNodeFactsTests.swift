@@ -12,10 +12,10 @@ func snapshotNodeReadsShareOneBatchedRequestPerElement() {
         attributes: ["AXRole", "AXValue"],
         multiRead: { _, _ in
             batches += 1
-            return [
+            return .values([
                 AXRead(status: .success, value: "AXButton" as CFString),
                 AXRead(status: .attributeUnsupported, value: nil),
-            ]
+            ])
         },
         singleRead: { _, _ in
             singles += 1
@@ -46,7 +46,7 @@ func failedBatchFallsBackToSingleReads() {
     var singles = 0
     let cache = AXNodeFactsCache(
         attributes: ["AXRole"],
-        multiRead: { _, _ in nil },
+        multiRead: { _, _ in .failed(.failure) },
         singleRead: { _, _ in
             singles += 1
             return AXRead(status: .success, value: "AXGroup" as CFString)
@@ -69,4 +69,78 @@ func snapshotScopeInstallsOneCacheAndRemovesIt() {
         }
     }
     #expect(AXNodeFactsCache.current == nil)
+}
+
+@Test
+func unresponsiveApplicationStopsReadingTheNodeAfterOneProbe() {
+    var singles = 0
+    var settableReads = 0
+    let cache = AXNodeFactsCache(
+        attributes: ["AXRole", "AXValue"],
+        multiRead: { _, _ in .failed(.cannotComplete) },
+        singleRead: { _, _ in
+            singles += 1
+            return AXRead(status: .cannotComplete, value: nil)
+        },
+        settableRead: { _, _ in
+            settableReads += 1
+            return true
+        }
+    )
+    let element = AXUIElementCreateApplication(4244)
+    #expect(cache.attribute(element, "AXValue").status == .cannotComplete)
+    #expect(cache.attribute(element, "AXTitle").status == .cannotComplete)
+    #expect(cache.attributeNames(element).status == .cannotComplete)
+    #expect(cache.actionNames(element).status == .cannotComplete)
+    #expect(!cache.isSettable(element, "AXValue"))
+    #expect(singles == 1)
+    #expect(settableReads == 0)
+    #expect(cache.unresponsiveNodeCount == 1)
+}
+
+@Test
+func slowBatchFallsBackToSingleReadsWhenTheApplicationAnswers() {
+    var singles = 0
+    let cache = AXNodeFactsCache(
+        attributes: ["AXRole", "AXRows"],
+        multiRead: { _, _ in .failed(.cannotComplete) },
+        singleRead: { _, attribute in
+            singles += 1
+            return AXRead(status: .success, value: attribute as CFString)
+        }
+    )
+    let element = AXUIElementCreateApplication(4245)
+    #expect(cache.attribute(element, "AXRole").value as? String == "AXRole")
+    #expect(cache.attribute(element, "AXTitle").value as? String == "AXTitle")
+    #expect(singles == 2)
+    #expect(cache.unresponsiveNodeCount == 0)
+}
+
+@Test
+func traversalDeadlineSkipsLaterNodesAndCountsThem() throws {
+    var renderer = TreeRenderer(
+        context: RenderContext(
+            windowBounds: nil,
+            focusedElement: nil,
+            focusedAncestry: [],
+            textLimit: .defaults,
+            treeLimits: .defaults,
+            traversalDeadline: 0
+        ),
+        readTitle: { _ in "Window" },
+        readExpansion: { _ in nil }
+    )
+    try renderer.render(AXUIElementCreateApplication(4246))
+    try renderer.render(AXUIElementCreateApplication(4247), relativeRuntimeID: [1])
+    #expect(renderer.records.count == 1)
+    #expect(renderer.deadlineOmittedCount == 1)
+}
+
+@Test
+func snapshotOmissionsReportDeadlineAndUnresponsiveReads() {
+    #expect(snapshotOmissions(deadlineOmitted: 0, unresponsiveNodes: 0).isEmpty)
+    let omissions = snapshotOmissions(deadlineOmitted: 3, unresponsiveNodes: 2, deadlineSeconds: 20)
+    #expect(omissions.map(\.reason) == ["time", "provider_probe_error"])
+    #expect(omissions.map(\.count) == [3, 2])
+    #expect(omissions[0].detail.hasPrefix("3 not visited: time budget exhausted (20s); tree is partial"))
 }
