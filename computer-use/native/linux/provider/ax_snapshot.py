@@ -32,6 +32,7 @@ from .ax_node_properties import (
     render_element_line,
 )
 from .ax_records import (
+    closed_combo_popups,
     record_for,
 )
 from .ax_virtual_table import (
@@ -238,6 +239,25 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
     # carry.
     TEXT_ONLY_ROLES = {"static", "label", "paragraph", "heading", "caption"}
 
+    def closed_popup_indices(node, facts, child_count_hint):
+        """Return the child indices of a closed combo box's popups.
+
+        The popups are skipped like a closed nested window and counted as
+        filtered; see closed_combo_popups(). They still enter the content
+        probe, so that opening one invalidates a reused tree.
+        """
+        if child_count_hint == 0:
+            return frozenset()
+        closed = closed_combo_popups(node, facts, snapshot_scope)
+        for _index, popup_facts in closed:
+            dropped["count"] += 1
+            dropped["filtered"] += 1
+            if focus_probe is not None:
+                focus_probe.skipped()
+            if content_probe is not None:
+                content_probe.add_node(popup_facts.node, popup_facts)
+        return frozenset(index for index, _facts in closed)
+
     def visit_impl(node, depth, path, render_depth=0, parent_text=""):
         """Visit one node; `depth` drives the budget, `render_depth` indents.
 
@@ -361,10 +381,12 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             if not keeps:
                 dropped["count"] += 1
                 dropped["filtered"] += 1
+                closed_popups = closed_popup_indices(
+                    node, facts, child_count_hint)
                 children, _, _ = child_entries(
                     node, child_count_hint, facts)
                 for child_index, child in children:
-                    if child is None:
+                    if child is None or child_index in closed_popups:
                         continue
                     # This node is not rendered, so render_depth stays and the
                     # children take its place.
@@ -376,6 +398,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             node, None, path, window_bounds, text_limit=text_limit,
             facts=facts,
         )
+        closed_popups = closed_popup_indices(node, facts, child_count_hint)
 
         # Under budget pressure, keep named, actionable and valued nodes by
         # dropping structural containers first. Only the container's own line
@@ -391,7 +414,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             dropped["pressure"] += 1
             children, _, _ = child_entries(node, child_count_hint, facts)
             for child_index, child in children:
-                if child is None:
+                if child is None or child_index in closed_popups:
                     continue
                 visit(child, depth + 1,
                       path + [child_index], render_depth, "")
@@ -511,7 +534,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             except StopIteration:
                 break
             child_slots_seen += 1
-            if child is None:
+            if child is None or child_index in closed_popups:
                 continue
             # This node was rendered: indent its children one level deeper and
             # pass its text down so they can detect verbatim repetition.

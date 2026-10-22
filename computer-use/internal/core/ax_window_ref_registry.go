@@ -22,6 +22,9 @@ type AXWindowRefEntry struct {
 	CreatedRevision                 string
 	LastSeenRevision                string
 	LastUsedTick                    uint64
+	// NoAccessibilityTree marks a window that has a native handle but no
+	// accessibility tree; see ax_native_window.go.
+	NoAccessibilityTree bool
 }
 
 type WindowRefRegistry struct {
@@ -347,4 +350,15 @@ func (registry *WindowRefRegistry) MarkByApp(
 	forEachOwnedRef(registry.entries, appRef,
 		func(entry *AXWindowRefEntry) string { return entry.AppRef },
 		func(ref string) { registry.MarkLifecycle(ref, lifecycle, reason) })
+}
+
+// markNoAccessibilityTree records whether the window of ref has no
+// accessibility tree. The apps listing sets it on every window it issues.
+func (registry *WindowRefRegistry) markNoAccessibilityTree(ref string, none bool) {
+	if registry == nil {
+		return
+	}
+	if entry := registry.entries[ref]; entry != nil {
+		entry.NoAccessibilityTree = none
+	}
 }

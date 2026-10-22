@@ -410,8 +410,11 @@ func (s *Service) renderAXDiffOrCompactObservation(
 			result.StructuredContent = map[string]any{}
 		}
 		kind := "focused"
-		if lines[0] == "content:" {
+		switch lines[0] {
+		case "content:":
 			kind = "content"
+		case "popup:":
+			kind = "popup"
 		}
 		result.StructuredContent["final_observation_kind"] = kind
 		return result, lines, true, true, false

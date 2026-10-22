@@ -16,6 +16,14 @@
   frame pixel shown at a point of a zoom image.
 - The CLI `act --json` and `gui --json` read their body from standard input
   with `-` and from a file with `@FILE`, in addition to an inline value.
+- Linux: AX output shows what is on screen. Options of a closed combo box
+  are no longer listed (Qt kept them visible, also for combos on hidden
+  pages); a click that opens a menu or popup returns its items under
+  `popup:`; spreadsheet tables state how many empty cells were omitted;
+  hidden toolkit windows leave the window listings; windows of applications
+  without an accessibility tree are listed with a wN for activate, close and
+  window waits; a cell that cannot confirm keyboard focus names the routes
+  that work.
 - macOS: when the screenshot after GUI input catches a desktop layout
   change, the provider discards that sample and captures again within the
   same `settle_ms` budget. Input is not replayed and the layout checks are
