@@ -492,7 +492,7 @@ internal sealed partial class UiaProvider : IDisposable
         foreach (var match in matches)
         {
             var name = ProcessName(match.AppProcessId, names) ?? query;
-            labels.Add($"{name} (pid={match.AppProcessId}, windows={match.Windows.Count})");
+            labels.Add($"{name} ({match.Windows.Count} window{(match.Windows.Count == 1 ? "" : "s")})");
             try
             {
                 using var owner = Process.GetProcessById(match.OwnerProcessId);
