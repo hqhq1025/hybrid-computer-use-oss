@@ -553,44 +553,47 @@ def make_handler(gateway: OpenAIGateway) -> type[BaseHTTPRequestHandler]:
 
             response_body = response.data
             status = response.status
-            delivered = relay_response(self, status, response.headers, response_body)
-            if not delivered:
-                row["client_disconnected"] = True
-            row["http_status"] = status
-            row["latency_sec"] = round(time.time() - started, 3)
-            task_label = (task or "")[:8]
-            if row.get("rate_limited"):
-                log(f"rate limit on {row['endpoint']} task={task_label} outlasted the wait; relayed")
-            elif status >= 400:
-                gateway.stats["errors"] += 1
-                row["upstream_error"] = True
-                log(f"{status} from {row['endpoint']} task={task_label}: {response_body[:300]!r}")
+            with gateway.budget.delivering(row):
+                delivered = relay_response(self, status, response.headers, response_body)
+                if not delivered:
+                    row["client_disconnected"] = True
+                row["http_status"] = status
+                row["latency_sec"] = round(time.time() - started, 3)
+                task_label = (task or "")[:8]
+                if row.get("rate_limited"):
+                    log(f"rate limit on {row['endpoint']} task={task_label} "
+                        "outlasted the wait; relayed")
+                elif status >= 400:
+                    gateway.stats["errors"] += 1
+                    row["upstream_error"] = True
+                    log(f"{status} from {row['endpoint']} task={task_label}: "
+                        f"{response_body[:300]!r}")
 
-            try:
-                payload = None
-                if "text/event-stream" in response.headers.get("content-type", ""):
-                    payload = parse_sse_for_usage(response_body)
-                elif response_body[:1] == b"{":
-                    payload = json.loads(response_body)
-                if isinstance(payload, dict):
-                    row["response_id"] = payload.get("id")
-                    row["response_status"] = payload.get("status")
-                    row.update(extract_usage(payload))
-                    if row.get("input_tokens") is not None:
-                        gateway.stats["accounted"] += 1
-            except Exception as exc:
-                row["accounting_error"] = f"{type(exc).__name__}: {exc}"
-                gateway.stats["errors"] += 1
-                log(f"ERROR usage parsing failed task={task}: {exc}")
-            succeeded = False
-            if delivered and 200 <= status < 300 and row["generation_request"]:
                 try:
-                    succeeded = generation_succeeded(response_body, response.headers)
-                except (ValueError, TypeError, KeyError, AttributeError):
-                    pass
-                if not succeeded:
-                    row["generation_error"] = "missing successful generation terminal"
-            gateway.budget.finish(row, gateway.token_log, succeeded)
+                    payload = None
+                    if "text/event-stream" in response.headers.get("content-type", ""):
+                        payload = parse_sse_for_usage(response_body)
+                    elif response_body[:1] == b"{":
+                        payload = json.loads(response_body)
+                    if isinstance(payload, dict):
+                        row["response_id"] = payload.get("id")
+                        row["response_status"] = payload.get("status")
+                        row.update(extract_usage(payload))
+                        if row.get("input_tokens") is not None:
+                            gateway.stats["accounted"] += 1
+                except Exception as exc:
+                    row["accounting_error"] = f"{type(exc).__name__}: {exc}"
+                    gateway.stats["errors"] += 1
+                    log(f"ERROR usage parsing failed task={task}: {exc}")
+                succeeded = False
+                if delivered and 200 <= status < 300 and row["generation_request"]:
+                    try:
+                        succeeded = generation_succeeded(response_body, response.headers)
+                    except (ValueError, TypeError, KeyError, AttributeError):
+                        pass
+                    if not succeeded:
+                        row["generation_error"] = "missing successful generation terminal"
+                gateway.budget.finish(row, gateway.token_log, succeeded)
 
     return Handler
 
