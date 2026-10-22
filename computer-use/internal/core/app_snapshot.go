@@ -107,6 +107,12 @@ type axRelationTarget struct {
 	ProcessGeneration  string `json:"processGeneration,omitempty"`
 }
 
+// axCellSummaryAnnotation is the provider annotation on a table whose
+// visible empty cells were left out of the tree. Its Detail says how many
+// and how to reach them; it is rendered on the table and is not a coverage
+// gap.
+const axCellSummaryAnnotation = "cell_summary"
+
 type axProviderAnnotation struct {
 	ParentRuntimeID []int  `json:"parentRuntimeId,omitempty"`
 	Kind            string `json:"kind"`
