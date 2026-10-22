@@ -81,10 +81,10 @@ class InputEmissionResultTests(unittest.TestCase):
         self.assertIn("input emission failed", str(caught.exception))
 
     def test_non_ascii_text_is_sent_one_character_at_a_time(self):
-        # One STRING event carrying "Grüße 你好" reached gedit as
-        # "Gr好好e 好好": libatspi rebinds a spare keycode for every non-ASCII
-        # character and a burst reuses it before the application reads the
-        # previous mapping. ASCII runs still go in one event.
+        # libatspi rebinds a spare keycode for every non-ASCII character, and
+        # a burst reuses it before the application reads the previous
+        # mapping ("Grüße 你好" -> "Gr好好e 好好"). ASCII runs still go in one
+        # event.
         events = []
         sleeps = []
 

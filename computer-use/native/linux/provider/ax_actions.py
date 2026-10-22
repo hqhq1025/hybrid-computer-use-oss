@@ -267,8 +267,8 @@ def send_key(key):
 # character without a keycode in the current layout by rebinding a spare
 # keycode to its keysym. A burst of such characters reuses that keycode before
 # the application has read the previous mapping, so one STRING event with
-# "Grüße 你好" arrived in gedit as "Gr好好e 好好". Measured in the probe image
-# (Xvfb, GTK3): 20 ms gave 18/20 exact results, 35 ms and 50 ms 20/20.
+# "Grüße 你好" can arrive as "Gr好好e 好好". 20 ms still lost characters
+# occasionally; 35 ms did not.
 NON_ASCII_KEY_INTERVAL_SECONDS = 0.035
 
 
