@@ -339,3 +339,53 @@ func TestFindAddressabilityExplainsHiddenTarget(t *testing.T) {
 			eligible, reason)
 	}
 }
+
+func TestDefaultObserveIssuesRefToUnnamedEditorWithProviderIdentity(t *testing.T) {
+	// GTK and Qt document editors (gedit, Bluefish, Kate) are unnamed text
+	// areas. They are the main target of their window; without a ref the
+	// model saw the text but could only type through the focused window.
+	showing := true
+	editor := &AXNode{
+		ID:                 "0/4",
+		Role:               "textbox",
+		SemanticClass:      "control",
+		Capabilities:       AXCapabilities{EditText: true},
+		LocatorKind:        AXLocatorProviderBound,
+		ProviderBusName:    ":1.42",
+		ProviderObjectPath: "/org/a11y/atspi/accessible/77",
+		ProcessGeneration:  "4242:1",
+		Showing:            &showing,
+		Visible:            &showing,
+		SourceRecord: &ElementRecord{
+			Frame: &frame{X: 0, Y: 70, Width: 900, Height: 670},
+		},
+	}
+	unnamedButton := &AXNode{
+		ID:                 "0/5",
+		Role:               "button",
+		SemanticClass:      "control",
+		Capabilities:       AXCapabilities{Activate: ActivationSemantic},
+		LocatorKind:        AXLocatorProviderBound,
+		ProviderBusName:    ":1.42",
+		ProviderObjectPath: "/org/a11y/atspi/accessible/78",
+		ProcessGeneration:  "4242:1",
+		Showing:            &showing,
+		Visible:            &showing,
+	}
+	snapshot := &AXSnapshot{
+		AppRef:       "a1",
+		AppIdentity:  "gedit",
+		WindowHandle: "private-window",
+		WindowRef:    "w1",
+		Revision:     "c1",
+		Roots:        []*AXNode{editor, unnamedButton},
+		ByID:         map[string]*AXNode{"0/4": editor, "0/5": unnamedButton},
+	}
+	NewRefRegistry(16).AssignSnapshotRefs(snapshot)
+	if editor.Ref == "" {
+		t.Fatalf("unnamed editor with provider identity got no ref (reason %q)", editor.AddressabilityReason)
+	}
+	if unnamedButton.Ref != "" {
+		t.Fatalf("unnamed button without a description must stay unaddressed, got %q", unnamedButton.Ref)
+	}
+}

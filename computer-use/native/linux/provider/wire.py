@@ -6,6 +6,7 @@ import traceback
 
 from . import phase_timing
 from . import ui_events
+from .a11y_enable import enable_session_accessibility
 from .ax_dispatch import perform_provider_request
 from .ax_transition_evidence import public_element_record
 from .foundation import (
@@ -247,6 +248,28 @@ def _initialize_provider(request):
     except Exception:
         _write_operator_exception(request, "startup")
         raise
+    # Users start applications without accessibility flags, and most
+    # toolkits decide at startup whether to export a tree. Switching the
+    # session on here makes every application started from now on visible;
+    # a session that already has it on sees only reads. A failure leaves
+    # GTK 3 applications and GUI working, so it is recorded, not raised.
+    try:
+        facts = enable_session_accessibility()
+    except Exception:
+        _write_operator_exception(request, "accessibility_enable")
+    else:
+        if facts["changed"] or facts["errors"]:
+            print(
+                json.dumps({
+                    "kind": "linux_provider_diagnostic",
+                    "request_id": "startup",
+                    "operation": "accessibility_enable",
+                    "stage": "startup",
+                    "diagnostic": facts,
+                }, separators=(",", ":")),
+                file=sys.stderr,
+                flush=True,
+            )
     # Without the event monitor the provider still works: every observe
     # walks the tree and the settle wait uses its fixed floor.
     ui_events.start()

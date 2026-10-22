@@ -91,6 +91,45 @@ class ExtentsTests(AtspiPatchedTestCase):
         self.assertIsNone(runtime.extents(self._node(0, 0, 100, 999999)))
 
 
+class GdkDevicePixelTests(unittest.TestCase):
+    """GDK must report X root pixels even when the desktop scales windows.
+
+    At GDK scale 2 a 1920x1080 root reads as 960x540, so screenshots are
+    rejected and mapped clicks land up to a screen width off target.
+    """
+
+    def test_scale_is_pinned_before_gi_is_imported(self):
+        # The probe records GDK_SCALE at the moment `gi` is first imported:
+        # GDK reads it when it opens the display, so a later pin is too late.
+        probe = (
+            "import importlib.abc, os, sys\n"
+            "seen = {}\n"
+            "class Probe(importlib.abc.MetaPathFinder):\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name == 'gi' and 'scale' not in seen:\n"
+            "            seen['scale'] = os.environ.get('GDK_SCALE')\n"
+            "            seen['dpi'] = os.environ.get('GDK_DPI_SCALE')\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, Probe())\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import native.linux.provider.foundation\n"
+            "print(seen.get('scale'), seen.get('dpi'))\n"
+        )
+        env = dict(os.environ, GDK_SCALE="2", GDK_DPI_SCALE="0.5")
+        result = subprocess.run(
+            [sys.executable, "-c", probe,
+             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))],
+            env=env, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["1", "None"])
+
+    def test_pin_overrides_an_inherited_scale(self):
+        environ = {"GDK_SCALE": "2", "GDK_DPI_SCALE": "0.5", "HOME": "/h"}
+        runtime.pin_gdk_device_pixels(environ)
+        self.assertEqual(environ, {"GDK_SCALE": "1", "HOME": "/h"})
+
+
 class DesktopBoundsTests(unittest.TestCase):
     def test_monitor_union_preserves_negative_virtual_desktop_origin(self):
         class Geometry:

@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runtime as runtime_entrypoint  # noqa: E402
 
 from native.linux.provider import (  # noqa: E402
+    a11y_enable,
     actionability,
     action_evidence,
     app_resolver,
@@ -62,6 +63,7 @@ from native.linux.provider import (  # noqa: E402
 
 PROVIDER_MODULES = (
     foundation,
+    a11y_enable,
     node_facts,
     action_evidence,
     phase_timing,
@@ -377,6 +379,10 @@ class FakeNode:
     def get_text_iface(self):
         return self._text
 
+    def get_hypertext_iface(self):
+        # Tests set `links` on a node to model AT-SPI Hypertext embeds.
+        return self if getattr(self, "links", None) is not None else None
+
     def get_editable_text_iface(self):
         return self._text if (self._text is not None and self._editable) else None
 
@@ -473,6 +479,22 @@ class FakeCoordType:
 RELATION = runtime.Atspi.RelationType
 
 
+class FakeAtspiHypertext:
+    @staticmethod
+    def get_n_links(iface):
+        return len(iface.links)
+
+    @staticmethod
+    def get_link(iface, index):
+        return iface.links[index]
+
+
+class FakeAtspiHyperlink:
+    @staticmethod
+    def get_object(link, index):
+        return link
+
+
 class FakeAtspi:
     """Keep the real StateType enum; replace only calls that reach the a11y bus."""
 
@@ -485,6 +507,8 @@ class FakeAtspi:
     EditableText = FakeAtspiEditableText
     Component = FakeAtspiComponent
     Value = FakeAtspiValue
+    Hypertext = FakeAtspiHypertext
+    Hyperlink = FakeAtspiHyperlink
 
 
 class AtspiPatchedTestCase(unittest.TestCase):
