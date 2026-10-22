@@ -2,9 +2,9 @@
 """Linux provider GUI capture, screenshot encoding, pixel evidence, and settle wait tests."""
 
 from runtime_test_support import *  # noqa: F401,F403
+from runtime_tests.gui_test_helpers import patch_gui_capture
 import base64
 import random
-from runtime_tests.test_gui import patch_gui_capture
 
 
 class GUICapturePipelineTests(unittest.TestCase):
