@@ -92,6 +92,7 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     "${runtime_root}/Sources/ComputerUseProviderKit/ComputerUseServiceTextSelection.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/DesktopInputRuntime.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/DesktopRuntime.swift"
+    "${runtime_root}/Sources/ComputerUseProviderKit/DesktopZoom.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/Errors.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/GUIDrag.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/GUIStillness.swift"
