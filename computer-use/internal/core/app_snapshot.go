@@ -33,6 +33,9 @@ type ProviderAppWindow struct {
 	ProcessGeneration  string `json:"processGeneration"`
 	Active             bool   `json:"active"`
 	InputTarget        bool   `json:"inputTarget"`
+	// NoAccessibilityTree marks a window whose process exports no
+	// accessibility tree; it has a native handle only.
+	NoAccessibilityTree bool `json:"noAccessibilityTree,omitempty"`
 }
 
 type frame struct {
@@ -106,6 +109,12 @@ type axRelationTarget struct {
 	ProviderObjectPath string `json:"providerObjectPath,omitempty"`
 	ProcessGeneration  string `json:"processGeneration,omitempty"`
 }
+
+// axCellSummaryAnnotation is the provider annotation on a table whose
+// visible empty cells were left out of the tree. Its Detail says how many
+// and how to reach them; it is rendered on the table and is not a coverage
+// gap.
+const axCellSummaryAnnotation = "cell_summary"
 
 type axProviderAnnotation struct {
 	ParentRuntimeID []int  `json:"parentRuntimeId,omitempty"`

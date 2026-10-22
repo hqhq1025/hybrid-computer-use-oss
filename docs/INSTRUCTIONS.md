@@ -11,7 +11,7 @@ text through its existing context route.
 | `instructions/hybrid.md` | default interaction guide | Bash, files, browser/CDP, AX, GUI |
 | `instructions/ax-only.md` | accessibility interaction guide | Bash, files, browser/CDP, AX |
 | `instructions/gui-only.md` | pixel-control interaction guide | Bash, files, browser/CDP, GUI |
-| `instructions/hybrid-code.md` | draft add-on for driving AX and GUI from code (CLI, SDK); not selected by any config yet | Bash, AX and GUI through `computer-use` |
+| `instructions/hybrid-code.md` | add-on for agents that drive AX and GUI from code: MCP tools inside a code tool by default, the CLI or the SDK otherwise; `--code-mode` appends it to the selected profile | Bash, AX and GUI from code |
 
 The base policy covers honesty, safety and verifying the requested outcome.
 The selected profile guides channel choice and interaction. Neither contains

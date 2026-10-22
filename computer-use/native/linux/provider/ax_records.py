@@ -290,6 +290,53 @@ def combo_label(combo, toggle):
     return "", ""
 
 
+# Roles of the popup that a combo box owns as a child: a list (Qt, Gecko), a
+# menu (GTK, Chromium) or a window wrapping either.
+COMBO_POPUP_ROLES = {"list", "list box", "menu", "window", "tree", "tree table"}
+# A combo box has its popup, an optional entry and an optional button as
+# children; reading more would only cost round trips on a misreporting node.
+COMBO_CHILD_SCAN_LIMIT = 8
+
+
+def closed_combo_popups(node, facts, scope=None):
+    """Return ``[(index, facts)]`` for the popups of a closed combo box.
+
+    The options of a closed combo box are not on screen and must not be
+    rendered or addressed. The popup is closed when the combo box is not
+    SHOWING (a combo on a hidden page), is EXPANDABLE but not EXPANDED, or
+    when the popup itself is not SHOWING or has no on-screen extents. The
+    last test is the only one that works for Qt, which reports neither
+    EXPANDABLE nor EXPANDED on a combo box and keeps SHOWING on the popup
+    list and its items while the popup is closed; only the list's extents
+    (0x0 at the origin) tell. Other children, such as the entry of an
+    editable combo box, are never returned.
+    """
+    if str(facts.value("role", "") or "") != "combo box":
+        return []
+    owner_closed = (
+        not facts.has_state(Atspi.StateType.SHOWING)
+        or (
+            facts.has_state(Atspi.StateType.EXPANDABLE)
+            and not facts.has_state(Atspi.StateType.EXPANDED)
+        )
+    )
+    closed = []
+    for index in range(min(facts.child_count(), COMBO_CHILD_SCAN_LIMIT)):
+        child = safe(lambda i=index: node.get_child_at_index(i))
+        if child is None:
+            continue
+        child_facts = NodeFacts(child, scope)
+        if str(child_facts.value("role", "") or "") not in COMBO_POPUP_ROLES:
+            continue
+        if (
+            owner_closed
+            or not child_facts.has_state(Atspi.StateType.SHOWING)
+            or child_facts.screen_frame() is None
+        ):
+            closed.append((index, child_facts))
+    return closed
+
+
 def effective_role(node, role=None):
     """Return the role every record and identity check uses for ``node``.
 

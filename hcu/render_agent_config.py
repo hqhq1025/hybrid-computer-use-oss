@@ -24,7 +24,9 @@ from pathlib import Path
 import sys
 
 from hcu.osworld import agents
-from hcu.paths import DEFAULT_BASE_INSTRUCTIONS_FILE, DEFAULT_INSTRUCTIONS_FILE, REPO_ROOT
+from hcu.paths import (
+    CODE_MODE_INSTRUCTIONS_FILE, DEFAULT_BASE_INSTRUCTIONS_FILE, DEFAULT_INSTRUCTIONS_FILE, REPO_ROOT,
+)
 
 CLAUDE_MCP_ADAPTER = (
     REPO_ROOT / "hcu/osworld/guest_files/claude_mcp_schema_adapter.py"
@@ -96,6 +98,9 @@ def render(args: argparse.Namespace) -> None:
         else ""
     )
     if args.agent == "codex":
+        if args.code_mode:
+            instructions = agents.code_mode_profile(
+                instructions, CODE_MODE_INSTRUCTIONS_FILE.read_text(encoding="utf-8"))
         args.output.write_text(
             agents.codex_config(
                 model=args.model,
@@ -107,6 +112,7 @@ def render(args: argparse.Namespace) -> None:
                 channels=args.channels,
                 developer_instructions=instructions,
                 execution_context="standalone",
+                code_mode=args.code_mode,
             ),
             encoding="utf-8",
         )
@@ -231,11 +237,21 @@ def main() -> int:
         help="Expose only one desktop channel; empty exposes both tools.",
     )
     parser.add_argument(
+        "--code-mode",
+        action="store_true",
+        help=(
+            "Codex only: the code tool calls the computer-use MCP tools from "
+            "code; appends instructions/hybrid-code.md to the profile."
+        ),
+    )
+    parser.add_argument(
         "--codex-home",
         default=os.environ.get("CODEX_HOME") or str(Path.home() / ".codex"),
         help="Local Codex home; defaults to CODEX_HOME or ~/.codex.",
     )
     args = parser.parse_args()
+    if args.code_mode and args.agent != "codex":
+        parser.error("--code-mode applies only to --agent codex")
     profile = agents.AGENT_PROFILES[args.agent]
     args.model = args.model or profile["default_model"]
     args.effort = args.effort or profile["default_effort"]
