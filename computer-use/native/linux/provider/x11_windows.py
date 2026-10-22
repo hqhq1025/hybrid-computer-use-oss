@@ -449,6 +449,21 @@ def frame_distance(first, second):
     )
 
 
+def _closest_by_geometry(candidates, native_window):
+    """Return the index of the one candidate clearly nearest the native frame."""
+    ranked = []
+    for index, window in candidates:
+        distance = frame_distance(safe(lambda: extents(window)), native_window)
+        if distance is not None:
+            ranked.append((distance, index))
+    ranked.sort()
+    if len(ranked) == 1 or (
+        len(ranked) > 1 and ranked[0][0] + 8 < ranked[1][0]
+    ):
+        return ranked[0][1]
+    return None
+
+
 def x11_window_id_for_accessible(app, window):
     """Uniquely correlate one AX top-level window with one managed X11 window."""
     candidates = list(x11_window_inventory_for_pid(node_pid(app)))
@@ -586,21 +601,6 @@ def strong_window_instance_handle_inventory(app, windows=None):
         for index, handle in selected.items()
         if str(handle or "").startswith("w2:")
     }.items(), complete=True)
-
-
-def _closest_by_geometry(candidates, native_window):
-    """Return the index of the one candidate clearly nearest the native frame."""
-    ranked = []
-    for index, window in candidates:
-        distance = frame_distance(safe(lambda: extents(window)), native_window)
-        if distance is not None:
-            ranked.append((distance, index))
-    ranked.sort()
-    if len(ranked) == 1 or (
-        len(ranked) > 1 and ranked[0][0] + 8 < ranked[1][0]
-    ):
-        return ranked[0][1]
-    return None
 
 
 def strong_window_instance_handles(app, windows=None):
