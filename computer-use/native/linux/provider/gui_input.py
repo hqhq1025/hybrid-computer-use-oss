@@ -244,6 +244,13 @@ def validate_gui_action(action, bounds=None, native_bounds=None):
             raise RuntimeError(
                 "gui type text accepts at most {} characters".format(
                     GUI_MAX_TEXT_LENGTH))
+        from .ax_actions import MAX_SYNTHESIZED_NON_ASCII_CHARACTERS
+        if sum(1 for char in text if ord(char) >= 128) > \
+                MAX_SYNTHESIZED_NON_ASCII_CHARACTERS:
+            raise RuntimeError(
+                "gui type text accepts at most {} non-ASCII characters per "
+                "action; split it into several type actions".format(
+                    MAX_SYNTHESIZED_NON_ASCII_CHARACTERS))
         normalized["text"] = text
     elif action_type == "keypress":
         keys = action.get("keys")

@@ -263,14 +263,63 @@ def send_key(key):
         raise release_error
 
 
+# Pause after each synthesized non-ASCII character. libatspi types a
+# character without a keycode in the current layout by rebinding a spare
+# keycode to its keysym. A burst of such characters reuses that keycode before
+# the application has read the previous mapping, so one STRING event with
+# "Grüße 你好" arrived in gedit as "Gr好好e 好好". Measured in the probe image
+# (Xvfb, GTK3): 20 ms gave 18/20 exact results, 35 ms and 50 ms 20/20.
+NON_ASCII_KEY_INTERVAL_SECONDS = 0.035
+
+
+def _text_runs(text):
+    """Split text into ASCII runs and single non-ASCII characters."""
+    runs = []
+    ascii_run = ""
+    for char in text:
+        if ord(char) < 128:
+            ascii_run += char
+            continue
+        if ascii_run:
+            runs.append(ascii_run)
+            ascii_run = ""
+        runs.append(char)
+    if ascii_run:
+        runs.append(ascii_run)
+    return runs
+
+
+# Bound the paced non-ASCII characters per call so one request stays well
+# inside the 30 s provider timeout (500 x 35 ms = 17.5 s).
+MAX_SYNTHESIZED_NON_ASCII_CHARACTERS = 500
+
+
 def send_text(text):
-    emit_keyboard_event(
-        0,
-        str(text),
-        Atspi.KeySynthType.STRING,
-        "text payload",
-        False,
-    )
+    text = str(text)
+    non_ascii = sum(1 for char in text if ord(char) >= 128)
+    if non_ascii > MAX_SYNTHESIZED_NON_ASCII_CHARACTERS:
+        raise OperationFailure(
+            "text_too_long_for_keyboard: {} non-ASCII characters exceed the "
+            "{} that keyboard synthesis can type in one call; no input was "
+            "emitted. Split the text into shorter type steps, or type into a "
+            "ref of an editable text field, which inserts the whole text "
+            "through the accessibility API.".format(
+                non_ascii, MAX_SYNTHESIZED_NON_ASCII_CHARACTERS),
+            failure_code="invalid_argument",
+            failure_phase="precondition",
+            input_events_emitted=False,
+        )
+    emitted = False
+    for run in _text_runs(text):
+        emitted = emit_keyboard_event(
+            0,
+            run,
+            Atspi.KeySynthType.STRING,
+            "text payload",
+            emitted,
+        )
+        if ord(run[0]) >= 128:
+            time.sleep(NON_ASCII_KEY_INTERVAL_SECONDS)
 
 
 def find_editable_text(root):
