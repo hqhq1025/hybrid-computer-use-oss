@@ -1,10 +1,10 @@
 {
-  "run_id": "panel20-codex-gpt54",
+  "run_id": "example-osworld-v1-codex",
   "benchmark_version": "v1",
   "agent": "codex",
   "model": "gpt-5.4",
   "effort": "xhigh",
-  "guest_image": "/datadrive2/osworld-v1/images/workstation-deps-v014-beta1/osworld-v1-ubuntu-workstation-deps-v014-beta1-core-64g.qcow2",
+  "guest_image": "/absolute/path/to/osworld-v1-workstation-deps-64g.qcow2",
   "client_password": "password",
   "volume_size": 64,
   "ram_size": "4G",

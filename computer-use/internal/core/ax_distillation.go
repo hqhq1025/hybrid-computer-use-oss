@@ -636,7 +636,7 @@ func defaultDistillationPlugins() []DistillationPlugin {
 }
 
 // maxNamedDescriptionRunes bounds help text on nodes that already have a
-// name. Measured on recorded panels: no description the model quoted in its
+// name. In recorded agent traces, no description the model quoted in its
 // reasoning or arguments was longer than 80 runes, while longer ones (checkbox
 // and spin-button help, toolbar usage hints) were about 1% of AX output.
 const maxNamedDescriptionRunes = 80

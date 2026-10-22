@@ -8,9 +8,9 @@ import (
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 )
 
-// The tests in this file come from the AX errors of four 20-task panel
-// rounds (October 2026). Each fails on the interface before this change:
-// the call was rejected, or the error left the model without the next call.
+// The tests in this file come from AX errors models made in recorded tasks.
+// Each case is a call that was rejected, or whose error left the model
+// without the next call.
 
 const (
 	recoveryMainHandle   = "w2:11111111111111111111111111111111"

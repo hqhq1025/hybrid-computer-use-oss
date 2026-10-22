@@ -42,7 +42,7 @@ func TestStructuredSelectorAcceptsStandardOrProviderRole(t *testing.T) {
 	}
 }
 
-// Full-e a10b69e1 #19: Thunderbird exposes its modal "New Folder" dialog
+// Thunderbird exposes its modal "New Folder" dialog
 // as a top-level frame. A selector for role dialog matches the root of a
 // window the provider reports as modal, and not the root of a plain one.
 func TestDialogSelectorMatchesAModalTopLevelWindow(t *testing.T) {
@@ -65,7 +65,7 @@ func TestDialogSelectorMatchesAModalTopLevelWindow(t *testing.T) {
 // is its real match rather than the last quote in the selector, including when
 // the name contains quotes or backslashes. Taking the last quote only works
 // without a suffix; a trailing [desc="..."] would be swallowed into the name.
-// Full-e 0810415c #6 wrote role "menu item"; the model sees "menuitem" in
+// Models write role "menu item"; the model sees "menuitem" in
 // the tree and models also write "menu_item". Every spelling must name the
 // same role, in an until selector and in find, without widening to other
 // roles.

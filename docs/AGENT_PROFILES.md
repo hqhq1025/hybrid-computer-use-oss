@@ -1,7 +1,5 @@
 # Task Agent Profiles
 
-Last verified against commit `a4006c5`.
-
 `hcu/osworld/agents.py` builds one profile per agent; `python3 -m
 hcu.render_agent_config` writes these configurations for use outside
 OSWorld. Four agents are supported: Codex, Claude Code, Gemini CLI and Grok
