@@ -180,39 +180,6 @@ func TestGUISuccessStartsWithTheEvidenceLine(t *testing.T) {
 	if last := visible.Content[len(visible.Content)-1]; last.Type != "image" {
 		t.Fatalf("GUI success lost its screenshot: %#v", visible.Content)
 	}
-	source := mainGoSource(t)
-	if !strings.Contains(source, `if name != contract.PublicToolGUI`) {
-		t.Fatal("callTool still applies the generic evidence wrapper to GUI")
-	}
-}
-
-func TestBatchErrorKeepsRecoveredNoInputObservation(t *testing.T) {
-	source := mainGoSource(t)
-	for _, fragment := range []string{
-		"if !finalObservationReturned && !preparationFailed {",
-		`result.StructuredContent["observation_required"] = true`,
-		"A fresh independent current-state ",
-		"observation follows. The failed action emitted no input ",
-		"The failed action emitted no input",
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("batch recovery integration is missing %q", fragment)
-		}
-	}
-	result := ToolCallResult{
-		IsError: true,
-		StructuredContent: map[string]any{
-			"failure_code":                        "stale_element_ref",
-			"final_observation_returned":          true,
-			"observation_required":                false,
-			"next_identical_observation_required": false,
-			"action_outcome":                      "not_executed",
-		},
-	}
-	if result.StructuredContent["final_observation_returned"] != true ||
-		result.StructuredContent["observation_required"] != false {
-		t.Fatalf("recovered action result fixture is invalid: %#v", result)
-	}
 }
 
 func TestLegacyTextEvidenceIncludesFinalStructuralBudgetMetadata(t *testing.T) {

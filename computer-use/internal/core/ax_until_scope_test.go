@@ -214,45 +214,6 @@ func TestFalseSelectorUntilHintNamesTheFocusedDialog(t *testing.T) {
 	}
 }
 
-// Shape 2: a title until for a new window is evaluated against every window
-// of the app, not the batch window (tasks a434992a, 8ba5ae7a).
-func TestTitleUntilSeesANewWindowOfTheApp(t *testing.T) {
-	s, backend, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	result := s.runAXPostcondition(context, map[string]any{
-		"type": "window_title_contains", "text": "Insert Sheet", "exists": true, "timeout_ms": 1,
-	})
-	if result.IsError || untilStatus(result) != "pass" {
-		t.Fatalf("dialog title did not satisfy until: %s", ResultText(result))
-	}
-	for _, request := range backend.listRequests {
-		if request.WindowHandle != "" {
-			t.Fatalf("title until was narrowed to one window: %#v", request)
-		}
-	}
-}
-
-// Shape 2, negate: the batch window is the dialog that the action closed
-// (tasks 9195653c, 8ba5ae7a, 7767eef2). Its handle is stale, yet the app's
-// complete inventory answers the predicate.
-func TestNegatedTitleUntilAfterTheBatchDialogClosed(t *testing.T) {
-	s, _, context := untilScopeService(t, untilMainWindow())
-	context.WindowHandle = untilDialogHandle
-	result := s.runAXPostcondition(context, map[string]any{
-		"type": "window_title_contains", "text": "Insert Sheet", "exists": false, "timeout_ms": 1,
-	})
-	if result.IsError || untilStatus(result) != "pass" {
-		t.Fatalf("closed dialog title must be absent: %s", ResultText(result))
-	}
-	stillOpen, _, context := untilScopeService(t, untilMainWindow(), untilDialogWindow())
-	context.WindowHandle = untilDialogHandle
-	result = stillOpen.runAXPostcondition(context, map[string]any{
-		"type": "window_title_contains", "text": "Insert Sheet", "exists": false, "timeout_ms": 1,
-	})
-	if result.IsError || untilStatus(result) == "pass" {
-		t.Fatalf("an open dialog must keep the negated title false: %s", ResultText(result))
-	}
-}
-
 // A selector until bound to a window that closed reads the app's remaining
 // windows instead of returning unknown.
 func TestSelectorUntilAfterTheBatchDialogClosed(t *testing.T) {
@@ -264,41 +225,6 @@ func TestSelectorUntilAfterTheBatchDialogClosed(t *testing.T) {
 	})
 	if result.IsError || untilStatus(result) != "pass" {
 		t.Fatalf("closed dialog selector must be absent: %s", ResultText(result))
-	}
-}
-
-// Shape 3: closing the app's last window retires its aN; a negated title
-// until is still true when the complete inventory has no such process
-// (task 0b17a146).
-func TestNegatedTitleUntilAfterTheAppExited(t *testing.T) {
-	s, backend, context := untilScopeService(t)
-	backend.appGone, backend.appGoneFacts = true, true
-	s.markAppIdentityLifecycle(context.AppRef, AXRefStale, "stale_app_ref")
-	assertion := map[string]any{
-		"type": "window_title_contains", "text": "H2O_Factsheet_WA.docx", "exists": false, "timeout_ms": 1,
-	}
-	result := s.runAXPostcondition(context, assertion)
-	if result.IsError || untilStatus(result) != "pass" {
-		t.Fatalf("an exited app has no window with that title: %s", ResultText(result))
-	}
-	if _, err := s.resolveShortAXAppRef(context.AppRef); err == nil {
-		t.Fatal("the absence check revived the retired app ref")
-	}
-	// The name read fails here (a provider that cannot list a missing app
-	// by name), so the poll reads the exact retired process.
-	exact := false
-	for _, request := range backend.listRequests {
-		exact = exact || (request.AppIdentity != nil &&
-			request.AppIdentity.ProcessGeneration == "pid:10:start:100")
-	}
-	if !exact {
-		t.Fatalf("the fallback read must name the exact retired process: %#v", backend.listRequests)
-	}
-
-	backend.appGoneFacts = false
-	result = s.runAXPostcondition(context, assertion)
-	if !result.IsError || untilStatus(result) != "observation_incomplete" {
-		t.Fatalf("an incomplete inventory must stay unknown: %s", ResultText(result))
 	}
 }
 

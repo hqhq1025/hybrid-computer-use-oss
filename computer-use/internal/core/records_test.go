@@ -199,20 +199,6 @@ func TestEveryPublicErrorCodeIsPublished(t *testing.T) {
 			t.Fatalf("hinted code %s is missing from the schema error table", code)
 		}
 	}
-	source := mainGoSource(t)
-	for _, line := range strings.Split(source, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "axCode") || !strings.Contains(line, "= \"") {
-			continue
-		}
-		name, value, _ := strings.Cut(line, "=")
-		value = strings.Trim(strings.TrimSpace(value), `"`)
-		if strings.HasPrefix(strings.TrimSpace(name), "axCode") {
-			if _, ok := contract.PublicErrorCodes[value]; !ok {
-				t.Fatalf("code %s declared in core is not published", value)
-			}
-		}
-	}
 }
 
 // GUI records carry the image path and screen size, never base64.

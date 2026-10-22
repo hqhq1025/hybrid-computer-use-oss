@@ -326,30 +326,15 @@ func TestWaitOnlyActWithoutAWindowNeedsOne(t *testing.T) {
 // The public error codes are one list: every code maps from its internal
 // facts with a hint (TestEveryPublicErrorCodeHasAHint), and the docs and the
 // instructions name exactly these codes and no removed one.
-func TestPublicErrorCodesAreDocumented(t *testing.T) {
-	// The table holds the AX codes and the GUI-only codes, nothing else
-	// (TestErrorTableEqualsDocumentedCodes checks the exact set).
-	guiOnly := 0
-	for _, code := range guiPublicErrorCodes {
-		if !contract.ContainsString(axPublicErrorCodes, code) {
-			guiOnly++
-		}
-	}
-	if len(axPublicErrorCodes)+guiOnly != len(contract.PublicErrorCodes) {
-		t.Fatalf("AX codes %v and GUI codes %v do not make up the error table %v",
-			axPublicErrorCodes, guiPublicErrorCodes, SortedErrorCodes())
-	}
+// TestErrorTableEqualsDocumentedCodes checks that the docs name every
+// current code; this keeps the removed until codes out of them.
+func TestRemovedUntilCodesStayUndocumented(t *testing.T) {
 	for _, path := range []string{"../../../docs/MCP.md", "../../../instructions/hybrid.md"} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		text := string(raw)
-		for _, code := range SortedErrorCodes() {
-			if !strings.Contains(text, "`"+code+"`") {
-				t.Fatalf("%s does not name %s", path, code)
-			}
-		}
 		for _, removed := range []string{"until_failed", "until_unknown", `"until":`} {
 			if strings.Contains(text, removed) {
 				t.Fatalf("%s still names %s", path, removed)

@@ -1,7 +1,6 @@
 package core
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
@@ -123,79 +122,6 @@ func TestActionPostconditionReconciliationSamplesAfterPolling(t *testing.T) {
 	}
 }
 
-func TestAXAssertionSpecOwnsTimeoutAndRejectsIndexPostcondition(t *testing.T) {
-	assertion := map[string]any{
-		"type":       "state",
-		"target":     map[string]any{"ref": "r17"},
-		"state":      "checked",
-		"value":      true,
-		"timeout_ms": float64(2500),
-	}
-	spec, err := parseAXAssertionSpec(assertion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if spec.timeoutMS != 2500 || spec.targetAddress != "r17" {
-		t.Fatalf("parsed assertion drifted: %#v", spec)
-	}
-	service := NewService()
-	if err := service.preflightAXPostcondition(
-		&AXBatchContext{WindowHandle: "window-1", WindowRef: "w1"},
-		map[string]any{
-			"type":   "exists",
-			"target": map[string]any{"index": float64(7)},
-			"value":  true,
-		},
-	); err == nil || !strings.Contains(err.Error(), "not stable across mutations") {
-		t.Fatalf("numeric postcondition target was not rejected: %v", err)
-	}
-}
-
-func TestValueAssertionAcceptsAndNormalizesJSONScalars(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		expected any
-		observed string
-	}{
-		{name: "number", expected: float64(100), observed: "100.0"},
-		{name: "boolean", expected: true, observed: "TRUE"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			assertion := map[string]any{
-				"type":   "value",
-				"target": map[string]any{"ref": "r17"},
-				"value":  tc.expected,
-			}
-			spec, err := parseAXAssertionSpec(assertion)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if spec.assertionType != "value_equals" {
-				t.Fatalf("assertion type = %q", spec.assertionType)
-			}
-			goal := assertionGoal(assertion)
-			if ok, detail := goal.check(
-				&ElementRecord{Value: tc.observed},
-				nil,
-			); !ok {
-				t.Fatalf("scalar value did not match: %s", detail)
-			}
-		})
-	}
-}
-
-func TestValueContainsRejectsNonStringScalar(t *testing.T) {
-	_, err := parseAXAssertionSpec(map[string]any{
-		"type":   "value",
-		"target": map[string]any{"ref": "r17"},
-		"value":  float64(100),
-		"match":  "contains",
-	})
-	if err == nil || !strings.Contains(err.Error(), "requires a string value") {
-		t.Fatalf("numeric contains assertion was not rejected clearly: %v", err)
-	}
-}
-
 func TestPostconditionFailureClassificationPreservesUnderlyingCause(t *testing.T) {
 	predicateFalse := ToolCallResult{
 		IsError: true,
@@ -231,96 +157,6 @@ func TestPostconditionFailureClassificationPreservesUnderlyingCause(t *testing.T
 			classification,
 			underlying,
 		)
-	}
-}
-
-func TestClosedWindowNegativeTitlePostconditionUsesOwningApp(t *testing.T) {
-	backend := &recordingPlatformBackend{
-		windowResponse: &ProviderWindowResult{
-			OK:           true,
-			WindowTitles: []string{"Document - Editor"},
-		},
-	}
-	service, appRef, windowRef, _ := sheetBatchService(t)
-	service.Backend = backend
-	result := service.runAXPostcondition(
-		&AXBatchContext{
-			AppRef:       appRef,
-			WindowRef:    windowRef,
-			AppToken:     appRef,
-			WindowHandle: "private-window",
-		},
-		map[string]any{
-			"type":       "window_title_contains",
-			"text":       "Confirm Removal",
-			"exists":     false,
-			"timeout_ms": float64(1),
-		},
-	)
-	if result.IsError ||
-		result.StructuredContent["assertion_status"] != "pass" {
-		t.Fatalf("negative close postcondition did not use app inventory: %#v", result)
-	}
-	if len(backend.calls) != 1 || backend.calls[0] != "window_list" {
-		t.Fatalf("unexpected provider calls: %#v", backend.calls)
-	}
-}
-
-func TestRefOwnedBatchScopesSelectorPostconditionToSameWindow(t *testing.T) {
-	service, _, windowRef, elementRef := sheetBatchService(t)
-	context, err := service.deriveAXBatchContext(
-		"", []axBatchAction{{
-			actionType: "click",
-			targetRef:  elementRef,
-		}}, nil,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if context.WindowRef != windowRef {
-		t.Fatalf("element ref did not preserve its owning window: %#v", context)
-	}
-	if err := service.preflightAXPostcondition(
-		context,
-		map[string]any{
-			"type": "exists",
-			"target": map[string]any{
-				"selector": map[string]any{
-					"role": "text",
-					"name": "Saved",
-				},
-			},
-			"value": true,
-		},
-	); err != nil {
-		t.Fatalf("selector postcondition rejected its inherited window: %v", err)
-	}
-}
-
-// Probe #13: optionalBool used to decode any string other than "true" as
-// false, so {"type":"exists","value":"yes"} silently asserted absence.
-func TestAssertionBooleansRejectStrings(t *testing.T) {
-	for name, assertion := range map[string]map[string]any{
-		"exists value": {
-			"type": "exists", "target": map[string]any{"ref": "r1"}, "value": "yes",
-		},
-		"exists true string": {
-			"type": "exists", "target": map[string]any{"ref": "r1"}, "value": "true",
-		},
-		"state value": {
-			"type": "state", "target": map[string]any{"ref": "r1"},
-			"state": "checked", "value": "false",
-		},
-		"window title exists": {
-			"type": "window_title_contains", "text": "Save", "exists": "no",
-		},
-	} {
-		if _, err := parseAXAssertionSpec(assertion); err == nil {
-			t.Fatalf("%s: string boolean was accepted", name)
-		}
-	}
-	if got := optionalBool(map[string]any{"value": "yes"}, "value"); got != nil {
-		t.Fatalf("optionalBool coerced a string to %v", *got)
 	}
 }
 

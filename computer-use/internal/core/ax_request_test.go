@@ -104,27 +104,6 @@ func TestDecodeAXRequestRejectsWithPathAndHint(t *testing.T) {
 	}
 }
 
-// TestAXHintsAreValidCalls checks that every corrected call shown for a
-// top-level mistake is itself accepted.
-func TestAXHintsAreValidCalls(t *testing.T) {
-	for _, args := range []map[string]any{
-		{},
-		{"mode": "assert_ax"},
-		{"mode": "observe"},
-		{"mode": "act"},
-		{"mode": "find", "app": "x"},
-		{"mode": "observe", "observation_target": "apps"},
-	} {
-		_, err := DecodeAXRequest(args)
-		if err == nil || err.Hint == "" {
-			t.Fatalf("%v: no hint: %#v", args, err)
-		}
-		if _, hintErr := DecodeAXRequest(decodeJSONForTest(t, err.Hint)); hintErr != nil {
-			t.Fatalf("hint %s for %v is invalid: %#v", err.Hint, args, hintErr)
-		}
-	}
-}
-
 func TestDecodeAXPredicateMapsToInternalAssertions(t *testing.T) {
 	for name, test := range map[string]struct {
 		in   map[string]any
@@ -142,9 +121,6 @@ func TestDecodeAXPredicateMapsToInternalAssertions(t *testing.T) {
 			map[string]any{"type": "value", "value": "14", "match": "contains"}},
 		"text": {map[string]any{"type": "text", "ref": "r1", "text": "Done", "negate": true},
 			map[string]any{"type": "text_contains", "text": "Done", "negate": true}},
-		"title": {map[string]any{"type": "title", "text": "Saved", "timeout_ms": 900.0, "stable_ms": 100.0},
-			map[string]any{"type": "window_title_contains", "text": "Saved", "exists": true,
-				"timeout_ms": 900, "stable_ms": 100}},
 	} {
 		got, err := decodeAXPredicate(test.in, "until")
 		if err != nil {

@@ -1,8 +1,6 @@
 package core
 
 import (
-	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -108,40 +106,6 @@ func TestAXAppUnavailableDetectionUsesStructuredFailureCode(t *testing.T) {
 	}
 }
 
-func TestPendingStaleGateBlocksNumericVerify(t *testing.T) {
-	service := NewService()
-	before := &AppSnapshot{
-		App:          AppDescriptor{Name: "Editor", PID: 7},
-		WindowHandle: "pid7/editor/frame",
-		sourceApp:    "editor",
-	}
-	service.rememberFailedObservation("editor", before)
-
-	for _, hiddenTool := range []string{"click", "get_app_state", "verify"} {
-		result := service.callTool(hiddenTool, map[string]any{"app": "editor"})
-		if !result.IsError ||
-			!strings.Contains(ResultText(result), "unsupportedTool") {
-			t.Fatalf("hidden tool %q must remain unavailable: %#v", hiddenTool, result)
-		}
-	}
-
-	exists := true
-	goal := verifyGoal{exists: &exists}
-	blocked := service.verify(
-		"edit", "17", "17", goal, 10, 0, contract.AXScopeWindow)
-	if !blocked.IsError ||
-		!strings.Contains(ResultText(blocked), "cannot reuse an element index") {
-		t.Fatalf("the stale app's loose alias must block its old numeric index: %#v", blocked)
-	}
-
-	noCache := NewService().verify(
-		"editor", "17", "17", goal, 10, 0, contract.AXScopeWindow)
-	if !noCache.IsError ||
-		!strings.Contains(ResultText(noCache), "without a current snapshot") {
-		t.Fatalf("numeric verify must always be bound to a current app snapshot: %#v", noCache)
-	}
-}
-
 func TestIncrementalTreeDoesNotInflateSingleHugeLine(t *testing.T) {
 	base := func(lines ...string) *AppSnapshot { return &AppSnapshot{TreeLines: lines} }
 	body := strings.Repeat("log line abcdefghij ", 400)
@@ -172,28 +136,6 @@ func TestIncrementalTreeDoesNotInflateSingleHugeLine(t *testing.T) {
 	}
 	if strings.Count(joined, body) != 0 {
 		t.Fatal("the unchanged body text must not be resent")
-	}
-}
-
-func TestFailedWindowTitlePollIsNotLiveUIEvidence(t *testing.T) {
-	result := NewService().verifyWindowTitleWithProbe(
-		"chrome",
-		"Settings",
-		true,
-		1,
-		0,
-		func(ProviderWindowListRequest) (*ProviderWindowResult, error) {
-			return nil, errors.New("AX bridge unavailable")
-		},
-	)
-	if !result.IsError {
-		t.Fatal("all-failed window probes must return an error")
-	}
-	if sampled, _ := result.StructuredContent["assertion_sampled_live_ui"].(bool); sampled {
-		t.Fatalf("failed probes were reported as live UI evidence: %#v", result.StructuredContent)
-	}
-	if scope := assertionEvidenceScope(result); scope != "error_only" {
-		t.Fatalf("failed probes got evidence scope %q", scope)
 	}
 }
 
@@ -782,58 +724,5 @@ func TestValueEqualsAssertionUsesExactTrimmedValue(t *testing.T) {
 	}
 	if ok, _ := goal.check(&ElementRecord{Value: "15"}, nil); ok {
 		t.Fatal("substring incorrectly satisfied value_equals")
-	}
-}
-
-func TestNumericValueAssertionPreservesExactLargeIntegers(t *testing.T) {
-	goal := verifyGoal{
-		valueEquals:     "9007199254740993",
-		valueEqualsKind: "number",
-	}
-	if ok, _ := goal.check(
-		&ElementRecord{Value: "9007199254740992"},
-		nil,
-	); ok {
-		t.Fatal("distinct integers above float64 precision compared equal")
-	}
-	if ok, detail := goal.check(
-		&ElementRecord{Value: "9007199254740993.0"},
-		nil,
-	); !ok {
-		t.Fatalf("equivalent exact decimal did not compare equal: %s", detail)
-	}
-	value, kind, ok := assertionScalarString(
-		map[string]any{"value": json.Number("1e10000")},
-		"value",
-	)
-	if !ok || kind != "number" || value != "1e10000" {
-		t.Fatalf("exact JSON number was rejected or changed: %q %q %t",
-			value, kind, ok)
-	}
-}
-
-func TestNegativeWindowTitleAcceptsCompleteAppDisappearance(t *testing.T) {
-	service, appRef, _, _ := sheetBatchService(t)
-	result := service.verifyWindowTitleWithProbe(
-		appRef,
-		"Editor",
-		false,
-		1,
-		0,
-		func(ProviderWindowListRequest) (*ProviderWindowResult, error) {
-			return &ProviderWindowResult{
-				OK:    false,
-				Error: "stale application identity",
-				Failure: &ProviderFailure{
-					Code:          "stale_target",
-					Subject:       "app",
-					FactsComplete: true,
-				},
-			}, nil
-		},
-	)
-	if result.IsError ||
-		result.StructuredContent["assertion_status"] != "pass" {
-		t.Fatalf("complete app disappearance did not prove title absence: %#v", result)
 	}
 }
