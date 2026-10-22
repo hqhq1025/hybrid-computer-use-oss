@@ -1,7 +1,5 @@
 # Client compatibility
 
-Last verified against commit `a4006c5`.
-
 HCU exposes `AX` and `GUI` over stdio MCP. A client that discovers both tools
 has passed discovery, not a complete desktop test. Check the model request,
 tool result, and next model request to verify the whole path.

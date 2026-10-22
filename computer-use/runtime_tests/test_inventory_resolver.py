@@ -484,9 +484,9 @@ class AppNotFoundListsWindowsTests(AtspiPatchedTestCase):
 class AppNameWindowInventoryTests(AtspiPatchedTestCase):
     """A title wait by app name reads every process of that name.
 
-    Full-e tasks 7ae48c60 and 7767eef2 closed the application and launched it
-    again; the wait must see whichever process now owns the window, and a
-    complete inventory without the application is an answer, not an error.
+    An agent may close the application and launch it again; the wait must
+    see whichever process now owns the window, and a complete inventory
+    without the application is an answer, not an error.
     """
 
     def _app(self, name, pid, titles):

@@ -1,7 +1,5 @@
 # Isolation
 
-Last verified against commit `a4006c5`.
-
 Each benchmark task uses a fresh desktop, task-agent session, MCP process and
 result directory. Do not mount this repository, host credentials, user
 configuration or another task's artifacts into the evaluated environment.

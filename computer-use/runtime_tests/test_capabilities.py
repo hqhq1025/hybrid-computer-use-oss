@@ -94,7 +94,7 @@ class ComboProjectionTests(AtspiPatchedTestCase):
         self.assertEqual(record["controlType"], "toggle button")
 
     def test_combo_projection_survives_render_tree_pruning(self):
-        """The Paragraph dialog combo was pruned and unfindable (0810415c)."""
+        """A combo inside layout panels survives render-tree pruning."""
         panel, _combo, _toggle = self._combo_group()
         window = _Node(role="dialog", name="Paragraph", x=0, y=0, w=200, h=200).add(panel)
         records, _lines, _ = runtime.render_tree(

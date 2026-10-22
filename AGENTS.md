@@ -90,6 +90,27 @@ files over 800 lines and tests over 1,200 lines.
   setup canary first.
 - `VERSION` holds the release version; do not hard-code versions elsewhere.
 
+## Writing docs, comments and changelogs
+
+Docs, code comments and `CHANGELOG.md` describe the current behavior and why
+it is so. Evidence for a change goes in the pull request description; git
+history keeps it.
+
+- Do not write commit SHAs, run ids, internal hostnames or paths, image
+  tags, verification dates, costs or panel scores in them.
+- Do not add "last verified" stamps. CI and git history show freshness. If a
+  text needs a version, refer to `VERSION` or a release tag.
+- Pin an external revision only where it is needed to reproduce a result,
+  in one place (a lock file, a config or the one command that uses it), and
+  refer to that place.
+- A comment or test says what behavior it covers, not which task or run
+  found it.
+- Evaluation notes and investigation logs stay out of the repository.
+
+`scripts/maint/check_layout.sh` fails on a commit-verification stamp or an
+internal host path in tracked text, and warns on hex tokens that look like
+commit SHAs in `README.md`, `CHANGELOG.md` and `docs/`.
+
 ## Checks
 
 Run before reporting a change:

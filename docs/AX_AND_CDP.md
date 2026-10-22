@@ -1,7 +1,5 @@
 # AX, GUI, and CDP
 
-Last verified against commit `a4006c5`.
-
 ## AX and GUI startup
 
 `computer-use` must run in the same signed-in desktop session as the
