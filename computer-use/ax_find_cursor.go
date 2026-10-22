@@ -10,7 +10,7 @@ import (
 )
 
 const defaultAXFindCursorLimit = 32
-const maxAXFindPageSize = 50
+
 const defaultAXFindCursorNodeBudget = 50000
 const defaultAXFindCursorByteBudget = 64 << 20
 const defaultAXFindCursorIdleTTL = 2 * time.Minute

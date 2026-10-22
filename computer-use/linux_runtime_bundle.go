@@ -2,8 +2,6 @@
 
 package main
 
-import "embed"
-
 var linuxProviderPaths = []string{
 	"native/linux/provider/foundation.py",
 	"native/linux/provider/x11_windows.py",
@@ -39,9 +37,6 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/response_builder.py",
 	"native/linux/provider/wire_v2.py",
 }
-
-//go:embed runtime.py native/__init__.py native/linux/__init__.py native/linux/provider/*.py
-var linuxRuntimeFS embed.FS
 
 func linuxRuntimeBundle() map[string]string {
 	paths := append([]string{

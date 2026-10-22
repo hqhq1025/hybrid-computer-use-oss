@@ -30,11 +30,6 @@ type callOptions struct {
 	Since string `json:"since,omitempty"`
 }
 
-const (
-	formatText    = "text"
-	formatRecords = "records"
-)
-
 // Record is the JSON envelope for one call in records format. Success and
 // error use the same shape.
 type Record struct {
@@ -125,11 +120,6 @@ type RecordScreen struct {
 	CoordinateSpace string `json:"coordinate_space,omitempty"`
 	Image           string `json:"image,omitempty"`
 }
-
-// recordsOpRead is the records-only AX mode {"mode":"read","refs":[...]}.
-// It has no MCP form: the published schema and the model contract do not
-// list it, and the text format rejects it.
-const recordsOpRead = "read"
 
 // callRecord runs one public call and renders it as a Record. The text
 // contract and the records contract share validation, dispatch, stale-ref

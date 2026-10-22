@@ -10,15 +10,6 @@ import (
 	"strings"
 )
 
-const (
-	treeViewWorking = "working"
-	treeViewFull    = "full"
-	axScopeWindow   = "window"
-	axScopeContent  = "content"
-)
-
-var axScopeValues = []string{axScopeWindow, axScopeContent}
-
 func normalizedTreeView(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case treeViewFull:
@@ -77,11 +68,6 @@ func applyProjection(request *axServiceRequest, projection snapshotProjection) {
 	// ObservationRoot is request-local for the same reason: action readback
 	// must not inherit a previous diagnostic subtree.
 }
-
-const (
-	defaultSettleMS = 800
-	maxSettleMS     = 3000
-)
 
 func runtimePathContains(ancestor, descendant []int) bool {
 	// The provider uses [] for the accessibility root path. JSON omits that

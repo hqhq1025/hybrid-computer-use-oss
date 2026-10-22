@@ -17,29 +17,6 @@ import (
 // and shows a corrected call. Decoding is strict: no case folding, aliases,
 // or numeric strings. The services below receive only decoded values.
 
-// Public AX error codes. Internal failure codes stay in telemetry; the model
-// sees only these.
-const (
-	axCodeInvalidArgument  = "invalid_argument"
-	axCodeStaleRef         = "stale_ref"
-	axCodeWindowChanged    = "window_changed"
-	axCodeWaitTimeout      = "wait_timeout"
-	axCodeEffectUnknown    = "effect_unknown"
-	axCodeAppUnavailable   = "app_unavailable"
-	axCodeRuntimeError     = "runtime_error"
-	axCodeAmbiguousWindow  = "ambiguous_window"
-	axCodeWindowNotFound   = "window_not_found"
-	axCodeNoFocusedWindow  = "no_focused_window"
-	axModeApps             = "apps"
-	axDefaultFindPageSize  = 20
-	axDefaultWaitTimeout   = 5000
-	axMaxUntilStableMS     = 5000
-	axPublicErrorCodeKey   = "public_error_code"
-	axPublicErrorPathKey   = "public_error_path"
-	axPublicErrorHintKey   = "public_error_hint"
-	axPublicErrorDetailKey = "public_error_message"
-)
-
 // axPublicErrorCodes is the complete list of public AX error codes. The
 // documentation and the instructions list the same codes.
 var axPublicErrorCodes = []string{
@@ -128,13 +105,6 @@ var axModeFields = map[string][]string{
 	axModeFind:    {"mode", "app", "window_ref", "scope", "query", "limit", "cursor"},
 	axModeAct:     {"mode", "window_ref", "actions", "observe"},
 }
-
-var axActionTypes = []string{
-	"click", "type", "keypress", "set_value", "select", "scroll", "activate", "close", "wait",
-}
-
-// axFindFilters are the query fields shared by find and a wait step.
-var axFindFilters = []string{"role", "name_equals", "name_contains", "text_equals", "text_contains", "state"}
 
 // axActionFields lists the fields each action type accepts besides type.
 var axActionFields = map[string][]string{

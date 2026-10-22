@@ -134,12 +134,6 @@ func (s *service) gui(actions any, settleMS int) toolCallResult {
 // GUI error whose correction is to look at the desktop again.
 const guiScreenshotCall = `{"actions":[{"type":"screenshot"}]}`
 
-const guiCodePermissionDenied = "permission_denied"
-
-const guiPermissionHint = "Ask the user to grant the denied system permission to the current Computer Use Provider " +
-	"(on macOS: Screen Recording or Accessibility in System Settings > Privacy & Security), " +
-	"restart the provider, then take a fresh GUI screenshot before retrying input."
-
 // guiPublicErrorCodes are the public codes a GUI result can carry. They are
 // a subset of the error table.
 var guiPublicErrorCodes = []string{

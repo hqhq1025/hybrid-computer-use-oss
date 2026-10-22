@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"strings"
 )
 
@@ -92,18 +91,4 @@ func (e *argumentRuleError) Error() string { return e.message }
 
 func newArgumentRuleError(code, message string) error {
 	return &argumentRuleError{code: code, message: message}
-}
-
-// withArgumentRule records the rule code of err on result, if err is a rule
-// violation; the code is internal evidence.
-func withArgumentRule(result toolCallResult, err error) toolCallResult {
-	var rule *argumentRuleError
-	if !errors.As(err, &rule) {
-		return result
-	}
-	if result.StructuredContent == nil {
-		result.StructuredContent = map[string]any{}
-	}
-	result.StructuredContent["argument_error_code"] = rule.code
-	return result
 }

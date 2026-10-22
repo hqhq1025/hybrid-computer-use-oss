@@ -13,15 +13,6 @@ type axReadContext struct {
 	windowHandle string
 }
 
-const (
-	axModeObserve = "observe"
-	axModeFind    = "find"
-	axModeAct     = "act"
-	// axModeAssert names the internal predicate check that a wait step
-	// runs. It is not a public mode.
-	axModeAssert = "assert_ax"
-)
-
 // parseAXMode returns the public mode of a call, or an error when it is
 // missing or unknown. Only exact values are accepted.
 func parseAXMode(args map[string]any) (string, error) {
