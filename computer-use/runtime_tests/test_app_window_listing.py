@@ -938,3 +938,62 @@ class AXDirectTargetResolutionTests(AtspiPatchedTestCase):
 
         self.assertTrue(response["ok"])
         self.assertEqual(response["resolvedElement"], record)
+
+
+class SameTitleWindowHandleTests(AtspiPatchedTestCase):
+    """Hidden same-title windows must not take the handle of the shown one.
+
+    Electron applications keep hidden BrowserWindows that AT-SPI still lists
+    as frames. Joplin 3.5 lists three frames named "Joplin" while the window
+    manager manages one window: the 1536x842 main window, plus two hidden
+    800x600 ones that wmctrl does not list. All three matched the managed
+    window by title, the tie gave none of them a handle, and every node of
+    Joplin became addressable=false (owner_identity_incomplete).
+    """
+
+    def _joplin(self):
+        main = _TreeNode(role="frame", name="Joplin", x=192, y=132, w=1536, h=842)
+        hidden_a = _TreeNode(role="frame", name="Joplin", x=560, y=253, w=800, h=600)
+        hidden_b = _TreeNode(role="frame", name="Joplin", x=560, y=253, w=800, h=600)
+        app = _TreeNode(role="application", name="joplin",
+                        kids=(main, hidden_a, hidden_b))
+        app.get_process_id = lambda: 4633
+        return app
+
+    def _managed(self, *windows):
+        return runtime.InventoryResult(list(windows), complete=True)
+
+    def test_the_frame_matching_the_managed_geometry_gets_the_handle(self):
+        app = self._joplin()
+        managed = self._managed({
+            "pid": 4633, "id": "0x3200004", "x": 197, "y": 161,
+            "width": 1536, "height": 842, "title": "Joplin"})
+        with mock.patch.object(runtime, "_x11_managed_windows",
+                               return_value=managed), \
+                mock.patch.object(runtime, "process_generation",
+                                  return_value="77"), \
+                mock.patch.object(runtime, "correlation_root_window_state",
+                                  return_value=None):
+            handles = runtime.strong_window_instance_handles(app)
+
+        self.assertEqual(list(handles), [0])
+        self.assertTrue(handles[0].startswith("w2:"))
+
+    def test_equally_close_frames_stay_unaddressable(self):
+        """Two frames at the managed geometry cannot be told apart."""
+        twin_a = _TreeNode(role="frame", name="Doc", x=0, y=0, w=800, h=600)
+        twin_b = _TreeNode(role="frame", name="Doc", x=0, y=0, w=800, h=600)
+        app = _TreeNode(role="application", name="editor", kids=(twin_a, twin_b))
+        app.get_process_id = lambda: 9
+        managed = self._managed({
+            "pid": 9, "id": "0x1", "x": 0, "y": 0,
+            "width": 800, "height": 600, "title": "Doc"})
+        with mock.patch.object(runtime, "_x11_managed_windows",
+                               return_value=managed), \
+                mock.patch.object(runtime, "process_generation",
+                                  return_value="77"), \
+                mock.patch.object(runtime, "correlation_root_window_state",
+                                  return_value=None):
+            handles = runtime.strong_window_instance_handles(app)
+
+        self.assertEqual(handles, {})

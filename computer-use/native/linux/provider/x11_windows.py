@@ -480,11 +480,37 @@ def strong_window_instance_handle_inventory(app, windows=None):
             selected[exact[0][0]] = opaque_window_instance_handle_for_id(
                 app, window_id
             )
+            continue
+        # Several frames with the managed title: Electron keeps hidden
+        # BrowserWindows that AT-SPI still lists (Joplin: a 1536x842 main
+        # window and two hidden 800x600 ones, all titled "Joplin"). The
+        # frame whose extents match the managed geometry is the shown one;
+        # equally close frames stay without a handle.
+        closest = _closest_by_geometry(exact or matches, native.get(window_id))
+        if closest is not None:
+            selected[closest] = opaque_window_instance_handle_for_id(
+                app, window_id
+            )
     return InventoryResult({
         index: handle
         for index, handle in selected.items()
         if str(handle or "").startswith("w2:")
     }.items(), complete=True)
+
+
+def _closest_by_geometry(candidates, native_window):
+    """Return the index of the one candidate clearly nearest the native frame."""
+    ranked = []
+    for index, window in candidates:
+        distance = frame_distance(safe(lambda: extents(window)), native_window)
+        if distance is not None:
+            ranked.append((distance, index))
+    ranked.sort()
+    if len(ranked) == 1 or (
+        len(ranked) > 1 and ranked[0][0] + 8 < ranked[1][0]
+    ):
+        return ranked[0][1]
+    return None
 
 
 def strong_window_instance_handles(app, windows=None):
