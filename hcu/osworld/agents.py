@@ -146,12 +146,19 @@ def codex_config(
     channels: str = "",
     developer_instructions: str | None = None,
     execution_context: Literal["standalone", "isolated-guest"] = "standalone",
+    code_mode: bool = False,
 ) -> str:
     """Codex config with sandboxed shell execution and on-request approvals.
 
     Only callers that provide an externally isolated, disposable guest should
     select ``isolated-guest`` to retain unattended, unrestricted evaluation.
     This setting does not isolate the MCP server or its desktop session.
+
+    ``code_mode`` gives the model only Codex's code tool. The computer-use
+    MCP server stays registered, and code calls AX and GUI as
+    ``tools.mcp__computer_use__AX`` and ``tools.mcp__computer_use__GUI``.
+    Codex versions that defer MCP tools in code mode leave their declarations
+    out of the code tool description; ``omit_tools_from`` keeps them in.
     """
     if execution_context == "standalone":
         approval_policy, sandbox_mode = "on-request", "workspace-write"
@@ -185,6 +192,11 @@ def codex_config(
         if developer_instructions is not None
         else ""
     )
+    code_mode_features = (
+        "code_mode = true\ncode_mode_only = true\ncode_mode_host = true"
+        if code_mode else "code_mode_host = false"
+    )
+    code_mode_mcp = 'omit_tools_from = ["deferred"]\n' if code_mode else ""
     return f"""\
 model = {json.dumps(model)}
 model_provider = "{CODEX_PROVIDER_ID}"
@@ -231,7 +243,7 @@ workspace_dependencies = false
 image_generation = false
 computer_use = false
 auth_elicitation = false
-code_mode_host = false
+{code_mode_features}
 fast_mode = false
 in_app_chat = false
 in_app_dictation = false
@@ -270,7 +282,12 @@ args = ["mcp"]
 required = true
 startup_timeout_sec = 60
 tool_timeout_sec = 180
-{mcp_env}"""
+{code_mode_mcp}{mcp_env}"""
+
+
+def code_mode_profile(instructions: str, code_guide: str) -> str:
+    """The profile for code mode: the selected profile, then the code guide."""
+    return instructions + "\n\n" + code_guide if instructions else code_guide
 
 
 def claude_mcp_config(

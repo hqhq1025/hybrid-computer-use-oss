@@ -578,3 +578,22 @@ def test_codex_cli_consumes_instructions_and_existing_context(tmp_path, enabled)
     assert "PROJECT_CONTEXT_MARKER" in json.dumps(messages)
     assert user_context.read_text() == "USER_CONTEXT_MARKER"
     assert project_context.read_text() == "PROJECT_CONTEXT_MARKER"
+
+
+def test_codex_code_mode_render_appends_the_code_guide(tmp_path):
+    output, _base, instructions = render(tmp_path, "codex", extra=("--code-mode",))
+    rendered = read_toml(output)
+    assert rendered["features"]["code_mode_only"] is True
+    assert rendered["mcp_servers"]["computer_use"]["omit_tools_from"] == ["deferred"]
+    guide = (ROOT / "instructions/hybrid-code.md").read_text(encoding="utf-8")
+    assert rendered["developer_instructions"] == instructions.read_text(encoding="utf-8") + "\n\n" + guide
+
+
+def test_code_mode_is_rejected_for_other_agents(tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-m", "hcu.render_agent_config", "--agent", "claude-code",
+         "--gateway", "http://127.0.0.1:1", "--mcp", sys.executable,
+         "--output", str(tmp_path / "mcp.json"), "--code-mode"],
+        env=dict(os.environ, PYTHONPATH=str(ROOT)), capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 2 and "--code-mode applies only" in result.stderr

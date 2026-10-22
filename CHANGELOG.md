@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The OSWorld runner and `hcu.render_agent_config` take `--code-mode`
+  (queue config `"code_mode": true`) for Codex. It keeps the computer-use MCP
+  server registered for code to call, turns on Codex code mode with
+  `omit_tools_from = ["deferred"]` on the server, and appends
+  `instructions/hybrid-code.md` to the profile.
+  `configs/osworld-v2-codex-code-mode-queue.example.json` shows it.
 - `instructions/hybrid-code.md` covers code that calls the MCP tools inside
   a code tool, the CLI and the SDK. It drops the help and schema reads at the
   start, shows one batch with its check, and opens an image in the same code

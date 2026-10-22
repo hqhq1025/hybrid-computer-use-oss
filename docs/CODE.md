@@ -393,7 +393,10 @@ code calls nested tools. Registering the MCP server is enough: code calls
 and gets the MCP result, `{content, isError}`. The first text item is the
 JSON evidence line; images are `ImageContent` blocks, and `image(block)` shows
 one to the model from the same `exec`, without another model turn.
-`instructions/hybrid-code.md` is the guide for this mode.
+`instructions/hybrid-code.md` is the guide for this mode. The OSWorld runner
+and `hcu.render_agent_config` select this setup with `--code-mode`
+(`"code_mode": true` in a queue config); [MCP](MCP.md#codex-code-mode) shows
+the resulting configuration.
 
 - Codex renders each MCP input schema as a TypeScript declaration. Some
   versions do not resolve `$ref`, so the AX `query` field appears as
