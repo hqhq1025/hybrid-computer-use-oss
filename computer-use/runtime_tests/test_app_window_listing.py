@@ -376,58 +376,6 @@ class ListAppsTopLevelWindowTests(AtspiPatchedTestCase):
         self.assertEqual(windows[0]["handle"], "")
         self.assertFalse(windows[0]["active"])
 
-    def _native(self, *window_ids):
-        patcher = mock.patch.object(
-            runtime, "x11_window_inventory_for_pid",
-            return_value=runtime.InventoryResult(
-                [{"id": window_id} for window_id in window_ids], complete=True))
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def test_hidden_windows_beside_a_bound_one_are_not_listed(self):
-        """Hidden toolkit windows do not appear as "(not addressable)" noise.
-
-        Electron keeps unmapped BrowserWindows with the main window's title
-        that AT-SPI reports SHOWING. The process's only managed window is
-        bound to the main frame, so the others cannot be on screen.
-        """
-        frames = tuple(_TreeNode(role="frame", name="Notes") for _ in range(3))
-        app = _TreeNode(role="application", name="notes", kids=frames)
-        app.get_process_id = lambda: 101
-        self._patch_inventory([app], {id(app): {0: "w2:0xa"}},
-                              {"windowIds": {"0xa"}, "activeWindow": "0xa"})
-        self._native("0xa")
-
-        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
-
-        self.assertEqual(["w2:0xa"], [w["handle"] for w in windows])
-
-    def test_unbound_window_stays_while_a_native_window_is_unclaimed(self):
-        frames = (_TreeNode(role="frame", name="Main"),
-                  _TreeNode(role="dialog", name="Export"))
-        app = _TreeNode(role="application", name="paint", kids=frames)
-        app.get_process_id = lambda: 101
-        self._patch_inventory([app], {id(app): {0: "w2:0xa"}},
-                              {"windowIds": {"0xa", "0xb"}, "activeWindow": "0xa"})
-        self._native("0xa", "0xb")
-
-        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
-
-        self.assertEqual(["w2:0xa", ""], [w["handle"] for w in windows])
-
-    def test_process_without_managed_windows_keeps_unbound_windows(self):
-        frames = (_TreeNode(role="frame", name="Main"),
-                  _TreeNode(role="frame", name="Other"))
-        app = _TreeNode(role="application", name="remote", kids=frames)
-        app.get_process_id = lambda: 101
-        self._patch_inventory([app], {id(app): {0: "w2:0xa"}},
-                              {"windowIds": {"0xa"}, "activeWindow": None})
-        self._native()
-
-        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
-
-        self.assertEqual(2, len(windows))
-
     def test_infrastructure_window_is_marked(self):
         panel = _TreeNode(role="frame", name="")
         app = _TreeNode(role="application", name="panel", kids=(panel,))

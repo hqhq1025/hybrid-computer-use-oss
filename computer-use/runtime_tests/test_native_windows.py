@@ -142,5 +142,80 @@ class NativeWindowActionTests(AtspiPatchedTestCase):
         self.assertTrue(caught.exception.input_events_emitted)
 
 
+class HiddenWindowListingTests(AtspiPatchedTestCase):
+    """AT-SPI windows that cannot be on screen leave the window listings."""
+
+    def _patch_inventory(self, apps, handles, root_state):
+        original_apps = runtime.iter_apps
+        runtime.iter_apps = lambda: apps
+        self.addCleanup(setattr, runtime, "iter_apps", original_apps)
+        for patcher in (
+            mock.patch.object(runtime, "strong_window_instance_handles",
+                              side_effect=lambda app, windows: handles.get(id(app), {})),
+            mock.patch.object(runtime, "correlation_root_window_state", return_value=root_state),
+            mock.patch.object(runtime, "opaque_window_instance_handle_for_id",
+                              side_effect=lambda app, window_id: "w2:" + str(window_id)),
+            mock.patch.object(runtime, "is_infrastructure_window",
+                              side_effect=lambda window: False),
+            mock.patch.object(runtime, "provider_bus_name", return_value=":1.9"),
+            mock.patch.object(runtime, "process_generation", return_value="gen"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _native(self, *window_ids):
+        patcher = mock.patch.object(
+            runtime, "x11_window_inventory_for_pid",
+            return_value=runtime.InventoryResult(
+                [{"id": window_id} for window_id in window_ids], complete=True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_hidden_windows_beside_a_bound_one_are_not_listed(self):
+        """Hidden toolkit windows do not appear as "(not addressable)" noise.
+
+        Electron keeps unmapped BrowserWindows with the main window's title
+        that AT-SPI reports SHOWING. The process's only managed window is
+        bound to the main frame, so the others cannot be on screen.
+        """
+        frames = tuple(_TreeNode(role="frame", name="Notes") for _ in range(3))
+        app = _TreeNode(role="application", name="notes", kids=frames)
+        app.get_process_id = lambda: 101
+        self._patch_inventory([app], {id(app): {0: "w2:0xa"}},
+                              {"windowIds": {"0xa"}, "activeWindow": "0xa"})
+        self._native("0xa")
+
+        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
+
+        self.assertEqual(["w2:0xa"], [w["handle"] for w in windows])
+
+    def test_unbound_window_stays_while_a_native_window_is_unclaimed(self):
+        frames = (_TreeNode(role="frame", name="Main"),
+                  _TreeNode(role="dialog", name="Export"))
+        app = _TreeNode(role="application", name="paint", kids=frames)
+        app.get_process_id = lambda: 101
+        self._patch_inventory([app], {id(app): {0: "w2:0xa"}},
+                              {"windowIds": {"0xa", "0xb"}, "activeWindow": "0xa"})
+        self._native("0xa", "0xb")
+
+        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
+
+        self.assertEqual(["w2:0xa", ""], [w["handle"] for w in windows])
+
+    def test_process_without_managed_windows_keeps_unbound_windows(self):
+        frames = (_TreeNode(role="frame", name="Main"),
+                  _TreeNode(role="frame", name="Other"))
+        app = _TreeNode(role="application", name="remote", kids=frames)
+        app.get_process_id = lambda: 101
+        self._patch_inventory([app], {id(app): {0: "w2:0xa"}},
+                              {"windowIds": {"0xa"}, "activeWindow": None})
+        self._native()
+
+        windows = runtime.list_apps_inventory()["apps"][0]["windows"]
+
+        self.assertEqual(2, len(windows))
+
+
+
 if __name__ == "__main__":
     unittest.main()
