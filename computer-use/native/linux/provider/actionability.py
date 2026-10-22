@@ -58,10 +58,40 @@ def preferred_action_index(node):
     return fallback
 
 
-def do_action_by_index(node, index):
+ACTION_REPLY_TIMEOUT = "reply_timeout"
+
+
+def invoke_action(node, index):
+    """Invoke one AT-SPI action; return True, False or ACTION_REPLY_TIMEOUT.
+
+    A DoAction call that times out without a reply was still delivered: the
+    toolkit runs the action inside the handler and replies when it returns.
+    Qt does so for a menu item or button that opens a modal dialog
+    (QDialog::exec runs the dialog's event loop before DoAction returns),
+    so Okular's "Go to Page..." reply arrived only after the dialog closed.
+    Treating that as "no action" made the click fall back to a coordinate
+    click that the new dialog then blocked, and the result said no input
+    was emitted while the dialog was open.
+    """
     if index is None:
         return False
-    return bool(safe(lambda: node.do_action(int(index)), False))
+    try:
+        return bool(node.do_action(int(index)))
+    except Exception as error:
+        if is_reply_timeout(error):
+            return ACTION_REPLY_TIMEOUT
+        return False
+
+
+def is_reply_timeout(error):
+    """Return whether ``error`` is libatspi's D-Bus no-reply timeout."""
+    return "did not receive a reply" in str(
+        getattr(error, "message", "") or error).lower()
+
+
+def do_action_by_index(node, index):
+    """Invoke the action; return True, False or ACTION_REPLY_TIMEOUT (truthy)."""
+    return invoke_action(node, index)
 
 
 def application_toolkit(node):

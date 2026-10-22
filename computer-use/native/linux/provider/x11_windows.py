@@ -6,6 +6,7 @@ import re
 import subprocess
 from .foundation import (
     AX_WINDOW_ROLES,
+    TOP_LEVEL_CONTAINER_ROLES,
     Atspi,
     Gdk,
     GUI_MAX_LAYOUT_WINDOWS,
@@ -26,6 +27,7 @@ from .foundation import (
     safe,
     state_contains,
 )
+from .a11y_enable import request_full_trees
 from .primitives import semantic_text_key
 
 
@@ -353,6 +355,72 @@ def _x11_managed_windows():
     return inventory
 
 
+# Children of the root window inspected for override-redirect popups.
+MAX_POPUP_CANDIDATES = 64
+_ROOT_CHILD_RE = re.compile(
+    r"^\s+(0x[0-9a-fA-F]+) .*?(\d+)x(\d+)[+-]-?\d+[+-]-?\d+\s+([+-]-?\d+)([+-]-?\d+)\s*$",
+    re.MULTILINE,
+)
+
+
+def _x11_override_redirect_windows(pid):
+    """Return viewable override-redirect top-level windows owned by pid.
+
+    Menus, context menus and drop-down lists of Chromium and Electron are
+    override-redirect windows: the window manager does not manage them, so
+    wmctrl never lists them. Each is read only when it is big enough to be
+    a popup, and the result is cached for the operation like the managed
+    listing.
+    """
+    key = ("override_redirect", int(pid))
+    cached = _x11_window_inventory_cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        root = subprocess.run(
+            ["xwininfo", "-root", "-children"],
+            capture_output=True, text=True, timeout=1,
+        )
+    except Exception:
+        return []
+    found = []
+    matches = list(_ROOT_CHILD_RE.finditer(root.stdout or ""))
+    for match in matches[:MAX_POPUP_CANDIDATES]:
+        window_id, width, height = match.group(1), int(match.group(2)), int(match.group(3))
+        if width < 20 or height < 20:
+            continue
+        try:
+            info = subprocess.run(
+                ["xwininfo", "-id", window_id],
+                capture_output=True, text=True, timeout=0.5,
+            )
+        except Exception:
+            continue
+        layout = parse_xwininfo_layout(info.stdout)
+        if not layout or not layout["visible"] or not layout["overrideRedirect"]:
+            continue
+        try:
+            owner = subprocess.run(
+                ["xprop", "-id", window_id, "_NET_WM_PID"],
+                capture_output=True, text=True, timeout=0.5,
+            )
+        except Exception:
+            continue
+        owner_pid = re.search(r"=\s*(\d+)", owner.stdout or "")
+        if owner_pid is None or int(owner_pid.group(1)) != int(pid):
+            continue
+        normalized = normalize_x11_window_id(window_id)
+        if normalized:
+            found.append({
+                "id": normalized,
+                "x": layout["x"], "y": layout["y"],
+                "width": layout["width"], "height": layout["height"],
+                "title": "",
+            })
+    _x11_window_inventory_cache[key] = found
+    return found
+
+
 def x11_window_inventory_for_pid(pid):
     """Return bounded native windows with explicit enumeration completeness."""
     pid = int(pid or 0)
@@ -382,6 +450,21 @@ def frame_distance(first, second):
     )
 
 
+def _closest_by_geometry(candidates, native_window):
+    """Return the index of the one candidate clearly nearest the native frame."""
+    ranked = []
+    for index, window in candidates:
+        distance = frame_distance(safe(lambda: extents(window)), native_window)
+        if distance is not None:
+            ranked.append((distance, index))
+    ranked.sort()
+    if len(ranked) == 1 or (
+        len(ranked) > 1 and ranked[0][0] + 8 < ranked[1][0]
+    ):
+        return ranked[0][1]
+    return None
+
+
 def x11_window_id_for_accessible(app, window):
     """Uniquely correlate one AX top-level window with one managed X11 window."""
     candidates = list(x11_window_inventory_for_pid(node_pid(app)))
@@ -397,6 +480,17 @@ def x11_window_id_for_accessible(app, window):
             return title_matches[0]["id"]
         if title_matches:
             candidates = title_matches
+    bounds = safe(lambda: extents(window))
+    if bounds is None and not (
+        state_contains(window, Atspi.StateType.SHOWING)
+        or state_contains(window, Atspi.StateType.VISIBLE)
+    ):
+        # A frame with no geometry that is neither showing nor visible has
+        # no native window (Krita's Qt "Offscreen" frame). Without this, the
+        # sole-candidate fallback below gave it the application's only X11
+        # window, two AX windows then claimed one native window, and the
+        # real one lost its handle and was listed "(not addressable)".
+        return None
     root_state = correlation_root_window_state()
     active_id = root_state.get("activeWindow") if root_state else None
     if (
@@ -405,7 +499,6 @@ def x11_window_id_for_accessible(app, window):
         and sum(candidate["id"] == active_id for candidate in candidates) == 1
     ):
         return active_id
-    bounds = safe(lambda: extents(window))
     ranked = []
     for candidate in candidates:
         distance = frame_distance(bounds, candidate)
@@ -419,6 +512,25 @@ def x11_window_id_for_accessible(app, window):
     if ranked[0][0] + 8 < ranked[1][0]:
         return ranked[0][1]
     return None
+
+
+def titled_top_level_window_id(window, native):
+    """Bind a top-level child with a non-window role by its exact title.
+
+    Qt reports a top-level QWidget that lacks a window flag (Flameshot's
+    "Configuration") as role "filler", yet the window manager manages it as
+    an ordinary window. Such children get a handle only on strong evidence:
+    a non-empty title equal to exactly one managed window of the process.
+    Untitled panels and popups never match, so they stay unaddressed.
+    """
+    title_key = semantic_text_key(node_name(window))
+    if not title_key:
+        return None
+    matches = [
+        window_id for window_id, item in native.items()
+        if semantic_text_key(item.get("title")) == title_key
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def opaque_window_instance_handle_for_id(app, window_id):
@@ -455,7 +567,12 @@ def strong_window_instance_handle_inventory(app, windows=None):
     grouped = {}
     for index, window in windows:
         role = str(node_role(window) or "").strip().lower()
+        if role not in AX_WINDOW_ROLES and role not in TOP_LEVEL_CONTAINER_ROLES:
+            continue
         if role not in AX_WINDOW_ROLES:
+            window_id = titled_top_level_window_id(window, native)
+            if window_id:
+                grouped.setdefault(window_id, []).append((index, window))
             continue
         window_id = x11_window_id_for_accessible(app, window)
         if window_id:
@@ -480,11 +597,98 @@ def strong_window_instance_handle_inventory(app, windows=None):
             selected[exact[0][0]] = opaque_window_instance_handle_for_id(
                 app, window_id
             )
+            continue
+        # Several frames with the managed title: Electron keeps hidden
+        # BrowserWindows that AT-SPI still lists (Joplin: a 1536x842 main
+        # window and two hidden 800x600 ones, all titled "Joplin"). The
+        # frame whose extents match the managed geometry is the shown one;
+        # equally close frames stay without a handle.
+        closest = _closest_by_geometry(exact or matches, native.get(window_id))
+        if closest is not None:
+            selected[closest] = opaque_window_instance_handle_for_id(
+                app, window_id
+            )
+    # Untitled frames left without a managed window may be popups that the
+    # window manager does not manage (Chromium menus); match them by
+    # geometry to override-redirect windows of the same process.
+    # Only applications with a titled window qualify: desktop panels own
+    # untitled frames too, and scanning for them on every listing would
+    # cost about 40 ms for nothing.
+    claimed = set(selected)
+    unmatched = [
+        (index, window) for index, window in windows
+        if index not in claimed
+        and str(node_role(window) or "").strip().lower() in AX_WINDOW_ROLES
+        and not semantic_text_key(node_name(window))
+    ]
+    has_titled_window = any(
+        semantic_text_key(node_name(window)) for _, window in windows)
+    if unmatched and has_titled_window:
+        for popup in _x11_override_redirect_windows(node_pid(app)):
+            closest = _closest_by_geometry(unmatched, popup)
+            if closest is not None:
+                selected[closest] = opaque_window_instance_handle_for_id(
+                    app, popup["id"]
+                )
+                unmatched = [item for item in unmatched if item[0] != closest]
     return InventoryResult({
         index: handle
         for index, handle in selected.items()
         if str(handle or "").startswith("w2:")
     }.items(), complete=True)
+
+
+def managed_window_title(app, window, strong_handles=None):
+    """Return the X11 title of the managed window bound to ``window``, or "".
+
+    Some toolkits leave a top-level AT-SPI frame unnamed while the window
+    manager shows a title (GTK3 D-Feet: frame "" vs WM_NAME "d-feet"). The
+    title is taken only for a window with a one-to-one strong binding, so it
+    names exactly the window the model can address.
+    """
+    windows = app_windows(app)
+    if strong_handles is None:
+        strong_handles = strong_window_instance_handles(app, windows)
+    index = next(
+        (i for i, candidate in windows if candidate is window), None
+    )
+    if index is None or not strong_handles.get(index):
+        return ""
+    target = strong_handles[index]
+    for item in x11_window_inventory_for_pid(node_pid(app)):
+        if opaque_window_instance_handle_for_id(app, item.get("id")) == target:
+            # Docks, panels and the desktop also carry X11 titles
+            # ("xfce4-panel"); only application windows lend theirs.
+            if x11_window_type(item.get("id")) not in TITLED_WINDOW_TYPES:
+                return ""
+            return str(item.get("title") or "").strip()
+    return ""
+
+
+TITLED_WINDOW_TYPES = {"NORMAL", "DIALOG"}
+
+
+def x11_window_type(window_id):
+    """Return the EWMH _NET_WM_WINDOW_TYPE suffix of one X11 window, or ""."""
+    if not window_id:
+        return ""
+    try:
+        result = subprocess.run(
+            ["xprop", "-id", str(window_id), "_NET_WM_WINDOW_TYPE"],
+            capture_output=True, text=True, timeout=1,
+        )
+    except Exception:
+        return ""
+    match = re.search(r"_NET_WM_WINDOW_TYPE_([A-Z_]+)", result.stdout or "")
+    return match.group(1) if match else ""
+
+
+def accessible_window_title(app, window, strong_handles=None):
+    """Return the window's AT-SPI name, or its managed X11 title when unnamed."""
+    own = str(node_name(window) or "").strip()
+    if own:
+        return own
+    return managed_window_title(app, window, strong_handles)
 
 
 def strong_window_instance_handles(app, windows=None):
@@ -553,6 +757,7 @@ def iter_apps():
             errors=["desktop lookup returned no root"],
         )
     children = enumerate_children(root, "desktop")
+    request_full_trees(app for _, app in children)
     return InventoryResult(
         [app for _, app in children],
         complete=children.complete,

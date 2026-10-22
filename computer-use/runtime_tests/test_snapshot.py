@@ -588,6 +588,52 @@ class TreeOmissionTests(AtspiPatchedTestCase):
         self.assertIn("cannot discover nodes the provider did not expose", text)
 
 
+class HiddenNestedWindowTests(AtspiPatchedTestCase):
+    """Hidden Qt dock windows must not spend the node budget.
+
+    Krita parents dozens of closed dockers to its main window as frames that
+    are neither SHOWING nor VISIBLE. Their subtrees held about half of the
+    window's nodes (Qt keeps SHOWING on their combo-popup items), so the
+    record and character budgets ran out before the menu bar, and observe
+    and find never saw "Settings".
+    """
+
+    def _window(self, hidden_count=40):
+        hidden = []
+        for index in range(hidden_count):
+            items = tuple(
+                _TreeNode(role="list item", name="Option {}-{}".format(index, item))
+                for item in range(5))
+            docker = _TreeNode(
+                role="frame", name="Docker {}".format(index), kids=items)
+            docker.states = {STATE.SENSITIVE}
+            hidden.append(docker)
+        menu = _TreeNode(role="menu item", name="Settings", x=10, y=0, w=60,
+                         h=20)
+        bar = _TreeNode(role="menu bar", name="", w=500, h=20, kids=(menu,))
+        return _TreeNode(role="frame", name="Krita", w=1000, h=700,
+                         kids=tuple(hidden) + (bar,))
+
+    def test_hidden_nested_window_subtree_is_skipped(self):
+        records, _lines, annotations = runtime.render_tree(
+            self._window(), None, [0], prune=True, max_tree_nodes=60,
+            indexer=runtime.StableIndexer({}))
+        names = [record["name"] for record in records]
+        self.assertIn("Settings", names)
+        self.assertFalse(any(name.startswith("Option") for name in names))
+        omitted = [a for a in annotations if a.get("kind") == "provider_omission"]
+        self.assertTrue(omitted)
+
+    def test_showing_nested_window_is_still_walked(self):
+        visible = _TreeNode(role="frame", name="Layers", w=100, h=100,
+                            kids=(_TreeNode(role="push button", name="Add"),))
+        root = _TreeNode(role="frame", name="Krita", w=1000, h=700,
+                         kids=(visible,))
+        records, _lines, _annotations = runtime.render_tree(
+            root, None, [0], prune=True, indexer=runtime.StableIndexer({}))
+        self.assertIn("Add", [record["name"] for record in records])
+
+
 class NodeDescriptionTests(AtspiPatchedTestCase):
     def _nodes(self, lines):
         return [l for l in lines if l.strip() and l.strip()[0].isdigit()]

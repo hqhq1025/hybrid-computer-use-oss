@@ -63,8 +63,53 @@ sudo apt-get install python3 python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 \
   gir1.2-gdkpixbuf-2.0 xdotool wmctrl x11-utils
 ```
 
-OSWorld guests provide `/home/user/a11y-env.sh`, which the runner sources
-before it starts the agent.
+When `DISPLAY`, `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` is missing,
+for example under `docker exec`, the server finds the same user's session
+from `/run/user/<uid>` and the desktop processes.
+
+### Accessibility on Linux
+
+Applications started by the user need no accessibility flags or
+environment scripts. On its first request the Linux provider switches
+session accessibility on, the way a screen reader does at login:
+
+1. It sets `org.a11y.Status.IsEnabled` on the session bus. This starts the
+   AT-SPI bus if needed and stores `org.gnome.desktop.interface
+   toolkit-accessibility true` in the user's settings.
+2. On Xfce, it adds `gail:atk-bridge` to the XSETTINGS value `Gtk/Modules`
+   through Xfconf. On GNOME, the settings daemon does this itself.
+3. It reads the attributes of each AT-SPI application once. Chromium and
+   Electron build their tree below the window frame only after this
+   screen-reader signal.
+
+It never sets `ScreenReaderEnabled`, because on GNOME that starts Orca.
+Sessions that already have accessibility on see only reads.
+
+| Toolkit | Started after the provider | Already running when the provider starts |
+| --- | --- | --- |
+| GTK 3, GTK 4 (including LibreOffice with the gtk3 plugin) | Visible | Visible |
+| GTK 2 (GIMP) | Visible | Visible within seconds when an XSETTINGS manager runs (Xfce, GNOME) |
+| Qt 5/6 (VLC, Kate, Okular) | Visible | Not visible; restart the application |
+| Gecko (Firefox) | Visible | Not visible; restart the application |
+| Chromium, Electron (Chrome, VS Code, Joplin, XMind) | Visible | Not visible; quit every window and start it again |
+
+`AX {"mode":"apps"}` names each titled window whose process is not on the
+accessibility bus, with its toolkit and the restart that makes it visible.
+Until the restart, only GUI can read and operate that window. It also names
+windows that an application on the bus shows outside its tree, such as the
+native message boxes of Electron applications; use GUI for those.
+
+On other desktops, applications started before the provider may also need
+a restart. A GTK 2 application without an XSETTINGS manager needs
+`GTK_MODULES=gail:atk-bridge` at launch. LibreOffice exposes a tree only
+with a GTK VCL plugin; set `SAL_USE_VCLPLUGIN=gtk3` where it chooses
+another one.
+
+The provider also sets `GDK_SCALE=1` for its own process, so GUI
+screenshots and input use X root pixels when the desktop scales windows.
+
+OSWorld guests source `/home/user/a11y-env.sh` before the agent starts.
+The script sets the same switches at launch time and stays compatible.
 
 The server speaks MCP on stdout. A wrapper must never print to stdout; send
 diagnostics to stderr.
@@ -529,11 +574,15 @@ the shell or the application.
 
 ## Troubleshooting
 
-AX sees no applications:
+AX sees no applications, or `AX apps` reports windows that are not on the
+accessibility bus: restart those applications after the server has run
+once (see [Accessibility on Linux](#accessibility-on-linux)). Then check the
+session:
 
 ```bash
-source /home/user/a11y-env.sh
 computer-use doctor
+gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus \
+  --method org.freedesktop.DBus.Properties.Get org.a11y.Status IsEnabled
 python3 -c 'import gi; gi.require_version("Atspi", "2.0"); from gi.repository import Atspi'
 printf '%s\n' "$DISPLAY" "$XAUTHORITY" "$XDG_RUNTIME_DIR" "$DBUS_SESSION_BUS_ADDRESS"
 ```

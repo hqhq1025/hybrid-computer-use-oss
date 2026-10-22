@@ -17,11 +17,13 @@ from .foundation import (
     provider_object_path,
 )
 from . import action_evidence
+from .ax_records import effective_role
 from .x11_windows import (
     _x11_window_inventory_cache,
     app_windows,
     relative_frame,
     strong_window_instance_handle_inventory,
+    titled_top_level_window_id,
     x11_root_window_state,
     x11_window_id_for_accessible,
     x11_window_inventory_for_pid,
@@ -68,6 +70,10 @@ def _window_action_preflight(tool, app, window, element_record):
     """Return (handle, window_id) of the exact native window to command."""
     role = str((element_record or {}).get("controlType") or "").strip().lower()
     path = list((element_record or {}).get("runtimeId") or [])
+    if role not in AX_WINDOW_ROLES and window is not None:
+        # A top-level container (Qt "filler") is a window; see
+        # top_level_window_role().
+        role = str(effective_role(window) or "").strip().lower()
     if role not in AX_WINDOW_ROLES or len(path) != 1:
         raise OperationFailure(
             "{} requires a top-level AX window target; no window command was "
@@ -118,7 +124,13 @@ def _window_action_preflight(tool, app, window, element_record):
             input_events_emitted=False,
             failure_subject="window",
         )
-    window_id = x11_window_id_for_accessible(app, window)
+    window_id = x11_window_id_for_accessible(app, window) or (
+        titled_top_level_window_id(
+            window,
+            {item["id"]: item for item in x11_window_inventory_for_pid(node_pid(app))
+             if item.get("id")},
+        )
+    )
     if not window_id:
         raise OperationFailure(
             "stale_window_ref reason=native_window_instance_changed; "
@@ -293,7 +305,7 @@ def resolve_window_action_target(app, target):
         )
     index, window = matches[0]
     bounds = extents(window)
-    role = str(node_role(window) or target.get("providerWindowRole") or "")
+    role = str(effective_role(window) or target.get("providerWindowRole") or "")
     record = {
         "index": 0,
         "runtimeId": [index],

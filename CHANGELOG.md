@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- macOS: when the screenshot after GUI input catches a desktop layout
+  change, the provider discards that sample and captures again within the
+  same `settle_ms` budget. Input is not replayed and the layout checks are
+  unchanged; if the budget runs out, the call fails as before.
+- Linux: GTK, LibreOffice and Qt applications are easier to address. Editable
+  text fields and document editors appear as `textbox` with their value and a
+  ref; unnamed list rows take their visible label as name; Qt top-level
+  widgets and unnamed frames get a window ref and their window-manager
+  title; keys such as `COMMA` and `PLUS` resolve; non-ASCII text typed by
+  keyboard synthesis arrives intact (at most 500 non-ASCII characters per
+  call); an element that refuses keyboard focus reports why.
 - Bring the CLI, Python SDK, code mode and PTC adapter up to the MCP
   contract. The CLI adds `gui zoom X0 Y0 X1 Y1`, `gui double_click|move X Y`
   and `select rN [TEXT] [--to rN]`. The SDK adds `zoom(region)`,

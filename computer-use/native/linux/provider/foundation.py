@@ -7,6 +7,30 @@ import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+
+def pin_gdk_device_pixels(environ=None):
+    """Make GDK report X root pixels, whatever the desktop's scale setting.
+
+    GDK applies its window scale (GDK_SCALE, or the XSETTINGS
+    Gdk/WindowScalingFactor that Xfce and GNOME publish) to the screen and
+    monitor geometry it returns. At scale 2 on a 1920x1080 root, GDK reports
+    960x540 while a root-window grab still returns 1920x1080 pixels and
+    XTEST still takes root coordinates. Screenshot dimensions then disagree
+    with the declared screen, and points mapped through the halved geometry
+    land up to the full screen width away from the target.
+
+    GDK reads the setting once, when it opens the display, so the pin must be
+    in the environment before the first `gi.repository.Gdk` import. An
+    explicit GDK_SCALE overrides XSETTINGS. GDK_DPI_SCALE only scales fonts;
+    it is removed so the provider never renders text of its own differently.
+    """
+    environ = os.environ if environ is None else environ
+    environ["GDK_SCALE"] = "1"
+    environ.pop("GDK_DPI_SCALE", None)
+
+
+pin_gdk_device_pixels()
+
 import gi
 
 gi.require_version("Atspi", "2.0")
@@ -135,6 +159,10 @@ GUI_ACTION_FIELDS = {
 AX_WINDOW_ROLES = {
     "frame", "window", "dialog", "alert", "file chooser", "color chooser",
 }
+# Container roles a toolkit may report for a top-level window: Qt exposes a
+# top-level QWidget without a window flag (Flameshot's "Configuration") as
+# "filler" or "panel".
+TOP_LEVEL_CONTAINER_ROLES = {"filler", "panel"}
 AX_WINDOW_ACTION_TIMEOUT_SECONDS = 1.2
 AX_WINDOW_ACTION_POLL_SECONDS = 0.04
 
@@ -434,6 +462,64 @@ def provider_bus_name(node):
 
 def provider_object_path(node):
     return str(safe(lambda: node.path, "") or "")
+
+
+def provider_identity_path(node, transient=None, owner_cache=None):
+    """Return the object path that identifies ``node`` in records and refs.
+
+    A TRANSIENT child of a MANAGES_DESCENDANTS container that the container
+    re-creates on every query is identified by the container's path and the
+    child's index instead (``<owner>/item/<index>``). AT-SPI allows such
+    containers to hand out a new object per query, and Qt does so for
+    item-view cells and combo-popup items: VLC's preferences tree and
+    Okular's sidebar returned a new path on every get_child_at_index(), so a
+    ref bound to the path seen by observe or find was already stale when the
+    next action resolved it. Children that keep their object (GTK cells,
+    LibreOffice items) keep their own path. The resolver still checks role
+    and name, so an index that now holds another item fails closed.
+
+    ``transient`` is the node's TRANSIENT state when the caller has already
+    read it; None reads it here. ``owner_cache`` (a dict shared by one
+    snapshot) keeps the re-creation probe to one per container.
+    """
+    path = str(safe(lambda: node.path, "") or "")
+    if transient is None:
+        transient = state_contains(node, Atspi.StateType.TRANSIENT)
+    if not transient or not path:
+        return path
+    parent = safe(lambda: node.get_parent())
+    owner = str(safe(lambda: parent.path, "") or "")
+    if not owner:
+        return path
+    index = safe(lambda: node.get_index_in_parent(), -1)
+    if not isinstance(index, int) or index < 0:
+        return path
+    cache = owner_cache if owner_cache is not None else {}
+    recreates = cache.get(owner)
+    if recreates is None:
+        again = safe(lambda: parent.get_child_at_index(index))
+        again_path = str(safe(lambda: again.path, "") or "")
+        recreates = bool(
+            again_path and again_path != path
+            and state_contains(parent, Atspi.StateType.MANAGES_DESCENDANTS)
+        )
+        cache[owner] = recreates
+    return transient_item_path(owner, index) if recreates else path
+
+
+TRANSIENT_ITEM_MARK = "/item/"
+
+
+def transient_item_path(owner_path, index):
+    return "{}{}{}".format(owner_path, TRANSIENT_ITEM_MARK, int(index))
+
+
+def split_transient_item_path(path):
+    """Return ``(owner_path, index)`` for an item identity, else None."""
+    owner, mark, index = str(path or "").rpartition(TRANSIENT_ITEM_MARK)
+    if not mark or not owner or not index.isdigit():
+        return None
+    return owner, int(index)
 
 
 def state_contains(node, state):

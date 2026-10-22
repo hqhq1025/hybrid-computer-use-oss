@@ -80,6 +80,61 @@ class InputEmissionResultTests(unittest.TestCase):
 
         self.assertIn("input emission failed", str(caught.exception))
 
+    def test_non_ascii_text_is_sent_one_character_at_a_time(self):
+        # libatspi rebinds a spare keycode for every non-ASCII character, and
+        # a burst reuses it before the application reads the previous
+        # mapping ("Grüße 你好" -> "Gr好好e 好好"). ASCII runs still go in one
+        # event.
+        events = []
+        sleeps = []
+
+        def generate(keyval, keystring, synth_type):
+            events.append((keyval, keystring, synth_type))
+            return True
+
+        with mock.patch.object(
+                runtime.Atspi, "generate_keyboard_event",
+                side_effect=generate, create=True), \
+                mock.patch.object(runtime.time, "sleep", side_effect=sleeps.append):
+            runtime.send_text("ab Grüße 你好!")
+
+        self.assertEqual(
+            [keystring for _keyval, keystring, _type in events],
+            ["ab Gr", "ü", "ß", "e ", "你", "好", "!"],
+        )
+        self.assertTrue(all(
+            synth_type == runtime.Atspi.KeySynthType.STRING
+            for _keyval, _keystring, synth_type in events))
+        self.assertEqual(len(sleeps), 4)
+        self.assertTrue(all(0 < delay <= 0.05 for delay in sleeps))
+
+    def test_long_non_ascii_text_is_rejected_before_input(self):
+        events = []
+        with mock.patch.object(
+                runtime.Atspi, "generate_keyboard_event",
+                side_effect=lambda *args: events.append(args) or True,
+                create=True):
+            with self.assertRaises(runtime.OperationFailure) as caught:
+                runtime.send_text("你" * 501)
+        self.assertEqual(events, [])
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertIn("no input was emitted", str(caught.exception))
+
+    def test_gui_batch_rejects_long_non_ascii_text_before_input(self):
+        with self.assertRaises(RuntimeError) as caught:
+            runtime.validate_gui_action({"type": "type", "text": "好" * 501})
+        self.assertIn("non-ASCII", str(caught.exception))
+        runtime.validate_gui_action({"type": "type", "text": "好" * 500})
+
+    def test_ascii_text_is_one_event(self):
+        events = []
+        with mock.patch.object(
+                runtime.Atspi, "generate_keyboard_event",
+                side_effect=lambda *args: events.append(args) or True,
+                create=True):
+            runtime.send_text("hello world")
+        self.assertEqual(len(events), 1)
+
     def test_all_pressed_modifiers_are_released_after_one_release_fails(self):
         events = []
 

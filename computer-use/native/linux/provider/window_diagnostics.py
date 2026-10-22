@@ -14,7 +14,7 @@ from .foundation import (
     state_contains,
 )
 from .ax_records import effective_name
-from .x11_windows import app_windows
+from .x11_windows import app_windows, managed_window_title
 
 
 DIALOG_ROLES = {"dialog", "alert", "file chooser", "color chooser"}
@@ -27,6 +27,11 @@ def window_label(window, text_limit=DEFAULT_TEXT_LIMIT):
     name = str(node_name(window) or "").strip()
     if name:
         return limit_text(name, text_limit=text_limit)
+    app = safe(lambda: window.get_parent())
+    if app is not None and node_role(app) == "application":
+        managed = managed_window_title(app, window)
+        if managed:
+            return limit_text(managed, text_limit=text_limit)
     role = str(node_role(window) or "window")
     for index in range(min(child_count(window), 8)):
         child = safe(lambda: window.get_child_at_index(index))
