@@ -26,6 +26,7 @@ from .foundation import (
     safe,
     state_contains,
 )
+from .a11y_enable import request_full_trees
 from .primitives import semantic_text_key
 
 
@@ -668,6 +669,7 @@ def iter_apps():
             errors=["desktop lookup returned no root"],
         )
     children = enumerate_children(root, "desktop")
+    request_full_trees(app for _, app in children)
     return InventoryResult(
         [app for _, app in children],
         complete=children.complete,
