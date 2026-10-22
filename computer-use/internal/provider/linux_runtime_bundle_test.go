@@ -50,8 +50,8 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/ui_events.py",
 		"native/linux/provider/window_diagnostics.py",
 		"native/linux/provider/window_resolver.py",
-		"native/linux/provider/wire_v2.py",
-		"native/linux/provider/wire_v2_request.py",
+		"native/linux/provider/wire.py",
+		"native/linux/provider/wire_request.py",
 		"native/linux/provider/x11_windows.py",
 		"runtime.py",
 	}
@@ -69,7 +69,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 func TestLinuxRuntimeEntrypointNamesEveryFragment(t *testing.T) {
 	bundle := linuxRuntimeBundle()
 	for _, name := range []string{
-		"native.linux.provider.wire_v2",
+		"native.linux.provider.wire",
 		"import main",
 	} {
 		if !strings.Contains(bundle["runtime.py"], name) {
@@ -84,7 +84,7 @@ func TestLinuxRuntimeEntrypointNamesEveryFragment(t *testing.T) {
 	}
 }
 
-func TestLinuxBackendUsesProviderV2WireWithoutLegacyPlatformRoundTrip(
+func TestLinuxBackendUsesProviderWireWithoutLegacyPlatformRoundTrip(
 	t *testing.T,
 ) {
 	for _, path := range []string{

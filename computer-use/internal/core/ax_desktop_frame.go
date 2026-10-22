@@ -40,7 +40,7 @@ func (s *Service) attachDesktopFrame(snapshot *AppSnapshot) []string {
 // applies before a frame may become coordinate provenance.
 func (s *Service) captureDesktopFrame() (*AppSnapshot, error) {
 	response, err := s.callProviderDesktop(ProviderDesktopRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 		Actions:         []ProviderDesktopAction{{Type: "screenshot"}},
 	})
 	if err != nil {

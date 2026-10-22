@@ -39,7 +39,7 @@ type axWindowInventory struct {
 // apps, observe, and act.
 func (s *Service) listDesktopWindows() (*axWindowInventory, ToolCallResult) {
 	response, err := s.callProviderObserveApps(ProviderObserveAppsRequest{
-		ProtocolVersion: ProviderProtocolV2,
+		ProtocolVersion: ProviderProtocolVersion,
 	})
 	if err != nil {
 		var timeout *RuntimeTimeoutError

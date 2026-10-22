@@ -42,7 +42,7 @@ func TestNativeAliasConflicts(t *testing.T) {
 					third.Index, third.RuntimeID, third.ProviderWindowObjectPath = 3, []int{0, 3}, "window-two"
 					snapshot.Elements = append(snapshot.Elements, third)
 				}
-				tree, err := buildAXSnapshotV1(snapshot)
+				tree, err := buildAXSnapshot(snapshot)
 				var typed *axProviderIdentityConflict
 				if tree != nil || !errors.As(err, &typed) {
 					t.Fatalf("conflict accepted: %v", err)
@@ -59,7 +59,7 @@ func TestNativeAliasCompatibleAndDistinct(t *testing.T) {
 	snapshot := nativeAliasFixture("process_instance")
 	snapshot.Elements[1].AutomationID = ""
 	snapshot.Elements[1].States, snapshot.Elements[2].States = "[focused]", "[selected]"
-	tree, err := buildAXSnapshotV1(snapshot)
+	tree, err := buildAXSnapshot(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,14 +69,14 @@ func TestNativeAliasCompatibleAndDistinct(t *testing.T) {
 		t.Fatalf("compatible aliases lost identity or consensus: %#v", first)
 	}
 	snapshot.Elements[2].ProviderObjectPath = "different-object"
-	tree, err = buildAXSnapshotV1(snapshot)
+	tree, err = buildAXSnapshot(snapshot)
 	if err != nil || tree.ByIndex[1] == tree.ByIndex[2] {
 		t.Fatalf("distinct objects merged: %v", err)
 	}
 	snapshot = nativeAliasFixture("table_owner")
 	snapshot.Elements[1].Name, snapshot.Elements[2].Name = "A1", "B1"
 	snapshot.Elements[1].ControlType, snapshot.Elements[2].ControlType = "cell", "cell"
-	tree, err = buildAXSnapshotV1(snapshot)
+	tree, err = buildAXSnapshot(snapshot)
 	if err != nil || tree.ByIndex[1] == tree.ByIndex[2] {
 		t.Fatalf("virtual targets merged: %v", err)
 	}

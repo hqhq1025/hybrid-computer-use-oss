@@ -32,7 +32,7 @@ func TestDarwinActionDiagnosticsRequireHostOptIn(t *testing.T) {
 			}
 			request := core.NewProviderWireRequest("diagnostics", core.ProviderWireResolveAndAct)
 			request.Action = &core.ProviderActionRequest{
-				ProtocolVersion: core.ProviderProtocolV2, Intent: core.AccessibilityClick, App: "Editor",
+				ProtocolVersion: core.ProviderProtocolVersion, Intent: core.AccessibilityClick, App: "Editor",
 				Target:      &core.ProviderSemanticTarget{Selector: `button "Save"`, Role: "button", Name: "Save", HasName: true},
 				Click:       &core.ProviderClickInput{ClickCount: 1},
 				Diagnostics: &core.ProviderDiagnosticContext{PhaseTiming: true},
@@ -40,7 +40,7 @@ func TestDarwinActionDiagnosticsRequireHostOptIn(t *testing.T) {
 			var sent bytes.Buffer
 			darwinProviderWorkerStarter = func(darwinProviderArtifact) (*darwinProviderWorker, error) {
 				response := core.ProviderWireResponse{
-					Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolV2,
+					Protocol: core.ProviderProtocolName, SchemaVersion: core.ProviderProtocolVersion,
 					RequestID: request.RequestID, Operation: request.Operation,
 					Accessibility: &core.ProviderAccessibilityResult{OK: true},
 				}

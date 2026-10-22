@@ -147,7 +147,7 @@ func TestAXMixedBatchStopsOnOrderedPartialEmissionWithoutRetry(t *testing.T) {
 		execute: func(request ProviderOrderedInputRequest) ProviderOrderedInputResult {
 			stopped := request.Steps[1].ActionIndex
 			return ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:       request.Steps[0].ActionIndex,
@@ -483,7 +483,7 @@ func TestAXBatchPreservesOrderedPartialEmissionWithoutLegacyRetry(t *testing.T) 
 			stopped := request.Steps[1].ActionIndex
 			unattempted := request.Steps[2].ActionIndex
 			return ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:       request.Steps[0].ActionIndex,

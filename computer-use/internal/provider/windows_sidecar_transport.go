@@ -694,7 +694,7 @@ func (worker *windowsProviderWorker) call(
 			Phase:       "request_id_mismatch",
 			RequestSent: true,
 			Cause: errors.New(
-				"provider returned a mismatched V2 request_id",
+				"provider returned a mismatched request_id",
 			),
 		}
 	}
@@ -705,7 +705,7 @@ func (worker *windowsProviderWorker) call(
 			Phase:       "operation_mismatch",
 			RequestSent: true,
 			Cause: errors.New(
-				"provider returned a mismatched V2 operation",
+				"provider returned a mismatched operation",
 			),
 		}
 	}

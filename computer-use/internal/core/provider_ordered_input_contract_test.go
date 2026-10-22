@@ -28,7 +28,7 @@ func testProviderOrderedInputRequest(
 		})
 	}
 	return ProviderOrderedInputRequest{
-		ContractVersion: ProviderOrderedInputContractV1,
+		ContractVersion: ProviderOrderedInputContractVersion,
 		App:             "a1",
 		AppIdentity: &ProviderAppIdentity{
 			ProviderBusName:   "pid:42",
@@ -63,7 +63,7 @@ func testProviderOrderedInputSuccess(
 		})
 	}
 	return ProviderOrderedInputResult{
-		ContractVersion: ProviderOrderedInputContractV1,
+		ContractVersion: ProviderOrderedInputContractVersion,
 		OK:              true,
 		Steps:           steps,
 		Snapshot: &ProviderSnapshot{
@@ -107,7 +107,7 @@ func TestProviderOrderedInputContractAcceptsTypedStops(t *testing.T) {
 		{
 			name: "window changed before first dispatch",
 			result: ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:      4,
@@ -138,7 +138,7 @@ func TestProviderOrderedInputContractAcceptsTypedStops(t *testing.T) {
 		{
 			name: "partial emission stops later actions",
 			result: ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:       4,
@@ -178,7 +178,7 @@ func TestProviderOrderedInputContractAcceptsTypedStops(t *testing.T) {
 		{
 			name: "same-window pre-dispatch transient can retry",
 			result: ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:      4,
@@ -314,7 +314,7 @@ func TestProviderOrderedInputResultRejectsContradictoryEvidence(t *testing.T) {
 		{
 			name: "continued after failure",
 			result: ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:      4,
@@ -341,7 +341,7 @@ func TestProviderOrderedInputResultRejectsContradictoryEvidence(t *testing.T) {
 		{
 			name: "window changed but input emitted",
 			result: ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:       4,
@@ -367,7 +367,7 @@ func TestProviderOrderedInputResultRejectsContradictoryEvidence(t *testing.T) {
 		{
 			name: "partial emission omitted aggregate",
 			result: ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:       4,
@@ -394,7 +394,7 @@ func TestProviderOrderedInputResultRejectsContradictoryEvidence(t *testing.T) {
 			name: "retry after prior emission",
 			result: func() ProviderOrderedInputResult {
 				result := ProviderOrderedInputResult{
-					ContractVersion: ProviderOrderedInputContractV1,
+					ContractVersion: ProviderOrderedInputContractVersion,
 					Steps: []ProviderOrderedInputStepResult{
 						{
 							ActionIndex:       4,
@@ -435,7 +435,7 @@ func TestProviderOrderedInputResultRejectsContradictoryEvidence(t *testing.T) {
 		{
 			name: "retry with nontransient failure",
 			result: ProviderOrderedInputResult{
-				ContractVersion: ProviderOrderedInputContractV1,
+				ContractVersion: ProviderOrderedInputContractVersion,
 				Steps: []ProviderOrderedInputStepResult{
 					{
 						ActionIndex:      4,
