@@ -436,6 +436,64 @@ def provider_object_path(node):
     return str(safe(lambda: node.path, "") or "")
 
 
+def provider_identity_path(node, transient=None, owner_cache=None):
+    """Return the object path that identifies ``node`` in records and refs.
+
+    A TRANSIENT child of a MANAGES_DESCENDANTS container that the container
+    re-creates on every query is identified by the container's path and the
+    child's index instead (``<owner>/item/<index>``). AT-SPI allows such
+    containers to hand out a new object per query, and Qt does so for
+    item-view cells and combo-popup items: VLC's preferences tree and
+    Okular's sidebar returned a new path on every get_child_at_index(), so a
+    ref bound to the path seen by observe or find was already stale when the
+    next action resolved it. Children that keep their object (GTK cells,
+    LibreOffice items) keep their own path. The resolver still checks role
+    and name, so an index that now holds another item fails closed.
+
+    ``transient`` is the node's TRANSIENT state when the caller has already
+    read it; None reads it here. ``owner_cache`` (a dict shared by one
+    snapshot) keeps the re-creation probe to one per container.
+    """
+    path = str(safe(lambda: node.path, "") or "")
+    if transient is None:
+        transient = state_contains(node, Atspi.StateType.TRANSIENT)
+    if not transient or not path:
+        return path
+    parent = safe(lambda: node.get_parent())
+    owner = str(safe(lambda: parent.path, "") or "")
+    if not owner:
+        return path
+    index = safe(lambda: node.get_index_in_parent(), -1)
+    if not isinstance(index, int) or index < 0:
+        return path
+    cache = owner_cache if owner_cache is not None else {}
+    recreates = cache.get(owner)
+    if recreates is None:
+        again = safe(lambda: parent.get_child_at_index(index))
+        again_path = str(safe(lambda: again.path, "") or "")
+        recreates = bool(
+            again_path and again_path != path
+            and state_contains(parent, Atspi.StateType.MANAGES_DESCENDANTS)
+        )
+        cache[owner] = recreates
+    return transient_item_path(owner, index) if recreates else path
+
+
+TRANSIENT_ITEM_MARK = "/item/"
+
+
+def transient_item_path(owner_path, index):
+    return "{}{}{}".format(owner_path, TRANSIENT_ITEM_MARK, int(index))
+
+
+def split_transient_item_path(path):
+    """Return ``(owner_path, index)`` for an item identity, else None."""
+    owner, mark, index = str(path or "").rpartition(TRANSIENT_ITEM_MARK)
+    if not mark or not owner or not index.isdigit():
+        return None
+    return owner, int(index)
+
+
 def state_contains(node, state):
     state_set = safe(node.get_state_set)
     if state_set is None:

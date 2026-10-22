@@ -14,6 +14,7 @@ from .foundation import (
     node_role,
     process_generation,
     provider_bus_name,
+    provider_identity_path,
     provider_object_path,
     safe,
     state_contains,
@@ -320,7 +321,7 @@ def semantic_relations(node, text_limit=DEFAULT_TEXT_LIMIT):
 
 
 def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
-               facts=None):
+               facts=None, owner_cache=None):
     """Build the canonical record of one node.
 
     ``facts`` carries the reads that the traversal already made for this
@@ -364,7 +365,10 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT,
         "runtimeId": path[:],
         "automationId": accessible_id(node),
         "providerBusName": provider_bus_name(node),
-        "providerObjectPath": provider_object_path(node),
+        "providerObjectPath": provider_identity_path(
+            node, transient=facts.has_state(Atspi.StateType.TRANSIENT),
+            owner_cache=(owner_cache if owner_cache is not None
+                         else facts.scope_cache("transient_owner"))),
         "processGeneration": process_generation(facts.pid()),
         "showing": facts.showing(),
         "visible": facts.state_flag(Atspi.StateType.VISIBLE),

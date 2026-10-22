@@ -302,5 +302,86 @@ class SelectTests(AtspiPatchedTestCase):
         self.assertEqual(self.notes, ["[select] selected 4 cells A2:B3"])
 
 
+class _RecreatingList(_Node):
+    """A Qt item view: every child query returns a new accessible object.
+
+    Qt's AT-SPI bridge wraps each item-view cell (and each list item of a
+    combo popup) in a fresh QAccessibleInterface per query, so the object
+    path of the same cell changes on every read (measured on VLC and Okular,
+    Qt 5.15). The cells are TRANSIENT children of a MANAGES_DESCENDANTS
+    container.
+    """
+
+    def __init__(self, names, **kwargs):
+        super().__init__(role="tree", states=(
+            STATE.SHOWING, STATE.VISIBLE, STATE.MANAGES_DESCENDANTS), **kwargs)
+        self.names = list(names)
+
+    def get_child_count(self):
+        return len(self.names)
+
+    def get_child_at_index(self, index):
+        cell = _Node(role="table cell", name=self.names[index], states=(
+            STATE.SHOWING, STATE.VISIBLE, STATE.TRANSIENT))
+        cell.parent = self
+        cell.get_index_in_parent = lambda: index
+        return cell
+
+
+class TransientItemIdentityTests(AtspiPatchedTestCase):
+    """Refs to Qt item-view cells failed as stale right after observe or find."""
+
+    def setUp(self):
+        super().setUp()
+        self.view = _RecreatingList(["Logger", "Network Sync", "syslog"])
+        self.window = _Node(role="dialog", name="Preferences").add(self.view)
+        patcher = mock.patch.object(
+            runtime, "process_generation", return_value="99123")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_recreated_item_keeps_one_provider_identity(self):
+        first = runtime.provider_identity_path(self.view.get_child_at_index(1))
+        second = runtime.provider_identity_path(self.view.get_child_at_index(1))
+        self.assertEqual(first, second)
+        self.assertNotEqual(
+            first, runtime.provider_identity_path(self.view.get_child_at_index(2)))
+
+    def test_ref_to_recreated_cell_resolves_by_its_identity(self):
+        cell = self.view.get_child_at_index(1)
+        record = runtime.record_for(cell, 0, [0, 0, 1], None)
+        found = runtime.scan_provider_identity(
+            [(0, self.window)], record["providerBusName"],
+            record["providerObjectPath"], record["processGeneration"],
+            max_nodes=100, deadline=runtime.time.monotonic() + 5)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(runtime.node_name(found[0][0]), "Network Sync")
+
+    def test_runtime_path_check_accepts_the_recreated_cell(self):
+        app = _Node(role="application", name="vlc").add(self.window)
+        cell = self.view.get_child_at_index(2)
+        record = runtime.record_for(cell, 0, [0, 0, 2], None)
+        target = {
+            "role": "table cell", "name": "syslog", "hasName": True,
+            "providerBusName": record["providerBusName"],
+            "providerObjectPath": record["providerObjectPath"],
+            "processGeneration": record["processGeneration"],
+        }
+        found = runtime.resolve_provider_runtime_path(
+            app, [0, 0, 2], target, {0})
+        self.assertEqual(len(found), 1)
+
+    def test_persistent_objects_keep_their_object_path(self):
+        """GTK cells are TRANSIENT too but keep their objects; nothing changes."""
+        button = _Node(role="push button", name="OK")
+        _Node(role="panel").add(button)
+        self.assertEqual(runtime.provider_identity_path(button), button.path)
+        list_view = _Node(role="list", states=(
+            STATE.SHOWING, STATE.VISIBLE, STATE.MANAGES_DESCENDANTS))
+        plain = _Node(role="list item", name="a")
+        list_view.add(plain)
+        self.assertEqual(runtime.provider_identity_path(plain), plain.path)
+
+
 if __name__ == "__main__":
     unittest.main()
