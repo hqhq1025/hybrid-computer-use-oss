@@ -145,8 +145,8 @@ element, a substring of it, or a range. `gui` has `screenshot`,
 `zoom X0 Y0 X1 Y1`, `click|double_click|move X Y`, `type TEXT` and
 `key CHORD`. GUI `drag`, `scroll` and `wait` take `gui --json`, and an AX
 batch takes `act --json`. `--json -` reads the body from standard input and
-`--json @FILE` from a file, so code that builds a command does not have to
-quote JSON for the shell. `observe --as full|screenshot` prints an
+`--json @FILE` from a file, so code that builds a command need not quote
+JSON for the shell. `observe --as full|screenshot` prints an
 `image: full desktop WxH, the current GUI frame` line before the image path.
 After that line, `gui click` may use the image's pixels. `gui zoom` prints the
 mapping line and the zoom image path. Common options are `--session NAME`
@@ -387,12 +387,34 @@ window binding and preflight before input stay in the core.
 
 ## Codex code mode
 
-No change is needed. Codex renders each MCP input schema to a TypeScript
-declaration with a 16,000-byte limit (`code-mode-protocol`,
-`DEFAULT_INPUT_SCHEMA_MAX_BYTES`). The published AX and GUI input schemas are
-each under 5,000 bytes as compact JSON
-(`computer-use/testdata/contract/public_contract.json`), so they stay within
-that limit. In code mode the tools stay text:
+In Codex code mode the model writes JavaScript for one `exec` tool, and that
+code calls nested tools. Registering the MCP server is enough: code calls
+`tools.mcp__computer_use__AX(args)` and `tools.mcp__computer_use__GUI(args)`
+and gets the MCP result, `{content, isError}`. The first text item is the
+JSON evidence line; images are `ImageContent` blocks, and `image(block)` shows
+one to the model from the same `exec`, without another model turn.
+`instructions/hybrid-code.md` is the guide for this mode.
+
+- Codex renders each MCP input schema as a TypeScript declaration. The
+  renderer does not resolve `$ref` in every version and shows a composition
+  next to properties as untyped branches, so the published schemas keep both
+  out of the fields code writes: the AX schema writes the `query` object out
+  at each use, and the core enforces the scroll delta rule.
+- Codex can defer MCP tools in code mode. A deferred tool is still callable as
+  `tools.mcp__computer_use__AX` and listed in `ALL_TOOLS`, but its declaration
+  is left out of the `exec` description. `omit_tools_from = ["deferred"]` in
+  the server's `[mcp_servers.computer_use]` entry lists AX and GUI again.
+- Use one entry point per task. An in-process MCP server refuses input while
+  a CLI or SDK daemon serves the same desktop; `computer-use mcp --attach`
+  shares one daemon when a task needs both.
+- Without MCP, code runs the CLI or Python through `tools.exec_command`. The
+  record holds the image path; `tools.view_image({path})` returns its data
+  URL, and `image(url)` shows it from the same `exec`. Printing the image
+  as a data URL instead does not survive the nested output limit: a
+  full-desktop PNG is about 100,000 characters, and a smaller
+  `max_output_tokens` on `exec_command` cuts the middle out of it.
+
+In code mode the tools stay text:
 
 ```js
 const out = await tools.mcp__computer_use__AX({mode: "find", window_ref: "w1", query: {role: "button"}, limit: 50});

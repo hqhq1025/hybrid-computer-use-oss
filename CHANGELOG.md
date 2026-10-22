@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `instructions/hybrid-code.md` covers code that calls the MCP tools inside
+  a code tool, the CLI and the SDK. It drops the help and schema reads at the
+  start, shows one batch with its check, and opens an image in the same code
+  that took it.
 - The Python SDK adds `click_zoom(zoom_record, u, v)`, which clicks the
   frame pixel shown at a point of a zoom image.
 - The CLI `act --json` and `gui --json` read their body from standard input
