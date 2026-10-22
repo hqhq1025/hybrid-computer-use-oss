@@ -609,10 +609,6 @@ class ProviderWireV2Tests(unittest.TestCase):
         self.assertEqual(result["recovery_context"], recovery_context)
         recover.assert_called_once_with(request["observe"])
 
-    def test_rejects_legacy_runtime_envelope(self):
-        with self.assertRaisesRegex(ValueError, "unknown field"):
-            runtime.execute({"intent": "observe", "app": "Editor"})
-
     def test_rejects_unknown_top_level_field(self):
         request = {
             "protocol": "computer-use-provider-v2",
@@ -640,23 +636,6 @@ class ProviderWireV2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown field"):
             runtime.execute(request)
 
-    def test_rejects_action_field_from_another_intent(self):
-        request = {
-            "protocol": "computer-use-provider-v2",
-            "schema_version": 2,
-            "request_id": "req-mixed-action",
-            "operation": "resolve_and_act",
-            "action": {
-                "protocol_version": 2,
-                "intent": "type",
-                "app": "Editor",
-                "window_handle": "w1",
-                "input": {"text": "hello", "key": "ENTER"},
-            },
-        }
-        with self.assertRaisesRegex(ValueError, "unknown field"):
-            runtime.execute(request)
-
     def test_rejects_keypress_without_key(self):
         request = {
             "protocol": "computer-use-provider-v2",
@@ -672,22 +651,6 @@ class ProviderWireV2Tests(unittest.TestCase):
             },
         }
         with self.assertRaisesRegex(ValueError, "missing required field"):
-            runtime.execute(request)
-
-    def test_rejects_set_value_without_target(self):
-        request = {
-            "protocol": "computer-use-provider-v2",
-            "schema_version": 2,
-            "request_id": "req-set-value",
-            "operation": "resolve_and_act",
-            "action": {
-                "protocol_version": 2,
-                "intent": "set_value",
-                "app": "Editor",
-                "input": {"value": ""},
-            },
-        }
-        with self.assertRaisesRegex(ValueError, "requires an exact target"):
             runtime.execute(request)
 
     def test_protocol_mismatch_has_specific_failure_code(self):

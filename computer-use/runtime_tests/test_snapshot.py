@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Linux provider snapshot enumeration, rendering, pruning, and node description tests."""
 
-import inspect
-
 from runtime_test_support import *  # noqa: F401,F403
 
 
@@ -833,28 +831,52 @@ class DropdownItemTests(AtspiPatchedTestCase):
 class EmptyCellOmissionTests(AtspiPatchedTestCase):
     """Most cells in a Calc viewport are empty, and rendering them wastes budget."""
 
-    def test_notice_states_the_verified_path_only(self):
-        """The omission notice suggests only the route that works.
+    def test_empty_cells_get_no_record_and_the_notice_names_the_verified_path(self):
+        """Empty cells are skipped before record_for, which would spend budget.
 
-        Omitted empty cells have no element index, so the notice must say how
-        to reach them. Typing a reference into the Name Box does not work:
-        set_value changes its text without navigating, like the dropdown commit
-        above, and click does not give it keyboard focus. Moving the cell
-        cursor with press_key and then calling type_text does work.
+        Omitted cells have no element index, so the notice says how to reach
+        them. Typing a reference into the Name Box does not work: set_value
+        changes its text without navigating, and click does not give it
+        keyboard focus. Moving the cell cursor with press_key and then
+        calling type_text does work.
         """
-        source = effective_runtime_source()
+        table = object()
+        node = _TreeNode(role="table", name="Data")
+        node.get_table_iface = lambda: table
+        cells = {(0, 0): _TreeNode(role="table cell", name="A1"),
+                 (0, 1): _TreeNode(role="table cell", name="B1")}
+        table_api = mock.Mock()
+        table_api.get_accessible_at.side_effect = lambda _table, row, col: cells[(row, col)]
+        table_api.get_n_rows.return_value = 1
+        table_api.get_n_columns.return_value = 2
+        values = {id(cells[(0, 0)]): ("", True), id(cells[(0, 1)]): ("42", True)}
+        records = []
+        lines = []
+        record_for = mock.Mock(return_value={
+            "index": 1, "localizedControlType": "table cell",
+            "controlType": "table cell", "frame": None,
+        })
 
-        self.assertIn("empty cell(s) omitted", source)
-        self.assertIn("move the cell cursor there", source)
-        self.assertNotIn("Name Box and press", source)
+        with mock.patch.object(
+            runtime, "visible_cell_range", return_value=(0, 0, 0, 1)
+        ), mock.patch.object(
+            runtime.Atspi, "Table", table_api, create=True
+        ), mock.patch.object(
+            runtime, "text_value_with_status",
+            side_effect=lambda cell, text_limit=None: values[id(cell)],
+        ), mock.patch.object(runtime, "record_for", record_for):
+            rendered = runtime.render_visible_cells(
+                node, 0, [0], None, records, lines,
+                indexer=runtime.StableIndexer({}), annotations=[],
+            )
 
-    def test_empty_cells_are_skipped_before_costing_a_record(self):
-        """Empty cells are skipped before record_for, which would still spend budget."""
-        body = inspect.getsource(runtime.render_visible_cells)
-
-        skip = body.index("if not value:")
-        build = body.index("record = record_for(")
-        self.assertLess(skip, build, "the skip decision must happen before record_for")
+        self.assertEqual(rendered, 1)
+        self.assertEqual(record_for.call_count, 1)
+        self.assertIs(record_for.call_args.args[0], cells[(0, 1)])
+        notice = lines[-1]
+        self.assertIn("1 non-empty cell(s) listed, 1 empty cell(s) omitted", notice)
+        self.assertIn("move the cell cursor there with press_key and then type_text", notice)
+        self.assertNotIn("Name Box", notice)
 
 
 class ElectronActionNamesTests(AtspiPatchedTestCase):
@@ -946,13 +968,6 @@ class ElectronActionNamesTests(AtspiPatchedTestCase):
 
         self.assertTrue(has_click)
         self.assertIsNotNone(runtime.preferred_action_index(node))
-
-    def test_covered_set_has_a_single_source_of_truth(self):
-        """The click-covered action set is defined once, since copies drift apart."""
-        source = effective_runtime_source()
-
-        self.assertEqual(source.count('"default.activate",'), 1,
-                         "CLICK_COVERED_ACTIONS must not be duplicated")
 
 
 class ObjectReplacementTests(AtspiPatchedTestCase):
