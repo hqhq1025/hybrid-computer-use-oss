@@ -23,17 +23,6 @@ internal static partial class NativeDesktop
     private const int ClipboardRetryMilliseconds = 20;
     private const int CaptureLayoutRetryCount = 3;
     private const int CaptureLayoutRetryMilliseconds = 25;
-    private const uint RdwInvalidate = 0x0001;
-    private const uint RdwErase = 0x0004;
-    private const uint RdwAllChildren = 0x0080;
-    private const uint RdwUpdateNow = 0x0100;
-    private const uint RdwFrame = 0x0400;
-    private const uint WindowRenderCommitFlags =
-        RdwInvalidate |
-        RdwErase |
-        RdwAllChildren |
-        RdwUpdateNow |
-        RdwFrame;
     private const int PublishedLayoutHistoryLimit = 32;
     private const int WindowActivationDirectTimeoutMilliseconds = 250;
     private const int WindowActivationPollMilliseconds = 25;
@@ -441,15 +430,4 @@ internal static partial class NativeDesktop
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool RedrawWindow(
-        nint handle,
-        nint updateRectangle,
-        nint updateRegion,
-        uint flags);
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmFlush();
-
 }

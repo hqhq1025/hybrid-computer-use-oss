@@ -441,8 +441,7 @@ internal sealed partial class UiaProvider
                         return BuildSnapshot(
                             process,
                             window,
-                            observation,
-                            commitPostActionScreenshot: true);
+                            observation);
                     }
                     if (!MatchesPostActionOwner(ownerIdentity, window))
                     {
@@ -457,8 +456,7 @@ internal sealed partial class UiaProvider
                     return BuildSnapshot(
                         ownerProcess,
                         window,
-                        observation,
-                        commitPostActionScreenshot: true);
+                        observation);
                 },
                 () => new JsonObject
                 {

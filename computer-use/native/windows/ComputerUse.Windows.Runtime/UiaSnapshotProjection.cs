@@ -32,13 +32,12 @@ internal sealed partial class UiaProvider
     private JsonObject BuildSnapshot(
         Process process,
         NativeDesktop.WindowRecord selectedWindow,
-        JsonObject? observation,
-        bool commitPostActionScreenshot = false)
+        JsonObject? observation)
     {
         try
         {
             return WindowOwnershipObservation.Read(() => BuildSnapshotSample(
-                process, selectedWindow, observation, commitPostActionScreenshot));
+                process, selectedWindow, observation));
         }
         catch (WindowOwnershipUnavailableException error)
         {
@@ -51,8 +50,7 @@ internal sealed partial class UiaProvider
     private JsonObject BuildSnapshotSample(
         Process process,
         NativeDesktop.WindowRecord selectedWindow,
-        JsonObject? observation,
-        bool commitPostActionScreenshot)
+        JsonObject? observation)
     {
         var projection = ProjectNativeWindows(
             process,
@@ -128,69 +126,6 @@ internal sealed partial class UiaProvider
             ["elements"] = records,
             ["annotations"] = annotations,
         };
-        if (observation?["include_screenshot"]?.GetValue<bool>() == true)
-        {
-            var screenshotScope = OptionalString(
-                observation,
-                "screenshot_scope",
-                "window");
-            NativeDesktop.ScreenFrame? frame;
-            if (screenshotScope == "screen")
-            {
-                frame = commitPostActionScreenshot
-                    ? NativeDesktop.CaptureCommittedScreen(
-                        selectedWindow.Handle)
-                    : NativeDesktop.Capture();
-            }
-            else
-            {
-                NativeDesktop.ScreenFrame CaptureWindow()
-                {
-                    if (!NativeDesktop.TryCapture(
-                            selectedWindow.Bounds,
-                            out var captured) ||
-                        captured is null)
-                    {
-                        throw new InvalidOperationException(
-                            "window_outside_virtual_desktop");
-                    }
-                    return captured;
-                }
-
-                try
-                {
-                    frame = commitPostActionScreenshot
-                        ? NativeDesktop.CaptureCommittedWindow(
-                            selectedWindow.Handle)
-                        : CaptureWindow();
-                }
-                catch (InvalidOperationException error) when (
-                    error.Message == "window_outside_virtual_desktop")
-                {
-                    snapshot["screenshotUnavailableReason"] =
-                        "window_outside_virtual_desktop";
-                    frame = null;
-                }
-            }
-            if (frame is not null)
-            {
-                snapshot["windowBounds"] = RectangleJson(
-                    new Rectangle(
-                        frame.OriginX,
-                        frame.OriginY,
-                        frame.NativeWidth,
-                        frame.NativeHeight));
-                snapshot["screenshotPngBase64"] = frame.PngBase64;
-                snapshot["screenshotMimeType"] = "image/png";
-                snapshot["screenshotEncoding"] = "png";
-                snapshot["coordinateSpace"] = screenshotScope == "screen"
-                    ? "screen_image_px"
-                    : "window_image_px";
-                snapshot["frameId"] = frame.FrameId;
-                snapshot["width"] = frame.Width;
-                snapshot["height"] = frame.Height;
-            }
-        }
         return snapshot;
 
         bool Emit(AutomationElement element, int[] treePath, int depth)

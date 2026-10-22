@@ -282,6 +282,38 @@ validCount++;
 var invalidSchemaCases = new[]
 {
     (
+        "observation rejects a window screenshot",
+        """
+        {
+          "protocol":"computer-use-provider",
+          "schema_version":2,
+          "request_id":"invalid-observe-screenshot",
+          "operation":"observe",
+          "observe":{
+            "protocol_version":2,
+            "app":"Editor",
+            "observation":{"include_screenshot":true}
+          }
+        }
+        """
+    ),
+    (
+        "observation rejects screenshot_scope",
+        """
+        {
+          "protocol":"computer-use-provider",
+          "schema_version":2,
+          "request_id":"invalid-observe-scope",
+          "operation":"observe",
+          "observe":{
+            "protocol_version":2,
+            "app":"Editor",
+            "observation":{"include_screenshot":false,"screenshot_scope":"window"}
+          }
+        }
+        """
+    ),
+    (
         "target rejects unknown field",
         """
         {

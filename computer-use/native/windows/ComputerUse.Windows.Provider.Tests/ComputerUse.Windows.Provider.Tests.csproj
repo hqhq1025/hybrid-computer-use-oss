@@ -103,9 +103,6 @@
       Include="../ComputerUse.Windows.Runtime/PostActionOwnerTransitionPolicy.cs"
       Link="PostActionOwnerTransitionPolicy.cs" />
     <Compile
-      Include="../ComputerUse.Windows.Runtime/WindowRenderCommit.cs"
-      Link="WindowRenderCommit.cs" />
-    <Compile
       Include="../ComputerUse.Windows.Runtime/DesktopObservationRetry.cs"
       Link="DesktopObservationRetry.cs" />
     <Compile
