@@ -142,7 +142,25 @@ var cliShorthands = map[string]cliShorthand{
 			}
 			return contract.PublicToolAX, args, nil
 		}},
-	"gui": {"gui screenshot | gui click X Y | gui type TEXT | gui key CTRL+S | gui --json '{\"actions\":[...]}'",
+	"select": {"select rN [TEXT] [--to rN]",
+		func(p []string, f cliFlags) (string, map[string]any, error) {
+			if len(p) == 0 || len(p) > 2 || !core.AXElementRefPattern.MatchString(p[0]) {
+				return "", nil, usageError("select needs rN, then an optional substring of it")
+			}
+			action := map[string]any{"type": "select", "ref": p[0]}
+			if len(p) == 2 {
+				action["text"] = p[1]
+			}
+			copyFlag(action, f, "to", "to_ref")
+			args := map[string]any{"mode": "act", "actions": []any{action}}
+			copyFlag(args, f, "window", "window_ref")
+			copyFlag(args, f, "as", "observe")
+			if err := appendWaitFlag(args, f); err != nil {
+				return "", nil, err
+			}
+			return contract.PublicToolAX, args, nil
+		}},
+	"gui": {"gui screenshot | gui zoom X0 Y0 X1 Y1 | gui click|double_click|move X Y | gui type TEXT | gui key CTRL+S | gui --json '{\"actions\":[...]}'",
 		func(p []string, f cliFlags) (string, map[string]any, error) {
 			if f.has("json") {
 				var body map[string]any
@@ -157,13 +175,18 @@ var cliShorthands = map[string]cliShorthand{
 			action := map[string]any{"type": p[0]}
 			switch {
 			case p[0] == "screenshot" && len(p) == 1:
+			case p[0] == "zoom" && len(p) == 5:
+				region, err := cliNumbers(p[1:])
+				if err != nil {
+					return "", nil, usageError("gui zoom needs numeric X0 Y0 X1 Y1 in frame pixels")
+				}
+				action["region"] = region
 			case (p[0] == "click" || p[0] == "double_click" || p[0] == "move") && len(p) == 3:
-				x, errX := strconv.ParseFloat(p[1], 64)
-				y, errY := strconv.ParseFloat(p[2], 64)
-				if errX != nil || errY != nil {
+				point, err := cliNumbers(p[1:])
+				if err != nil {
 					return "", nil, usageError("gui " + p[0] + " needs numeric X Y")
 				}
-				action["x"], action["y"] = x, y
+				action["x"], action["y"] = point[0], point[1]
 			case p[0] == "type" && len(p) == 2:
 				action["text"] = p[1]
 			case p[0] == "key" && len(p) == 2:
@@ -231,6 +254,19 @@ func singleAction(usage, actionType string, fields ...string) cliShorthand {
 		}
 		return contract.PublicToolAX, args, nil
 	}}
+}
+
+// cliNumbers parses positional numbers, such as GUI pixels.
+func cliNumbers(words []string) ([]any, error) {
+	out := make([]any, len(words))
+	for index, word := range words {
+		value, err := strconv.ParseFloat(word, 64)
+		if err != nil {
+			return nil, err
+		}
+		out[index] = value
+	}
+	return out, nil
 }
 
 func splitChord(chord string) []any {
@@ -339,6 +375,8 @@ func allowedCLIFlags(command string) map[string]bool {
 		flags += " window as wait until"
 	case "scroll":
 		flags += " window as wait until pages"
+	case "select":
+		flags += " window as wait until to"
 	case "batch":
 		flags += " session keep-going text json records"
 	}
@@ -695,6 +733,10 @@ Commands:
 	out.WriteString(`
 Output: model text by default, identical to the MCP result; --json (or
 --records for act and gui) prints one records JSON object. Images are files.
+GUI x/y and zoom regions are pixels of the current GUI frame: the latest gui
+screenshot or observe --as full|screenshot image. gui zoom only looks; its
+result states how a zoom pixel maps back to frame pixels. Other GUI actions
+(drag, scroll, wait) and other AX steps take --json.
 Options: --session NAME (or HCU_SESSION), --socket PATH (or HCU_SOCKET),
 --request-id ID (act retries return the first result), --since SNAPSHOT_ID.
 Input commands also take --window wN, --as none|diff|tree, and --wait STEP_JSON:

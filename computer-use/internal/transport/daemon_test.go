@@ -538,6 +538,7 @@ func TestInProcessMCPRefusesInputWhileADaemonRuns(t *testing.T) {
 	for _, read := range []map[string]any{
 		{"name": "AX", "arguments": map[string]any{"mode": "observe", "window_ref": "w1"}},
 		{"name": "GUI", "arguments": map[string]any{"actions": []any{map[string]any{"type": "screenshot"}}}},
+		{"name": "GUI", "arguments": map[string]any{"actions": []any{map[string]any{"type": "zoom", "region": []any{0, 0, 80, 80}}}}},
 		// An act of only wait steps sends no input.
 		{"name": "AX", "arguments": map[string]any{"mode": "act", "actions": []any{
 			map[string]any{"type": "wait", "window": "Saved"}}}},
