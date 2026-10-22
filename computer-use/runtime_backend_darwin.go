@@ -184,10 +184,15 @@ func (darwinRuntimeBackend) ProcessState(pid int) string {
 	return "unknown"
 }
 
-func defaultRuntimeBackend() PlatformBackend {
+func platformRuntimeBackend() PlatformBackend {
 	return darwinRuntimeBackend{}
 }
 
-func shutdownPlatformRuntime() {
+func platformShutdown() {
 	shutdownDarwinProviderProcess()
+}
+
+func init() {
+	defaultRuntimeBackend = platformRuntimeBackend
+	shutdownPlatformRuntime = platformShutdown
 }

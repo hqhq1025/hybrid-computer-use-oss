@@ -187,10 +187,15 @@ func (windowsRuntimeBackend) ProcessState(pid int) string {
 	return windowsTasklistProcessState(data, pid)
 }
 
-func defaultRuntimeBackend() PlatformBackend {
+func platformRuntimeBackend() PlatformBackend {
 	return windowsRuntimeBackend{}
 }
 
-func shutdownPlatformRuntime() {
+func platformShutdown() {
 	shutdownWindowsProviderProcess()
+}
+
+func init() {
+	defaultRuntimeBackend = platformRuntimeBackend
+	shutdownPlatformRuntime = platformShutdown
 }

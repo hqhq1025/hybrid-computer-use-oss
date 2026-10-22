@@ -1,5 +1,3 @@
-//go:build !linux && !darwin && !windows
-
 package main
 
 import "errors"
@@ -63,9 +61,3 @@ func (unsupportedRuntimeBackend) RuntimeEnvironment(base []string) []string {
 func (unsupportedRuntimeBackend) ProcessState(int) string {
 	return "unknown"
 }
-
-func defaultRuntimeBackend() PlatformBackend {
-	return unsupportedRuntimeBackend{}
-}
-
-func shutdownPlatformRuntime() {}

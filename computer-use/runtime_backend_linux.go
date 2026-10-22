@@ -136,10 +136,15 @@ func (linuxRuntimeBackend) ProcessState(pid int) string {
 	return processPIDState(pid, "/proc")
 }
 
-func defaultRuntimeBackend() PlatformBackend {
+func platformRuntimeBackend() PlatformBackend {
 	return linuxRuntimeBackend{}
 }
 
-func shutdownPlatformRuntime() {
+func platformShutdown() {
 	shutdownLinuxProviderProcess()
+}
+
+func init() {
+	defaultRuntimeBackend = platformRuntimeBackend
+	shutdownPlatformRuntime = platformShutdown
 }
