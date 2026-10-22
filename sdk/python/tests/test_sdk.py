@@ -27,6 +27,58 @@ def recording_transport(calls):
     return transport
 
 
+# Wait step kinds: the decoder accepts exactly one per step. The schema has
+# no enum for them; published_items checks each is a published step field.
+WAIT_SUBJECTS = ("window", "query", "ref", "text")
+
+# Published items that the SDK reaches only through its generic calls
+# (act, gui, call), not through a dedicated helper.
+SDK_GENERIC_ONLY = {"gui:click", "gui:double_click", "gui:move", "gui:drag",
+                    "gui:scroll", "gui:type", "gui:keypress", "gui:wait"}
+
+
+def published_items(schema):
+    """AX modes, observe values, act step types, wait kinds and GUI action
+    types, read from the daemon's published schemas."""
+    items = set()
+    tools = {tool["name"]: tool["input_schema"] for tool in schema["tools"]}
+    ax = tools["AX"]["properties"]
+    step = ax["actions"]["items"]["properties"]
+    items.update("ax.mode:" + value for value in ax["mode"]["enum"])
+    items.update("ax.observe:" + value for value in ax["observe"]["enum"])
+    items.update("ax.act:" + value for value in step["type"]["enum"])
+    for subject in WAIT_SUBJECTS:
+        assert subject in step, "wait subject %s is not a published step field" % subject
+        items.add("ax.wait:" + subject)
+
+    def walk(node):
+        if isinstance(node, dict):
+            kind = node.get("type")
+            if isinstance(kind, dict) and isinstance(kind.get("const"), str):
+                items.add("gui:" + kind["const"])
+            for child in node.values():
+                walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+    walk(tools["GUI"])
+    return items
+
+
+def call_items(tool, args):
+    """The published items one call uses."""
+    if tool == "GUI":
+        return {"gui:" + action["type"] for action in args["actions"]}
+    items = {"ax.mode:" + args["mode"]}
+    if "observe" in args:
+        items.add("ax.observe:" + args["observe"])
+    for action in args.get("actions", []):
+        items.add("ax.act:" + action["type"])
+        if action["type"] == "wait":
+            items.update("ax.wait:" + key for key in WAIT_SUBJECTS if key in action)
+    return items
+
+
 class SDKAgainstDaemon(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -37,35 +89,70 @@ class SDKAgainstDaemon(unittest.TestCase):
     def tearDownClass(cls):
         cls.desktop.close()
 
-    def test_every_helper_builds_a_call_the_core_accepts(self):
-        # Drift guard: each helper's arguments go through the core's own
-        # decoder and published schema; none may come back invalid_argument.
+    def helper_calls(self):
         calls = []
         builder = hcu.Desktop(recording_transport(calls))
         builder.apps()
         builder.observe("w1", root="focused", scope="content", observe="diff")
+        builder.observe("w1", observe="tree")
+        builder.observe("w1", observe="full")
+        builder.observe("w1", observe="screenshot")
         builder.wait({"window": "Saved", "timeout_ms": 1})
         builder.wait({"ref": "r1", "state": "checked"}, window_ref="w1")
+        builder.wait({"query": {"role": "dialog"}, "gone": True, "timeout_ms": 1})
+        builder.wait({"text": "Saved", "timeout_ms": 1}, window_ref="w1")
         builder.find("w1", role="button", name_has="Sa", text="x", state="checked", limit=5)
         builder.find(cursor="f1", limit=5)
         builder.read(["r1", "r2"])
-        builder.act([{"type": "click", "ref": "r1"}, {"type": "wait", "ref": "r1", "timeout_ms": 1}], window_ref="w1")
         builder.click("r1", wait={"ref": "r1", "state": "checked", "timeout_ms": 1})
         builder.type("hello", ref="r2")
         builder.type("hello")
         builder.key("ctrl+s")
         builder.set_value("r2", "42")
+        builder.select("r2", text="ell")
+        builder.select("r3", to_ref="r4")
         builder.scroll("r2", "down", pages=2)
         builder.activate("w1")
         builder.activate("Sheet")
         builder.close_window("w9")
         builder.screenshot()
+        builder.zoom([0, 0, 80, 40])
+        return calls
+
+    def test_every_helper_builds_a_call_the_core_accepts(self):
+        # Drift guard: each helper's arguments go through the core's own
+        # decoder and published schema; none may come back invalid_argument.
+        calls = self.helper_calls()
+        builder = hcu.Desktop(recording_transport(calls))
+        builder.act([{"type": "click", "ref": "r1"}, {"type": "wait", "ref": "r1", "timeout_ms": 1}], window_ref="w1")
         builder.gui([{"type": "click", "x": 1, "y": 2}], settle_ms=0)
-        self.assertEqual(len(calls), 19)
         for _method, params in calls:
             raw = self.desktop.transport("call", dict(params, request_id=None))
             self.assertNotEqual(raw.get("code"), "invalid_argument",
                                 "%s rejected: %s" % (json.dumps(params["args"]), raw.get("message")))
+
+    def test_helpers_reach_every_published_item(self):
+        # Drift guard: a mode, observe value, act step, wait kind or GUI action
+        # added to the contract fails here until a helper builds it or
+        # SDK_GENERIC_ONLY names it.
+        published = published_items(self.schema)
+        helped = set()
+        for _method, params in self.helper_calls():
+            if params["tool"] == "GUI" or params["args"]["mode"] != "read":
+                helped |= call_items(params["tool"], params["args"])
+        self.assertEqual(published - helped - SDK_GENERIC_ONLY, set(), "published items without a helper")
+        self.assertEqual(helped & SDK_GENERIC_ONLY, set(), "items with a helper listed as generic only")
+        self.assertEqual(SDK_GENERIC_ONLY - published, set(), "SDK_GENERIC_ONLY names unpublished items")
+
+    def test_observation_calls_carry_no_request_id(self):
+        # screenshot and zoom only look: no request_id, retry-safe.
+        for args in ({"actions": [{"type": "screenshot"}]},
+                     {"actions": [{"type": "zoom", "region": [0, 0, 80, 40]}]}):
+            self.assertFalse(hcu._may_emit_input("GUI", args))
+            self.assertNotIn("request_id", hcu._call_params("GUI", args, None, None))
+        click = {"actions": [{"type": "click", "x": 1, "y": 2}]}
+        self.assertTrue(hcu._may_emit_input("GUI", click))
+        self.assertIn("request_id", hcu._call_params("GUI", click, None, None))
 
     def test_errors_are_classes_named_by_code(self):
         for code in self.schema.errors:

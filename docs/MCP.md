@@ -1,7 +1,5 @@
 # Computer Use MCP
 
-Last verified against commit `a4006c5`.
-
 `computer-use` is a stdio MCP server that controls an already-running
 desktop. This page covers building it, running it, configuring Codex and
 Claude Code, the public contract and troubleshooting. For the internal design
@@ -91,7 +89,13 @@ describes them.
 ```bash
 computer-use call AX --args '{"mode":"apps"}'
 computer-use call GUI --args '{"actions":[{"type":"screenshot"}]}'
+computer-use call GUI --args '{"actions":[{"type":"zoom","region":[600,60,680,100]}]}'
 ```
+
+`call` runs one process per command, and a zoom needs a GUI frame in the same
+process. A lone `call GUI` zoom therefore takes a fresh screenshot and fails
+with `gui_frame_stale`. Use `--calls` to send the screenshot and the zoom
+together, or use the daemon commands, which keep the frame across commands.
 
 ## Codex
 
@@ -266,9 +270,15 @@ identity graph:
 application aN -> top-level window wN -> element rN
 ```
 
-- `apps` lists every top-level window as `wN` with its title, application and
+- `apps` lists confirmed top-level windows as `wN` with title, application and
   whether it has focus. Output names applications but shows no `aN`; `app`
   still accepts an `aN`, a name, an app id or a PID.
+  If an application does not answer, the listing retains confirmed windows
+  and reports `inventory_complete=false` with `inventory_issues` in text and
+  records output. Each issue names the application when known and gives the
+  read failure. Missing windows remain unknown. Returned refs remain usable;
+  title-based selection, implicit focus, and window waits require a complete
+  listing. A missing window cannot prove that a close succeeded.
 - `observe` returns a window tree or a diff with `rN` refs; `find` returns
   matching `rN`, and a truncated result prints the call for the next page.
 - References describe current state; they are not durable selectors. Every
@@ -437,7 +447,7 @@ restoring permission does not authorize replaying the actions.
 ### GUI
 
 `GUI` takes an ordered `actions` array. A call with exactly one `screenshot`
-action observes. Any other call is an input batch of up to 64 `click`,
+or `zoom` action observes. Any other call is an input batch of up to 64 `click`,
 `double_click`, `move`, `drag`, `scroll`, `type`, `keypress` and `wait`
 actions, and returns one final screenshot. `wait` is one second without an
 observation, at most 20 seconds per batch. `settle_ms` (default 800, at most
@@ -468,6 +478,8 @@ against that frame. Zoom fails with `gui_frame_stale` and a fresh screenshot
 when there is no frame, or when any window over the region changed since the
 frame. Linux, macOS and Windows implement the same geometry, pinned by
 `testdata/contract/zoom_geometry.json`, which every provider test replays.
+A zoom result's evidence line carries the same mapping as data:
+`"zoom":{"frame","region","width","height","scale_x","scale_y"}`.
 
 Every GUI result starts with the same JSON line as AX, followed by `screen`
 (the returned image's size and coordinate space) and `actions` (pixel-change

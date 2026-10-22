@@ -12,9 +12,13 @@
 #      (any GOOS, tests included);
 #   3. a Linux provider module missing from linuxProviderPaths
 #      (internal/provider/linux_runtime_bundle.go): go:embed takes the whole
-#      directory, but only listed files reach the runtime bundle.
-# Warns, without failing, for non-test source files over 800 lines and test
-# files over 1,200 lines.
+#      directory, but only listed files reach the runtime bundle;
+#   4. a "last verified against commit" stamp or an internal host path
+#      (/datadriveN, cpuNNN, gpuNNN) in tracked text ("Writing docs, comments
+#      and changelogs" in AGENTS.md).
+# Warns, without failing, for non-test source files over 800 lines, test
+# files over 1,200 lines, and SHA-like hex tokens in README.md, CHANGELOG.md
+# and docs/ that are not in HEX_ALLOW.
 set -euo pipefail
 
 repo=$(git rev-parse --show-toplevel)
@@ -120,6 +124,31 @@ with open("computer-use/internal/provider/linux_runtime_bundle.go", encoding="ut
 for module in modules:
     if module not in bundle:
         errors.append("Linux provider module not in linuxProviderPaths: " + module)
+
+# 4. Bookkeeping in tracked text. This file names the patterns, so it is
+# skipped. HEX_ALLOW holds external revisions pinned to reproduce a result.
+STAMP = re.compile(r"last verified against commit", re.IGNORECASE)
+HOST = re.compile(r"/datadrive\d|\b[cg]pu\d{3}\b")
+HEX = re.compile(r"(?<![\w-])(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![\w-])")
+HEX_ALLOW = {"d578d2d4e0dc82b43e270fdaa7fa89d9708cd154"}  # OSWorld-V2 checkout
+READER_DOCS = re.compile(r"^(README\.md|CHANGELOG\.md|docs/.*\.md)$")
+for path in files:
+    if path == "scripts/maint/check_layout.sh" or path.startswith("computer-use/vendor/"):
+        continue
+    with open(path, "rb") as handle:
+        data = handle.read()
+    if b"\0" in data:
+        continue
+    for number, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1):
+        where = "{}:{}".format(path, number)
+        if STAMP.search(line):
+            errors.append("commit-verification stamp: " + where)
+        if HOST.search(line):
+            errors.append("internal host path: " + where)
+        if READER_DOCS.match(path):
+            for token in HEX.findall(line):
+                if token not in HEX_ALLOW:
+                    warnings.append("SHA-like token {} in {}".format(token, where))
 
 # Size warnings.
 for path in files:

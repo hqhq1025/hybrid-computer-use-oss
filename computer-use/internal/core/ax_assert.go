@@ -2,8 +2,6 @@ package core
 
 import (
 	"fmt"
-	"math/big"
-	"strconv"
 	"strings"
 
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
@@ -24,19 +22,13 @@ import (
 // first would fail without sampling once.
 
 type verifyGoal struct {
-	state           string
-	valueEquals     string
-	valueEqualsKind string
-	valueContains   string
-	textContains    string
-	exists          *bool
+	state         string
+	valueEquals   string
+	valueContains string
+	textContains  string
+	exists        *bool
 	// negated inverts a value or text predicate: wait until it is false.
 	negated bool
-}
-
-func (g verifyGoal) empty() bool {
-	return g.state == "" && g.valueEquals == "" && g.valueContains == "" &&
-		g.textContains == "" && g.exists == nil
 }
 
 func (g verifyGoal) describe() string {
@@ -125,31 +117,7 @@ func (g verifyGoal) check(record *ElementRecord, lookupErr error) (bool, string)
 		observed = append(observed, fmt.Sprintf("value is %q", record.Value))
 	}
 	if g.valueEquals != "" {
-		valueMatches := strings.TrimSpace(record.Value) ==
-			strings.TrimSpace(g.valueEquals)
-		switch g.valueEqualsKind {
-		case "number":
-			observed, observedOK := new(big.Rat).SetString(
-				strings.TrimSpace(record.Value),
-			)
-			expected, expectedOK := new(big.Rat).SetString(
-				strings.TrimSpace(g.valueEquals),
-			)
-			valueMatches = observedOK &&
-				expectedOK &&
-				observed.Cmp(expected) == 0
-		case "boolean":
-			observed, observedErr := strconv.ParseBool(
-				strings.TrimSpace(record.Value),
-			)
-			expected, expectedErr := strconv.ParseBool(
-				strings.TrimSpace(g.valueEquals),
-			)
-			valueMatches = observedErr == nil &&
-				expectedErr == nil &&
-				observed == expected
-		}
-		if !valueMatches {
+		if strings.TrimSpace(record.Value) != strings.TrimSpace(g.valueEquals) {
 			ok = false
 		}
 		observed = append(observed, fmt.Sprintf("value is %q", record.Value))
@@ -167,29 +135,11 @@ func (g verifyGoal) check(record *ElementRecord, lookupErr error) (bool, string)
 	return ok, strings.Join(observed, ", ")
 }
 
-// selectorHint extracts the part of a selector that is usable for fuzzy
-// matching: `push button "Save"` gives `Save` and `"Calculate"` gives
-// `Calculate`. Without quotes the whole string counts, so a selector such as
-// `heading Results` still yields candidates.
-func selectorHint(selector string) string {
-	if start := strings.Index(selector, "\""); start >= 0 {
-		if end := strings.LastIndex(selector, "\""); end > start {
-			return selector[start+1 : end]
-		}
-	}
-	return strings.TrimSpace(selector)
-}
-
 func firstLine(text string) string {
 	if index := strings.IndexByte(text, '\n'); index >= 0 {
 		return text[:index]
 	}
 	return text
-}
-
-func numericElementIndex(selector string) bool {
-	_, err := strconv.Atoi(strings.TrimSpace(selector))
-	return err == nil
 }
 
 func axAssertionResult(
@@ -236,13 +186,6 @@ func assertionNegativeResult(
 	return result
 }
 
-func assertionEvidenceScope(result ToolCallResult) string {
-	if sampled, _ := result.StructuredContent["assertion_sampled_live_ui"].(bool); sampled {
-		return "independent_ui_read"
-	}
-	return "error_only"
-}
-
 func isAXAppUnavailableResult(result ToolCallResult) bool {
 	if !result.IsError || result.StructuredContent == nil {
 		return false
@@ -278,53 +221,4 @@ func snapshotForScopedLookup(snapshot *AppSnapshot) *AppSnapshot {
 		}
 	}
 	return &clone
-}
-
-func (s *Service) verify(
-	app,
-	selector string,
-	displaySelector string,
-	goal verifyGoal,
-	timeoutMS,
-	stableMS int,
-	scope string,
-	targetWindowHandle ...string,
-) ToolCallResult {
-	if app == "" {
-		return TextResult("Missing required argument: app", true)
-	}
-	if strings.TrimSpace(selector) == "" {
-		return TextResult("wait requires ref or selector.", true)
-	}
-	if strings.TrimSpace(displaySelector) == "" {
-		displaySelector = selector
-	}
-	if numericElementIndex(selector) {
-		if s.hasPendingFailedObservation(app) {
-			return TextResult(
-				"wait cannot reuse an element index after a stale-reference failure; "+
-					"observe or find again and use a newly returned rN.", true)
-		}
-		if s.currentSnapshot(app) == nil {
-			return TextResult(
-				"wait cannot use an element index without a current snapshot; "+
-					"observe or find first.", true)
-		}
-	} else if _, err := semanticTargetFromAddress(selector); err != nil {
-		result := TextResult(
-			"wait selector invalid: "+err.Error(), true)
-		result.StructuredContent = map[string]any{
-			"assertion_status":     "locator_invalid",
-			"task_effect_verified": false,
-		}
-		return result
-	}
-	if goal.empty() {
-		return TextResult("wait needs a predicate.", true)
-	}
-	lookup := func(snapshot *AppSnapshot) (*ElementRecord, error) {
-		return lookupElementFor(snapshot, selector, "", "wait")
-	}
-	return s.verifyLookup(app, lookup, displaySelector, selectorHint(selector),
-		numericElementIndex(selector), goal, timeoutMS, stableMS, scope, targetWindowHandle...)
 }

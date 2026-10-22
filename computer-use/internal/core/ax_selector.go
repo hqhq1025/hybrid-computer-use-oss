@@ -161,7 +161,7 @@ func selectorRoleMatches(record *ElementRecord, requested string) bool {
 
 // modalWindowRoot reports whether record is the root of a top-level window
 // that the provider reports as modal. Toolkits expose some modal dialogs as
-// a plain frame or window (Thunderbird's "New Folder", full-e a10b69e1), so
+// a plain frame or window (Thunderbird's "New Folder"), so
 // the role alone does not show that a dialog is open; a selector for role
 // dialog also matches such a window.
 func modalWindowRoot(snapshot *AppSnapshot, record *ElementRecord) bool {

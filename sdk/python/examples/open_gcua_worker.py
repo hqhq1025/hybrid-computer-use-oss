@@ -1,6 +1,7 @@
 """Inject HCU into the existing OpenGCUA persistent Python worker.
 
-Operator example tested against OpenGCUA ae34bba, using private bootstrap and
+Operator example tested against OpenGCUA revision
+ae34bba0643598638232103c32dbfa017f3b84c8, using private bootstrap and
 cleanup hooks, not a public plugin API. Set OPEN_GCUA_RUNTIME_DIR to that
 checkout's packages/harness/runtime and pass this file as CodeExecutor's
 runtime_path. Set HCU_SOCKET, HCU_SESSION, and HCU_OUTPUT_ROOT explicitly.
@@ -60,9 +61,11 @@ def install(runtime, *, transport, image_reader):
             directory.mkdir(parents=True, exist_ok=True)
             path = directory / ("hcu-" + uuid.uuid4().hex + (".png" if event["media_type"] == "image/png" else ".jpg"))
             path.write_bytes(data)
+            # A zoom image is look-only: coordinate_space zoom_pixels tells the
+            # host that GUI x/y come from the mapping, not from these pixels.
             runtime._emit({"type": "screenshot", "path": str(path.resolve()),
                            "width": width, "height": height,
-                           "coordinate_space": "image_pixels"})
+                           "coordinate_space": event["coordinate_space"]})
         else:
             runtime._emit({"type": "display", "kind": "text",
                            "text": json.dumps(event, ensure_ascii=False),

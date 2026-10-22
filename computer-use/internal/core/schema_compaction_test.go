@@ -9,8 +9,9 @@ import (
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 )
 
-// Codex (codex-rs/tools/src/json_schema.rs and json_schema/compaction.rs,
-// commit ce0323f) rewrites a tool input schema before the model sees it and,
+// Codex (openai/codex codex-rs/tools/src/json_schema.rs and
+// json_schema/compaction.rs, revision ce0323f2f2d3b25e82806cd555237da3db4e1897)
+// rewrites a tool input schema before the model sees it and,
 // above 5,000 bytes, compacts it in up to four stages until it fits: strip
 // descriptions, inline-drop $defs, collapse nesting at depth 3, prune
 // oneOf/anyOf/allOf. This test reproduces those rules and reports each

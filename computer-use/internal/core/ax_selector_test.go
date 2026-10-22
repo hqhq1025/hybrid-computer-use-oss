@@ -42,11 +42,30 @@ func TestStructuredSelectorAcceptsStandardOrProviderRole(t *testing.T) {
 	}
 }
 
+// Thunderbird exposes its modal "New Folder" dialog
+// as a top-level frame. A selector for role dialog matches the root of a
+// window the provider reports as modal, and not the root of a plain one.
+func TestDialogSelectorMatchesAModalTopLevelWindow(t *testing.T) {
+	root := ElementRecord{Index: 0, ControlType: "frame", Name: "New Folder",
+		ProviderBusName: ":1.84", ProviderObjectPath: "/window/2"}
+	for _, modal := range []bool{true, false} {
+		snapshot := &AppSnapshot{
+			Elements: []ElementRecord{root},
+			Windows: []TopLevelWindow{{Title: "New Folder", Role: "frame", Modal: modal,
+				ProviderBusName: ":1.84", ProviderObjectPath: "/window/2"}},
+		}
+		record, err := lookupBySelector(snapshot, `dialog "New Folder"`, "")
+		if matched := err == nil && record.Index == 0; matched != modal {
+			t.Fatalf("modal=%v: record=%#v err=%v", modal, record, err)
+		}
+	}
+}
+
 // TestSelectorFindsTheRealClosingQuote checks that the closing quote of a name
 // is its real match rather than the last quote in the selector, including when
 // the name contains quotes or backslashes. Taking the last quote only works
 // without a suffix; a trailing [desc="..."] would be swallowed into the name.
-// Full-e 0810415c #6 wrote role "menu item"; the model sees "menuitem" in
+// Models write role "menu item"; the model sees "menuitem" in
 // the tree and models also write "menu_item". Every spelling must name the
 // same role, in an until selector and in find, without widening to other
 // roles.

@@ -1,7 +1,5 @@
 # Running OSWorld
 
-Last verified against commit `a4006c5`.
-
 `hcu.osworld` runs OSWorld (V1) or OSWorld-V2 (V2) tasks. Each task gets a
 fresh official Docker/QEMU guest, and Codex, Claude Code, Gemini CLI or Grok
 Build runs inside it as the task agent. The official evaluator scores the
@@ -177,9 +175,9 @@ The probe has a 90-second limit and uses no model calls. A tool error or
 missing required response evidence stops preparation.
 
 An empty desktop can pass discovery without exercising observe or find;
-the report records those checks as skipped. For candidate evaluation, also
-run these reads against a known open fixture window and require every check
-to pass. A setup canary alone does not verify the MCP response contract.
+the report records those checks as skipped. Before evaluating a changed
+build, also run these reads against a known open fixture window and require
+every check to pass. A setup canary alone does not verify the MCP response contract.
 
 ## Run one task
 

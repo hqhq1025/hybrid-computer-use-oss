@@ -1,7 +1,5 @@
 # Architecture
 
-Last verified against commit `a4006c5`.
-
 ## Control plane
 
 The OSWorld runner creates one isolated desktop per task, installs one task
@@ -83,6 +81,14 @@ Go service still validates the whole public batch, binds one logical window,
 and consumes per-action continuity and emission evidence. Other providers use
 the existing per-action path. Provider argument rejection is distinct from a
 transport failure and does not imply input or restart a healthy worker.
+
+Application discovery responses can include `inventory_issues`, a list of
+`{app, reason}` objects. An omitted `app` means application enumeration itself
+was incomplete. Known windows remain usable, but the Go core permits partial
+inventories only for `AX mode=apps`. Title selection, implicit focus, and
+window waits require a complete inventory. Missing windows never prove absence.
+Linux retains its existing human-readable notes alongside these typed facts.
+Native window-close verification uses its separate exact-window evidence.
 
 ## Go packages
 
@@ -269,7 +275,7 @@ not hide a fragment from them; a fragment that names a cross-package
 identifier includes the package qualifier.
 
 `scripts/maint/split_packages.sh all --commit` reproduces the split from the
-single-package tree at `db6a59c`; `scripts/maint/package_map.txt` assigns
+single-package tree before the split; `scripts/maint/package_map.txt` assigns
 each file to its package.
 
 ## AX state model

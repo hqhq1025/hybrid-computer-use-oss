@@ -62,6 +62,7 @@ def app_top_level_windows(app, windows, active_handle):
 
 def list_apps_inventory():
     entries = []
+    inventory_issues = []
     seen_identities = set()
     unreadable = 0
     root_state = correlation_root_window_state()
@@ -85,6 +86,10 @@ def list_apps_inventory():
             # call timeout. Its windows cannot be listed, but the listing
             # must not read as complete.
             unreadable += 1
+            inventory_issues.append({
+                "app": node_name(app) or "unnamed application",
+                "reason": "The accessibility window inventory did not answer completely; missing windows remain unknown.",
+            })
         if not windows:
             continue
         strong = strong_window_instance_handles(app, windows)
@@ -151,6 +156,9 @@ def list_apps_inventory():
         lines.append(display_text)
     notes = []
     if not inventory_complete(apps):
+        inventory_issues.append({
+            "reason": "The accessibility bus did not list every application.",
+        })
         notes.append(
             "Incomplete: the accessibility bus did not list every application."
         )
@@ -162,6 +170,7 @@ def list_apps_inventory():
     return {
         "text": "\n".join(lines),
         "notes": notes,
+        "inventory_issues": inventory_issues,
         "apps": [
             {
                 "name": entry["name"],
