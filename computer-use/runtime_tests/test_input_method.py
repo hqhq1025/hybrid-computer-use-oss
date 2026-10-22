@@ -10,6 +10,7 @@ class InputMethodAcknowledgementTests(unittest.TestCase):
         self.clock = 0.0
         self.pending = []
         self.events = []
+        self.committed = []
         self.current_context = "/org/freedesktop/IBus/InputContext_7"
         self.commit_delay = 0.2
         self.commit_value = None
@@ -48,6 +49,8 @@ class InputMethodAcknowledgementTests(unittest.TestCase):
         self.clock += seconds
 
     def signal(self, member, text, visible=True):
+        if member == "CommitText":
+            self.committed.append(text)
         text_value = ("IBusText", {}, text, ())
         values = ((text_value,) if member == "CommitText"
                   else (text_value, len(text), visible))
@@ -84,6 +87,28 @@ class InputMethodAcknowledgementTests(unittest.TestCase):
         self.assertGreaterEqual(prefixes[1], 0.25)
         self.assertEqual([value for _, kind, value in self.events if kind == "text"],
                          list("4e2dfc"))
+
+    def test_ascii_line_feed_and_tab_reach_input_method_as_literal_text(self):
+        payload = "left\nright\tend"
+        with mock.patch.object(runtime, "InputMethodText", return_value=self.composer), \
+                mock.patch.object(runtime, "send_key", side_effect=self.key), \
+                mock.patch.object(runtime, "emit_keyboard_event",
+                                  side_effect=lambda code, text, kind, detail: self.text(text)):
+            runtime.send_text(payload)
+
+        self.assertEqual("".join(self.committed), payload)
+        self.assertEqual([value for _, kind, value in self.events if kind == "key"],
+                         [key for _ in payload for key in ("CTRL+SHIFT+u", "ENTER")])
+
+    def test_ascii_control_text_without_input_method_fails_before_input(self):
+        for payload in ("line\nnext", "left\tright"):
+            with self.subTest(payload=payload), \
+                    mock.patch.object(runtime, "ibus_bindings", side_effect=ValueError("missing")), \
+                    mock.patch.object(runtime, "emit_keyboard_event") as keyboard:
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.send_text(payload)
+                self.assertFalse(caught.exception.input_events_emitted)
+                keyboard.assert_not_called()
 
     def test_missing_preedit_does_not_send_hex_or_enter(self):
         self.acknowledge_preedit = False

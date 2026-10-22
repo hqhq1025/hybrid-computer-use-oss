@@ -71,15 +71,15 @@ When `DISPLAY`, `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` is missing,
 for example under `docker exec`, the server finds the same user's session
 from `/run/user/<uid>` and the desktop processes.
 
-Keyboard typing of non-ASCII text requires an active IBus Simple input
-context, normally the desktop's `xkb` input source. Applications must inherit
+Keyboard text containing non-ASCII characters, line feeds or tabs requires
+an active IBus Simple input context, normally the desktop's `xkb` input source. Applications must inherit
 the desktop's input-method environment. Existing application processes may
 need a restart after that environment is corrected. AX editable-text writes
 continue to use the application's accessibility interface when available.
-Desktops without this input-method support reject Unicode keyboard typing;
+Desktops without this input-method support reject keyboard text containing these characters;
 the provider does not fall back to temporary X keymap rebinding.
 
-Unicode keyboard input waits for the input method to acknowledge composition,
+Input-method keyboard typing waits for the input method to acknowledge composition,
 each hex digit and each committed character. It does not change the clipboard or input
 source. If the input context cannot compose text, the operation stops. Failure
 after the initial `Ctrl+Shift+U` prefix reports partial input and can leave a
@@ -87,7 +87,8 @@ visible preedit. Inspect the field before retrying; the provider does not
 send an automatic Escape that could cancel unrelated application state.
 Commit acknowledgements prove input-method delivery, not the resulting field
 contents. Applications can filter literal control characters such as line feeds
-and tabs. Use `keypress` when the intended operation is an Enter or Tab key,
+and tabs. The provider composes these characters as text; it does not replace
+them with Enter or Tab keys. Use `keypress` when the intended operation is an Enter or Tab key,
 and inspect the resulting application state.
 
 ### Accessibility on Linux

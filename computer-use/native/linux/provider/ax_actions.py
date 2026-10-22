@@ -291,9 +291,10 @@ def send_text(text):
         return emit_keyboard_event(
             0, value, Atspi.KeySynthType.STRING, "text payload")
 
-    if non_ascii:
+    if non_ascii or "\n" in text or "\t" in text:
         # Keep ASCII and Unicode in one ordered stream. Mixing X key events
         # with asynchronous input-method commits can reorder adjacent text.
+        # AT-SPI STRING drops literal LF and Tab; compose their codepoints too.
         InputMethodText().send(text, send_key, ascii_text)
     elif text:
         ascii_text(text)

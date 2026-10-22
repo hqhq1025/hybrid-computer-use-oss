@@ -162,7 +162,7 @@ class InputMethodText:
 
     def failure(self, detail):
         return OperationFailure(
-            "Unicode input requires an active IBus Simple input context: "
+            "This keyboard text requires an active IBus Simple input context: "
             + detail + ". Enable the desktop input method before typing. "
             + ("Input may be partial; inspect the field before retrying."
                if self.emitted else "No input was emitted."),
