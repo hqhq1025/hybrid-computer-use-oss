@@ -71,11 +71,11 @@ func TestRemovedCLICompatibilityCommandsStayRemoved(t *testing.T) {
 func TestCallPrintsModelFacingResultWithImageFiles(t *testing.T) {
 	t.Setenv("COMPUTER_USE_OUTPUT_DIR", t.TempDir())
 	dispatched := 1
-	svc := newServiceWithBackend(&recordingPlatformBackend{desktopResponse: &ProviderDesktopResult{
+	svc := newServiceWithBackend(&transportRecordingPlatformBackend{desktopResponse: &ProviderDesktopResult{
 		OK:        true,
 		GUIResult: ProviderGUIResult{Dispatched: &dispatched},
 		Snapshot: &appSnapshot{
-			ScreenshotPNGBase64: testPNGBase64(t, 40, 30), CoordinateSpace: "screen_image_px",
+			ScreenshotPNGBase64: transportTestPNGBase64(t, 40, 30), CoordinateSpace: "screen_image_px",
 			FrameID: "f", Width: 40, Height: 30,
 		},
 	}})

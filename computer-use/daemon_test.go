@@ -26,7 +26,7 @@ func TestMain(m *testing.M) {
 // counts input calls and can hold one input call open, to show that a
 // second client waits for it.
 type fakeDesktopBackend struct {
-	appWideBackend
+	transportAppWideBackend
 	mu         sync.Mutex
 	inputs     int
 	hold       chan struct{}
@@ -36,7 +36,7 @@ type fakeDesktopBackend struct {
 }
 
 func newFakeDesktopBackend() *fakeDesktopBackend {
-	return &fakeDesktopBackend{appWideBackend: appWideBackend{open: []untilFakeWindow{untilMainWindow()}}}
+	return &fakeDesktopBackend{transportAppWideBackend: transportAppWideBackend{open: []transportUntilFakeWindow{transportUntilMainWindow()}}}
 }
 
 func (b *fakeDesktopBackend) ObserveApps(ProviderObserveAppsRequest) (ProviderAccessibilityResult, error) {
@@ -44,7 +44,7 @@ func (b *fakeDesktopBackend) ObserveApps(ProviderObserveAppsRequest) (ProviderAc
 		Name: "LibreOffice", BundleIdentifier: "libreoffice", PID: 10, InputCapable: true,
 		ProviderBusName: ":1.84", ProcessGeneration: "pid:10:start:100",
 		Windows: []providerAppWindow{{
-			Title: "Sheet", Role: "frame", Handle: untilMainHandle, ProviderBusName: ":1.84",
+			Title: "Sheet", Role: "frame", Handle: transportUntilMainHandle, ProviderBusName: ":1.84",
 			ProviderObjectPath: "/window/1", ProcessGeneration: "pid:10:start:100", Active: true, InputTarget: true,
 		}},
 	}}}, nil
@@ -72,7 +72,7 @@ func (b *fakeDesktopBackend) ResolveAndAct(request ProviderActionRequest) (Provi
 	b.mu.Lock()
 	b.inFlight--
 	b.mu.Unlock()
-	snapshot := b.snapshotFor(untilMainWindow())
+	snapshot := b.snapshotFor(transportUntilMainWindow())
 	return ProviderAccessibilityResult{
 		OK: true, Snapshot: snapshot,
 		Mutation:       &ProviderMutationFacts{InputEventsEmitted: true},

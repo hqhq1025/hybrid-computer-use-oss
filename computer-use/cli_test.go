@@ -145,7 +145,7 @@ func TestCLIUntilIsRejectedWithAWaitHint(t *testing.T) {
 			!strings.Contains(argErr.hint, `"type":"wait"`) {
 			t.Fatalf("%s: want invalid_argument with a wait hint, got %#v", line, argErr)
 		}
-		if _, hintErr := decodeAXRequest(decodeJSONForTest(t, argErr.hint)); hintErr != nil {
+		if _, hintErr := decodeAXRequest(transportDecodeJSONForTest(t, argErr.hint)); hintErr != nil {
 			t.Fatalf("%s: hint %s does not decode: %s", line, argErr.hint, hintErr.message)
 		}
 	}
@@ -277,7 +277,7 @@ func TestSchemaCommandPrintsPublishedContract(t *testing.T) {
 		t.Fatalf("schema: %s", out.String())
 	}
 	for _, tool := range contract.Tools {
-		published := findToolDefinition(t, tool.Name).InputSchema
+		published := transportFindToolDefinition(t, tool.Name).InputSchema
 		if !reflect.DeepEqual(roundTripJSON(t, published), any(tool.InputSchema)) {
 			t.Fatalf("%s schema differs from tools/list", tool.Name)
 		}

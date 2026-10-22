@@ -26,7 +26,7 @@ func equivalenceScenarios() []equivalenceScenario {
 		{
 			name: "apps then observe a window",
 			build: func(t *testing.T) *service {
-				s, _, _ := untilScopeService(t, untilMainWindow(), untilDialogWindow())
+				s, _, _ := transportUntilScopeService(t, transportUntilMainWindow(), transportUntilDialogWindow())
 				return s
 			},
 			calls: []equivalenceCall{
@@ -38,9 +38,9 @@ func equivalenceScenarios() []equivalenceScenario {
 		{
 			name: "apps listing",
 			build: func(t *testing.T) *service {
-				s, _ := windowScriptService(editorApps(
-					testWindow{testHandleReport, "Quarterly report - Editor", true},
-					testWindow{testHandleMail, "Inbox - Mail", false},
+				s, _ := transportWindowScriptService(transportEditorApps(
+					transportTestWindow{transportTestHandleReport, "Quarterly report - Editor", true},
+					transportTestWindow{transportTestHandleMail, "Inbox - Mail", false},
 				))
 				return s
 			},
@@ -49,7 +49,7 @@ func equivalenceScenarios() []equivalenceScenario {
 		{
 			name: "argument errors",
 			build: func(t *testing.T) *service {
-				return newServiceWithBackend(&recordingPlatformBackend{})
+				return newServiceWithBackend(&transportRecordingPlatformBackend{})
 			},
 			calls: []equivalenceCall{
 				{publicToolAX, `{"mode":"act","actions":[{"ref":"w1","action":"close"}]}`},
@@ -61,11 +61,11 @@ func equivalenceScenarios() []equivalenceScenario {
 			name: "GUI screenshot",
 			build: func(t *testing.T) *service {
 				dispatched := 1
-				return newServiceWithBackend(&recordingPlatformBackend{desktopResponse: &ProviderDesktopResult{
+				return newServiceWithBackend(&transportRecordingPlatformBackend{desktopResponse: &ProviderDesktopResult{
 					OK:        true,
 					GUIResult: ProviderGUIResult{Dispatched: &dispatched},
 					Snapshot: &appSnapshot{
-						ScreenshotPNGBase64: testPNGBase64(t, 100, 80),
+						ScreenshotPNGBase64: transportTestPNGBase64(t, 100, 80),
 						CoordinateSpace:     "screen_image_px",
 						FrameID:             "frame-1",
 						Width:               100,

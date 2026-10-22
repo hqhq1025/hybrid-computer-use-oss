@@ -183,7 +183,7 @@ func capturePublicContract(t *testing.T) publicContract {
 		contract.Initialize[protocol] = withoutServerVersion(t, response)
 	}
 
-	svc := newServiceWithBackend(&recordingPlatformBackend{
+	svc := newServiceWithBackend(&transportRecordingPlatformBackend{
 		err: errors.New("desktop unavailable in contract test"),
 	})
 	handleMCPRequest(map[string]any{

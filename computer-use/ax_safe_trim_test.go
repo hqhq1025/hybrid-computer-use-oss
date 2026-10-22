@@ -48,34 +48,6 @@ func TestFindTextExcerptBoundaries(t *testing.T) {
 	}
 }
 
-func TestFindTextExcerptDeliveredWithinBudget(t *testing.T) {
-	t.Setenv("COMPUTER_USE_MAX_INLINE_CHARS", "4000")
-	svc, snapshot, _ := findDeliveryMany(t, 12)
-	for i := 2; i < len(snapshot.Elements); i++ {
-		snapshot.Elements[i].ControlType = "paragraph"
-		snapshot.Elements[i].Value = strings.Repeat("界🙂\\\"\n", 100)
-	}
-	if err := svc.buildAndRenderAXSnapshotV1(snapshot, treeViewWorking); err != nil {
-		t.Fatal(err)
-	}
-	svc.backend = &recordingPlatformBackend{accessibilityResponse: &ProviderAccessibilityResult{OK: true, Snapshot: snapshot}}
-	result := findDeliveryWire(t, svc, map[string]any{"mode": "find", "app": "Independent", "query": map[string]any{"role": "paragraph"}})
-	text := resultText(result)
-	if result.IsError || !strings.Contains(text, " text=") || !strings.Contains(text, "text_truncated=true") {
-		t.Fatalf("missing bounded excerpts: %s", text)
-	}
-	targets := findDeliveredTargets.FindAllStringSubmatch(text, -1)
-	if len(targets) == 0 || strings.Count(text, " text=") != len(targets) {
-		t.Fatalf("excerpt/ref units were split: %s", text)
-	}
-	record := snapshot.Elements[2]
-	record.FindMatchedField, record.FindMatchedText = "value", record.Value
-	unit := findMatchUnit(snapshot.axSnapshot, record, 1)
-	if strings.Contains(unit, "  text=") || !strings.Contains(unit, "matched_text=") {
-		t.Fatalf("matched value repeated: %s", unit)
-	}
-}
-
 func TestAbsentRefRangesPreserveEveryRefAndGap(t *testing.T) {
 	// r8 remains current; nested removed nodes include a duplicate r3.
 	root := &AXNode{Ref: "r3", Children: []*AXNode{{Ref: "r4"}, {Ref: "r5"}, {Ref: "r7"}, {Ref: "r8"}, {Ref: "r9"}, {Ref: "r10"}, {Ref: "r11"}, {Ref: "r3"}}}

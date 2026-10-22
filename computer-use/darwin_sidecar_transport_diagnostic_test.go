@@ -54,7 +54,7 @@ func TestDarwinActionDiagnosticsRequireHostOptIn(t *testing.T) {
 			if _, err := runDarwinProvider(request); err != nil {
 				t.Fatal(err)
 			}
-			decoded, err := DecodeProviderWireRequest(sent.Bytes())
+			decoded, err := providerDecodeProviderWireRequest(sent.Bytes())
 			if err != nil {
 				t.Fatal(err)
 			}

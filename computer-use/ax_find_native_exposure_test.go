@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
@@ -275,26 +274,5 @@ func TestFindExposureGenuineChanges(t *testing.T) {
 				t.Fatal("consumed invalidation reported twice")
 			}
 		})
-	}
-}
-
-func TestFindExposureTransport(t *testing.T) {
-	for _, protocol := range []string{mcpProtocolLegacy, mcpProtocolStructured} {
-		for _, structured := range []string{"0", "1"} {
-			t.Run(fmt.Sprintf("%s/%s", protocol, structured), func(t *testing.T) {
-				t.Setenv("COMPUTER_USE_MAX_INLINE_CHARS", "2000")
-				t.Setenv("COMPUTER_USE_STRUCTURED_CONTENT", structured)
-				svc, snapshot, matches := findExposureFixture(t, 8)
-				first := svc.renderFindPage(snapshot, matches, 0, 1, "target", nil, false)
-				cursor, _ := first.StructuredContent["next_cursor"].(string)
-				svc.protocolVersion = protocol
-				svc.exposedHiddenRefs = map[string]map[int]elementRecord{}
-				result := findDeliveryWire(t, svc, map[string]any{"mode": "find", "cursor": cursor, "limit": 1})
-				if result.IsError {
-					t.Fatalf("transport rejected page: %s", resultText(result))
-				}
-				assertFindExposureDelivered(t, svc, snapshot, result)
-			})
-		}
 	}
 }

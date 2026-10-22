@@ -739,7 +739,7 @@ func TestWindowsProviderProtocolHelper(t *testing.T) {
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		request, err := DecodeProviderWireRequest(scanner.Bytes())
+		request, err := providerDecodeProviderWireRequest(scanner.Bytes())
 		if err != nil {
 			os.Exit(3)
 		}
