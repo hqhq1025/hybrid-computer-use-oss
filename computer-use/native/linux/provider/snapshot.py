@@ -52,6 +52,7 @@ from .gui_capture import (
     gui_model_dimensions,
     pixbuf_sample,
     scale_to_model,
+    zoom_pixels,
 )
 
 from .atspi_inventory import (
@@ -489,6 +490,12 @@ class CapturedGUISnapshot:
         if self._sample is None and self.has_image:
             object.__setattr__(self, "_sample", pixbuf_sample(self._pixbuf))
         return self._sample
+
+    def zoom(self, geometry):
+        """Encode a zoom image cut from this grab; see zoom_geometry."""
+        if not self.has_image:
+            return None
+        return zoom_pixels(self._pixbuf, geometry)
 
     def encode(self):
         if self._encoding_error is not None:

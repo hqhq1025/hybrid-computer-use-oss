@@ -315,6 +315,9 @@ type ProviderDesktopAction struct {
 	Path    []ProviderPoint `json:"path,omitempty"`
 	ScrollX *float64        `json:"scroll_x,omitempty"`
 	ScrollY *float64        `json:"scroll_y,omitempty"`
+	// Region is a zoom rectangle [x0, y0, x1, y1] in pixels of the frame
+	// that the request's frame_id names.
+	Region []float64 `json:"region,omitempty"`
 }
 
 type ProviderDesktopRequest struct {
@@ -368,6 +371,16 @@ type ProviderGUIResult struct {
 	WaitActionsRequested     *int                              `json:"wait_actions_requested,omitempty"`
 	WaitSecondsRequested     *float64                          `json:"wait_seconds_requested,omitempty"`
 	KeyboardMicroWaitActions *int                              `json:"keyboard_micro_wait_actions,omitempty"`
+	Zoom                     *ProviderGUIZoom                  `json:"zoom,omitempty"`
+}
+
+// ProviderGUIZoom is the geometry of a zoom image: the captured region in
+// frame pixels, snapped to whole native pixels, and the image size. Each
+// axis maps back by its own scale, width/(x1-x0) and height/(y1-y0).
+type ProviderGUIZoom struct {
+	Region []float64 `json:"region"`
+	Width  int       `json:"width"`
+	Height int       `json:"height"`
 }
 
 type ProviderFailure struct {
@@ -541,6 +554,8 @@ func decodeProviderDesktopAction(item any, action *ProviderDesktopAction) error 
 			action.Keys, err = desktopStrings(key, raw)
 		case "path":
 			action.Path, err = desktopPath(raw)
+		case "region":
+			action.Region, err = desktopNumbers(key, raw)
 		default:
 			err = fmt.Errorf("unknown field %q", key)
 		}
@@ -549,6 +564,22 @@ func decodeProviderDesktopAction(item any, action *ProviderDesktopAction) error 
 		}
 	}
 	return nil
+}
+
+func desktopNumbers(key string, raw any) ([]float64, error) {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be an array of numbers", key)
+	}
+	values := make([]float64, len(items))
+	for index, item := range items {
+		number, err := desktopNumber(fmt.Sprintf("%s[%d]", key, index), item)
+		if err != nil {
+			return nil, err
+		}
+		values[index] = *number
+	}
+	return values, nil
 }
 
 func desktopString(key string, raw any) (string, error) {

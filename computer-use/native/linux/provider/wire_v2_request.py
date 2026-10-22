@@ -143,6 +143,7 @@ ELEMENT_FIELDS = {
 POINT_FIELDS = {"x", "y"}
 DESKTOP_ACTION_CONTRACTS = {
     "screenshot": ({"type"}, {"type"}),
+    "zoom": ({"type", "region"}, {"type", "region"}),
     "click": ({"type", "x", "y", "button", "keys"}, {"type", "x", "y"}),
     "double_click": ({"type", "x", "y", "keys"}, {"type", "x", "y"}),
     "move": ({"type", "x", "y", "keys"}, {"type", "x", "y"}),
@@ -295,6 +296,14 @@ def _validate_desktop_action(action: object, index: int) -> None:
         )
     if "keys" in action:
         _validate_keys(action["keys"], path + ".keys")
+    if action_type == "zoom":
+        region = action["region"]
+        if (not isinstance(region, list) or len(region) != 4
+                or not all(_number(value) for value in region)):
+            raise ProviderRequestError(
+                "invalid_provider_request",
+                "{}.region must be four numbers".format(path),
+            )
     if action_type == "drag":
         points = action["path"]
         if not isinstance(points, list) or len(points) < 2:

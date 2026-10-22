@@ -1,11 +1,14 @@
 """Screen capture, pixel comparison and screenshot encoding."""
 
 import base64
+import math
 from .foundation import (
     Gdk,
     GdkPixbuf,
     GUI_MODEL_MAX_HEIGHT,
     GUI_MODEL_MAX_WIDTH,
+    GUI_ZOOM_MAX_SCALE,
+    GUI_ZOOM_MIN_SIDE,
     PIXEL_DIFF_STRIDE,
     PIXEL_DIFF_THRESHOLD,
     SCREENSHOT_MAX_BASE64_CHARS,
@@ -254,6 +257,68 @@ def gui_model_dimensions(bounds):
         "scale_x": float(width) / native_width,
         "scale_y": float(height) / native_height,
     }
+
+
+def zoom_geometry(region, bounds):
+    """Map a zoom region of the GUI frame to a native crop and an image size.
+
+    region is [x0, y0, x1, y1] in pixels of the delivered full-desktop frame.
+    The crop is snapped outward to whole native pixels, and the returned
+    region is that snapped crop in frame pixels, unrounded. The image fits
+    the model box and enlarges native pixels at most GUI_ZOOM_MAX_SCALE
+    times. Each axis maps back by its own exact ratio, width / (x1 - x0)
+    and height / (y1 - y0); one shared scale would misplace points on a
+    narrow crop. Raises ValueError for a region outside the frame or with a
+    side shorter than GUI_ZOOM_MIN_SIDE frame pixels.
+    """
+    frame_size = gui_model_dimensions(bounds)
+    frame_width, frame_height = frame_size["width"], frame_size["height"]
+    x0, y0, x1, y1 = (float(value) for value in region)
+    if not (0 <= x0 < x1 <= frame_width and 0 <= y0 < y1 <= frame_height):
+        raise ValueError(
+            "zoom region [{:g}, {:g}, {:g}, {:g}] must lie inside the {}x{} "
+            "frame with x0 < x1 and y0 < y1".format(
+                x0, y0, x1, y1, frame_width, frame_height))
+    if x1 - x0 < GUI_ZOOM_MIN_SIDE or y1 - y0 < GUI_ZOOM_MIN_SIDE:
+        raise ValueError(
+            "zoom region sides must be at least {} frame pixels".format(
+                GUI_ZOOM_MIN_SIDE))
+    native_width = max(1, int(round(bounds["width"])))
+    native_height = max(1, int(round(bounds["height"])))
+    per_x = float(native_width) / frame_width
+    per_y = float(native_height) / frame_height
+    left = max(0, int(math.floor(x0 * per_x + 1e-9)))
+    top = max(0, int(math.floor(y0 * per_y + 1e-9)))
+    right = min(native_width, int(math.ceil(x1 * per_x - 1e-9)))
+    bottom = min(native_height, int(math.ceil(y1 * per_y - 1e-9)))
+    crop_width, crop_height = right - left, bottom - top
+    enlarge = min(
+        GUI_ZOOM_MAX_SCALE,
+        float(GUI_MODEL_MAX_WIDTH) / crop_width,
+        float(GUI_MODEL_MAX_HEIGHT) / crop_height,
+    )
+    width = max(1, int(round(crop_width * enlarge)))
+    height = max(1, int(round(crop_height * enlarge)))
+    return {
+        "native": (left, top, crop_width, crop_height),
+        "region": [left / per_x, top / per_y, right / per_x, bottom / per_y],
+        "width": width,
+        "height": height,
+    }
+
+
+def zoom_pixels(pixbuf, geometry):
+    """Encode the zoom image of a full-desktop native grab."""
+    left, top, crop_width, crop_height = geometry["native"]
+    crop = pixbuf.new_subpixbuf(left, top, crop_width, crop_height)
+    if crop is None:
+        raise RuntimeError("zoom crop failed")
+    if (geometry["width"], geometry["height"]) != (crop_width, crop_height):
+        crop = crop.scale_simple(
+            geometry["width"], geometry["height"], GdkPixbuf.InterpType.BILINEAR)
+        if crop is None:
+            raise RuntimeError("zoom scaling failed")
+    return encoded_screenshot(crop)
 
 
 def capture_gui_pixels(bounds):

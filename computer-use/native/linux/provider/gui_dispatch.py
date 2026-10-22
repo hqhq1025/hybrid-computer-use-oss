@@ -21,6 +21,7 @@ from .foundation import (
 from .gui_capture import (
     capture_window_pixels,
     gui_model_dimensions,
+    zoom_geometry,
     pixel_buffers_identical,
     pixel_change,
 )
@@ -304,6 +305,131 @@ def coordinates_still_valid(reference, current, actions):
     return True
 
 
+def windows_over(layout, rect):
+    """The visible managed windows that overlap rect, bottom first.
+
+    rect is (x, y, width, height) in desktop-relative native pixels, the
+    space of the layout's window geometry.
+    """
+    x, y, width, height = rect
+    over = []
+    for window in layout.get("windows") or []:
+        if (window["x"] < x + width and x < window["x"] + window["width"]
+                and window["y"] < y + height and y < window["y"] + window["height"]):
+            over.append((window.get("id"), window["x"], window["y"],
+                         window["width"], window["height"]))
+    return over
+
+
+def region_still_valid(reference, current, rect):
+    """The area form of coordinates_still_valid: every window over rect,
+    and their stacking order, is unchanged since the reference frame."""
+    if not isinstance(reference, dict) or not isinstance(current, dict):
+        return False
+    if reference.get("desktop") != current.get("desktop"):
+        return False
+    return windows_over(reference, rect) == windows_over(current, rect)
+
+
+def gui_zoom(action, bounds, frame_id):
+    """Return an enlarged region of the GUI frame named by frame_id.
+
+    The zoom is look-only: it emits no input, publishes no frame, and its
+    pixels come from a fresh grab only when the windows over the region are
+    the same as in that frame, so the region shows the frame's geometry. A
+    frame this provider did not publish, or a layout change over the region,
+    is rejected with a fresh full-desktop screenshot, as a stale coordinate
+    action is.
+    """
+    def stale(message, capture):
+        snapshot = {}
+        try:
+            snapshot = capture.encode() if capture is not None else {}
+        except Exception:
+            snapshot = {}
+        return {
+            "ok": False,
+            "error": message + " Nothing was captured for the zoom and no input "
+                     "was emitted.",
+            "failureCode": "stale_gui_frame",
+            "failurePhase": "precondition",
+            "dispatched": 0,
+            "input_events_emitted": False,
+            "input_actions_dispatched": 0,
+            "effect_unknown": False,
+            "quiescent": None,
+            "snapshot": snapshot,
+        }
+
+    try:
+        geometry = zoom_geometry(action["region"], bounds)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "error": "gui zoom failed region pre-validation; nothing was captured",
+            "validation_errors": [{"index": 0, "type": "zoom", "error": str(exc)}],
+            "preflight_only": True,
+            "dispatched": 0,
+            "input_events_emitted": False,
+            "input_actions_dispatched": 0,
+        }
+    try:
+        current = capture_gui_snapshot(bounds)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": "full-desktop capture failed before zoom: {}".format(exc),
+            "dispatched": 0,
+            "input_events_emitted": False,
+            "input_actions_dispatched": 0,
+        }
+    if not current.has_image or not current.frame_id:
+        return stale(
+            "The desktop could not be captured with a consistent layout sample.",
+            current)
+    if not frame_id:
+        return stale("Zoom regions are frame pixels, and no GUI frame was named.", current)
+    if current.frame_id != frame_id:
+        left, top, width, height = geometry["native"]
+        if not region_still_valid(
+                _published_layouts.get(frame_id), capture_layout(current),
+                (left, top, width, height)):
+            return stale(
+                "The windows over the zoom region changed since the frame its "
+                "coordinates came from.", current)
+    image = current.zoom(geometry)
+    if not image or not image.get("data"):
+        return {
+            "ok": False,
+            "error": "gui zoom capture failed; no input was sent",
+            "dispatched": 0,
+            "input_events_emitted": False,
+            "input_actions_dispatched": 0,
+        }
+    return {
+        "ok": True,
+        "text": "GUI zoom; no input was sent.",
+        "dispatched": 0,
+        "input_events_emitted": False,
+        "input_actions_dispatched": 0,
+        "guiResult": {"zoom": {
+            "region": geometry["region"],
+            "width": geometry["width"],
+            "height": geometry["height"],
+        }},
+        # The zoom image is not a frame: no frameId, no layout, so it is
+        # never remembered as coordinate provenance.
+        "snapshot": {
+            "screenshotPngBase64": image["data"],
+            "screenshotMimeType": image.get("mimeType"),
+            "screenshotEncoding": image.get("encoding"),
+            "coordinateSpace": "zoom_image_px",
+            "width": geometry["width"],
+            "height": geometry["height"],
+        },
+    }
+
+
 def perform_gui(actions, settle_ms=800, frame_id=None):
     """Run one validated GUI batch and remember the layout it returns."""
     response = _perform_gui(actions, settle_ms, frame_id)
@@ -334,7 +460,20 @@ def _perform_gui(actions, settle_ms=800, frame_id=None):
             "input_actions_dispatched": 0,
         }
 
+    zooms = sum(1 for action in static_actions if action["type"] == "zoom")
+    if zooms and len(static_actions) != 1:
+        return {
+            "ok": False,
+            "error": "gui zoom must be the only action in the call; nothing was "
+                     "dispatched or captured",
+            "preflight_only": True,
+            "dispatched": 0,
+            "input_events_emitted": False,
+            "input_actions_dispatched": 0,
+        }
     bounds = desktop_bounds()
+    if bounds is not None and zooms:
+        return gui_zoom(static_actions[0], bounds, frame_id)
     if bounds is None:
         return {
             "ok": False,

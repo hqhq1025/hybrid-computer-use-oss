@@ -32,6 +32,9 @@ func (s *Service) gui(actions any, settleMS int) ToolCallResult {
 			return guiArgumentError(err, actions)
 		}
 	}
+	if len(providerActions) == 1 && providerActions[0].Type == "zoom" {
+		return s.guiZoom(providerActions[0])
+	}
 	privateFrameID := ""
 	if guiBatchUsesFrameProvenance(providerActions) {
 		if s.guiSnapshot == nil || s.guiSnapshot.FrameID == "" {
@@ -145,7 +148,7 @@ var guiPublicErrorCodes = []string{
 
 // guiPublicFields are the leading fields of the GUI evidence line, in order:
 // the AX evidence fields, then the returned screen and the action facts.
-var guiPublicFields = append(append([]string{}, axPublicFields...), "screen", "actions")
+var guiPublicFields = append(append([]string{}, axPublicFields...), "screen", "zoom", "actions")
 
 // guiActionHints are the invalid_argument hints for an action of a known
 // type: one valid action of that type.
@@ -158,6 +161,7 @@ var guiActionHints = map[string]string{
 	"type":         `{"type":"type","text":"hello"}`,
 	"keypress":     `{"type":"keypress","keys":["CTRL","S"]}`,
 	"wait":         `{"type":"wait"}`,
+	"zoom":         `{"type":"zoom","region":[0,0,400,200]}`,
 }
 
 // guiError is a GUI error result that carries its public code.
@@ -360,7 +364,7 @@ func withGUIRequested(result ToolCallResult, raw any) ToolCallResult {
 		return result
 	}
 	if len(actions) == 1 {
-		if action, _ := actions[0].(map[string]any); action["type"] == "screenshot" {
+		if action, _ := actions[0].(map[string]any); action["type"] == "screenshot" || action["type"] == "zoom" {
 			return result
 		}
 	}
@@ -440,6 +444,9 @@ func prepareGUIEvidence(result ToolCallResult) ToolCallResult {
 	}
 	if full["observation_required"] == true {
 		public["observation_required"] = true
+	}
+	if zoom, ok := full["zoom"].(map[string]any); ok {
+		public["zoom"] = zoom
 	}
 	result.StructuredContent = public
 	return result
