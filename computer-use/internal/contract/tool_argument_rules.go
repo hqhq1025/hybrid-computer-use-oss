@@ -83,7 +83,6 @@ const (
 	ArgumentRuleTextBudget      = "text_budget"
 	ArgumentRuleRefOwnsIdentity = "ref_owns_identity"
 	ArgumentRuleWaitBudget      = "wait_budget"
-	ArgumentRuleScrollDelta     = "scroll_delta"
 )
 
 // ArgumentRuleError is a cross-field rule violation.

@@ -48,6 +48,8 @@ func TestArgumentErrorsSelectTheIntendedBranch(t *testing.T) {
 			[]string{"settle_ms must be an integer, not a string"}},
 		{"GUI", `{"actions":[{"type":"click","x":1,"y":1,"button":"LEFT"}]}`, "/actions/0/button",
 			[]string{`button "LEFT" is unsupported`}},
+		{"GUI", `{"actions":[{"type":"scroll","x":1,"y":1,"scroll_y":0}]}`, "/actions/0/scroll_y",
+			[]string{"scroll_y must not be 0"}},
 		{"AX", `{"mode":"ACT"}`, "/mode", []string{`mode "ACT" is unsupported`}},
 		{"AX", `{"mode":"observe","app":"x","actions":[]}`, "/actions",
 			[]string{"actions must contain 1 to 64 items"}},

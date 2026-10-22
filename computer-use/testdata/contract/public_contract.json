@@ -48,6 +48,39 @@
           },
           "description": "Accessibility for application windows. Modes: apps lists confirmed windows (wN, title, app, active) and reports incomplete inventories; missing windows then remain unknown. observe returns the window tree with rN refs. find returns matching rN. act runs ordered steps, checks them before input, stops at the first failed step, and reports each target's change, windows opened/closed/focused, and a diff. Copy rN/wN exactly; stale refs fail. keypress/type without ref go to the focused window. select marks ref, its text substring, or ref..to_ref (paragraphs, cells) and reports the selection read back. activate/close take a title substring or wN. A wait step sends no input and fails the batch on timeout: window (title, any app), query (as find), ref with value/state/text, or text; gone inverts. After a window wait, keys go to that window. Skip waits the report answers. Errors return code and hint. Examples:\n{\"mode\":\"act\",\"actions\":[{\"type\":\"click\",\"ref\":\"r12\"},{\"type\":\"wait\",\"window\":\"Export\"},{\"type\":\"type\",\"text\":\"q3.csv\"},{\"type\":\"keypress\",\"keys\":[\"ENTER\"]}]}\n{\"mode\":\"find\",\"window_ref\":\"w2\",\"query\":{\"role\":\"button\",\"name_contains\":\"Save\"}}",
           "inputSchema": {
+            "$defs": {
+              "query": {
+                "additionalProperties": false,
+                "description": "At least one filter; ANDed, case-insensitive.",
+                "properties": {
+                  "name_contains": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "name_equals": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "role": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "state": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "text_contains": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "text_equals": {
+                    "pattern": "\\S",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
             "additionalProperties": false,
             "not": {
               "required": [
@@ -91,35 +124,7 @@
                       "type": "number"
                     },
                     "query": {
-                      "additionalProperties": false,
-                      "description": "At least one filter; ANDed, case-insensitive.",
-                      "properties": {
-                        "name_contains": {
-                          "pattern": "\\S",
-                          "type": "string"
-                        },
-                        "name_equals": {
-                          "pattern": "\\S",
-                          "type": "string"
-                        },
-                        "role": {
-                          "pattern": "\\S",
-                          "type": "string"
-                        },
-                        "state": {
-                          "pattern": "\\S",
-                          "type": "string"
-                        },
-                        "text_contains": {
-                          "pattern": "\\S",
-                          "type": "string"
-                        },
-                        "text_equals": {
-                          "pattern": "\\S",
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
+                      "$ref": "#/$defs/query"
                     },
                     "ref": {
                       "description": "rN element; wN for activate/close. Omit for keys/text to the focused window.",
@@ -224,35 +229,7 @@
                 "type": "string"
               },
               "query": {
-                "additionalProperties": false,
-                "description": "At least one filter; ANDed, case-insensitive.",
-                "properties": {
-                  "name_contains": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "name_equals": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "role": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "state": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "text_contains": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  "text_equals": {
-                    "pattern": "\\S",
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/$defs/query"
               },
               "root": {
                 "description": "observe: subtree at rN or the focused element.",
@@ -539,6 +516,32 @@
                         },
                         {
                           "additionalProperties": false,
+                          "anyOf": [
+                            {
+                              "properties": {
+                                "scroll_x": {
+                                  "not": {
+                                    "const": 0
+                                  }
+                                }
+                              },
+                              "required": [
+                                "scroll_x"
+                              ]
+                            },
+                            {
+                              "properties": {
+                                "scroll_y": {
+                                  "not": {
+                                    "const": 0
+                                  }
+                                }
+                              },
+                              "required": [
+                                "scroll_y"
+                              ]
+                            }
+                          ],
                           "properties": {
                             "keys": {
                               "description": "Held modifiers.",
@@ -567,7 +570,7 @@
                             },
                             "type": {
                               "const": "scroll",
-                              "description": "Scroll at a point by scroll_x and/or scroll_y; at least one is non-zero.",
+                              "description": "Scroll at a point.",
                               "type": "string"
                             },
                             "x": {
@@ -1632,7 +1635,7 @@
         "result": {
           "content": [
             {
-              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"scroll needs a non-zero scroll_x or scroll_y. No action was emitted\",\"hint\":\"{\\\"type\\\":\\\"scroll\\\",\\\"x\\\":640,\\\"y\\\":412,\\\"scroll_y\\\":-3}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
+              "text": "{\"ok\":false,\"code\":\"invalid_argument\",\"path\":\"actions[0]\",\"message\":\"actions[0] scroll requires at least one of scroll_x or scroll_y\",\"hint\":\"{\\\"type\\\":\\\"scroll\\\",\\\"x\\\":640,\\\"y\\\":412,\\\"scroll_y\\\":-3}\",\"input_emitted\":false,\"completed\":0,\"requested\":1}",
               "type": "text"
             }
           ],

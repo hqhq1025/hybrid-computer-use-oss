@@ -253,10 +253,8 @@ func TestGUISchemaPublishesRuntimeLimitsAndFocusBoundary(t *testing.T) {
 		}
 		return nil
 	}()
-	// The non-zero delta rule is a core argument rule, not a schema
-	// composition, so code-declaration clients see two plain numbers.
-	if scrollBranch == nil || scrollBranch["anyOf"] != nil {
-		t.Fatal("scroll schema must keep scroll_x and scroll_y as plain numbers")
+	if scrollBranch == nil || len(scrollBranch["anyOf"].([]any)) != 2 {
+		t.Fatal("scroll schema must require a non-zero scroll_x or scroll_y")
 	}
 	clickButtons := byType["click"]["button"].(map[string]any)["enum"].([]string)
 	if !reflect.DeepEqual(

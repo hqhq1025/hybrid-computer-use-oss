@@ -165,18 +165,9 @@ func nonBlankString(description string) map[string]any {
 // which names the field and shows a corrected call. Keep it under the
 // client compaction budget (TestAXSchemaSurvivesClientCompaction).
 func axInputSchema() map[string]any {
-	// query is written out at both uses rather than shared through $defs:
-	// clients that render the schema as code declarations, such as Codex
-	// code mode, show an unresolved $ref as an untyped value.
-	query := func() map[string]any {
-		filters := map[string]any{}
-		for _, field := range AXFindFilters {
-			filters[field] = nonBlankString("")
-		}
-		return map[string]any{
-			"type": "object", "additionalProperties": false, "properties": filters,
-			"description": "At least one filter; ANDed, case-insensitive.",
-		}
+	query := map[string]any{}
+	for _, field := range AXFindFilters {
+		query[field] = nonBlankString("")
 	}
 	return map[string]any{
 		"type":                 "object",
@@ -184,6 +175,10 @@ func axInputSchema() map[string]any {
 		"required":             []string{"mode"},
 		// window_ref already names its app.
 		"not": map[string]any{"required": []string{"app", "window_ref"}},
+		"$defs": map[string]any{"query": map[string]any{
+			"type": "object", "additionalProperties": false, "properties": query,
+			"description": "At least one filter; ANDed, case-insensitive.",
+		}},
 		"properties": map[string]any{
 			"mode": map[string]any{
 				"type": "string", "enum": []string{AXModeApps, AXModeObserve, AXModeFind, AXModeAct},
@@ -203,7 +198,7 @@ func axInputSchema() map[string]any {
 				"type": "string", "pattern": "^(focused|r[1-9][0-9]*)$",
 				"description": "observe: subtree at rN or the focused element.",
 			},
-			"query": query(),
+			"query": map[string]any{"$ref": "#/$defs/query"},
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": MaxAXFindPageSize, "description": "find page size; default 20."},
 			"cursor": map[string]any{
 				"type": "string", "pattern": "^f[1-9][0-9]*$",
@@ -238,7 +233,7 @@ func axInputSchema() map[string]any {
 						"direction": map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}},
 						"pages":     map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": MaxScrollPages},
 						"window":    nonBlankString("wait: a top-level window whose title contains this, on the whole desktop."),
-						"query":     query(),
+						"query":     map[string]any{"$ref": "#/$defs/query"},
 						"state":     nonBlankString("wait: ref state, e.g. checked."),
 						"gone":      map[string]any{"type": "boolean", "description": "wait until it is absent."},
 						"timeout_ms": map[string]any{
@@ -295,16 +290,27 @@ func guiActionProperty(includeScreenshot bool) map[string]any {
 		}
 		return objectSchema(fields, append([]string{"type"}, required...))
 	}
-	// The core rejects a scroll whose deltas are all zero
-	// (ArgumentRuleScrollDelta). An anyOf with "not const" would say the
-	// same, but code-declaration renderers show it as untyped values.
-	scroll := branch("scroll", "Scroll at a point by scroll_x and/or scroll_y; at least one is non-zero.", map[string]any{
+	scroll := branch("scroll", "Scroll at a point.", map[string]any{
 		"x":        numberProperty("Screenshot X pixel."),
 		"y":        numberProperty("Screenshot Y pixel."),
 		"scroll_x": map[string]any{"type": "number", "minimum": -GUIMaxScrollDelta, "maximum": GUIMaxScrollDelta},
 		"scroll_y": map[string]any{"type": "number", "minimum": -GUIMaxScrollDelta, "maximum": GUIMaxScrollDelta},
 		"keys":     mouseKeys,
 	}, []string{"x", "y"})
+	scroll["anyOf"] = []any{
+		map[string]any{
+			"required": []string{"scroll_x"},
+			"properties": map[string]any{
+				"scroll_x": map[string]any{"not": map[string]any{"const": 0}},
+			},
+		},
+		map[string]any{
+			"required": []string{"scroll_y"},
+			"properties": map[string]any{
+				"scroll_y": map[string]any{"not": map[string]any{"const": 0}},
+			},
+		},
+	}
 	branches := []any{}
 	if includeScreenshot {
 		branches = append(branches,

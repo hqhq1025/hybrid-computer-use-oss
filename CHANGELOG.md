@@ -10,12 +10,6 @@
   frame pixel shown at a point of a zoom image.
 - The CLI `act --json` and `gui --json` read their body from standard input
   with `-` and from a file with `@FILE`, in addition to an inline value.
-- The AX schema writes the find `query` object out where it is used instead
-  of sharing it through `$defs`, and the GUI scroll action lists `scroll_x`
-  and `scroll_y` as plain numbers; the core rejects a scroll without a
-  non-zero delta before any input. Clients that render tool schemas as code
-  declarations, such as Codex code mode, now show the query fields and the
-  scroll deltas with their types instead of `unknown`.
 - Linux: GTK, LibreOffice and Qt applications are easier to address. Editable
   text fields and document editors appear as `textbox` with their value and a
   ref; unnamed list rows take their visible label as name; Qt top-level
