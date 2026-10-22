@@ -38,7 +38,6 @@ type axServiceOperation string
 const (
 	axServiceObserveApps axServiceOperation = "observe_apps"
 	axServiceObserve     axServiceOperation = "observe"
-	axServiceWindowList  axServiceOperation = "list_app_windows"
 )
 
 type axActionCommand interface {

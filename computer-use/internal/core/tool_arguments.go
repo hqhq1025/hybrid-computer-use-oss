@@ -171,73 +171,6 @@ func integerElementIndexFloat(value float64) string {
 	return strconv.FormatInt(int64(value), 10)
 }
 
-func optionalPositiveInt(args map[string]any, key string) (*int, error) {
-	value, ok := args[key]
-	if !ok {
-		return nil, nil
-	}
-	return positiveIntFromValue(value, key)
-}
-
-func optionalNonNegativeInt(
-	args map[string]any,
-	key string,
-	maximum int,
-) (*int, error) {
-	value, ok := args[key]
-	if !ok {
-		return nil, nil
-	}
-	invalid := fmt.Errorf(
-		"%s must be a whole number between 0 and %d",
-		key,
-		maximum,
-	)
-	var integer int64
-	switch typed := value.(type) {
-	case int:
-		integer = int64(typed)
-	case float64:
-		if !isWholeNumber(typed) {
-			return nil, invalid
-		}
-		integer = int64(typed)
-	case json.Number:
-		parsed, ok := jsonInteger(typed)
-		if !ok {
-			return nil, invalid
-		}
-		integer = parsed
-	default:
-		return nil, invalid
-	}
-	if integer < 0 || integer > int64(maximum) {
-		return nil, invalid
-	}
-	result := int(integer)
-	return &result, nil
-}
-
-func positiveIntFromValue(value any, key string) (*int, error) {
-	switch typed := value.(type) {
-	case int:
-		return positiveIntFromInt64(int64(typed), key)
-	case float64:
-		if !isWholeNumber(typed) {
-			return nil, fmt.Errorf("%s must be a positive integer", key)
-		}
-		return positiveIntFromFloat64(typed, key)
-	case json.Number:
-		integer, ok := jsonInteger(typed)
-		if !ok {
-			return nil, fmt.Errorf("%s must be a positive integer", key)
-		}
-		return positiveIntFromInt64(integer, key)
-	default:
-		return nil, fmt.Errorf("%s must be a positive integer", key)
-	}
-}
-
 // jsonInteger reads a JSON number as an integer. JSON Schema treats any
 // number with a zero fractional part as an integer, so 5.0 and 5e3 count.
 func jsonInteger(number json.Number) (int64, bool) {
@@ -251,28 +184,8 @@ func jsonInteger(number json.Number) (int64, bool) {
 	return rational.Num().Int64(), true
 }
 
-func positiveIntFromFloat64(value float64, key string) (*int, error) {
-	if !isWholeNumber(value) || value <= 0 || value > float64(maxInt()) {
-		return nil, fmt.Errorf("%s must be a positive integer", key)
-	}
-	integer := int(value)
-	return &integer, nil
-}
-
-func positiveIntFromInt64(value int64, key string) (*int, error) {
-	if value <= 0 || value > int64(maxInt()) {
-		return nil, fmt.Errorf("%s must be a positive integer", key)
-	}
-	integer := int(value)
-	return &integer, nil
-}
-
 func isWholeNumber(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && math.Trunc(value) == value
-}
-
-func maxInt() int {
-	return int(^uint(0) >> 1)
 }
 
 func defaultString(value, fallback string) string {
@@ -330,10 +243,3 @@ func parseObservation(args map[string]any) (observation, error) {
 // optionalBool returns the JSON boolean stored under key, or nil when the key
 // is absent or holds any other type. Strings are never coerced: "yes" used to
 // decode as false and silently inverted an assertion.
-func optionalBool(args map[string]any, key string) *bool {
-	flag, ok := args[key].(bool)
-	if !ok {
-		return nil
-	}
-	return &flag
-}

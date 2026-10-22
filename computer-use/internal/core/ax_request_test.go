@@ -104,52 +104,35 @@ func TestDecodeAXRequestRejectsWithPathAndHint(t *testing.T) {
 	}
 }
 
-func TestDecodeAXPredicateMapsToInternalAssertions(t *testing.T) {
+func TestRefWaitPredicateChecksEachQualifier(t *testing.T) {
 	for name, test := range map[string]struct {
-		in   map[string]any
-		want map[string]any
+		wait   axWait
+		record ElementRecord
+		holds  bool
 	}{
-		"exists": {map[string]any{"type": "exists", "ref": "r1"},
-			map[string]any{"type": "exists", "value": true}},
-		"gone": {map[string]any{"type": "exists", "ref": "r1", "negate": true},
-			map[string]any{"type": "exists", "value": false}},
-		"state": {map[string]any{"type": "state", "ref": "r1", "state": "checked"},
-			map[string]any{"type": "state", "state": "checked", "value": true}},
-		"not state": {map[string]any{"type": "state", "ref": "r1", "state": "checked", "negate": true},
-			map[string]any{"type": "state", "value": false}},
-		"value": {map[string]any{"type": "value", "ref": "r1", "value": "14", "match": "contains"},
-			map[string]any{"type": "value", "value": "14", "match": "contains"}},
-		"text": {map[string]any{"type": "text", "ref": "r1", "text": "Done", "negate": true},
-			map[string]any{"type": "text_contains", "text": "Done", "negate": true}},
+		"exists":        {axWait{ref: "r1"}, ElementRecord{}, true},
+		"gone":          {axWait{ref: "r1", gone: true}, ElementRecord{}, false},
+		"state":         {axWait{ref: "r1", state: "checked"}, ElementRecord{States: "[checked]"}, true},
+		"not state":     {axWait{ref: "r1", state: "checked", gone: true}, ElementRecord{States: "[checked]"}, false},
+		"value":         {axWait{ref: "r1", value: "14"}, ElementRecord{Value: " 14 "}, true},
+		"value differs": {axWait{ref: "r1", value: "14"}, ElementRecord{Value: "140"}, false},
+		"text":          {axWait{ref: "r1", text: "Done"}, ElementRecord{Name: "All done"}, true},
+		"text gone":     {axWait{ref: "r1", text: "Done", gone: true}, ElementRecord{Name: "All done"}, false},
 	} {
-		got, err := decodeAXPredicate(test.in, "until")
+		predicate, err := axRefWaitPredicate(&test.wait)
 		if err != nil {
-			t.Fatalf("%s: %#v", name, err)
+			t.Fatalf("%s: %v", name, err)
 		}
-		for key, value := range test.want {
-			if got[key] != value {
-				t.Fatalf("%s: %s=%#v want %#v (%#v)", name, key, got[key], value, got)
-			}
-		}
-		if _, specErr := parseAXAssertionSpec(got); specErr != nil {
-			t.Fatalf("%s: internal assertion rejected: %v", name, specErr)
+		if held, observed := predicate.goal.check(&test.record, nil); held != test.holds {
+			t.Fatalf("%s: held=%v want %v (%s)", name, held, test.holds, observed)
 		}
 	}
 }
 
-func TestValuePredicateNegateInvertsTheGoal(t *testing.T) {
-	assertion, err := decodeAXPredicate(map[string]any{
-		"type": "value", "ref": "r1", "value": "busy", "negate": true,
-	}, "until")
-	if err != nil {
-		t.Fatal(err)
-	}
-	goal := assertionGoal(assertion)
-	if ok, _ := goal.check(&ElementRecord{Value: "busy"}, nil); ok {
-		t.Fatal("negated value predicate held while the value matched")
-	}
-	if ok, _ := goal.check(&ElementRecord{Value: "idle"}, nil); !ok {
-		t.Fatal("negated value predicate did not hold after the value changed")
+// The schema accepts a text of only spaces; a ref wait rejects it.
+func TestRefWaitPredicateRejectsBlankText(t *testing.T) {
+	if _, err := axRefWaitPredicate(&axWait{ref: "r1", text: "  "}); err == nil {
+		t.Fatal("a blank text was accepted")
 	}
 }
 
