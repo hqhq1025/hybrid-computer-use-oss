@@ -1024,3 +1024,59 @@ class NonFrameTopLevelWindowTests(AtspiPatchedTestCase):
         got_handle, window_id = runtime._window_action_preflight(
             "activate", app, window, record)
         self.assertEqual((got_handle, window_id), (handle, "0xe0000b"))
+
+
+
+class UnnamedFrameTitleTests(AtspiPatchedTestCase):
+    """An AT-SPI frame without a name takes the managed X11 window's title.
+
+    D-Feet (GTK3) exposes its frame with an empty name while the window
+    manager titles it "d-feet". apps listed w1 "" and observe showed
+    "(unnamed frame)", so neither the model nor a title wait could name it.
+    """
+
+    def _app(self):
+        frame = _TreeNode(role="frame", name="", x=-26, y=4, w=952, h=649)
+        app = _TreeNode(role="application", name="d-feet", kids=(frame,))
+        app.get_process_id = lambda: 4242
+        return app, frame
+
+    def _patches(self, title="d-feet"):
+        return (
+            mock.patch.object(
+                runtime, "x11_window_inventory_for_pid",
+                return_value=runtime.InventoryResult(
+                    [{"id": "0x3000007", "title": title,
+                      "x": 0, "y": 27, "width": 952, "height": 649}],
+                    complete=True)),
+            mock.patch.object(runtime, "correlation_root_window_state",
+                              return_value={"activeWindow": "0x3000007"}),
+            mock.patch.object(runtime, "process_generation", return_value="gen"),
+        )
+
+    def test_listing_uses_the_managed_window_title(self):
+        app, frame = self._app()
+        for patcher in self._patches():
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        windows = runtime.app_windows(app)
+        listed = runtime.app_top_level_windows(app, windows, None)
+        self.assertEqual(listed[0]["title"], "d-feet")
+        self.assertTrue(listed[0]["handle"].startswith("w2:"))
+
+    def test_window_label_uses_the_managed_window_title(self):
+        app, frame = self._app()
+        frame.get_parent = lambda: app
+        for patcher in self._patches():
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.assertEqual(runtime.window_label(frame), "d-feet")
+
+    def test_named_frame_keeps_its_accessible_name(self):
+        app, frame = self._app()
+        frame.title = "Bus browser"
+        for patcher in self._patches():
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        listed = runtime.app_top_level_windows(app, runtime.app_windows(app), None)
+        self.assertEqual(listed[0]["title"], "Bus browser")

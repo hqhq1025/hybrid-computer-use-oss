@@ -512,6 +512,37 @@ def strong_window_instance_handle_inventory(app, windows=None):
     }.items(), complete=True)
 
 
+def managed_window_title(app, window, strong_handles=None):
+    """Return the X11 title of the managed window bound to ``window``, or "".
+
+    Some toolkits leave a top-level AT-SPI frame unnamed while the window
+    manager shows a title (GTK3 D-Feet: frame "" vs WM_NAME "d-feet"). The
+    title is taken only for a window with a one-to-one strong binding, so it
+    names exactly the window the model can address.
+    """
+    windows = app_windows(app)
+    if strong_handles is None:
+        strong_handles = strong_window_instance_handles(app, windows)
+    index = next(
+        (i for i, candidate in windows if candidate is window), None
+    )
+    if index is None or not strong_handles.get(index):
+        return ""
+    target = strong_handles[index]
+    for item in x11_window_inventory_for_pid(node_pid(app)):
+        if opaque_window_instance_handle_for_id(app, item.get("id")) == target:
+            return str(item.get("title") or "").strip()
+    return ""
+
+
+def accessible_window_title(app, window, strong_handles=None):
+    """Return the window's AT-SPI name, or its managed X11 title when unnamed."""
+    own = str(node_name(window) or "").strip()
+    if own:
+        return own
+    return managed_window_title(app, window, strong_handles)
+
+
 def strong_window_instance_handles(app, windows=None):
     return dict(strong_window_instance_handle_inventory(app, windows))
 
