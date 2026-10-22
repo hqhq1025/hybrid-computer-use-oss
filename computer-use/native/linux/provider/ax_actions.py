@@ -23,6 +23,7 @@ from .input_primitives import (
 
 from .tree_walk import iter_all
 from .ax_records import combo_edit_target, combo_edit_identity
+from .input_method import InputMethodText
 
 
 def resolve_combo_editor(element, record):
@@ -210,6 +211,9 @@ def parse_key(key):
 
 def send_key(key):
     codes, normalized = parse_key(key)
+    if len(normalized) == 1 and ord(normalized) >= 128 and not codes:
+        # A literal Unicode key has the same keymap race as a text payload.
+        return send_text(normalized)
     pressed = []
     emitted = False
     primary_error = None
@@ -263,34 +267,8 @@ def send_key(key):
         raise release_error
 
 
-# Pause after each synthesized non-ASCII character. libatspi types a
-# character without a keycode in the current layout by rebinding a spare
-# keycode to its keysym. A burst of such characters reuses that keycode before
-# the application has read the previous mapping, so one STRING event with
-# "Grüße 你好" can arrive as "Gr好好e 好好". 20 ms still lost characters
-# occasionally; 35 ms did not.
-NON_ASCII_KEY_INTERVAL_SECONDS = 0.035
-
-
-def _text_runs(text):
-    """Split text into ASCII runs and single non-ASCII characters."""
-    runs = []
-    ascii_run = ""
-    for char in text:
-        if ord(char) < 128:
-            ascii_run += char
-            continue
-        if ascii_run:
-            runs.append(ascii_run)
-            ascii_run = ""
-        runs.append(char)
-    if ascii_run:
-        runs.append(ascii_run)
-    return runs
-
-
-# Bound the paced non-ASCII characters per call so one request stays well
-# inside the 30 s provider timeout (500 x 35 ms = 17.5 s).
+# Keep the public keyboard-input bound; input method delivery also has a
+# whole-payload deadline below the provider timeout.
 MAX_SYNTHESIZED_NON_ASCII_CHARACTERS = 500
 
 
@@ -309,17 +287,16 @@ def send_text(text):
             failure_phase="precondition",
             input_events_emitted=False,
         )
-    emitted = False
-    for run in _text_runs(text):
-        emitted = emit_keyboard_event(
-            0,
-            run,
-            Atspi.KeySynthType.STRING,
-            "text payload",
-            emitted,
-        )
-        if ord(run[0]) >= 128:
-            time.sleep(NON_ASCII_KEY_INTERVAL_SECONDS)
+    def ascii_text(value):
+        return emit_keyboard_event(
+            0, value, Atspi.KeySynthType.STRING, "text payload")
+
+    if non_ascii:
+        # Keep ASCII and Unicode in one ordered stream. Mixing X key events
+        # with asynchronous input-method commits can reorder adjacent text.
+        InputMethodText().send(text, send_key, ascii_text)
+    elif text:
+        ascii_text(text)
 
 
 def find_editable_text(root):
