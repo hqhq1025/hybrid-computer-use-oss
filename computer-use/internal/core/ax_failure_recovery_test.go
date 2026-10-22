@@ -635,3 +635,56 @@ func TestCloseObserveNoneDoesNotLeakReplacementWindowObservation(t *testing.T) {
 		t.Fatalf("close lifecycle probes=%d, want 2", len(backend.observeRequests))
 	}
 }
+
+// staleSecondActionBackend fails the second action of a batch before any
+// input, with complete facts, as a provider does when its target vanished.
+type staleSecondActionBackend struct {
+	*reportBackend
+	actions int
+}
+
+func (b *staleSecondActionBackend) ResolveAndAct(request ProviderActionRequest) (ProviderAccessibilityResult, error) {
+	b.actions++
+	if b.actions != 2 {
+		return b.reportBackend.ResolveAndAct(request)
+	}
+	b.actionRequests = append(b.actionRequests, request)
+	result := ProviderAccessibilityResult{
+		OK:    false,
+		Error: "stale_element_ref: target disappeared; no input was emitted",
+		Failure: &ProviderFailure{
+			Code: "stale_element_ref", Phase: "precondition", Subject: "element", FactsComplete: true,
+		},
+		Mutation: &ProviderMutationFacts{},
+	}
+	result.PrepareForService()
+	return result, nil
+}
+
+// The batch stop summary must not let the model credit the failed action
+// with the state the recovery observation shows.
+func TestBatchStopAfterNoInputFailureSaysTheFailedActionDidNotCauseTheState(t *testing.T) {
+	s, backend := reportService(t, reportMain())
+	_, refs := reportObserve(t, s, "Interface", "OK")
+	s.Backend = &staleSecondActionBackend{reportBackend: backend}
+	result := s.callTool(contract.PublicToolAX, map[string]any{"mode": "act", "actions": []any{
+		map[string]any{"type": "click", "ref": refs["Interface"]},
+		map[string]any{"type": "click", "ref": refs["OK"]},
+	}})
+	if !result.IsError ||
+		result.StructuredContent["action_outcome"] != "not_executed" ||
+		result.StructuredContent["final_observation_returned"] != true {
+		t.Fatalf("stopped batch evidence: %#v", result.StructuredContent)
+	}
+	text := ResultText(result)
+	for _, fragment := range []string{
+		"Stopped at action 2/2 (click).",
+		"1 earlier action(s) returned without error; that does not verify their effect.",
+		"A fresh independent current-state observation follows. " +
+			"The failed action emitted no input and did not cause that state.",
+	} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("stopped batch text is missing %q:\n%s", fragment, text)
+		}
+	}
+}

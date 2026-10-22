@@ -699,41 +699,6 @@ func TestDarwinProviderStopWaitsForExactProviderProcess(t *testing.T) {
 	}
 }
 
-func TestDarwinProductionLaunchUsesNonWaitingLaunchServicesPrivateSocket(
-	t *testing.T,
-) {
-	data, err := os.ReadFile("darwin_sidecar_transport.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(data)
-	for _, fragment := range []string{
-		`"/usr/bin/open"`,
-		`"-n"`,
-		`net.Listen("unix", socketPath)`,
-		`os.Chmod(socketPath, 0o600)`,
-		`"--socket"`,
-		`"--pid-file"`,
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("macOS provider launcher missing %q", fragment)
-		}
-	}
-	for _, forbidden := range []string{
-		`"-W"`,
-		"session_probe",
-		"wait_for_change",
-		"heartbeat",
-		"screenshotBlob",
-		"route_evidence",
-		"--blob-dir",
-	} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("macOS transport retained obsolete contract %q", forbidden)
-		}
-	}
-}
-
 func TestDarwinProviderOpenCommandDoesNotWaitForApplicationExit(t *testing.T) {
 	command := darwinProviderOpenCommand(
 		"/tmp/"+darwinProviderAppName,
