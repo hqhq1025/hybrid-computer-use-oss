@@ -27,6 +27,7 @@ from .input_primitives import (
 )
 from .actionability import (
     action_only_sets_state,
+    ACTION_REPLY_TIMEOUT,
     do_action_by_index,
     point_hits_element,
     preferred_action_index,
@@ -212,12 +213,20 @@ def _auto_click(
     if handled:
         action_evidence["route"] = "semantic_action"
         action_evidence["input_emitted"] = True
+        reply_note = ""
+        if handled == ACTION_REPLY_TIMEOUT:
+            reply_note = (
+                " The application did not reply before the timeout, which "
+                "toolkits do while a modal dialog the action opened is "
+                "running; the action was delivered."
+            )
         notes.append(
             A11Y_CHANNEL
             + SEMANTIC
             + "Invoked the element's AT-SPI accessibility action. "
             + UNVERIFIED_SEMANTIC
             + state_only_note
+            + reply_note
         )
     else:
         if element is not None and node_role(element) == "menu":

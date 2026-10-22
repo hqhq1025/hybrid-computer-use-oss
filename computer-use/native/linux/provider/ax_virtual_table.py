@@ -112,6 +112,9 @@ def render_visible_cells(
 
     total = (row1 - row0 + 1) * (col1 - col0 + 1)
     probe_budget = min(MAX_TABLE_CELLS, total)
+    # The cells' records are rebound to this table below, so the transient
+    # re-creation probe (provider_object_path()) runs once, not per cell.
+    owner_cache = {provider_object_path(node): False}
     record_budget = max(0, max_tree_nodes - len(records))
     count = 0
     empty = 0
@@ -161,7 +164,8 @@ def render_visible_cells(
             index = (indexer.index_for(cell_path, node_role(cell), "")
                      if indexer is not None else len(records))
             record = record_for(
-                cell, index, cell_path, window_bounds, text_limit=text_limit
+                cell, index, cell_path, window_bounds, text_limit=text_limit,
+                owner_cache=owner_cache,
             )
             # The cell wrapper may be recreated between AX reads. Bind its
             # identity to the owning table plus row/column, then resolve the

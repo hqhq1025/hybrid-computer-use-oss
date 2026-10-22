@@ -480,6 +480,17 @@ def x11_window_id_for_accessible(app, window):
             return title_matches[0]["id"]
         if title_matches:
             candidates = title_matches
+    bounds = safe(lambda: extents(window))
+    if bounds is None and not (
+        state_contains(window, Atspi.StateType.SHOWING)
+        or state_contains(window, Atspi.StateType.VISIBLE)
+    ):
+        # A frame with no geometry that is neither showing nor visible has
+        # no native window (Krita's Qt "Offscreen" frame). Without this, the
+        # sole-candidate fallback below gave it the application's only X11
+        # window, two AX windows then claimed one native window, and the
+        # real one lost its handle and was listed "(not addressable)".
+        return None
     root_state = correlation_root_window_state()
     active_id = root_state.get("activeWindow") if root_state else None
     if (
@@ -488,7 +499,6 @@ def x11_window_id_for_accessible(app, window):
         and sum(candidate["id"] == active_id for candidate in candidates) == 1
     ):
         return active_id
-    bounds = safe(lambda: extents(window))
     ranked = []
     for candidate in candidates:
         distance = frame_distance(bounds, candidate)
