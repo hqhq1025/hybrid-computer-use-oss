@@ -314,19 +314,3 @@ func TestNegatedSelectorUntilAfterTheAppExited(t *testing.T) {
 		t.Fatalf("an exited app has no matching element: %s", ResultText(result))
 	}
 }
-
-// closingBackend closes the app with its last window, the way LibreOffice
-// exits when its last document closes.
-type closingBackend struct {
-	*appWideBackend
-	appRef  string
-	service *Service
-}
-
-func (b *closingBackend) ActOnWindow(request ProviderWindowActionRequest) (ProviderWindowResult, error) {
-	result, err := b.appWideBackend.ActOnWindow(request)
-	b.open = nil
-	b.appGone, b.appGoneFacts = true, true
-	b.service.markAppIdentityLifecycle(b.appRef, AXRefStale, "stale_app_ref")
-	return result, err
-}

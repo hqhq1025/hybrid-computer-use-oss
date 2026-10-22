@@ -156,19 +156,6 @@ func (d *recoveryDesktop) ResolveAndAct(request ProviderActionRequest) (Provider
 	return result, nil
 }
 
-// closeDialog closes the Paragraph dialog and returns focus to the
-// document, as OK or Cancel does.
-func (d *recoveryDesktop) closeDialog() {
-	kept := []recoveryWindow{}
-	for _, window := range d.windows {
-		if window.handle != recoveryDialogHandle {
-			kept = append(kept, window)
-		}
-	}
-	d.windows = kept
-	d.focus = recoveryMainHandle
-}
-
 func recoveryService(t *testing.T, desktop *recoveryDesktop) *Service {
 	t.Helper()
 	return NewServiceWithBackend(desktop)
@@ -204,15 +191,6 @@ func windowRefs(t *testing.T, s *Service) map[string]string {
 		refs[match[2]] = match[1]
 	}
 	return refs
-}
-
-func refFor(t *testing.T, text, name string) string {
-	t.Helper()
-	match := regexp.MustCompile(`"` + regexp.QuoteMeta(name) + `"[^\n]*\[ref=(r[0-9]+)\]`).FindStringSubmatch(text)
-	if match == nil {
-		t.Fatalf("no ref for %q in:\n%s", name, text)
-	}
-	return match[1]
 }
 
 func TestContentFindInADialogSearchesTheDialog(t *testing.T) {
