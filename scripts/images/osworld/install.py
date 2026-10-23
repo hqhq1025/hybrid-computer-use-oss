@@ -75,6 +75,7 @@ def install_phase(phase, manifest, manifest_path, assets, user):
     elif phase == "special":
         install_special(manifest, assets, user)
     elif phase == "preferences":
+        run(["python3", str(ROOT / "configure_thunderbird.py")])
         for script, arguments in (("configure_editor.py", []),
                                   ("configure_desktop.py", ["--manifest", str(manifest_path)])):
             run(["runuser", "-u", user.pw_name, "--", "python3", str(ROOT / script),
