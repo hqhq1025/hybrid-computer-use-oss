@@ -23,6 +23,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/atspi_inventory.py",
 		"native/linux/provider/ax_actions.py",
 		"native/linux/provider/ax_dispatch.py",
+		"native/linux/provider/ax_dropdown.py",
 		"native/linux/provider/ax_input_delivery.py",
 		"native/linux/provider/ax_node_properties.py",
 		"native/linux/provider/ax_records.py",

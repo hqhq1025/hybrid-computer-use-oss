@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- AX trees show a table cell's value after its name when the two differ,
+  for example `cell "A1" = "Year"` in a spreadsheet, clipped to 40
+  characters, so reading a sheet no longer needs `find`. A tree over its
+  budget now drops elements from the end of a long list or table instead
+  of replacing the whole list with one summary line.
+- Linux: AX `select` with an option name now changes the choice of GTK
+  and Qt combo boxes and succeeds only when the combo box shows that
+  option afterwards. For Qt, the provider moves the popup's current item
+  to the option and presses Return; otherwise the step reports
+  `effect_unknown`. `select` on an option of an open combo popup does the
+  same. A combo box's value now matches the choice it shows instead of an
+  option left highlighted in its popup.
 - Linux: AX element boxes, coordinate clicks, hit tests and scrolls land on
   the element under a desktop scale (GTK, Qt, Firefox and Chromium browser
   views at scale 2) and on LibreOffice 7.3 toolbars. AX `find` searches past
