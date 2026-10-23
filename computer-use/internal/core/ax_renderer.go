@@ -346,6 +346,14 @@ func (s *Service) BuildAndRenderAXSnapshot(
 	// Evaluate it before deriving the working projection so distillation can
 	// remove or unwrap controls that the ref-only action surface cannot target.
 	s.RefRegistry.AssignSnapshotRefs(axSnapshot)
+	// Preserve the requested root even when it has no label or is currently
+	// unaddressable. Set this only after visibility and identity checks so a
+	// read-only root cannot make a hidden control actionable.
+	for _, root := range axSnapshot.Roots {
+		if root.ExplicitRoot {
+			root.ForceKeep = true
+		}
+	}
 	if normalizedTreeView(view) == contract.TreeViewFull {
 		axSnapshot.Roots = cloneAXForest(axSnapshot.CanonicalRoots, nil)
 	} else if err := distillAXSnapshot(axSnapshot); err != nil {

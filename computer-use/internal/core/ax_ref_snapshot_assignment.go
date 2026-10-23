@@ -101,11 +101,15 @@ func axNodeRefEligibility(
 		return false, "not_currently_visible", ""
 	}
 
-	// A find result is an explicit request to address this exact canonical
+	// A find match or observation root explicitly selects this canonical
 	// object. Identity and actionability are separate: reuse a unique,
 	// window-scoped semantic locator when available, otherwise use a complete
 	// provider identity. Action support is checked before execution.
-	if node.FindMatch {
+	if node.FindMatch || node.ExplicitRoot {
+		if node.ExplicitRoot && locatorKind == AXLocatorProviderBound &&
+			axNodeProviderIdentityComplete(node) {
+			return true, "", AXLocatorProviderBound
+		}
 		if axNodeSemanticIdentityComplete(node) &&
 			!node.SemanticIdentityAmbiguous {
 			return true, "", AXLocatorSemantic
