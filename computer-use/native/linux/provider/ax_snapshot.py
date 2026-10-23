@@ -6,6 +6,7 @@ from .foundation import (
     Atspi,
     BUDGET_PRESSURE_RATIO,
     DEFAULT_TEXT_LIMIT,
+    HARD_CHILD_CAP,
     MAX_CHILD_FANOUT,
     FIND_WALK_DEADLINE_SECONDS,
     FIND_WALK_MAX_CHILD_FANOUT,
@@ -41,6 +42,7 @@ from .ax_records import (
 )
 from .ax_virtual_table import (
     render_visible_cells,
+    visible_child_span,
 )
 from .find_walk import TEXT_ONLY_ROLES, candidate_record, repeats_parent_text
 
@@ -172,7 +174,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
     # that matches the cause, which a merged count cannot do.
     dropped = {"count": 0, "chars": 0, "time": 0, "depth": 0,
                "budget": 0, "filtered": 0, "pressure": 0,
-               "render_error": 0, "fanout": 0}
+               "render_error": 0, "fanout": 0, "outside_view": 0}
     budget = {"chars": 0}
     # Find walk: kept nodes without a record (`light`), and the kept
     # ancestors of the node being visited that have no record yet.
@@ -294,16 +296,29 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
 
             return unknown_children(), True, None
 
-        if not should_enumerate_children(node, count, facts=facts):
-            return iter(()), False, count
-        fanout = min(count, max_child_fanout)
-        if count > fanout:
-            excess = count - fanout
-            dropped["count"] += excess
-            dropped["fanout"] += excess
+        if should_enumerate_children(node, count, facts=facts):
+            fanout = min(count, max_child_fanout)
+            if count > fanout:
+                excess = count - fanout
+                dropped["count"] += excess
+                dropped["fanout"] += excess
+            indices = range(fanout)
+        else:
+            span = None
+            if (count > HARD_CHILD_CAP
+                    and not facts.has_state(Atspi.StateType.MANAGES_DESCENDANTS)):
+                # Too many children to enumerate, but each one is a real
+                # child: read those in view and report the rest.
+                span = visible_child_span(node, count, window_bounds)
+            if span is None:
+                return iter(()), False, count
+            indices = range(span[0], span[1] + 1)
+            outside = count - len(indices)
+            dropped["count"] += outside
+            dropped["outside_view"] += outside
 
         def known_children():
-            for child_index in range(fanout):
+            for child_index in indices:
                 try:
                     child = node.get_child_at_index(child_index)
                 except Exception as exc:
@@ -319,7 +334,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                     continue
                 yield child_index, child
 
-        return known_children(), True, fanout
+        return known_children(), True, len(indices)
 
     def is_structural_filler(record):
         """Return whether the record is a pure layout container.
@@ -865,6 +880,12 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 "sibling and eligible-child traversal continued; budget-stopped roots "
                 "reported separately".format(
                     dropped["render_error"]))
+        if dropped["outside_view"]:
+            reasons.append(
+                "{} child root(s) outside the view not read: a container "
+                "reported more children than the walk enumerates, so only "
+                "those in view were read; scroll to read others".format(
+                    dropped["outside_view"]))
         if dropped["fanout"]:
             reasons.append(
                 "{} child root(s) not traversed because a container exceeded "
@@ -879,7 +900,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             "reason": ",".join(
                 key for key in (
                     "time", "chars", "budget", "depth", "filtered",
-                    "pressure", "render_error", "fanout",
+                    "pressure", "render_error", "fanout", "outside_view",
                 ) if dropped[key]
             ),
             "detail": "; ".join(reasons) if reasons else "cause not recorded",

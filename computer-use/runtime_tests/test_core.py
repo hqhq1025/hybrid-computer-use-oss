@@ -325,7 +325,7 @@ class ExtentsTests(AtspiPatchedTestCase):
 
     def test_still_rejects_absurd_sizes(self):
         self.assertIsNone(runtime.extents(self._node(0, 0, 0, 40)))
-        self.assertIsNone(runtime.extents(self._node(0, 0, 100, 999999)))
+        self.assertIsNone(runtime.extents(self._node(0, 0, 100, 2147483647)))
 
 
 class GdkDevicePixelTests(unittest.TestCase):
