@@ -624,3 +624,160 @@ class DropdownCommitTests(SelectBoundaryTests):
                        states=(STATE.SELECTED,)))
 
         self.assertEqual(runtime.element_value(combo), "Seattle")
+
+
+class ProjectedComboSelectTests(SelectBoundaryTests):
+    """A LibreOffice gtk3 drop-down: a drawn toggle beside a hidden combo box.
+
+    The toggle is projected as the combo box. Its list opens in a separate
+    untitled popup window of table cells that has no relation back to the
+    toggle; the toggle reports CHECKED while the list is open, and the text
+    beside it shows the choice. Selection.select_child on a cell only
+    highlights it: activating a cell commits the row under the list cursor,
+    and grab_focus on a cell moves the cursor there.
+    """
+
+    def _lo_combo(self, value="10 pt", options=("8 pt", "10 pt", "12 pt"),
+                  grab_moves_cursor=True, list_only=False):
+        app = _Node(role="application", name="soffice")
+        frame = _Node(role="frame", name="Untitled 1 - LibreOffice Calc")
+        entry = _Node(role="text", states=(
+            STATE.SHOWING, STATE.VISIBLE, STATE.EDITABLE))
+        entry.text_iface = _Text("" if list_only else value)
+        toggle = _Node(role="toggle button")
+        frame.add(_Node(role="tool bar").add(_Node(role="filler").add(
+            entry, _Node(role="combo box", states=()), toggle)))
+        popup = _Node(role="window", states=())
+        table = _Node(role="table")
+        popup.add(_Node(role="scroll pane").add(table))
+        cells = [_Node(role="table cell", name=name) for name in options]
+        table.add(*cells)
+        app.add(frame, popup)
+        state = {"cursor": None, "keys": [], "clicks": 0, "value": value}
+
+        def set_open(opened):
+            for node in (toggle, popup):
+                node.states.discard(STATE.CHECKED if node is toggle
+                                    else STATE.SHOWING)
+            for cell in cells:
+                cell.states.discard(STATE.FOCUSED)
+                cell.states.discard(STATE.SELECTED)
+            state["cursor"] = None
+            if opened:
+                toggle.states.add(STATE.CHECKED)
+                popup.states.add(STATE.SHOWING)
+                state["cursor"] = options.index(state["value"])
+                cells[state["cursor"]].states.update(
+                    (STATE.FOCUSED, STATE.SELECTED))
+
+        def click(_index):
+            state["clicks"] += 1
+            set_open(STATE.CHECKED not in toggle.states)
+            return True
+
+        toggle.get_n_actions = lambda: 1
+        toggle.get_action_name = lambda _index: "click"
+        toggle.do_action = click
+
+        def grab(index):
+            if grab_moves_cursor and state["cursor"] is not None:
+                cells[state["cursor"]].states.discard(STATE.FOCUSED)
+                cells[index].states.add(STATE.FOCUSED)
+                state["cursor"] = index
+            return True
+
+        def activate(_index):
+            if state["cursor"] is not None:
+                state["value"] = cells[state["cursor"]].title
+                if not list_only:
+                    entry.text_iface.text = state["value"]
+            set_open(False)
+            return True
+
+        for index, cell in enumerate(cells):
+            cell.component.grab_focus = lambda index=index: grab(index)
+            cell.get_n_actions = lambda: 3
+            cell.get_action_name = (
+                lambda k: ("expand or contract", "edit", "activate")[k])
+            cell.do_action = activate
+
+        def send_key(key):
+            state["keys"].append(key)
+            if key == "Escape":
+                set_open(False)
+
+        patch = mock.patch.object(runtime, "send_key", send_key)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return toggle, entry, cells, state
+
+    def test_choice_is_committed_through_the_list_and_read_back(self):
+        toggle, entry, _cells, state = self._lo_combo()
+        notes = []
+
+        runtime.perform_select(
+            {"text": "12 pt"}, None, toggle, {}, None, notes, {})
+
+        self.assertEqual(entry.text_iface.text, "12 pt")
+        self.assertNotIn(STATE.CHECKED, toggle.states)
+        self.assertEqual(state["keys"], [])
+        self.assertTrue(any("12 pt" in note for note in notes))
+
+    def test_select_on_a_cell_of_the_open_list_commits_its_combo(self):
+        toggle, entry, cells, _state = self._lo_combo()
+        toggle.do_action(0)
+
+        runtime.perform_select({}, None, cells[2], {}, None, [], {})
+
+        self.assertEqual(entry.text_iface.text, "12 pt")
+        self.assertNotIn(STATE.CHECKED, toggle.states)
+
+    def test_highlighted_but_uncommitted_choice_is_not_success(self):
+        toggle, entry, _cells, _state = self._lo_combo(grab_moves_cursor=False)
+
+        failure = self.assert_unknown(lambda: runtime.perform_select(
+            {"text": "12 pt"}, None, toggle, {}, None, [], {}))
+
+        self.assertEqual(entry.text_iface.text, "10 pt")
+        self.assertIn("\"10 pt\"", str(failure))
+
+    def test_unknown_option_closes_the_list_it_opened(self):
+        toggle, entry, _cells, _state = self._lo_combo()
+
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select(
+                {"text": "13 pt"}, None, toggle, {}, None, [], {})
+
+        self.assertEqual(caught.exception.failure_code, "invalid_argument")
+        self.assertIn("\"12 pt\"", str(caught.exception))
+        self.assertNotIn(STATE.CHECKED, toggle.states)
+        self.assertEqual(entry.text_iface.text, "10 pt")
+
+    def test_choice_already_shown_needs_no_input(self):
+        toggle, _entry, _cells, state = self._lo_combo()
+
+        runtime.perform_select(
+            {"text": "10 pt"}, None, toggle, {}, None, [], {})
+
+        self.assertEqual(state["clicks"], 0)
+
+    def test_list_only_choice_is_read_back_from_the_reopened_list(self):
+        toggle, _entry, _cells, state = self._lo_combo(list_only=True)
+
+        runtime.perform_select(
+            {"text": "12 pt"}, None, toggle, {}, None, [], {})
+
+        self.assertEqual(state["value"], "12 pt")
+        self.assertNotIn(STATE.CHECKED, toggle.states)
+        self.assertEqual(state["clicks"], 3)
+
+    def test_list_only_uncommitted_choice_is_not_success(self):
+        toggle, _entry, _cells, state = self._lo_combo(
+            list_only=True, grab_moves_cursor=False)
+
+        failure = self.assert_unknown(lambda: runtime.perform_select(
+            {"text": "12 pt"}, None, toggle, {}, None, [], {}))
+
+        self.assertEqual(state["value"], "10 pt")
+        self.assertIn("\"10 pt\"", str(failure))
+        self.assertNotIn(STATE.CHECKED, toggle.states)

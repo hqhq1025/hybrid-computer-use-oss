@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Linux: AX `select` chooses options of LibreOffice drop-downs (toolbar
+  boxes such as font size, and dialog lists such as Line Spacing), both
+  with an option name on the combo box and on a cell of its open list. It
+  succeeds only when the drop-down shows the option afterwards.
+- Linux: keyboard input to a window that is not in front no longer waits
+  about 7 s for Qt dialogs. The provider asks the window manager to
+  activate the window first and checks that the X11 active window is that
+  window, not just a window of the same application.
 - Windows: `type` and `set_value` send Unicode key events instead of pasting
   through the clipboard, so they no longer replace the clipboard or wait a
   fixed half second; GUI keys wait for the application instead of 500 ms.

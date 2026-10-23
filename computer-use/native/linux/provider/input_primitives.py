@@ -11,7 +11,12 @@ from .foundation import (
     state_contains,
 )
 from .tree_walk import iter_all
-from .x11_windows import app_windows, iter_apps
+from .x11_windows import (
+    app_windows,
+    iter_apps,
+    x11_root_window_state,
+    x11_window_id_for_accessible,
+)
 
 
 def window_is_active(window):
@@ -53,12 +58,79 @@ def window_in_foreground(window):
     return window_is_active(window) or x11_holds_focus(window)
 
 
+def x11_window_id(window):
+    """Return the managed X11 window of one AX top-level window, or None."""
+    app = safe(lambda: Atspi.Accessible.get_application(window))
+    if app is None:
+        return None
+    return safe(lambda: x11_window_id_for_accessible(app, window))
+
+
+def x11_active_window_id():
+    state = x11_root_window_state()
+    return state.get("activeWindow") if state else None
+
+
+def request_window_activation(window_id):
+    """Ask the window manager to activate a window (EWMH _NET_ACTIVE_WINDOW)."""
+    try:
+        result = subprocess.run(
+            ["wmctrl", "-i", "-a", window_id],
+            capture_output=True,
+            timeout=3,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
+def _wait_until(predicate, timeout):
+    deadline = time.time() + timeout
+    while True:
+        if predicate():
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
 def focus_window(window, timeout=1.0):
+    """Bring the window to the foreground and verify it from X11 state.
+
+    The window manager is asked first because it activates the window of
+    any toolkit at once. A child's grab_focus is only the fallback: Qt
+    accepts it on every child without activating the window, so trying
+    each child would cost one full timeout per child.
+    """
     if window is None:
         return False
     if window_is_active(window):
         return True
-    if x11_holds_focus(window):
+
+    def in_foreground():
+        return window_is_active(window) or x11_holds_focus(window)
+
+    window_id = x11_window_id(window)
+    if window_id:
+        def activated():
+            return (
+                window_is_active(window)
+                or x11_active_window_id() == window_id
+            )
+
+        # Compare the exact window, not the process: keystrokes go to the
+        # X11 active window, which can be another window of the same app.
+        if activated():
+            return True
+        if request_window_activation(window_id) and _wait_until(
+            activated, timeout
+        ):
+            return True
+        # The window manager can refuse, for example while a modal child of
+        # the same app stays on top and keeps the input.
+        if in_foreground():
+            return True
+    elif in_foreground():
         return True
 
     def grab(node):
@@ -79,13 +151,13 @@ def focus_window(window, timeout=1.0):
     for node in focusable[:FOCUS_GRAB_CANDIDATES]:
         if not grab(node):
             continue
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if window_is_active(window) or x11_holds_focus(window):
-                return True
-            time.sleep(0.05)
+        if _wait_until(in_foreground, timeout):
+            return True
+        # The toolkit took the grab without activating the window; the
+        # other candidates would do the same.
+        break
     title = str(node_name(window) or "").strip()
-    if title:
+    if title and not window_id:
         safe(
             lambda: subprocess.run(
                 ["wmctrl", "-a", title],
@@ -93,12 +165,9 @@ def focus_window(window, timeout=1.0):
                 timeout=3,
             )
         )
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if window_is_active(window) or x11_holds_focus(window):
-                return True
-            time.sleep(0.05)
-    return window_is_active(window) or x11_holds_focus(window)
+        if _wait_until(in_foreground, timeout):
+            return True
+    return in_foreground()
 
 
 def active_accessible_window():
