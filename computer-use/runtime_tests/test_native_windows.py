@@ -233,6 +233,34 @@ class NativeWindowActionTests(AtspiPatchedTestCase):
             with mock.patch.object(runtime, "strong_window_instance_handles", return_value={0: handle}):
                 self.assertIsNone(runtime.native_window_for_operation({"window_handle": handle}))
 
+    def test_dispatcher_rejects_native_ref_after_ax_claims_window_before_app_lookup(self):
+        app = _TreeNode(role="application", name="paint3d", kids=(
+            _TreeNode(role="frame", name="Main"),))
+        app.get_process_id = lambda: 30
+        with mock.patch.object(runtime, "iter_apps", return_value=[app]), \
+                mock.patch.object(runtime, "_x11_managed_windows", return_value=_managed(
+                    _window(30, "0x1", "Main"))), \
+                mock.patch.object(runtime, "x11_window_type", return_value="NORMAL"), \
+                mock.patch.object(runtime, "process_generation", return_value="gen"), \
+                mock.patch.object(runtime, "x11_root_window_state", return_value={"activeWindow": "0x1"}), \
+                mock.patch.object(runtime, "resolve_operation_app",
+                    side_effect=AssertionError("A native ref must not fall back to app-name lookup")) as resolve, \
+                mock.patch.object(runtime, "_emit") as native_emit, \
+                mock.patch.object(runtime, "_emit_native_window_command") as ax_emit:
+            handle = runtime.window_handle_for_pid(30, "0x1")
+            operation = {"app": "paint3d", "action": "activate", "window_handle": handle,
+                         "target": {"selector": 'window "Main"', "hasName": True,
+                                    "name": "Main", "role": "window", "windowHandle": handle}}
+            with mock.patch.object(runtime, "strong_window_instance_handles", return_value={0: handle}):
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.perform_provider_request("window_action", operation)
+            self.assertIn(caught.exception.failure_code, {"invalid_target", "stale_window_ref"})
+            self.assertEqual("precondition", caught.exception.failure_phase)
+            self.assertFalse(caught.exception.input_events_emitted)
+            resolve.assert_not_called()
+            native_emit.assert_not_called()
+            ax_emit.assert_not_called()
+
     def test_close_that_leaves_the_window_is_effect_unknown(self):
         with mock.patch.object(runtime, "_emit"), \
                 mock.patch.object(runtime, "x11_root_window_state",

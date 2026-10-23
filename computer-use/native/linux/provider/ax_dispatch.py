@@ -179,6 +179,21 @@ def dispatch_provider_operation(
         native = native_window_for_operation(operation)
         if native is not None:
             return perform_native_window_action(action_intent, native)
+        target = operation.get("target") or {}
+        if (not operation.get("app_identity")
+                and not target.get("providerBusName")
+                and not target.get("providerWindowBusName")
+                and (operation.get("window_handle") or target.get("windowHandle"))):
+            # A native ref has no AX application identity. Once its native
+            # validation fails, app-name lookup cannot recover that identity.
+            raise OperationFailure(
+                "invalid_target: the native window ref cannot be verified; "
+                "list windows again. No input was emitted.",
+                failure_code="invalid_target",
+                failure_phase="precondition",
+                input_events_emitted=False,
+                failure_subject="window",
+            )
     if operation_kind == "observe":
         return _observe_operation(operation, observation)
     if (
