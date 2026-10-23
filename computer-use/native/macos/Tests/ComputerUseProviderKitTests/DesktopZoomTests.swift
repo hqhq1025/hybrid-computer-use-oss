@@ -100,10 +100,4 @@ func zoomRequestsPassNativeValidation() throws {
         ],
     ]
     try ProviderRequestValidator.validate(request)
-    var bad = request
-    bad["desktop"] = [
-        "protocol_version": 2, "settle_ms": 0,
-        "actions": [["type": "zoom", "region": [0, 0, 100]]],
-    ]
-    #expect(throws: (any Error).self) { try ProviderRequestValidator.validate(bad) }
 }

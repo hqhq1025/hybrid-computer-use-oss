@@ -77,7 +77,6 @@ public final class ProviderServer {
         error: Error
     ) -> [String: Any] {
         // Correlate only trusted headers, independently of payload validation.
-        // Do not use the validator's integer helper, which truncates fractions.
         guard request["protocol"] as? String == "computer-use-provider",
               request["schema_version"] as? Int == 2,
               let requestID = request["request_id"] as? String,

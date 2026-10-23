@@ -425,22 +425,6 @@ public final class ComputerUseService {
 
     public init() {}
 
-    public func listApps() -> ToolCallResult {
-        ToolCallResult.text(
-            AppDiscovery.listCatalog()
-                .map(\.renderedLine)
-                .joined(separator: "\n")
-        )
-    }
-
-    public func getAppState(
-        app query: String,
-        textLimit: SnapshotTextLimit = .defaults,
-        treeLimits: AccessibilityTreeLimits = .defaults
-    ) throws -> ToolCallResult {
-        snapshotResult(for: try refreshSnapshot(for: query, textLimit: textLimit, treeLimits: treeLimits), style: .fullState)
-    }
-
     public func click(
         app query: String,
         elementIndex: String?,

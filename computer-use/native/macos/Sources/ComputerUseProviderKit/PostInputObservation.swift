@@ -38,36 +38,16 @@ struct PostInputObservationError:
     var actionRoute: String? { delivery.actionRoute }
 }
 
-// Call only after input and any claimed readback have completed successfully.
-func observeAfterConfirmedInput<T>(
-    route: String,
-    readbackSampled: Bool = false,
-    readbackVerified: Bool? = nil,
-    capture: () throws -> T
-) throws -> T {
-    do {
-        return try capture()
-    } catch {
-        throw PostInputObservationError(
-            error,
-            route: route,
-            readbackSampled: readbackSampled,
-            readbackVerified: readbackVerified
-        )
-    }
-}
-
 func postInputObservationFailureResult(
     _ error: Error,
     evidence: [String: Any]? = nil
 ) -> [String: Any] {
-    let failure = (error as? PostInputObservationError)
-        ?? PostInputObservationError(
-            error,
-            route: evidence?["route"] as? String,
-            readbackSampled: evidence?["readback_sampled"] as? Bool ?? false,
-            readbackVerified: evidence?["readback_verified"] as? Bool
-        )
+    let failure = PostInputObservationError(
+        error,
+        route: evidence?["route"] as? String,
+        readbackSampled: evidence?["readback_sampled"] as? Bool ?? false,
+        readbackVerified: evidence?["readback_verified"] as? Bool
+    )
     var result = runtimeFailureResult(failure)
     result["failurePhase"] = "observation"
     result["underlyingFailureCode"] = "post_action_snapshot_unavailable"

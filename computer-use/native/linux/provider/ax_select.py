@@ -22,6 +22,7 @@ success; a route that cannot prove the selection fails instead of guessing.
 
 import time
 
+from . import action_evidence as action_evidence_state
 from .foundation import (
     Atspi,
     OBJECT_REPLACEMENT,
@@ -534,6 +535,7 @@ def perform_select(action_input, window, element, element_record, to_element,
         raise RuntimeError("select requires a target ref")
     role = node_role(element)
     text = action_input.get("text")
+    emitted = True
     owner = owning_dropdown(element) if text is None and to_element is None else None
     if to_element is not None:
         if role in ("table cell", "cell"):
@@ -549,10 +551,12 @@ def perform_select(action_input, window, element, element_record, to_element,
     elif text is not None and effective_role(element, role) in DROPDOWN_ROLES or (
             text is None and owner is not None):
         # select on an option of an open popup chooses it in its drop-down.
+        action_evidence_state.replace(action_evidence)
         chosen = select_dropdown_option(
             element if text is not None else owner,
             text if text is not None else option_name(element), window)
         summary = "selected option {}".format(_quote(chosen))
+        emitted = bool(action_evidence.get("input_emitted"))
         action_evidence["route"] = "semantic_action"
     elif text is not None or _text_iface(element) is not None and role not in (
             "list item", "table cell", "cell", "tree item", "icon"):
@@ -601,7 +605,7 @@ def perform_select(action_input, window, element, element_record, to_element,
         select_item(element)
         summary = "selected {} {}".format(role or "item", _quote(node_name(element)))
         action_evidence["route"] = "selection_api"
-    action_evidence["input_emitted"] = True
+    action_evidence["input_emitted"] = emitted
     action_evidence["readback_sampled"] = True
     action_evidence["readback_verified"] = True
     notes.append("[select] " + summary)
