@@ -66,23 +66,6 @@ internal static class BoundedTreeDiscoveryTests
         Check(childReads == 0 && result.AcquiredNodes == 1 && result.DepthLimited,
             "Depth boundary must not issue even one child read.");
 
-        var covered = new Node("window") { First = new Node("deep") };
-        var other = new Node("popup-host") { First = new Node("deep-popup") };
-        covered.Next = other;
-        var current = string.Empty;
-        var coveredOnly = BoundedTreeDiscovery.Visit(
-            () => covered, node => node.First, node => node.Next,
-            (node, _) => { current = node.Id; return true; },
-            10, 1, TimeSpan.FromSeconds(10), depthLimitIsGap: () => current != "window");
-        Check(coveredOnly.DepthLimited, "A depth limit outside covered subtrees remains a gap.");
-        var coveredRoot = new Node("window") { First = new Node("deep") };
-        var noGap = BoundedTreeDiscovery.Visit(
-            () => coveredRoot, node => node.First, node => node.Next,
-            (node, _) => { current = node.Id; return true; },
-            10, 1, TimeSpan.FromSeconds(10), depthLimitIsGap: () => current != "window");
-        Check(!noGap.DepthLimited && noGap.StopReason == TreeDiscoveryStopReason.Completed,
-            "A depth limit inside a subtree the caller already covers is not a gap.");
-
         var foreign = new Node("foreign", 8) { First = new Node("foreign-child", 8) };
         var neutral = new Node("neutral", 0) { First = new Node("menu") };
         root.First = foreign;

@@ -836,22 +836,15 @@ internal sealed partial class UiaProvider : IDisposable
 
         void AddDesktopTransientRoots(ITreeWalker walker)
         {
-            var insideProjectedWindow = false;
             var result = BoundedTreeDiscovery.Visit(
                 () => walker.GetFirstChild(desktop),
                 element => walker.GetFirstChild(element),
                 element => walker.GetNextSibling(element),
-                (element, depth) =>
+                (element, _) =>
                 {
                     var rootProcessId = Safe(
                         () => element.Properties.ProcessId.ValueOrDefault,
                         0);
-                    if (depth == 1)
-                    {
-                        insideProjectedWindow = projectedHandles.Contains(Safe(
-                            () => element.Properties.NativeWindowHandle.ValueOrDefault.ToInt64(),
-                            0L));
-                    }
                     if (rootProcessId != 0 && rootProcessId != process.Id)
                     {
                         return false;
@@ -874,11 +867,7 @@ internal sealed partial class UiaProvider : IDisposable
                     return true;
                 },
                 MaxDesktopTransientCandidates, MaxDesktopTransientDepth,
-                timeout, elapsed,
-                // The window traversal already covers a projected window's
-                // control view, so a depth limit inside it loses at most a
-                // raw-only popup nested that deep, as the unbounded walk did.
-                depthLimitIsGap: () => !insideProjectedWindow);
+                timeout, elapsed);
             RecordDiscoveryLimit(result, "transient_discovery");
         }
 
@@ -896,7 +885,10 @@ internal sealed partial class UiaProvider : IDisposable
             {
                 annotation?.Invoke(scope + "_node_budget");
             }
-            if (result.DepthLimited) { annotation?.Invoke(scope + "_depth_budget"); }
+            // The depth bound is not a gap. Popup hosts sit just below the
+            // desktop; the bound cuts window content, which the window
+            // traversal covers. Counting it marked ordinary windows such as
+            // Notepad partial and made their controls unaddressable.
         }
 
         void AddCandidate(
