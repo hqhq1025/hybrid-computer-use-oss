@@ -203,7 +203,8 @@ func compactAXModelEvidence(
 	targetedCoverageFailure := coverageIncomplete &&
 		axTargetedCoverageFailure(full, mode, isError)
 	if coverageIncomplete &&
-		(mode == contract.AXModeObserve || targetedCoverageFailure) {
+		(mode == contract.AXModeObserve || axFinalObservationHasTree(full) ||
+			targetedCoverageFailure) {
 		compact["coverage"] = "partial"
 		compact["tree_complete"] = false
 	}
@@ -646,4 +647,19 @@ func axPublicEvidence(full map[string]any, isError bool, content []ContentItem) 
 		}
 	}
 	return public
+}
+
+// axFinalObservationHasTree reports whether an act result carries a final
+// observation that renders the window tree. Its coverage is then the model's
+// coverage, the same as for an observe call.
+func axFinalObservationHasTree(full map[string]any) bool {
+	if full["final_observation_returned"] != true {
+		return false
+	}
+	switch full["final_observation_kind"] {
+	case "content", "focused", "tree", "working_tree", "diff", "full":
+		return true
+	default:
+		return false
+	}
 }

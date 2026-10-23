@@ -500,6 +500,9 @@ func mergeAXBatchFinalObservation(
 	if inputEmitted {
 		actionResult.StructuredContent["input_events_emitted"] = true
 	}
+	if _, present := observationResult.StructuredContent["final_observation_returned"]; present {
+		replaceAXObservationCoverage(actionResult.StructuredContent, observationResult.StructuredContent)
+	}
 	for key, value := range observationResult.StructuredContent {
 		switch key {
 		case "failure_code", "failure_phase":
@@ -567,4 +570,19 @@ func mergeAXBatchFinalObservation(
 		}
 	}
 	return actionResult
+}
+
+// replaceAXObservationCoverage makes the coverage facts describe the final
+// observation, not the action's earlier read. A key the final observation
+// does not set is removed, so a complete read cannot inherit an earlier gap.
+func replaceAXObservationCoverage(destination, current map[string]any) {
+	for _, key := range []string{
+		"tree_complete_for_model", "coverage_incomplete_nodes", "coverage_incomplete_reasons",
+		"structural_budget_applied", "structural_budget_omitted_nodes", "structural_budget_omitted_targets",
+	} {
+		delete(destination, key)
+		if value, present := current[key]; present {
+			destination[key] = value
+		}
+	}
 }
