@@ -268,6 +268,83 @@ class ActionNotesTests(AtspiPatchedTestCase):
         self.assertTrue(any("2 coordinate click(s)" in note for note in notes))
 
 
+class ActionReplyTimeoutTests(AtspiPatchedTestCase):
+    """A semantic action whose reply times out was still delivered.
+
+    Qt runs a modal dialog's event loop inside the action handler
+    (QDialog::exec), so the D-Bus reply to DoAction arrives only after the
+    dialog closes. Okular's "Go to Page..." menu item opened its dialog,
+    the call timed out, and the click fell back to a coordinate click that
+    the new dialog blocked; the result said no input was emitted.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.window = FakeNode(states=(STATE.ACTIVE,))
+        for name, value in (
+            ("resolve_app", lambda q: FakeNode()),
+            ("main_window", lambda a: (0, self.window)),
+            ("extents", lambda n: runtime.frame(0, 0, 100, 100)),
+            ("build_snapshot", lambda *a, **k: {"text": ""}),
+            ("require_window_focus", lambda w, what: None),
+            ("time", _NoSleep()),
+        ):
+            original = getattr(runtime, name)
+            setattr(runtime, name, value)
+            self.addCleanup(setattr, runtime, name, original)
+
+    def _no_reply_node(self):
+        from gi.repository import GLib
+
+        node = FakeNode()
+        calls = []
+
+        def do_action(index):
+            calls.append(index)
+            raise GLib.Error.new_literal(
+                GLib.quark_from_string("atspi_error"),
+                "Did not receive a reply. Possible causes include: the remote "
+                "application did not send a reply, the message bus security "
+                "policy blocked the reply, the reply timeout expired, or the "
+                "network connection was broken.",
+                1,
+            )
+
+        node.do_action = do_action
+        return node, calls
+
+    def test_reply_timeout_counts_as_delivered_without_pointer_fallback(self):
+        element, calls = self._no_reply_node()
+        pointer = []
+        for name, value in (
+            ("find_element_at_snapshot_path", lambda a, r: element),
+            ("send_mouse_click", lambda *args: pointer.append(args)),
+            ("preferred_action_index", lambda node: 0),
+        ):
+            original = getattr(runtime, name)
+            setattr(runtime, name, value)
+            self.addCleanup(setattr, runtime, name, original)
+
+        response = perform_provider_operation(
+            {"intent": "click", "app": "x", "click_method": "auto",
+             "x": 1, "y": 1})
+
+        self.assertEqual(calls, [0])
+        self.assertEqual(pointer, [])
+        self.assertEqual(response["actionEvidence"]["route"], "semantic_action")
+        self.assertTrue(response["actionEvidence"]["input_emitted"])
+        self.assertTrue(any("did not reply" in note for note in response["notes"]))
+
+    def test_other_action_errors_still_mean_not_invoked(self):
+        element = FakeNode()
+
+        def refused(index):
+            raise RuntimeError("no such action")
+
+        element.do_action = refused
+        self.assertFalse(runtime.do_action_by_index(element, 0))
+
+
 class SnapshotDiagnosticsTests(AtspiPatchedTestCase):
     """An app whose accessibility tree holds only its window frame is flagged.
 

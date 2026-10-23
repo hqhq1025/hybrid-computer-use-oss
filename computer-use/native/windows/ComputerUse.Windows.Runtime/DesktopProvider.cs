@@ -137,7 +137,7 @@ internal static class DesktopProvider
         {
             throw new ProviderFailureException(
                 "final_desktop_observation_failed",
-                "postcondition",
+                "post_action_observation",
                 error.Message,
                 inputEmitted,
                 false,
@@ -405,12 +405,18 @@ internal static class DesktopProvider
                 "invalid_coordinate",
                 "precondition",
                 "Coordinate action requires y.");
-        if (x < 0 || y < 0 || x >= desktopWidth || y >= desktopHeight)
+        if (!WindowsDesktopImageGeometry.ContainsPoint(
+                x, y, desktopWidth, desktopHeight))
         {
+            // The core reports invalid_gui_action as invalid_argument; the
+            // Linux and macOS providers reject the same points.
             throw new ProviderFailureException(
-                "coordinate_out_of_bounds",
+                "invalid_gui_action",
                 "precondition",
-                "Coordinate is outside the captured full-desktop image.");
+                $"Coordinate ({x}, {y}) is outside the full-desktop image " +
+                $"pixels 0..{desktopWidth - 1} x 0..{desktopHeight - 1}; " +
+                "take a new screenshot.",
+                factsComplete: true);
         }
     }
 

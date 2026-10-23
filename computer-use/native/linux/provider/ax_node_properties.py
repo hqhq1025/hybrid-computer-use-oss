@@ -6,6 +6,7 @@ from .foundation import (
     CLICK_COVERED_ACTIONS,
     DEFAULT_TEXT_LIMIT,
     NON_SELF_ACTIONS,
+    OBJECT_REPLACEMENT,
     UNIVERSAL_ACTIONS,
     child_count,
     limit_text,
@@ -159,6 +160,45 @@ def selected_option_name(node):
     return ""
 
 
+# Maximum embedded objects read to build an editor's value.
+EMBEDDED_EDITOR_LINE_LIMIT = 200
+
+
+def embedded_editor_text(node, text_limit=DEFAULT_TEXT_LIMIT):
+    """Return the text of an editor whose own text is only embedded objects.
+
+    Chromium exposes a contenteditable editor (CodeMirror in Electron apps
+    such as Joplin) as an EDITABLE entry whose Text is one U+FFFC per line;
+    each line is an embedded child reached through Hypertext. The lines are
+    joined with newlines. Non-editable containers (a paragraph holding a
+    link) are left alone: their children render on their own.
+    """
+    text_iface = safe(node.get_text_iface)
+    if text_iface is None:
+        return ""
+    count = int(safe(lambda: Atspi.Text.get_character_count(text_iface), 0) or 0)
+    if count <= 0 or count > EMBEDDED_EDITOR_LINE_LIMIT:
+        return ""
+    own = str(safe(lambda: Atspi.Text.get_text(text_iface, 0, count), "") or "")
+    # The state read comes last: only nodes whose text is all embedded
+    # objects pay for it, so ordinary records keep one read per field.
+    if not own or own.strip(OBJECT_REPLACEMENT):
+        return ""
+    if not state_contains(node, Atspi.StateType.EDITABLE):
+        return ""
+    hypertext = safe(node.get_hypertext_iface)
+    if hypertext is None:
+        return ""
+    lines = []
+    links = int(safe(lambda: Atspi.Hypertext.get_n_links(hypertext), 0) or 0)
+    for index in range(min(links, EMBEDDED_EDITOR_LINE_LIMIT)):
+        link = safe(lambda index=index: Atspi.Hypertext.get_link(hypertext, index))
+        embedded = safe(lambda: Atspi.Hyperlink.get_object(link, 0)) if link else None
+        if embedded is not None:
+            lines.append(text_value(embedded, text_limit=None))
+    return limit_text("\n".join(lines), text_limit=text_limit)
+
+
 def element_value(node, text_limit=DEFAULT_TEXT_LIMIT, role=None):
     """Return the node's text or numeric value; see selected_option_name().
 
@@ -168,6 +208,9 @@ def element_value(node, text_limit=DEFAULT_TEXT_LIMIT, role=None):
     direct = text_value(node, text_limit=text_limit) or numeric_value(node)
     if direct:
         return direct
+    embedded = embedded_editor_text(node, text_limit=text_limit)
+    if embedded:
+        return embedded
     # Only dropdown roles pay for the descendant scan.
     if role is None:
         role = node_role(node)

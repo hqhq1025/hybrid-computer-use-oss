@@ -105,6 +105,123 @@ class ComboProjectionTests(AtspiPatchedTestCase):
 
 
 
+class EditableTextRoleTests(AtspiPatchedTestCase):
+    """AT-SPI role "text" names both static text and editable fields.
+
+    GTK (GtkEntry, GtkTextView), Qt (QLineEdit) and LibreOffice dialog fields
+    report role "text" with EDITABLE and EditableText; labels use "label". The
+    model saw the gedit document and the LibreOffice Find field as static
+    text: no ref in the tree, no value, and find role "textbox" missed them.
+    """
+
+    def _field(self, states, editable_iface=True, text="alpha"):
+        node = _Node(role="text", states=states)
+        node.text_iface = FakeTextIface(text)
+        if not editable_iface:
+            node.get_editable_text_iface = lambda: None
+        else:
+            node.get_editable_text_iface = lambda: node.text_iface
+        return node
+
+    def test_editable_single_line_text_is_an_entry(self):
+        node = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE,
+                            STATE.SINGLE_LINE))
+        _Node(role="filler").add(node)
+        record = runtime.record_for(node, 0, [0], None)
+        self.assertEqual(record["controlType"], "entry")
+        self.assertEqual(runtime.effective_role(node), "entry")
+        self.assertTrue(runtime.record_still_matches(node, record, None))
+
+    def test_editable_multi_line_text_is_a_text_area(self):
+        node = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE,
+                            STATE.MULTI_LINE))
+        _Node(role="scroll pane").add(node)
+        record = runtime.record_for(node, 0, [0], None)
+        self.assertEqual(record["controlType"], "text area")
+
+    def test_read_only_text_stays_text(self):
+        node = self._field((STATE.SHOWING, STATE.VISIBLE))
+        _Node(role="filler").add(node)
+        self.assertEqual(runtime.record_for(node, 0, [0], None)["controlType"], "text")
+
+    def test_editable_text_without_editable_interface_is_an_entry(self):
+        # KTextEditor (Kate) reports EDITABLE and Text but no EditableText;
+        # keyboard input still edits it.
+        node = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE),
+                           editable_iface=False)
+        _Node(role="filler").add(node)
+        self.assertEqual(runtime.record_for(node, 0, [0], None)["controlType"], "entry")
+
+    def test_editable_state_without_text_interface_stays_text(self):
+        node = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE),
+                           editable_iface=False)
+        node.text_iface = None
+        _Node(role="filler").add(node)
+        self.assertEqual(runtime.record_for(node, 0, [0], None)["controlType"], "text")
+
+    def test_combo_editor_keeps_its_role(self):
+        # The LibreOffice combo projection already exposes this editor through
+        # the combo box (editTarget); a second textbox would duplicate it.
+        editor = self._field((STATE.EDITABLE, STATE.SHOWING, STATE.VISIBLE))
+        combo = _Node(role="combo box", states=())
+        toggle = _Node(role="toggle button")
+        _Node(role="filler").add(editor, combo, toggle)
+        self.assertEqual(runtime.record_for(editor, 0, [0], None)["controlType"], "text")
+
+
+
+class ItemNameFromContentTests(AtspiPatchedTestCase):
+    """Unnamed rows take their name from their visible labels.
+
+    GTK3 GtkListBoxRow (GNOME Settings sidebar, D-Feet bus list) and GTK tree
+    rows expose no accessible name; the label is a descendant. The rows were
+    rendered as "listitem [addressable=false]" with the text beside them, so
+    the model could see "Mouse & Touchpad" but had no ref to click.
+    """
+
+    def _row(self, *labels, role="list item"):
+        row = _Node(role=role)
+        box = _Node(role="panel")
+        row.add(box)
+        for text, states in labels:
+            box.add(_Node(role="label", name=text, states=states))
+        _Node(role="list box").add(row)
+        return row
+
+    def test_unnamed_list_item_takes_its_visible_label(self):
+        visible = (STATE.SHOWING, STATE.VISIBLE)
+        hidden = ()
+        row = self._row(("Control how you connect", hidden), ("Network", visible))
+        record = runtime.record_for(row, 0, [0], None)
+        self.assertEqual(record["name"], "Network")
+        self.assertEqual(record["nameSource"], "content")
+        self.assertEqual(runtime.effective_name(row), "Network")
+        self.assertTrue(runtime.record_still_matches(row, record, None))
+
+    def test_offscreen_row_still_named_from_visible_labels(self):
+        row = self._row(("Mobile Network", (STATE.VISIBLE,)))
+        self.assertEqual(runtime.effective_name(row), "Mobile Network")
+
+    def test_several_labels_join_in_order(self):
+        visible = (STATE.SHOWING, STATE.VISIBLE)
+        row = self._row(("org.freedesktop.DBus", visible), ("pid: 220", visible),
+                        role="tree item")
+        self.assertEqual(runtime.effective_name(row), "org.freedesktop.DBus pid: 220")
+
+    def test_own_name_wins(self):
+        row = self._row(("Inner", (STATE.SHOWING, STATE.VISIBLE)))
+        row.title = "Outer"
+        record = runtime.record_for(row, 0, [0], None)
+        self.assertEqual(record["name"], "Outer")
+        self.assertEqual(record["nameSource"], "provider")
+
+    def test_containers_are_not_named_from_content(self):
+        panel = _Node(role="panel").add(
+            _Node(role="label", name="Network", states=(STATE.SHOWING, STATE.VISIBLE)))
+        self.assertEqual(runtime.effective_name(panel), "")
+
+
+
 class _Span:
     def __init__(self, start, end):
         self.start_offset, self.end_offset = start, end
@@ -300,6 +417,86 @@ class SelectTests(AtspiPatchedTestCase):
                                    self.notes, self.evidence)
         self.assertEqual(sorted(selected), [3, 4, 6, 7])
         self.assertEqual(self.notes, ["[select] selected 4 cells A2:B3"])
+
+
+class _RecreatingList(_Node):
+    """A Qt item view: every child query returns a new accessible object.
+
+    Qt's AT-SPI bridge wraps each item-view cell (and each list item of a
+    combo popup) in a fresh QAccessibleInterface per query, so the object
+    path of the same cell changes on every read. The cells are TRANSIENT
+    children of a MANAGES_DESCENDANTS container.
+    """
+
+    def __init__(self, names, **kwargs):
+        super().__init__(role="tree", states=(
+            STATE.SHOWING, STATE.VISIBLE, STATE.MANAGES_DESCENDANTS), **kwargs)
+        self.names = list(names)
+
+    def get_child_count(self):
+        return len(self.names)
+
+    def get_child_at_index(self, index):
+        cell = _Node(role="table cell", name=self.names[index], states=(
+            STATE.SHOWING, STATE.VISIBLE, STATE.TRANSIENT))
+        cell.parent = self
+        cell.get_index_in_parent = lambda: index
+        return cell
+
+
+class TransientItemIdentityTests(AtspiPatchedTestCase):
+    """Refs to Qt item-view cells failed as stale right after observe or find."""
+
+    def setUp(self):
+        super().setUp()
+        self.view = _RecreatingList(["Logger", "Network Sync", "syslog"])
+        self.window = _Node(role="dialog", name="Preferences").add(self.view)
+        patcher = mock.patch.object(
+            runtime, "process_generation", return_value="99123")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_recreated_item_keeps_one_provider_identity(self):
+        first = runtime.provider_identity_path(self.view.get_child_at_index(1))
+        second = runtime.provider_identity_path(self.view.get_child_at_index(1))
+        self.assertEqual(first, second)
+        self.assertNotEqual(
+            first, runtime.provider_identity_path(self.view.get_child_at_index(2)))
+
+    def test_ref_to_recreated_cell_resolves_by_its_identity(self):
+        cell = self.view.get_child_at_index(1)
+        record = runtime.record_for(cell, 0, [0, 0, 1], None)
+        found = runtime.scan_provider_identity(
+            [(0, self.window)], record["providerBusName"],
+            record["providerObjectPath"], record["processGeneration"],
+            max_nodes=100, deadline=runtime.time.monotonic() + 5)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(runtime.node_name(found[0][0]), "Network Sync")
+
+    def test_runtime_path_check_accepts_the_recreated_cell(self):
+        app = _Node(role="application", name="vlc").add(self.window)
+        cell = self.view.get_child_at_index(2)
+        record = runtime.record_for(cell, 0, [0, 0, 2], None)
+        target = {
+            "role": "table cell", "name": "syslog", "hasName": True,
+            "providerBusName": record["providerBusName"],
+            "providerObjectPath": record["providerObjectPath"],
+            "processGeneration": record["processGeneration"],
+        }
+        found = runtime.resolve_provider_runtime_path(
+            app, [0, 0, 2], target, {0})
+        self.assertEqual(len(found), 1)
+
+    def test_persistent_objects_keep_their_object_path(self):
+        """GTK cells are TRANSIENT too but keep their objects; nothing changes."""
+        button = _Node(role="push button", name="OK")
+        _Node(role="panel").add(button)
+        self.assertEqual(runtime.provider_identity_path(button), button.path)
+        list_view = _Node(role="list", states=(
+            STATE.SHOWING, STATE.VISIBLE, STATE.MANAGES_DESCENDANTS))
+        plain = _Node(role="list item", name="a")
+        list_view.add(plain)
+        self.assertEqual(runtime.provider_identity_path(plain), plain.path)
 
 
 if __name__ == "__main__":

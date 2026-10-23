@@ -6,7 +6,7 @@ selection parameter is exposed to the model.
 
 | OS | Native implementation | Runtime requirements |
 | --- | --- | --- |
-| Linux | Embedded Python, AT-SPI2, X11 | Signed-in X11 session and the packages in [Computer Use MCP](MCP.md#desktop-runtime) |
+| Linux | Embedded Python, AT-SPI2, X11 | Signed-in X11 session and the packages in [Computer Use MCP](MCP.md#desktop-runtime); the provider switches accessibility on, and applications started before it may need a restart ([details](MCP.md#accessibility-on-linux)) |
 | macOS | Swift, AXUIElement, CoreGraphics, ScreenCaptureKit | macOS 14+, graphical login, Accessibility and Screen Recording consent |
 | Windows | C#/.NET 8, FlaUI UIA3 5.0, Win32 | Unlocked interactive session, compatible target integrity level |
 

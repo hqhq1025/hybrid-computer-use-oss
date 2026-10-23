@@ -29,10 +29,7 @@ internal static partial class NativeDesktop
     internal static void MovePointer(double x, double y)
     {
         var bounds = DesktopBounds();
-        if (!bounds.Contains((int)Math.Round(x), (int)Math.Round(y)))
-        {
-            throw new InvalidOperationException("coordinate_out_of_bounds");
-        }
+        ValidatePointerCoordinate(x, y, bounds);
         var normalizedX = Normalize(x, bounds.Left, bounds.Width);
         var normalizedY = Normalize(y, bounds.Top, bounds.Height);
         SendChecked(
@@ -102,6 +99,12 @@ internal static partial class NativeDesktop
         if (path.Count < 2)
         {
             throw new InvalidOperationException("drag_path_requires_two_points");
+        }
+        // Reject the whole path before the button goes down.
+        var bounds = DesktopBounds();
+        foreach (var point in path)
+        {
+            ValidatePointerCoordinate(point.X, point.Y, bounds);
         }
         MovePointer(path[0].X, path[0].Y);
         Thread.Sleep(80);
@@ -308,9 +311,19 @@ internal static partial class NativeDesktop
         }
     }
 
-    private static int Normalize(double value, int origin, int length)
+    private static int Normalize(double value, int origin, int length) =>
+        WindowsDesktopImageGeometry.ToSendInputAbsolute(value, origin, length);
+
+    private static void ValidatePointerCoordinate(
+        double x,
+        double y,
+        Rectangle bounds)
     {
-        return (int)Math.Round((value - origin) * 65535.0 / Math.Max(1, length - 1));
+        if (!double.IsFinite(x) || !double.IsFinite(y) ||
+            !bounds.Contains((int)Math.Round(x), (int)Math.Round(y)))
+        {
+            throw new InvalidOperationException("coordinate_out_of_bounds");
+        }
     }
 
     private static Input VirtualKeyInput(ushort key, bool keyUp)

@@ -266,7 +266,7 @@ Notes:
 func runtimeNotes(platform string) string {
 	switch platform {
 	case "linux":
-		return "Linux runtime: AT-SPI2 and GDK run against the signed-in desktop user's accessibility session. When the client starts without XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, or display variables, computer-use tries to discover the same user's session from /run/user/<uid> and desktop processes."
+		return "Linux runtime: AT-SPI2 and GDK run against the signed-in desktop user's accessibility session. When the client starts without XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, or display variables, computer-use tries to discover the same user's session from /run/user/<uid> and desktop processes. On first use the provider switches session accessibility on (org.a11y.Status IsEnabled, and Gtk/Modules on Xfce); applications that were already running may need a restart, and AX apps names them."
 	case "darwin":
 		return "macOS runtime: install ComputerUseProvider.app beside computer-use and grant that provider Accessibility and Screen Recording permissions. Run inside the signed-in graphical session. Permissions and desktop capture must be checked with a live AX/GUI call; doctor does not verify them."
 	case "windows":

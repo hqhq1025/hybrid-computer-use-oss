@@ -22,7 +22,7 @@ func nativeFailureFixtures(t *testing.T) map[string]json.RawMessage {
 
 func TestNativeFailureEnvelopesStrictTypedRoundTrip(t *testing.T) {
 	fixtures := nativeFailureFixtures(t)
-	if len(fixtures) != 11 {
+	if len(fixtures) != 12 {
 		t.Fatalf("failure envelope coverage changed: %d", len(fixtures))
 	}
 	for name, data := range fixtures {

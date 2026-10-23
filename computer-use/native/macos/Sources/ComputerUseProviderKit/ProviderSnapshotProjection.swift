@@ -4,7 +4,7 @@ import CoreGraphics
 import Foundation
 
 extension AppSnapshot {
-    func providerDictionary(includeScreenshot: Bool) throws -> [String: Any] {
+    func providerDictionary() throws -> [String: Any] {
         let generation = providerProcessGeneration ?? macProcessGeneration(pid: app.pid)
         var result: [String: Any] = [
             "app": [
@@ -42,13 +42,15 @@ extension AppSnapshot {
                 "showing": true,
             ]]
         }
-        if includeScreenshot, let screenshotPNGData {
-            result["screenshotPngBase64"] = screenshotPNGData.base64EncodedString()
-            result["screenshotMimeType"] = "image/png"
-            result["screenshotEncoding"] = "png"
-            if let dimensions = imageDimensions(screenshotPNGData) {
-                result["width"] = dimensions.width
-                result["height"] = dimensions.height
+        if !omissions.isEmpty {
+            result["annotations"] = omissions.map { omission in
+                [
+                    "parentRuntimeId": [0],
+                    "kind": "provider_omission",
+                    "count": omission.count,
+                    "reason": omission.reason,
+                    "detail": omission.detail,
+                ] as [String: Any]
             }
         }
         if let focusedSummary {

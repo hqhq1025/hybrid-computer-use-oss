@@ -36,25 +36,39 @@ extension ComputerUseRuntimeBridge {
         try validateRequestedIdentity(operation, app: appDescriptor)
         recordTiming("app_resolution")
         let expectedWindowHandle = string(operation["targetWindowHandle"])
-        let cachedSnapshot = service.cachedSnapshot(for: app)
-        let initialSnapshot = try service.refreshSnapshot(
-            for: app,
-            recoveryPolicy: .readOnly,
-            fallbackWindow: cachedSnapshot?.rootWindowElement,
+        let initialSnapshot: AppSnapshot
+        let elementIndex: String?
+        if let lease = leasedActionTarget(
+            tool: tool,
+            operation: operation,
+            app: app,
+            appDescriptor: appDescriptor,
             expectedWindowHandle: expectedWindowHandle
-        )
-        try validateRequestedWindow(operation, snapshot: initialSnapshot)
-        recordTiming("initial_snapshot")
+        ) {
+            initialSnapshot = lease.snapshot
+            elementIndex = lease.elementIndex
+            recordTiming("initial_snapshot")
+        } else {
+            let cachedSnapshot = service.cachedSnapshot(for: app)
+            initialSnapshot = try service.refreshSnapshot(
+                for: app,
+                recoveryPolicy: .readOnly,
+                fallbackWindow: cachedSnapshot?.rootWindowElement,
+                expectedWindowHandle: expectedWindowHandle
+            )
+            try validateRequestedWindow(operation, snapshot: initialSnapshot)
+            recordTiming("initial_snapshot")
+            elementIndex = try resolvedRuntimeElementIndex(
+                operation,
+                app: app,
+                semanticTargetKey: "semanticTarget",
+                elementKey: "element",
+                targetLabel: "target"
+            )
+        }
         let changeWake = AXChangeWake(
             pid: appDescriptor.pid,
             targetElement: initialSnapshot.rootWindowElement
-        )
-        let elementIndex = try resolvedRuntimeElementIndex(
-            operation,
-            app: app,
-            semanticTargetKey: "semanticTarget",
-            elementKey: "element",
-            targetLabel: "target"
         )
         recordTiming("target_resolution")
         if tool == "resolve_target" {
@@ -118,9 +132,6 @@ extension ComputerUseRuntimeBridge {
                         pages: pages,
                         pid: snapshot.app.pid
                     )
-                    _ = try observeAfterConfirmedInput(route: "input.cg_event.scroll") {
-                        try service.refreshSnapshot(for: app)
-                    }
                 }
                 executedRoute = "input.cg_event.scroll"
                 geometrySampled = true
@@ -128,12 +139,15 @@ extension ComputerUseRuntimeBridge {
                 try focusRuntimeElement(elementIndex, app: app)
                 let dispatch = try service.typeTextWithRoute(
                     app: app,
-                    text: string(operation["text"])
+                    text: string(operation["text"]),
+                    elementIndex: elementIndex
                 )
                 executedRoute = dispatch.route
+                readbackSampled = dispatch.readbackVerified != nil
+                readbackVerified = dispatch.readbackVerified
             case "keypress":
                 try focusRuntimeElement(elementIndex, app: app)
-                _ = try service.pressKey(
+                try service.pressKey(
                     app: app,
                     key: string(operation["key"])
                 )
@@ -203,20 +217,16 @@ extension ComputerUseRuntimeBridge {
             }
             return result
         }
-        let includeScreenshot = bool(operation["includeScreenshot"])
         let snapshot: AppSnapshot
         let projectedSnapshot: [String: Any]
         do {
             relativeReadback?.finalSnapshotStatus = "attempted"
             snapshot = try service.refreshSnapshot(
                 for: app,
-                recoveryPolicy: .readOnly,
-                includeScreenshot: includeScreenshot
+                recoveryPolicy: .readOnly
             )
             relativeReadback?.finalSnapshotStatus = "captured"
-            projectedSnapshot = try snapshot.providerDictionary(
-                includeScreenshot: includeScreenshot
-            )
+            projectedSnapshot = try snapshot.providerDictionary()
             relativeReadback?.bindFinal(snapshot: snapshot)
             recordTiming("final_snapshot")
             if timingEnabled {
@@ -311,6 +321,63 @@ extension ComputerUseRuntimeBridge {
                 "failed to focus element \(elementIndex)"
             )
         }
+    }
+
+    /// Reuses the last snapshot for an action instead of walking the tree
+    /// again, when one batched live read shows that its window and target
+    /// are unchanged. Returns nil whenever a fresh walk is needed.
+    private func leasedActionTarget(
+        tool: String,
+        operation: [String: Any],
+        app: String,
+        appDescriptor: RunningAppDescriptor,
+        expectedWindowHandle: String
+    ) -> (snapshot: AppSnapshot, elementIndex: String?)? {
+        // The resolver reads the snapshot stored under this exact query.
+        guard let cached = service.snapshotsByApp[app.lowercased()],
+              cached.app.pid == appDescriptor.pid else {
+            return nil
+        }
+        let hasElementTarget = operation["semanticTarget"] != nil || operation["element"] != nil
+        guard actionMaySkipInitialSnapshot(
+                  tool: tool,
+                  hasElementTarget: hasElementTarget,
+                  hasCoordinates: operation["x"] != nil || operation["y"] != nil,
+                  cachedGeneration: cached.providerProcessGeneration,
+                  currentGeneration: macProcessGeneration(pid: appDescriptor.pid),
+                  cachedWindowHandle: cached.targetWindowHandle,
+                  requestedWindowHandle: expectedWindowHandle
+              ),
+              let recordedWindow = cached.rootWindowIdentity,
+              AXLiveIdentity.readLive(cached.rootWindowElement) == recordedWindow,
+              (try? validateRequestedWindow(operation, snapshot: cached)) != nil
+        else {
+            return nil
+        }
+        let resolved: String?
+        do {
+            resolved = try resolvedRuntimeElementIndex(
+                operation,
+                app: app,
+                semanticTargetKey: "semanticTarget",
+                elementKey: "element",
+                targetLabel: "target"
+            )
+        } catch {
+            return nil
+        }
+        guard let index = resolved else {
+            return hasElementTarget ? nil : (cached, nil)
+        }
+        guard let position = Int(index),
+              let record = cached.elements[position],
+              let element = record.element,
+              let recorded = record.liveIdentity,
+              AXLiveIdentity.readLive(element) == recorded
+        else {
+            return nil
+        }
+        return (cached, index)
     }
 
     private func resolvedRuntimeElementIndex(
@@ -662,4 +729,33 @@ func equivalentProviderProjectionIndex(
     let primary = target["runtimeId"] as? [Int]
     return records.first(where: { $0.runtimeID == primary })?.index
         ?? records.map(\.index).min()
+}
+
+/// Whether an action may act on the last snapshot after a live check
+/// instead of walking the tree first. Only window-bound actions whose
+/// target is a recorded element, or that need no element, qualify; a
+/// coordinate click hit-tests the snapshot and so needs a fresh one.
+func actionMaySkipInitialSnapshot(
+    tool: String,
+    hasElementTarget: Bool,
+    hasCoordinates: Bool,
+    cachedGeneration: String?,
+    currentGeneration: String,
+    cachedWindowHandle: String?,
+    requestedWindowHandle: String
+) -> Bool {
+    guard !requestedWindowHandle.isEmpty,
+          cachedWindowHandle == requestedWindowHandle,
+          cachedGeneration == currentGeneration,
+          !hasCoordinates else {
+        return false
+    }
+    switch tool {
+    case "click", "set_value", "select", "increment", "decrement":
+        return hasElementTarget
+    case "type", "keypress", "scroll":
+        return true
+    default:
+        return false
+    }
 }

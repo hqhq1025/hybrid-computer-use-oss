@@ -123,13 +123,16 @@ GDK_VOID_SYMBOL = 0xFFFFFF
 def keysym(name):
     """Resolve a key name to an X11 keysym, or 0 when it has none.
 
-    Punctuation is accepted as the character itself (",", ".", "/"), and
-    named keys in any case ("INSERT", "caps_lock"), because callers write
-    keys the way they appear on the keyboard.
+    Punctuation is accepted as the character itself (",", ".", "/") or by
+    its keysym name in any case ("COMMA", "plus"), and named keys in any
+    case ("INSERT", "caps_lock"), because callers write keys the way they
+    appear on the keyboard.
     """
     candidates = [name]
     if len(name) > 1:
         candidates.append("_".join(part.capitalize() for part in name.split("_")))
+        # Punctuation keysyms are lowercase names ("comma", "plus").
+        candidates.append(name.lower())
     for candidate in candidates:
         sym = Gdk.keyval_from_name(candidate)
         if sym and sym != GDK_VOID_SYMBOL:
@@ -260,14 +263,63 @@ def send_key(key):
         raise release_error
 
 
+# Pause after each synthesized non-ASCII character. libatspi types a
+# character without a keycode in the current layout by rebinding a spare
+# keycode to its keysym. A burst of such characters reuses that keycode before
+# the application has read the previous mapping, so one STRING event with
+# "Grüße 你好" can arrive as "Gr好好e 好好". 20 ms still lost characters
+# occasionally; 35 ms did not.
+NON_ASCII_KEY_INTERVAL_SECONDS = 0.035
+
+
+def _text_runs(text):
+    """Split text into ASCII runs and single non-ASCII characters."""
+    runs = []
+    ascii_run = ""
+    for char in text:
+        if ord(char) < 128:
+            ascii_run += char
+            continue
+        if ascii_run:
+            runs.append(ascii_run)
+            ascii_run = ""
+        runs.append(char)
+    if ascii_run:
+        runs.append(ascii_run)
+    return runs
+
+
+# Bound the paced non-ASCII characters per call so one request stays well
+# inside the 30 s provider timeout (500 x 35 ms = 17.5 s).
+MAX_SYNTHESIZED_NON_ASCII_CHARACTERS = 500
+
+
 def send_text(text):
-    emit_keyboard_event(
-        0,
-        str(text),
-        Atspi.KeySynthType.STRING,
-        "text payload",
-        False,
-    )
+    text = str(text)
+    non_ascii = sum(1 for char in text if ord(char) >= 128)
+    if non_ascii > MAX_SYNTHESIZED_NON_ASCII_CHARACTERS:
+        raise OperationFailure(
+            "text_too_long_for_keyboard: {} non-ASCII characters exceed the "
+            "{} that keyboard synthesis can type in one call; no input was "
+            "emitted. Split the text into shorter type steps, or type into a "
+            "ref of an editable text field, which inserts the whole text "
+            "through the accessibility API.".format(
+                non_ascii, MAX_SYNTHESIZED_NON_ASCII_CHARACTERS),
+            failure_code="invalid_argument",
+            failure_phase="precondition",
+            input_events_emitted=False,
+        )
+    emitted = False
+    for run in _text_runs(text):
+        emitted = emit_keyboard_event(
+            0,
+            run,
+            Atspi.KeySynthType.STRING,
+            "text payload",
+            emitted,
+        )
+        if ord(run[0]) >= 128:
+            time.sleep(NON_ASCII_KEY_INTERVAL_SECONDS)
 
 
 def find_editable_text(root):
@@ -434,30 +486,62 @@ def focus_target_element(window, element, element_record, what, timeout=1.0):
     def target_is_focused():
         return state_contains(element, Atspi.StateType.FOCUSED)
 
+    def not_focusable(message):
+        # A classified precondition failure: an unclassified exception reached
+        # the caller as an opaque "input_failed" runtime error, so the model
+        # could not tell that the element itself refuses keyboard focus (for
+        # example a LibreOffice toolbar item group) and retried the same call.
+        return OperationFailure(
+            message + " Target a focusable child such as its text field or "
+            "combo box, or click the element first.",
+            failure_code="target_not_focusable",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="element",
+        )
+
     component = safe(element.get_component_iface)
     if component is None:
         if target_is_focused():
             return
-        raise RuntimeError(
+        raise not_focusable(
             "{} could not focus the requested element; no keyboard input was "
-            "emitted".format(what)
+            "emitted.".format(what)
         )
     accepted = safe(lambda: Atspi.Component.grab_focus(component), False)
     if not accepted and target_is_focused():
         return
     if not accepted:
-        raise RuntimeError(
+        raise not_focusable(
             "{} could not focus the requested element; no keyboard input was "
-            "emitted".format(what)
+            "emitted.".format(what)
         )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if target_is_focused():
             return
         time.sleep(0.02)
-    raise RuntimeError(
+    if node_role(element) == "table cell":
+        # Spreadsheet cells accept grab_focus and move the cell cursor, but
+        # the cell objects never report FOCUSED, so the cursor position
+        # cannot be confirmed. Selecting the cell does not move the cursor
+        # either. A cell has no focusable child, so name the routes that do
+        # work: the cell cursor moved by keys, or set_value for a number.
+        raise OperationFailure(
+            "{} requested focus for the cell, but the cell did not report "
+            "focus within {:.1f}s, so the cell cursor position is unconfirmed; "
+            "no keyboard input was emitted. Move the cell cursor there with "
+            "keypress (or click the cell with GUI), then type without a ref. "
+            "For a number, set_value on the cell ref writes it directly."
+            .format(what, timeout),
+            failure_code="target_not_focusable",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="element",
+        )
+    raise not_focusable(
         "{} requested focus for the element, but that exact target did not report "
-        "focus within {:.1f}s; no keyboard input was emitted".format(what, timeout)
+        "focus within {:.1f}s; no keyboard input was emitted.".format(what, timeout)
     )
 
 

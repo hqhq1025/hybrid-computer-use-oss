@@ -171,3 +171,42 @@ func TestAllModelRenderersHideProviderDiagnostics(t *testing.T) {
 		}
 	}
 }
+
+// A spreadsheet leaves its empty visible cells out of the tree. The
+// provider's summary of them arrives as an annotation on the table; it must
+// reach the rendered tree, and it is not an acquisition gap.
+func TestEmptyCellSummaryIsRenderedOnTheTable(t *testing.T) {
+	detail := "294 empty cells in view A1:J30 omitted (6 listed; table is " +
+		"1048576x16384); they have no ref: move the cell cursor there with " +
+		"keypress, then type without a ref"
+	snapshot := &AppSnapshot{
+		App:          AppDescriptor{Name: "Sheets", PID: 42},
+		WindowTitle:  "Book",
+		WindowHandle: "0x42",
+		SnapshotID:   "sheet",
+		Elements: []ElementRecord{
+			{Index: 0, RuntimeID: []int{0}, ControlType: "frame", Name: "Book"},
+			{Index: 1, RuntimeID: []int{0, 0}, ControlType: "table", Name: "Sheet1"},
+			{Index: 2, RuntimeID: []int{0, 0, 0, 1}, ControlType: "table cell", Name: "B1"},
+		},
+		Annotations: []axProviderAnnotation{{
+			ParentRuntimeID: []int{0, 0},
+			Kind:            axCellSummaryAnnotation,
+			Count:           294,
+			Reason:          "empty_cells",
+			Detail:          detail,
+		}},
+		Scope: contract.AXScopeWindow,
+	}
+	text := typedTreeTextForTest(t, snapshot)
+	if !strings.Contains(text, `table "Sheet1":`) ||
+		!strings.Contains(text, "/empty-cells: ") ||
+		!strings.Contains(text, "move the cell cursor there with keypress") {
+		t.Fatalf("empty-cell summary missing from the rendered table:\n%s", text)
+	}
+	coverage := providerCoverageSummary(snapshot.Annotations)
+	if coverage.AcquisitionIncomplete != 0 || coverage.ProjectionHidden != 0 ||
+		coverage.ExpandableHidden != 0 {
+		t.Fatalf("empty-cell summary was counted as a coverage gap: %#v", coverage)
+	}
+}

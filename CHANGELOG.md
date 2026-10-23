@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- The OSWorld runner and `hcu.render_agent_config` take `--code-mode`
+  (queue config `"code_mode": true`) for Codex. It keeps the computer-use MCP
+  server registered for code to call, turns on Codex code mode with
+  `omit_tools_from = ["deferred"]` on the server, and appends
+  `instructions/hybrid-code.md` to the profile.
+  `configs/osworld-v2-codex-code-mode-queue.example.json` shows it.
+- `instructions/hybrid-code.md` covers code that calls the MCP tools inside
+  a code tool, the CLI and the SDK. It drops the help and schema reads at the
+  start, shows one batch with its check, and opens an image in the same code
+  that took it.
+- The Python SDK adds `click_zoom(zoom_record, u, v)`, which clicks the
+  frame pixel shown at a point of a zoom image.
+- The CLI `act --json` and `gui --json` read their body from standard input
+  with `-` and from a file with `@FILE`, in addition to an inline value.
+- Linux: AX output shows what is on screen. Options of a closed combo box
+  are no longer listed (Qt kept them visible, also for combos on hidden
+  pages); a click that opens a menu or popup returns its items under
+  `popup:`; spreadsheet tables state how many empty cells were omitted;
+  hidden toolkit windows leave the window listings; windows of applications
+  without an accessibility tree are listed with a wN for activate, close and
+  window waits; a cell that cannot confirm keyboard focus names the routes
+  that work.
+- macOS: when the screenshot after GUI input catches a desktop layout
+  change, the provider discards that sample and captures again within the
+  same `settle_ms` budget. Input is not replayed and the layout checks are
+  unchanged; if the budget runs out, the call fails as before.
+- Linux: GTK, LibreOffice and Qt applications are easier to address. Editable
+  text fields and document editors appear as `textbox` with their value and a
+  ref; unnamed list rows take their visible label as name; Qt top-level
+  widgets and unnamed frames get a window ref and their window-manager
+  title; keys such as `COMMA` and `PLUS` resolve; non-ASCII text typed by
+  keyboard synthesis arrives intact (at most 500 non-ASCII characters per
+  call); an element that refuses keyboard focus reports why.
 - Bring the CLI, Python SDK, code mode and PTC adapter up to the MCP
   contract. The CLI adds `gui zoom X0 Y0 X1 Y1`, `gui double_click|move X Y`
   and `select rN [TEXT] [--to rN]`. The SDK adds `zoom(region)`,

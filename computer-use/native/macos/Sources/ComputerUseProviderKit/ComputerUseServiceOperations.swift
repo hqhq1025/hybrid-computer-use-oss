@@ -3,7 +3,8 @@ import Foundation
 import ImageIO
 
 extension ComputerUseService {
-    public func scroll(app query: String, direction: String, elementIndex: String, pages: Double) throws -> ToolCallResult {
+    @discardableResult
+    public func scroll(app query: String, direction: String, elementIndex: String, pages: Double) throws -> String {
         let normalized = direction.lowercased()
         guard ["up", "down", "left", "right"].contains(normalized) else {
             throw ComputerUseError.message("Invalid scroll direction: \(direction)")
@@ -42,16 +43,13 @@ extension ComputerUseService {
         } else {
             throw ComputerUseError.stateUnavailable("element \(elementIndex) has no scrollable frame")
         }
-
-        return try observeAfterConfirmedInput(route: route) {
-            snapshotResult(for: try refreshSnapshot(for: query), style: .actionResult)
-        }
+        return route
     }
 
     public func drag(app query: String, fromX: Double, fromY: Double, toX: Double, toY: Double) throws -> ToolCallResult {
         let snapshot = try currentSnapshot(for: query)
-        let start = try screenshotToGlobalPoint(snapshot: snapshot, x: fromX, y: fromY)
-        let end = try screenshotToGlobalPoint(snapshot: snapshot, x: toX, y: toY)
+        let start = try windowPointToGlobalPoint(snapshot: snapshot, point: CGPoint(x: fromX, y: fromY))
+        let end = try windowPointToGlobalPoint(snapshot: snapshot, point: CGPoint(x: toX, y: toY))
         try performDragEvent(
             from: start,
             to: end,
@@ -61,14 +59,14 @@ extension ComputerUseService {
         return snapshotResult(for: try refreshSnapshot(for: query), style: .actionResult)
     }
 
-    public struct TextInputDispatchResult: @unchecked Sendable {
-        public let result: ToolCallResult
+    public struct TextInputDispatchResult: Sendable {
         public let route: String
         public let fallbackUsed: Bool
+        /// nil when the element's text could not be read back.
+        public let readbackVerified: Bool?
     }
 
-    public struct SetValueDispatchResult: @unchecked Sendable {
-        public let result: ToolCallResult
+    public struct SetValueDispatchResult: Sendable {
         public let route: String
     }
 
@@ -77,49 +75,102 @@ extension ComputerUseService {
         public let readbackVerified: Bool?
     }
 
-    static func textInputRoute() -> (route: String, fallbackUsed: Bool) {
-        ("input.pasteboard.global_command_v", false)
-    }
-
+    /// Types `text` into an editable element of the application without
+    /// taking focus or the clipboard when it can: first an AX selected-text
+    /// write, then Unicode key events posted to the process, and the
+    /// clipboard only when neither reached the element or the element's
+    /// value cannot be read. Readback compares the element's value with the
+    /// value the insertion should produce. Key events and paste reach only
+    /// the active application.
     public func typeTextWithRoute(
         app query: String,
-        text: String
+        text: String,
+        elementIndex: String? = nil
     ) throws -> TextInputDispatchResult {
         let snapshot = try currentSnapshot(for: query)
-        guard let focusedElement = try focusedEditableTextTarget(in: snapshot) else {
+        let pid = snapshot.app.pid
+        let start: AXUIElement?
+        if let elementIndex {
+            start = try lookupElement(snapshot: snapshot, index: elementIndex).element
+        } else {
+            start = copyElement(
+                AXUIElementCreateApplication(pid),
+                attribute: kAXFocusedUIElementAttribute
+            ) ?? snapshot.focusedElement
+        }
+        guard let target = try focusedEditableTextTarget(from: start, in: snapshot) else {
             throw ComputerUseError.stateUnavailable("type_text requires a focused editable text element. Click a text entry area first, or use set_value on a settable text element.")
         }
-        let retentionBarrier = AXPasteboardRetentionBarrier(
-            pid: snapshot.app.pid,
-            target: focusedElement
-        )
+        guard !text.isEmpty else {
+            return TextInputDispatchResult(route: "ax.none", fallbackUsed: false, readbackVerified: nil)
+        }
+        let baseline = textInsertionBaseline(of: target, inserting: text)
 
-        try InputSimulation.typeTextGlobally(text) {
+        let axRoute = "ax.attribute.selected_text.set"
+        if let baseline, axAttributeIsSettable(target, kAXSelectedTextAttribute),
+           AXUIElementSetAttributeValue(
+               target, kAXSelectedTextAttribute as CFString, text as CFString
+           ) == .success {
+            switch waitForTextReadback(target, baseline: baseline, timeout: 0.3) {
+            case .expected:
+                return TextInputDispatchResult(route: axRoute, fallbackUsed: false, readbackVerified: true)
+            case .unchanged:
+                break
+            case .other(let observed):
+                throw textReadbackMismatch(route: axRoute, expected: baseline.expected, observed: observed)
+            }
+        }
+
+        let pasteRoute = "input.pasteboard.pid_command_v"
+        guard let baseline else {
+            // Without a readable value no route can be verified; paste is
+            // the route that reached text fields in testing, and the
+            // clipboard is restored afterwards.
+            let retentionBarrier = AXPasteboardRetentionBarrier(pid: pid, target: target)
+            try InputSimulation.pasteTextToProcess(text, pid: pid) {
+                retentionBarrier.waitForSafeRestore()
+            }
+            return TextInputDispatchResult(route: pasteRoute, fallbackUsed: true, readbackVerified: nil)
+        }
+
+        let keyRoute = "input.cg_event.unicode_pid"
+        try InputSimulation.typeTextToProcess(text, pid: pid)
+        switch waitForTextReadback(target, baseline: baseline, timeout: 1.0) {
+        case .expected:
+            return TextInputDispatchResult(route: keyRoute, fallbackUsed: false, readbackVerified: true)
+        case .unchanged:
+            // No key event reached the element, so pasting cannot duplicate it.
+            break
+        case .other(let observed):
+            throw textReadbackMismatch(route: keyRoute, expected: baseline.expected, observed: observed)
+        }
+
+        let retentionBarrier = AXPasteboardRetentionBarrier(pid: pid, target: target)
+        try InputSimulation.pasteTextToProcess(text, pid: pid) {
             retentionBarrier.waitForSafeRestore()
         }
-        let selected = Self.textInputRoute()
-        return try observeAfterConfirmedInput(route: selected.route) {
-            TextInputDispatchResult(
-                result: snapshotResult(
-                    for: try refreshSnapshot(for: query),
-                    style: .actionResult
-                ),
-                route: selected.route,
-                fallbackUsed: selected.fallbackUsed
+        switch waitForTextReadback(target, baseline: baseline, timeout: 0.3) {
+        case .expected:
+            return TextInputDispatchResult(route: pasteRoute, fallbackUsed: true, readbackVerified: true)
+        case .unchanged:
+            // Key events and paste reach only the active application.
+            throw InputDeliveryError(
+                message: "Text input did not change the element: the application ignored the AX selected-text write, Unicode key events and Command-V. Key events reach only the active application; bring its window to the front with a GUI click on the field, then type again.",
+                inputEventsEmitted: true,
+                failureCode: "readback_mismatch",
+                partialInputPossible: true,
+                readbackSampled: true,
+                readbackVerified: false,
+                actionRoute: pasteRoute
             )
+        case .other(let observed):
+            throw textReadbackMismatch(route: pasteRoute, expected: baseline.expected, observed: observed)
         }
     }
 
-    public func typeText(app query: String, text: String) throws -> ToolCallResult {
-        try typeTextWithRoute(app: query, text: text).result
-    }
-
-    public func pressKey(app query: String, key: String) throws -> ToolCallResult {
+    public func pressKey(app query: String, key: String) throws {
         let snapshot = try currentSnapshot(for: query)
         try InputSimulation.pressKey(key, pid: snapshot.app.pid)
-        return try observeAfterConfirmedInput(route: "input.cg_event.keyboard") {
-            snapshotResult(for: try refreshSnapshot(for: query), style: .actionResult)
-        }
     }
 
     public func setValueWithRoute(
@@ -170,31 +221,7 @@ extension ComputerUseService {
                 actionRoute: "ax.attribute.value.set"
             )
         }
-        return try observeAfterConfirmedInput(
-            route: "ax.attribute.value.set",
-            readbackSampled: true,
-            readbackVerified: true
-        ) {
-            SetValueDispatchResult(
-                result: snapshotResult(
-                    for: try refreshSnapshot(for: query),
-                    style: .actionResult
-                ),
-                route: "ax.attribute.value.set"
-            )
-        }
-    }
-
-    public func setValue(
-        app query: String,
-        elementIndex: String,
-        value: String
-    ) throws -> ToolCallResult {
-        try setValueWithRoute(
-            app: query,
-            elementIndex: elementIndex,
-            value: value
-        ).result
+        return SetValueDispatchResult(route: "ax.attribute.value.set")
     }
 
     public func performRelativeAdjustment(
@@ -286,7 +313,6 @@ extension ComputerUseService {
         textLimit: SnapshotTextLimit = .defaults,
         treeLimits: AccessibilityTreeLimits = .defaults,
         recoveryPolicy: SnapshotRecoveryPolicy = .allowActivation,
-        includeScreenshot: Bool = false,
         fallbackWindow: AXUIElement? = nil,
         expectedWindowHandle: String? = nil
     ) throws -> AppSnapshot {
@@ -297,7 +323,6 @@ extension ComputerUseService {
             textLimit: textLimit,
             treeLimits: treeLimits,
             recoveryPolicy: recoveryPolicy,
-            includeScreenshot: includeScreenshot,
             fallbackWindow: fallbackWindow,
             expectedWindowHandle: windowHandle
         )
@@ -322,11 +347,7 @@ extension ComputerUseService {
 
 
     func snapshotResult(for snapshot: AppSnapshot, style: SnapshotTextStyle) -> ToolCallResult {
-        var content = [ToolResultContentItem.text(snapshot.renderedText(style: style))]
-        if let screenshotPNGData = snapshot.screenshotPNGData {
-            content.append(.pngImage(screenshotPNGData))
-        }
-        return ToolCallResult(content: content)
+        ToolCallResult(content: [.text(snapshot.renderedText(style: style))])
     }
 }
 

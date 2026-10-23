@@ -112,6 +112,9 @@ def render_visible_cells(
 
     total = (row1 - row0 + 1) * (col1 - col0 + 1)
     probe_budget = min(MAX_TABLE_CELLS, total)
+    # The cells' records are rebound to this table below, so the transient
+    # re-creation probe (provider_object_path()) runs once, not per cell.
+    owner_cache = {provider_object_path(node): False}
     record_budget = max(0, max_tree_nodes - len(records))
     count = 0
     empty = 0
@@ -145,8 +148,8 @@ def render_visible_cells(
                 # coordinate, which the range summary below already implies.
                 #
                 # Omitted cells get no ref, so the summary names the verified
-                # alternative: move the cell cursor with press_key, then
-                # type_text, which lands in the cell holding the cursor.
+                # alternative: move the cell cursor with keypress, then type
+                # without a ref, which lands in the cell holding the cursor.
                 #
                 # The Name Box (`text Value: A1` in the tree) looks more
                 # direct but failed verification: set_value changes its text
@@ -161,7 +164,8 @@ def render_visible_cells(
             index = (indexer.index_for(cell_path, node_role(cell), "")
                      if indexer is not None else len(records))
             record = record_for(
-                cell, index, cell_path, window_bounds, text_limit=text_limit
+                cell, index, cell_path, window_bounds, text_limit=text_limit,
+                owner_cache=owner_cache,
             )
             # The cell wrapper may be recreated between AX reads. Bind its
             # identity to the owning table plus row/column, then resolve the
@@ -209,20 +213,35 @@ def render_visible_cells(
         record_omission("visible_cell_budget", total - probed)
 
     if count or empty:
+        rows = safe(lambda: Atspi.Table.get_n_rows(table), "?")
+        cols = safe(lambda: Atspi.Table.get_n_columns(table), "?")
         lines.append(
             ("\t" * (depth + 2))
             + "(cells {}:{} are in view; zero-based rows {}-{} x cols {}-{}: "
-              "{} non-empty cell(s) listed, "
-              "{} empty cell(s) omitted; table is {}x{}. Omitted cells have no "
-              "stable ref. To put content in one, move the cell cursor there "
-              "with press_key and then type_text — typing lands in whichever cell "
-              "currently holds the cursor.)".format(
+              "{} non-empty cell(s) listed, {} empty cell(s) omitted; table "
+              "is {}x{})".format(
                   spreadsheet_a1(row0, col0), spreadsheet_a1(row1, col1),
-                  row0, row1, col0, col1, count, empty,
-                  safe(lambda: Atspi.Table.get_n_rows(table), "?"),
-                  safe(lambda: Atspi.Table.get_n_columns(table), "?"),
+                  row0, row1, col0, col1, count, empty, rows, cols,
               )
         )
+    if empty and annotations is not None:
+        # The core renders this annotation on the table node; provider lines
+        # never reach the caller. Empty cells have no record and no ref, so
+        # the note names the route that reaches them: the cell cursor.
+        annotations.append({
+            "parentRuntimeId": path[:],
+            "kind": "cell_summary",
+            "count": int(empty),
+            "reason": "empty_cells",
+            "detail": (
+                "{} empty cells in view {}:{} omitted ({} listed; table is "
+                "{}x{}); they have no ref: move the cell cursor there with "
+                "keypress, then type without a ref".format(
+                    empty, spreadsheet_a1(row0, col0),
+                    spreadsheet_a1(row1, col1), count, rows, cols,
+                )
+            ),
+        })
     return count
 
 

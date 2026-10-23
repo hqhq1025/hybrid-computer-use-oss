@@ -36,6 +36,28 @@ internal static class WindowsDesktopImageGeometry
                     MidpointRounding.AwayFromZero)));
     }
 
+    // A point addresses one delivered pixel: 0 <= u <= width - 1. A point
+    // past the last pixel center is outside the image, not on its edge.
+    internal static bool ContainsPoint(
+        double x,
+        double y,
+        int width,
+        int height) =>
+        double.IsFinite(x) && double.IsFinite(y) &&
+        x >= 0 && y >= 0 && x <= width - 1 && y <= height - 1;
+
+    // SendInput maps an absolute coordinate n on a virtual-desktop axis of
+    // length pixels to pixel floor(n * length / 65536). The smallest n that
+    // lands on pixel p is ceil(p * 65536 / length).
+    internal static int ToSendInputAbsolute(
+        double value,
+        int origin,
+        int length)
+    {
+        var pixel = (long)Math.Round(value) - origin;
+        return (int)((pixel * 65536 + length - 1) / length);
+    }
+
     internal static double ToNativeCoordinate(
         double deliveredCoordinate,
         int deliveredExtent,

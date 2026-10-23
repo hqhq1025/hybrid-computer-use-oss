@@ -240,15 +240,13 @@ func displayIdentifierSegment(for element: AXUIElement, role: String, identifier
 }
 
 func resolveLocalFrame(of element: AXUIElement, windowBounds: CGRect?) -> CGRect? {
-    var positionValue: CFTypeRef?
-    var sizeValue: CFTypeRef?
-    let positionError = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue)
-    let sizeError = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue)
+    let positionRead = readAttribute(element, kAXPositionAttribute)
+    let sizeRead = readAttribute(element, kAXSizeAttribute)
     guard
-        positionError == .success,
-        sizeError == .success,
-        let positionValue,
-        let sizeValue
+        positionRead.status == .success,
+        sizeRead.status == .success,
+        let positionValue = positionRead.value,
+        let sizeValue = sizeRead.value
     else {
         return nil
     }

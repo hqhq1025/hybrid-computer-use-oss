@@ -5,6 +5,9 @@ from .foundation import (
     Atspi,
     InventoryResult,
     OperationFailure,
+    child_at,
+    provider_identity_path,
+    split_transient_item_path,
     enumerate_children,
     node_pid,
     node_role,
@@ -239,7 +242,7 @@ def _provider_field(node, field):
     if field == "bus":
         return str(node.app.bus_name or "")
     if field == "path":
-        return str(node.path or "")
+        return provider_identity_path(node)
     if field == "generation":
         return process_generation(int(node.get_process_id() or 0))
     raise ValueError(field)
@@ -252,6 +255,7 @@ def scan_provider_identity(candidates, provider_bus, provider_path,
     complete = True
     errors = []
     visited = 0
+    item_owner = split_transient_item_path(provider_path)
     stack = []
     for window_index, window in reversed(list(candidates)):
         stack.append((window, [window_index]))
@@ -264,7 +268,10 @@ def scan_provider_identity(candidates, provider_bus, provider_path,
         visited += 1
         try:
             bus = _provider_field(node, "bus")
-            object_path = _provider_field(node, "path")
+            # The raw path is enough for every node but the owner of a
+            # re-created item (see provider_object_path()); reading the full
+            # identity of every scanned node would cost a state read each.
+            object_path = str(node.path or "")
             generation = _provider_field(node, "generation")
         except Exception as error:
             complete = False
@@ -272,16 +279,21 @@ def scan_provider_identity(candidates, provider_bus, provider_path,
                 "provider identity read failed: {}".format(type(error).__name__)
             )
             bus = object_path = generation = ""
-        if (
-            bus == provider_bus
-            and object_path == provider_path
-            and generation == provider_generation
-        ):
-            # The tuple is unique within one provider process generation.
-            # Resolving it does not require proving that every unrelated AX
-            # branch is readable, and stopping here avoids an O(tree) scan for
-            # an already-addressed object.
-            return InventoryResult([(node, path)], complete=True)
+        if bus == provider_bus and generation == provider_generation:
+            if object_path == provider_path:
+                # The tuple is unique within one provider process
+                # generation. Resolving it does not require proving that
+                # every unrelated AX branch is readable, and stopping here
+                # avoids an O(tree) scan for an already-addressed object.
+                return InventoryResult([(node, path)], complete=True)
+            if item_owner and object_path == item_owner[0]:
+                item = child_at(node, item_owner[1])
+                if (
+                    item is not None
+                    and provider_identity_path(item) == provider_path
+                ):
+                    return InventoryResult(
+                        [(item, path + [item_owner[1]])], complete=True)
         children = enumerate_children(node, "provider node")
         if not children.complete:
             complete = False
@@ -570,7 +582,7 @@ def scan_semantic_target(candidates, target, max_nodes, deadline, text_limit):
                     "runtimeId": list(path),
                     "automationId": accessible_id(node),
                     "providerBusName": provider_bus_name(node),
-                    "providerObjectPath": provider_object_path(node),
+                    "providerObjectPath": provider_identity_path(node),
                     "processGeneration": process_generation(node_pid(node)),
                     "showing": showing_state(node),
                     "visible": state_value(node, Atspi.StateType.VISIBLE),

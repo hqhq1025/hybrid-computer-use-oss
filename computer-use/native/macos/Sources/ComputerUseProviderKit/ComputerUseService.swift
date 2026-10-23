@@ -216,42 +216,6 @@ func canUseGlobalPointerForTransientRow(
     }
 }
 
-func screenshotPixelScale(
-    screenshotPixelSize: CGSize?,
-    windowBounds: CGRect?
-) -> CGSize {
-    guard
-        let screenshotPixelSize,
-        let windowBounds,
-        windowBounds.width > 0,
-        windowBounds.height > 0,
-        screenshotPixelSize.width > 0,
-        screenshotPixelSize.height > 0
-    else {
-        return CGSize(width: 1, height: 1)
-    }
-
-    return CGSize(
-        width: screenshotPixelSize.width / windowBounds.width,
-        height: screenshotPixelSize.height / windowBounds.height
-    )
-}
-
-func screenshotPixelToWindowPoint(
-    _ point: CGPoint,
-    screenshotPixelSize: CGSize?,
-    windowBounds: CGRect?
-) -> CGPoint {
-    let scale = screenshotPixelScale(
-        screenshotPixelSize: screenshotPixelSize,
-        windowBounds: windowBounds
-    )
-    return CGPoint(
-        x: point.x / scale.width,
-        y: point.y / scale.height
-    )
-}
-
 let nonSettableSetValueErrorMessage = "Cannot set a value for an element that is not settable"
 
 func setValueAttributeIsSettable(result: AXError, settable: Bool, attribute: String) throws -> Bool {
@@ -533,15 +497,9 @@ public final class ComputerUseService {
                 throw ComputerUseError.stateUnavailable("element \(elementIndex) has no clickable frame")
             }
             let targetPoint = try windowPointToGlobalPoint(snapshot: snapshot, point: windowPoint)
-            if semanticAXClickRequiresBoundWindowPreparation(
-                method: clickMethod,
-                hasWindowBounds: snapshot.windowBounds != nil,
-                hasWindowID: snapshot.targetWindowID != nil
-            ) {
-                try InputSimulation.prepareBoundWindowForSemanticPointerInput(
-                    snapshot
-                )
-            }
+            // AXPress needs no window preparation; every pointer fallback
+            // prepares the window itself, so a semantic click does not
+            // raise the window or steal focus.
             switch clickMethod {
             case .auto:
                 if !(try performAXClickSequence(
@@ -586,20 +544,10 @@ public final class ComputerUseService {
                 )
             }
         } else if let x, let y {
-            let screenshotPoint = CGPoint(x: x, y: y)
-            let point = screenshotPixelToWindowPointInSnapshot(snapshot: snapshot, point: screenshotPoint)
+            let point = CGPoint(x: x, y: y)
             let targetPoint = try windowPointToGlobalPoint(snapshot: snapshot, point: point)
             switch clickMethod {
             case .auto:
-                if semanticAXClickRequiresBoundWindowPreparation(
-                    method: clickMethod,
-                    hasWindowBounds: snapshot.windowBounds != nil,
-                    hasWindowID: snapshot.targetWindowID != nil
-                ) {
-                    try InputSimulation.prepareBoundWindowForSemanticPointerInput(
-                        snapshot
-                    )
-                }
                 let candidates = try clickCandidates(at: point, in: snapshot)
                 var handled = false
                 for record in candidates {
@@ -618,11 +566,21 @@ public final class ComputerUseService {
                 }
 
                 if !handled {
+                    // Only a pointer event needs the bound window in front.
+                    if semanticAXClickRequiresBoundWindowPreparation(
+                        method: clickMethod,
+                        hasWindowBounds: snapshot.windowBounds != nil,
+                        hasWindowID: snapshot.targetWindowID != nil
+                    ) {
+                        try InputSimulation.prepareBoundWindowForSemanticPointerInput(
+                            snapshot
+                        )
+                    }
                     try performNonAXClickFallback(
                         at: targetPoint,
                         button: button,
                         clickCount: clickCount,
-                        targetDescription: "x=\(Int(screenshotPoint.x)) y=\(Int(screenshotPoint.y))",
+                        targetDescription: "x=\(Int(point.x)) y=\(Int(point.y))",
                         snapshot: snapshot
                     )
                 }
@@ -637,7 +595,7 @@ public final class ComputerUseService {
                     windowPoint: point,
                     button: button,
                     clickCount: clickCount,
-                    targetDescription: "x=\(Int(screenshotPoint.x)) y=\(Int(screenshotPoint.y))",
+                    targetDescription: "x=\(Int(point.x)) y=\(Int(point.y))",
                     snapshot: snapshot
                 )
             }

@@ -588,6 +588,52 @@ class TreeOmissionTests(AtspiPatchedTestCase):
         self.assertIn("cannot discover nodes the provider did not expose", text)
 
 
+class HiddenNestedWindowTests(AtspiPatchedTestCase):
+    """Hidden Qt dock windows must not spend the node budget.
+
+    Krita parents dozens of closed dockers to its main window as frames that
+    are neither SHOWING nor VISIBLE. Their subtrees held about half of the
+    window's nodes (Qt keeps SHOWING on their combo-popup items), so the
+    record and character budgets ran out before the menu bar, and observe
+    and find never saw "Settings".
+    """
+
+    def _window(self, hidden_count=40):
+        hidden = []
+        for index in range(hidden_count):
+            items = tuple(
+                _TreeNode(role="list item", name="Option {}-{}".format(index, item))
+                for item in range(5))
+            docker = _TreeNode(
+                role="frame", name="Docker {}".format(index), kids=items)
+            docker.states = {STATE.SENSITIVE}
+            hidden.append(docker)
+        menu = _TreeNode(role="menu item", name="Settings", x=10, y=0, w=60,
+                         h=20)
+        bar = _TreeNode(role="menu bar", name="", w=500, h=20, kids=(menu,))
+        return _TreeNode(role="frame", name="Krita", w=1000, h=700,
+                         kids=tuple(hidden) + (bar,))
+
+    def test_hidden_nested_window_subtree_is_skipped(self):
+        records, _lines, annotations = runtime.render_tree(
+            self._window(), None, [0], prune=True, max_tree_nodes=60,
+            indexer=runtime.StableIndexer({}))
+        names = [record["name"] for record in records]
+        self.assertIn("Settings", names)
+        self.assertFalse(any(name.startswith("Option") for name in names))
+        omitted = [a for a in annotations if a.get("kind") == "provider_omission"]
+        self.assertTrue(omitted)
+
+    def test_showing_nested_window_is_still_walked(self):
+        visible = _TreeNode(role="frame", name="Layers", w=100, h=100,
+                            kids=(_TreeNode(role="push button", name="Add"),))
+        root = _TreeNode(role="frame", name="Krita", w=1000, h=700,
+                         kids=(visible,))
+        records, _lines, _annotations = runtime.render_tree(
+            root, None, [0], prune=True, indexer=runtime.StableIndexer({}))
+        self.assertIn("Add", [record["name"] for record in records])
+
+
 class NodeDescriptionTests(AtspiPatchedTestCase):
     def _nodes(self, lines):
         return [l for l in lines if l.strip() and l.strip()[0].isdigit()]
@@ -835,10 +881,11 @@ class EmptyCellOmissionTests(AtspiPatchedTestCase):
         """Empty cells are skipped before record_for, which would spend budget.
 
         Omitted cells have no element index, so the notice says how to reach
-        them. Typing a reference into the Name Box does not work: set_value
-        changes its text without navigating, and click does not give it
-        keyboard focus. Moving the cell cursor with press_key and then
-        calling type_text does work.
+        them. It is an annotation on the table, because the core renders
+        annotations and drops provider lines. Typing a reference into the
+        Name Box does not work: set_value changes its text without
+        navigating, and click does not give it keyboard focus. Moving the
+        cell cursor with keypress and then typing without a ref does work.
         """
         table = object()
         node = _TreeNode(role="table", name="Data")
@@ -852,6 +899,7 @@ class EmptyCellOmissionTests(AtspiPatchedTestCase):
         values = {id(cells[(0, 0)]): ("", True), id(cells[(0, 1)]): ("42", True)}
         records = []
         lines = []
+        annotations = []
         record_for = mock.Mock(return_value={
             "index": 1, "localizedControlType": "table cell",
             "controlType": "table cell", "frame": None,
@@ -867,15 +915,19 @@ class EmptyCellOmissionTests(AtspiPatchedTestCase):
         ), mock.patch.object(runtime, "record_for", record_for):
             rendered = runtime.render_visible_cells(
                 node, 0, [0], None, records, lines,
-                indexer=runtime.StableIndexer({}), annotations=[],
+                indexer=runtime.StableIndexer({}), annotations=annotations,
             )
 
         self.assertEqual(rendered, 1)
         self.assertEqual(record_for.call_count, 1)
         self.assertIs(record_for.call_args.args[0], cells[(0, 1)])
-        notice = lines[-1]
-        self.assertIn("1 non-empty cell(s) listed, 1 empty cell(s) omitted", notice)
-        self.assertIn("move the cell cursor there with press_key and then type_text", notice)
+        summary = [a for a in annotations if a["kind"] == "cell_summary"]
+        self.assertEqual(1, len(summary))
+        self.assertEqual([0], summary[0]["parentRuntimeId"])
+        self.assertEqual(1, summary[0]["count"])
+        notice = summary[0]["detail"]
+        self.assertIn("1 empty cells in view A1:B1 omitted (1 listed; table is 1x2)", notice)
+        self.assertIn("move the cell cursor there with keypress, then type without a ref", notice)
         self.assertNotIn("Name Box", notice)
 
 

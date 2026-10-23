@@ -66,6 +66,16 @@ internal static class LiveValueReadback
             : valuePatternValue;
     }
 
+    internal static bool TextEquals(string actual, string expected) =>
+        string.Equals(
+            NormalizeLineEndings(actual),
+            NormalizeLineEndings(expected),
+            StringComparison.Ordinal);
+
+    internal static bool RangeEquals(double actual, double expected) =>
+        double.IsFinite(actual) &&
+        Math.Abs(actual - expected) <= RangeTolerance;
+
     private static bool HasLineBreak(string value)
     {
         return value.Contains('\r') || value.Contains('\n');
@@ -87,9 +97,7 @@ internal static class LiveValueReadback
         try
         {
             var actual = readFreshValue();
-            return actual is not null &&
-                double.IsFinite(actual.Value) &&
-                Math.Abs(actual.Value - expected) <= RangeTolerance;
+            return actual is not null && RangeEquals(actual.Value, expected);
         }
         catch
         {

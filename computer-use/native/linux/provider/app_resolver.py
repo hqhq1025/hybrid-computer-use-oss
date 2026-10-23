@@ -18,15 +18,21 @@ from .atspi_inventory import (
     resolve_app_identity,
 )
 from .snapshot import snapshot_digest, utc_timestamp
+from .a11y_enable import invisible_window_notes, untracked_window_notes
+from .native_windows import native_app_entries, native_only_windows
 from .x11_windows import (
+    _x11_managed_windows,
+    accessible_window_title,
     app_windows,
     iter_apps,
     opaque_window_instance_handle_for_id,
     strong_window_instance_handles,
     window_instance_handle,
     correlation_root_window_state,
+    unmapped_window_indices,
 )
 from .window_diagnostics import is_infrastructure_window
+
 
 
 def app_top_level_windows(app, windows, active_handle):
@@ -47,7 +53,7 @@ def app_top_level_windows(app, windows, active_handle):
         else:
             active = bool(handle) and handle == active_handle
         listed.append({
-            "title": str(node_name(window) or "").strip(),
+            "title": accessible_window_title(app, window, strong),
             "role": str(node_role(window) or "window").strip().lower(),
             "handle": handle,
             "providerBusName": provider_bus_name(window),
@@ -67,6 +73,9 @@ def list_apps_inventory():
     root_state = correlation_root_window_state()
     active_window_id = root_state.get("activeWindow") if root_state else None
     apps = iter_apps()
+    # Titles of every AT-SPI top-level window, by process; see
+    # untracked_window_notes.
+    accessible_titles = {}
     for app in sorted(
         apps,
         key=lambda item: (node_name(item).lower(), node_pid(item)),
@@ -80,6 +89,8 @@ def list_apps_inventory():
         if all(identity):
             seen_identities.add(identity)
         windows = app_windows(app)
+        accessible_titles.setdefault(pid, set()).update(
+            str(node_name(window) or "").strip() for _, window in windows)
         if not inventory_complete(windows):
             # A busy or hung application does not answer within the AT-SPI
             # call timeout. Its windows cannot be listed, but the listing
@@ -91,7 +102,16 @@ def list_apps_inventory():
             })
         if not windows:
             continue
-        titles = [node_name(window) or "untitled" for _, window in windows]
+        strong = strong_window_instance_handles(app, windows)
+        hidden = unmapped_window_indices(app, windows, strong)
+        if hidden:
+            windows = [item for item in windows if item[0] not in hidden]
+            strong = {index: handle for index, handle in strong.items()
+                      if index not in hidden}
+        titles = [
+            accessible_window_title(app, window, strong) or "untitled"
+            for _, window in windows
+        ]
         title = titles[0]
         name = node_name(app)
         # None means the window manager did not report an active window, so
@@ -162,6 +182,19 @@ def list_apps_inventory():
             "Incomplete: {} application(s) did not answer the accessibility "
             "bus; their windows may be missing above.".format(unreadable)
         )
+    managed = _x11_managed_windows()
+    native_entries = []
+    if inventory_complete(apps) and inventory_complete(managed):
+        accessible_pids = {node_pid(app) for app in apps}
+        # Windows of processes that are not on the bus are listed with a
+        # native handle, so they can be activated, closed and awaited; the
+        # note adds the restart advice when the toolkit can export a tree.
+        native_entries = native_app_entries(native_only_windows(
+            managed, accessible_pids, active_window_id))
+        lines.extend(entry["displayText"] for entry in native_entries)
+        notes.extend(invisible_window_notes(managed, accessible_pids))
+        if not unreadable:
+            notes.extend(untracked_window_notes(managed, accessible_titles))
     return {
         "text": "\n".join(lines),
         "notes": notes,
@@ -178,7 +211,7 @@ def list_apps_inventory():
                 "windows": entry["windows"],
             }
             for entry in entries
-        ],
+        ] + native_entries,
     }
 
 

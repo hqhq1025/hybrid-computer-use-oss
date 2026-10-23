@@ -103,9 +103,6 @@
       Include="../ComputerUse.Windows.Runtime/PostActionOwnerTransitionPolicy.cs"
       Link="PostActionOwnerTransitionPolicy.cs" />
     <Compile
-      Include="../ComputerUse.Windows.Runtime/WindowRenderCommit.cs"
-      Link="WindowRenderCommit.cs" />
-    <Compile
       Include="../ComputerUse.Windows.Runtime/DesktopObservationRetry.cs"
       Link="DesktopObservationRetry.cs" />
     <Compile
@@ -162,5 +159,11 @@
     <Compile
       Include="../ComputerUse.Windows.Runtime/WindowsUiaAutomationFactory.cs"
       Link="WindowsUiaAutomationFactory.cs" />
+    <Compile
+      Include="../ComputerUse.Windows.Runtime/WindowsAppInventory.cs"
+      Link="WindowsAppInventory.cs" />
+    <Compile
+      Include="../ComputerUse.Windows.Runtime/ActionEvidencePolicy.cs"
+      Link="ActionEvidencePolicy.cs" />
   </ItemGroup>
 </Project>

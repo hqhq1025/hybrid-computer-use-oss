@@ -236,6 +236,54 @@ class TargetedKeyboardFocusTests(AtspiPatchedTestCase):
                 "targeted type_text",
             )
         self.assertIn("no keyboard input was emitted", str(caught.exception))
+        # A classified precondition failure, so the caller sees why (an
+        # unclassified exception reached the model as "input_failed").
+        self.assertIsInstance(caught.exception, runtime.OperationFailure)
+        self.assertEqual(caught.exception.failure_code, "target_not_focusable")
+        self.assertEqual(caught.exception.failure_phase, "precondition")
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertEqual(caught.exception.failure_subject, "element")
+
+    def test_focus_that_never_lands_is_a_classified_failure(self):
+        component = FakeComponent()
+        component.grab_focus = lambda: True
+        element = FakeNode(states=(STATE.EDITABLE,), component=component)
+        window = FakeNode(states=(STATE.ACTIVE,), children=(element,))
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.focus_target_element(
+                window, element,
+                {"runtimeId": [0], "controlType": "", "name": ""},
+                "targeted set_value keyboard fallback", timeout=0.05,
+            )
+        self.assertEqual(caught.exception.failure_code, "target_not_focusable")
+        self.assertIn("did not report focus", str(caught.exception))
+
+    def test_cell_without_focus_report_names_the_cursor_route(self):
+        """A table cell that never reports focus gets a cell-specific hint.
+
+        Spreadsheet cells accept grab_focus and move the cell cursor, but the
+        cell objects never report FOCUSED, so the target cannot be verified.
+        The failure names the routes that work instead of a generic "target a
+        focusable child", which does not exist for a cell.
+        """
+        component = FakeComponent()
+        component.grab_focus = lambda: True
+        cell = _NamedNode(name="B2", role="table cell", component=component)
+        window = FakeNode(states=(STATE.ACTIVE,), children=(cell,))
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.focus_target_element(
+                window, cell,
+                {"runtimeId": [0], "controlType": "table cell", "name": "B2"},
+                "targeted type_text", timeout=0.05,
+            )
+        message = str(caught.exception)
+        self.assertEqual(caught.exception.failure_code, "target_not_focusable")
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertIn("no keyboard input was emitted", message)
+        self.assertIn("Move the cell cursor there with keypress", message)
+        self.assertIn("type without a ref", message)
+        self.assertIn("set_value", message)
+        self.assertNotIn("focusable child", message)
 
     def test_same_name_focused_sibling_does_not_satisfy_target_focus(self):
         target = _NamedNode(
@@ -394,6 +442,23 @@ class KeyResolutionTests(unittest.TestCase):
             ("caps_lock", "Caps_Lock"),
             ("MENU", "Menu"),
             ("f4", "F4"),
+        ):
+            with self.subTest(key=key):
+                self.assertEqual(
+                    runtime.keysym(key), runtime.Gdk.keyval_from_name(expected)
+                )
+
+    def test_lowercase_keysym_names_in_any_case(self):
+        # X keysym names for punctuation are lowercase ("comma", "plus").
+        # Callers write them as on a key legend or in upper case, as for the
+        # named keys above; "CTRL+COMMA" failed with "Unsupported key: COMMA".
+        for key, expected in (
+            ("COMMA", "comma"),
+            ("Plus", "plus"),
+            ("MINUS", "minus"),
+            ("PERIOD", "period"),
+            ("EQUAL", "equal"),
+            ("BRACKETLEFT", "bracketleft"),
         ):
             with self.subTest(key=key):
                 self.assertEqual(
