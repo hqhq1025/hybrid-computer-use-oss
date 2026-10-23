@@ -6,7 +6,6 @@ from .foundation import (
     MAX_DEPTH,
     MAX_ELEMENTS,
     OperationFailure,
-    extents,
     node_pid,
     node_role,
     process_generation,
@@ -29,6 +28,7 @@ from .x11_windows import (
     main_window,
     select_window_by_handle,
     window_identity_set,
+    window_bounds,
     x11_root_window_state,
 )
 
@@ -288,7 +288,7 @@ def _resolve_target_operation(operation):
         )
     else:
         window_index, window = main_window(app)
-    bounds = extents(window)
+    bounds = window_bounds(app, window_index, window)
     semantic_target = operation.get("target")
     if not isinstance(semantic_target, dict):
         raise OperationFailure(
@@ -491,7 +491,8 @@ def _resolve_action_target(app, operation, operation_kind, action_input):
             )
         else:
             window_index, window = main_window(app)
-        bounds = operation.get("window_bounds") or extents(window)
+        bounds = operation.get("window_bounds") or window_bounds(
+            app, window_index, window)
     if semantic_target is not None and operation_kind != "window_action":
         (
             element,
@@ -683,7 +684,7 @@ def _observe_after_action(
     target_window_handle = (operation.get("window_handle")
                             or (operation.get("target") or {}).get("windowHandle"))
     selected_window = _post_action_window(app, target_window_handle)
-    after_bounds = safe(lambda: extents(selected_window[1]))
+    after_bounds = safe(lambda: window_bounds(app, *selected_window[:2]))
     after_pixel_bounds = after_bounds
     pixels_after_one = safe(lambda: capture_window_pixels(after_pixel_bounds))
     lap("after_bounds_and_pixels_after_one")

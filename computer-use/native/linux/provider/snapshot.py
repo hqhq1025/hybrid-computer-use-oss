@@ -12,7 +12,6 @@ from .foundation import (
     MAX_DEPTH,
     MAX_ELEMENTS,
     child_count,
-    extents,
     has_text_iface,
     limit_text,
     node_name,
@@ -47,6 +46,7 @@ from .x11_windows import (
     strong_window_instance_handles,
     unmapped_window_indices,
     window_instance_handle,
+    window_bounds,
 )
 
 from .gui_capture import (
@@ -365,7 +365,7 @@ def build_snapshot(
         else select_window_by_handle(app, target_window_handle)
     )
     lap("snapshot.select_window")
-    bounds = extents(window)
+    bounds = window_bounds(app, window_index, window)
     handle = window_instance_handle(app, window_index, window)
     title = window_label(window, text_limit=text_limit)
     app_bus = provider_bus_name(app)

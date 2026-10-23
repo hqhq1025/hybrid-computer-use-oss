@@ -29,6 +29,13 @@ The filenames must match `manifest.json`. Copy only software packages from an
 OSWorld asset distribution. Do not copy task documents, evaluator materials or
 credentials. No binary archives belong in this repository.
 
+The `qt` phase also installs Ubuntu's Java ATK wrapper and native JNI library.
+These packages let Java desktop applications expose controls through AT-SPI.
+A portable application with its own Java runtime must enable the wrapper in its
+launcher. Installing the packages alone does not configure a bundled runtime.
+Keep that configuration local to the application's Java command; do not export
+accessibility options globally to unrelated Java processes.
+
 ## Install in a fresh guest
 
 The examples assume that the desktop account is `user`. Replace that account
@@ -191,6 +198,18 @@ version and dpkg state. WPS's package scripts change system and user MIME
 defaults. The installer preserves those preference files, their permissions and
 their ownership, even when installation fails. WPS remains available through
 its desktop entry and the file manager's Open With menu.
+
+The installer enables `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` in the vendor's
+`wps`, `wpp` and `et` startup scripts. Both command-line and desktop launches
+inherit the setting without a login shell. The original argument parsing and
+exit behavior remain unchanged. This enables the bundled Qt accessibility
+bridge; it does not add semantics to custom-drawn document content.
+
+For an existing installation, run `sudo python3 configure_wps_accessibility.py`
+inside the guest. Close all WPS processes before checking a fresh launch.
+Package upgrades can replace these launchers; rerun the configuration after
+upgrades through other installers. Unknown launcher formats or existing
+conflicting settings stop configuration before any launcher changes.
 
 Close WPS before installation. The script does not copy profiles, accept license
 terms or change input-method settings. Confirm the license through WPS's normal

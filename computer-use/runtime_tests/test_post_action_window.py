@@ -92,9 +92,20 @@ class PostActionWindowTests(AtspiPatchedTestCase):
         self.b.states.update((STATE.MODAL, STATE.SHOWING, STATE.ACTIVE))
         extents = runtime.extents
         self.patch("extents", side_effect=lambda node: None if node is self.b else extents(node))
+        self.patch("x11_window_inventory_for_pid", return_value=runtime.InventoryResult([]))
         result = self.observe()
         self.assertEqual(result["snapshot"]["windowHandle"], self.handles[1])
         self.assertEqual(self.captures, [None, None])
+
+    def test_unreadable_native_geometry_does_not_reuse_original_region(self):
+        self.b.states.update((STATE.MODAL, STATE.SHOWING, STATE.ACTIVE))
+        extents = runtime.extents
+        self.patch("extents", side_effect=lambda node: None if node is self.b else extents(node))
+        self.patch("x11_window_inventory_for_pid", return_value=runtime.InventoryResult([], complete=False))
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            self.observe()
+        self.assertEqual(caught.exception.failure_code, "observation_incomplete")
+        self.assertEqual(self.captures, [None])
 
     def test_foreground_change_between_capture_and_tree_does_not_reselect(self):
         selections = self.patch("select_window_by_handle", wraps=runtime.select_window_by_handle)
