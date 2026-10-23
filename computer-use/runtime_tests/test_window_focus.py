@@ -178,6 +178,79 @@ class FocusWindowTests(AtspiPatchedTestCase):
     def test_none_window_is_not_focusable(self):
         self.assertFalse(runtime.focus_window(None))
 
+    def _native_window(self, window_id, active):
+        """Give the window an X11 id and an active-window reader.
+
+        ``active`` is a one-item list holding the current _NET_ACTIVE_WINDOW;
+        the returned list records every activation request sent to the
+        window manager, which moves ``active`` to the requested window.
+        """
+        requests = []
+
+        def activate(requested):
+            requests.append(requested)
+            active[0] = requested
+            return True
+
+        for name, value in (
+            ("x11_window_id", lambda window: window_id),
+            ("x11_active_window_id", lambda: active[0]),
+            ("request_window_activation", activate),
+        ):
+            patcher = mock.patch.object(input_primitives, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return requests
+
+    def test_inactive_window_is_activated_through_the_window_manager(self):
+        """Qt accepts grab_focus on every child without activating the window.
+
+        Asking the window manager first activates it at once; no child grab
+        (each of which only moves the app's internal focus) is needed.
+        """
+        component = FakeComponent(grabs=True)
+        window = FakeNode(
+            children=(FakeNode(states=(STATE.FOCUSABLE,), component=component),))
+        requests = self._native_window("0x2a", ["0x10"])
+
+        self.assertTrue(input_primitives.focus_window(window, timeout=0.2))
+        self.assertEqual(requests, ["0x2a"])
+        self.assertEqual(component.grab_calls, 0)
+
+    def test_window_already_active_in_x11_needs_no_request(self):
+        window = FakeNode()
+        requests = self._native_window("0x2a", ["0x2a"])
+
+        self.assertTrue(input_primitives.focus_window(window, timeout=0.2))
+        self.assertEqual(requests, [])
+
+    def test_another_window_of_the_same_app_does_not_count_as_focus(self):
+        """Input goes to the X11 active window, not to any window of the pid."""
+        window = FakeNode()
+        requests = self._native_window("0x2a", ["0x2b"])
+        patcher = mock.patch.object(
+            input_primitives, "x11_holds_focus", lambda window: True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        self.assertTrue(input_primitives.focus_window(window, timeout=0.2))
+        self.assertEqual(requests, ["0x2a"])
+
+    def test_accepted_grab_that_leaves_the_window_inactive_stops_grabbing(self):
+        """Without a native window, one accepted grab that does not activate
+        the window shows the toolkit ignores activation; the remaining
+        candidates are not each given the full timeout."""
+        components = [FakeComponent(grabs=True) for _ in range(3)]
+        window = FakeNode(
+            children=[
+                FakeNode(states=(STATE.FOCUSABLE,), component=c)
+                for c in components
+            ]
+        )
+
+        self.assertFalse(input_primitives.focus_window(window, timeout=0.05))
+        self.assertEqual([c.grab_calls for c in components], [1, 0, 0])
+
 
 class RequireWindowFocusTests(AtspiPatchedTestCase):
     def test_passes_through_when_window_is_active(self):

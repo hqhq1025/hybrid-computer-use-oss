@@ -8,13 +8,18 @@ choice (GTK, Qt), that name.
 
 from .foundation import (
     Atspi,
+    FIND_FIRST_BUDGET,
+    MAX_CHILD_FANOUT,
     OBJECT_REPLACEMENT,
     node_name,
     node_role,
+    provider_object_path,
     raw_extents,
     safe,
+    should_enumerate_children,
     state_contains,
 )
+from .ax_records import gtk_combo_partner
 from .ax_actions import send_key
 from .ax_select import (
     _failure,
@@ -162,8 +167,12 @@ def select_dropdown_option(node, text, window=None):
     succeeds only when it shows the option afterwards; otherwise the
     option's SELECTED state is the evidence. When neither route changes the
     shown choice, the popup's own commit path is used: open it, move its
-    current item to the option and press Return (Qt).
+    current item to the option and press Return (Qt). A LibreOffice
+    drop-down (a projected toggle) commits through its separate popup list;
+    see select_projected_option(). Returns the chosen option's name.
     """
+    if _projected_toggle(node):
+        return select_projected_option(node, text)
     options = _dropdown_options(node)
     wanted = str(text).strip()
     matches = [option for option in options if option_name(option) == wanted]
@@ -186,7 +195,7 @@ def select_dropdown_option(node, text, window=None):
         return _option_selected(option)
 
     if committed():
-        return option
+        return wanted
     emitted = False
     count = int(safe(option.get_n_actions, 0) or 0)
     names = [str(safe(lambda k=k: option.get_action_name(k), "") or "")
@@ -195,7 +204,7 @@ def select_dropdown_option(node, text, window=None):
         emitted = True
         safe(lambda: option.do_action(names.index("select")), False)
         if _wait_until(committed, 0.6):
-            return option
+            return wanted
     index = safe(lambda: option.get_index_in_parent())
     parent = safe(option.get_parent)
     if (index is not None and index >= 0 and parent is not None
@@ -206,17 +215,17 @@ def select_dropdown_option(node, text, window=None):
         emitted = True
         safe(lambda: Atspi.Selection.select_child(node, int(index)), False)
         if _wait_until(committed, 0.6):
-            return option
+            return wanted
     container = _selection_container(option)
     if container is not None and index is not None and index >= 0:
         emitted = True
         safe(lambda: Atspi.Selection.select_child(container, int(index)), False)
         if _wait_until(committed, 0.6):
-            return option
+            return wanted
     if shows_choice:
         emitted = True
         if _commit_from_popup(node, option, window) and _wait_until(committed, 1.0):
-            return option
+            return wanted
         raise _failure(
             "select_unverified: the drop-down shows {} after choosing {}; "
             "its choice may have changed. Open it, then press Return on the "
@@ -235,14 +244,226 @@ def select_dropdown_option(node, text, window=None):
 
 
 def owning_dropdown(node):
-    """Return the combo box whose popup list holds the option ``node``."""
+    """Return the drop-down whose popup list holds the option ``node``."""
     if node_role(node) not in OPTION_ROLES:
         return None
     current = node
     for _ in range(3):
         current = safe(current.get_parent)
         if current is None:
-            return None
+            break
         if node_role(current) == "combo box":
             return current
+    return projected_list_owner(node)
+
+
+# LibreOffice (gtk3) draws a drop-down as a toggle button beside a hidden
+# combo box and a text; ax_records.gtk_combo_partner() projects the toggle
+# as the combo box. The list opens in a separate untitled popup window of
+# table cells that has no relation back to the toggle. While the list is
+# open the toggle reports CHECKED, and the text shows the current choice.
+
+
+def _projected_toggle(node):
+    return gtk_combo_partner(node, node_role(node)) is not None
+
+
+def _projected_shown_choice(toggle):
+    """Return the text the projected combo's text sibling shows, or ""."""
+    parent = safe(toggle.get_parent)
+    count = int(safe(parent.get_child_count, 0) or 0) if parent else 0
+    texts = [child for child in (
+        safe(lambda k=k: parent.get_child_at_index(k)) for k in range(count))
+        if child is not None and node_role(child) == "text"]
+    return text_between(texts[0], 0, -1).strip() if len(texts) == 1 else ""
+
+
+def _top_level(node):
+    """Return ``(application, top-level window)`` holding ``node``.
+
+    LibreOffice reports no parent for its top-level windows, so the
+    application comes from get_application when the walk stops short.
+    """
+    window = node
+    for _ in range(64):
+        parent = safe(window.get_parent)
+        if parent is None or node_role(parent) == "application":
+            break
+        window = parent
+    else:
+        return None, None
+    app = parent if parent is not None else safe(
+        lambda: Atspi.Accessible.get_application(node))
+    return (app, window) if app is not None else (None, None)
+
+
+def _open_lists(app):
+    """Return the untitled showing top-level windows of ``app`` with options."""
+    count = int(safe(app.get_child_count, 0) or 0) if app else 0
+    windows = (safe(lambda k=k: app.get_child_at_index(k)) for k in range(count))
+    return [window for window in windows
+            if window is not None and not option_name(window)
+            and state_contains(window, Atspi.StateType.SHOWING)
+            and _dropdown_options(window)]
+
+
+def _list_choice(toggle):
+    """Read a list-only drop-down's choice: the row its list selects on opening.
+
+    A list-only LibreOffice drop-down (dialog combos such as Line Spacing)
+    leaves its text sibling empty, so the choice is readable only while the
+    list is open. The list is closed again before returning.
+    """
+    popup = _open_projected_list(toggle)
+    if popup is None:
+        return ""
+    chosen = [option_name(option) for option in _dropdown_options(popup)
+              if state_contains(option, Atspi.StateType.SELECTED)]
+    _click_toggle(toggle)
+    _wait_until(lambda: not state_contains(toggle, Atspi.StateType.CHECKED), 1.0)
+    return chosen[0] if len(chosen) == 1 else ""
+
+
+def _click_toggle(toggle):
+    count = int(safe(toggle.get_n_actions, 0) or 0)
+    names = [str(safe(lambda k=k: toggle.get_action_name(k), "") or "").lower()
+             for k in range(count)]
+    if "click" not in names:
+        return False
+    return bool(safe(lambda: toggle.do_action(names.index("click")), False))
+
+
+def _open_projected_list(toggle):
+    """Return the popup window holding the toggle's list, opening it if needed."""
+    app, _window = _top_level(toggle)
+    if state_contains(toggle, Atspi.StateType.CHECKED):
+        lists = _open_lists(app)
+        return lists[0] if len(lists) == 1 else None
+    before = {provider_object_path(window) for window in _open_lists(app)}
+    if not _click_toggle(toggle):
+        return None
+    opened = []
+
+    def appeared():
+        opened[:] = [window for window in _open_lists(app)
+                     if provider_object_path(window) not in before]
+        return len(opened) == 1
+    return opened[0] if _wait_until(appeared, 1.0) else None
+
+
+def _activate_list_row(option):
+    """Move the list cursor to ``option`` and activate that row.
+
+    A GTK tree view commits the row under its cursor when a cell is
+    activated. Selection.select_child only highlights a row and leaves the
+    cursor, so the old choice would be committed; grab_focus on the cell
+    moves the cursor.
+    """
+    component = safe(option.get_component_iface)
+    if component is None or not safe(
+            lambda: Atspi.Component.grab_focus(component), False):
+        return False
+    if not _wait_until(
+            lambda: state_contains(option, Atspi.StateType.FOCUSED), 0.6):
+        return False
+    count = int(safe(option.get_n_actions, 0) or 0)
+    names = [str(safe(lambda k=k: option.get_action_name(k), "") or "").lower()
+             for k in range(count)]
+    if "activate" not in names:
+        return False
+    return bool(safe(lambda: option.do_action(names.index("activate")), False))
+
+
+def select_projected_option(toggle, text):
+    """Choose an option of a LibreOffice drop-down and read the choice back.
+
+    The list is opened by clicking the toggle when it is closed, and closed
+    the same way if the option cannot be chosen. Success requires the text
+    beside the toggle to show the option afterwards or, for a list-only
+    drop-down whose text stays empty, the reopened list to select it.
+    """
+    wanted = str(text).strip()
+    shown = _projected_shown_choice(toggle)
+    if not state_contains(toggle, Atspi.StateType.CHECKED) and shown == wanted:
+        return wanted
+    clicked = not state_contains(toggle, Atspi.StateType.CHECKED)
+    popup = _open_projected_list(toggle)
+    if popup is None:
+        if clicked and state_contains(toggle, Atspi.StateType.CHECKED):
+            _click_toggle(toggle)
+        raise _failure(
+            "select_unavailable: the drop-down list could not be found as one "
+            "open popup; no option was chosen. Click the drop-down, then "
+            "select the option.",
+            code="effect_unknown" if clicked else "select_unavailable",
+            emitted=clicked, phase="emission" if clicked else "precondition")
+    options = _dropdown_options(popup)
+    matches = [option for option in options if option_name(option) == wanted]
+    if len(matches) != 1:
+        _click_toggle(toggle)
+        names = [option_name(option) for option in options]
+        raise _failure(
+            "select_option_not_found: {} {} among the options; the list was "
+            "closed without choosing. Options: {}.".format(
+                _quote(text),
+                "is not" if not matches else "occurs more than once",
+                ", ".join(_quote(name) for name in names[:30])
+                or "none readable"),
+            code="invalid_argument", emitted=True)
+    choice = ""
+    if _activate_list_row(matches[0]) and _wait_until(
+            lambda: not state_contains(toggle, Atspi.StateType.CHECKED), 1.0):
+        if shown:
+            _wait_until(
+                lambda: _projected_shown_choice(toggle) == wanted, 1.0)
+            choice = _projected_shown_choice(toggle)
+        else:
+            choice = _list_choice(toggle)
+        if choice == wanted:
+            return wanted
+    if state_contains(toggle, Atspi.StateType.CHECKED):
+        _click_toggle(toggle)
+        _wait_until(
+            lambda: not state_contains(toggle, Atspi.StateType.CHECKED), 1.0)
+    if not choice:
+        choice = _projected_shown_choice(toggle) or _list_choice(toggle)
+    raise _failure(
+        "select_unverified: the drop-down shows {} after choosing {}; its "
+        "choice may have changed. Open it and click the option with the GUI."
+        .format(_quote(choice) if choice else "no readable choice",
+                _quote(text)),
+        code="effect_unknown", emitted=True, phase="readback")
+
+
+def projected_list_owner(option):
+    """Return the toggle whose open list holds ``option``, or None.
+
+    The popup has no relation back to its toggle, so the owner is the one
+    projected combo of the same application that reports its list open.
+    """
+    app, window = _top_level(option)
+    if app is None or option_name(window):
+        return None
+    count = int(safe(app.get_child_count, 0) or 0)
+    stack = [top for top in (safe(lambda k=k: app.get_child_at_index(k))
+                             for k in range(count))
+             if top is not None and not _same(top, window)]
+    budget = FIND_FIRST_BUDGET
+    while stack and budget > 0:
+        node = stack.pop()
+        budget -= 1
+        # The opener is drawn, so subtrees that are not showing are skipped.
+        if not state_contains(node, Atspi.StateType.SHOWING):
+            continue
+        if node_role(node) == "toggle button":
+            if (state_contains(node, Atspi.StateType.CHECKED)
+                    and _projected_toggle(node)):
+                return node
+            continue
+        if should_enumerate_children(node):
+            children = int(safe(node.get_child_count, 0) or 0)
+            stack.extend(child for child in (
+                safe(lambda k=k: node.get_child_at_index(k))
+                for k in reversed(range(min(children, MAX_CHILD_FANOUT))))
+                if child is not None)
     return None

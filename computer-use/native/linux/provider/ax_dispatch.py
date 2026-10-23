@@ -179,6 +179,21 @@ def dispatch_provider_operation(
         native = native_window_for_operation(operation)
         if native is not None:
             return perform_native_window_action(action_intent, native)
+        target = operation.get("target") or {}
+        if (not operation.get("app_identity")
+                and not target.get("providerBusName")
+                and not target.get("providerWindowBusName")
+                and (operation.get("window_handle") or target.get("windowHandle"))):
+            # A native ref has no AX application identity. Once its native
+            # validation fails, app-name lookup cannot recover that identity.
+            raise OperationFailure(
+                "invalid_target: the native window ref cannot be verified; "
+                "list windows again. No input was emitted.",
+                failure_code="invalid_target",
+                failure_phase="precondition",
+                input_events_emitted=False,
+                failure_subject="window",
+            )
     if operation_kind == "observe":
         return _observe_operation(operation, observation)
     if (
@@ -230,12 +245,21 @@ def _observe_operation(operation, observation):
         # tree_reuse. Post-action snapshots below always walk.
         reuse_tree=True,
         find_walk=observation.get("find_walk") is True,
+        find_query=observation.get("find_query"),
+        find_resume_after=observation.get("find_resume_after"),
     )
     response = {"ok": True, "snapshot": snapshot}
     lap("observe_snapshot")
     # Modal notes come first: they determine how the rest of the tree
     # should be read.
     elements = snapshot.get("elements") or []
+    if observation.get("find_walk") is True:
+        # A find walk returns only candidate records, so the tree-shape
+        # diagnostics below would misread its sparse record list.
+        notes = snapshot.pop("modalNotes", [])
+        if notes:
+            response["notes"] = notes
+        return response
     shell_notes = snapshot_diagnostics(elements)
     # The two diagnostics describe degrees of the same problem and are
     # never emitted together: snapshot_diagnostics covers a tree reduced to

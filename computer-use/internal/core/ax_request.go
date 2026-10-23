@@ -212,8 +212,7 @@ func (s *Service) axDiffObservation(
 func (s *Service) axFind(request *axRequest) ToolCallResult {
 	if request.cursor != "" {
 		return WithAXModeEvidence(
-			s.continueFind(request.cursor, request.limit).
-				withEvidenceScope("cached_observation_page"),
+			s.continueFind(request.cursor, request.limit),
 			contract.AXModeFind,
 		)
 	}

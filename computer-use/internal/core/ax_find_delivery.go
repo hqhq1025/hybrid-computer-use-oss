@@ -227,7 +227,7 @@ func (s *Service) deliverFindPage(
 	}
 	included := page.fittingContextLines(units, lines, count)
 	nextCursor, continuation := "", ""
-	if end < len(matched) {
+	if end < len(matched) || snapshot.findResume != nil {
 		if setID == "" {
 			nextCursor = s.FindCursorRegistry.Create(snapshot, matched, end, query)
 		} else {
@@ -323,9 +323,10 @@ func (page findPageBuilder) result(units, context, continuation string, count in
 
 // fits reports whether the page fits the budget. A page that does not end
 // the match list must fit with either continuation form, so it is measured
-// before a cursor is committed.
+// before a cursor is committed. So must the last page of a walk that
+// stopped early, whose cursor continues the walk.
 func (page findPageBuilder) fits(units, context string, count int, omitted bool) bool {
-	if page.offset+count >= len(page.matched) {
+	if page.offset+count >= len(page.matched) && page.snapshot.findResume == nil {
 		return findDeliveryFits(page.result(units, context, "", count, omitted))
 	}
 	return findDeliveryFits(page.result(units, context, findReservedContinuation, count, omitted)) &&

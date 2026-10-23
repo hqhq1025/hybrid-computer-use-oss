@@ -663,6 +663,7 @@ func applyObservationRoot(
 		return errors.New("cannot apply observation root to a nil snapshot")
 	}
 	snapshot.observationRoot = nil
+	snapshot.observationRootEntry = nil
 	snapshot.observationRootMode = ""
 	snapshot.rootedCanonicalCount = 0
 	record, mode, err := resolveObservationRoot(snapshot, root)
@@ -670,6 +671,7 @@ func applyObservationRoot(
 		return err
 	}
 	snapshot.observationRoot = record
+	snapshot.observationRootEntry, _ = root["_resolved_ref_entry"].(*AXRefEntry)
 	snapshot.observationRootMode = mode
 	snapshot.rootedCanonicalCount = len(recordsUnderRoot(snapshot, record))
 	return nil

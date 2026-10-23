@@ -35,7 +35,15 @@ The examples assume that the desktop account is `user`. Replace that account
 with the guest's actual account.
 
 1. Copy this directory and the software archives to a temporary guest directory.
-2. Update apt's package index and inspect its proposed dependency changes.
+2. Configure independent binary package caches, then update apt's package index
+   and inspect its proposed dependency changes:
+
+```bash
+sudo python3 configure_apt.py
+```
+
+APT reads the configuration on its next invocation. An existing PackageKit
+daemon reads it on its next start; use a fresh boot for final image validation.
 3. Check the guest platform and archive filenames:
 
 ```bash
@@ -64,6 +72,14 @@ snap list
 Confirm that the refresh schedule reports `hold: forever`. Record the installed
 Snap revisions with the image. The hold prevents automatic refreshes; an explicit
 manual refresh that names a Snap can still update that application.
+
+The preferences phase also runs `configure_updates.py` as the desktop user.
+It disables Software's automatic update downloads and pop-up notification
+banners. A hidden desktop-entry alias lets GNOME associate Snap Store's
+notifications with its application policy. Notifications remain enabled in
+the notification center; Software's manual update controls and other
+applications' notification settings remain unchanged. Restart Software or
+start a fresh desktop session after applying these preferences.
 
 6. Start a fresh desktop session and verify application startup and input.
 7. Remove the copied scripts, archives and extracted staging files.
@@ -184,12 +200,14 @@ first-launch interface, then verify Writer, Spreadsheets and Presentation.
 
 | Component | Installed behavior |
 | --- | --- |
+| APT and PackageKit | Build binary package caches in memory, avoiding deletion of another reader's temporary cache during concurrent refreshes. |
 | FreeCAD | Uses private OCCT libraries so KiCad can install its incompatible system OCCT packages. System Qt preserves accessibility. |
 | Spyder | Passes integer image dimensions to Qt, preventing startup failures with stricter Python bindings. Unknown source patterns fail. |
 | GeoGebra | Restores executable permissions on its launcher, Java executable and Java process helper. |
 | VS Code | Enables editor accessibility for the next application launch while preserving other JSON settings. |
 | Joplin | Installs the upstream AppImage contents with the Chromium sandbox enabled. |
 | REAPER | Selects the guest's PulseAudio backend. |
+| Thunderbird | Disables unsolicited donation, data-reporting and welcome pages through application defaults. Mail accounts, stored messages and network settings remain unchanged. |
 | WPS, MuseScore and Slicer | Save desktop preferences that suppress first-launch prompts and update checks. |
 | OpenBoard | Installs the selected Snap channel. The channel can advance independently of this manifest. |
 | Support | Installs NSS certificate tools and IBus bindings. Certificate import and the active desktop input source remain the deployment's responsibility. |
@@ -202,6 +220,11 @@ resource path instead of replacing another installation. The scripts neither
 force conflicting packages into dpkg nor copy benchmark solutions into the guest.
 
 The package sources remain Ubuntu repositories and upstream release archives.
+Apt's package indexes, downloaded archives, package choices and normal package
+management locks remain available. Disabling `pkgcache` and `srcpkgcache` follows
+APT's documented empty-path configuration and can increase package-query startup
+time. Manual apt and PackageKit operations remain available; the installer does
+not stop services or suppress package errors.
 Apt dependency versions and Snap revisions are not frozen by this manifest.
 Record the installed package list and Snap revision alongside the exported image.
 Restart applications after setting preferences. GUI and accessibility checks

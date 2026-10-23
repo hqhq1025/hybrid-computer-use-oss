@@ -331,10 +331,13 @@ class WindowWithoutTreeNoteTests(AtspiPatchedTestCase):
                                   return_value=None):
             result = runtime.list_apps_inventory()
 
-        self.assertEqual(len(result["notes"]), 1, result["notes"])
-        self.assertIn('"Visual Studio Code"', result["notes"][0])
-        self.assertIn("pid 2980", result["notes"][0])
-        self.assertIn("only GUI", result["notes"][0])
+        # The message box is listed once, with a native handle, so AX can
+        # activate, close or wait for it; no note repeats it.
+        self.assertEqual(result["notes"], [], result["notes"])
+        native = [window for entry in result["apps"] for window in entry["windows"]
+                  if window.get("noAccessibilityTree")]
+        self.assertEqual(1, [window["title"] for window in native].count("Visual Studio Code"),
+                         result["text"])
 
 
 class ChromiumWakeSettleTests(AtspiPatchedTestCase):

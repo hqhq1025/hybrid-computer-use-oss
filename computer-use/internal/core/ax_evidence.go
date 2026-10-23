@@ -217,9 +217,13 @@ func compactAXModelEvidence(
 	}
 	if targetedCoverageFailure {
 		compact["target_resolution"] = "incomplete"
-		if mode == contract.AXModeAct {
+		switch {
+		case mode == contract.AXModeAct:
 			recover["target"] = "find|GUI"
-		} else {
+		case mode == contract.AXModeFind && full["next_cursor"] != nil:
+			// The find walk stopped early; its cursor searches the rest.
+			recover["target"] = "cursor|GUI"
+		default:
 			recover["target"] = "GUI"
 		}
 	}
@@ -626,6 +630,10 @@ func axPublicEvidence(full map[string]any, isError bool, content []ContentItem) 
 		hint, _ := full[contract.AXPublicErrorHintKey].(string)
 		if coordinateUnverified {
 			hint = GUIScreenshotCall
+		}
+		if hint == "" && code == contract.AXCodeStaleRef && full["failure_subject"] == "window" {
+			// A window that no longer exists cannot be found inside itself.
+			hint = `{"mode":"apps"}`
 		}
 		if hint == "" {
 			hint = axPublicHints[code]

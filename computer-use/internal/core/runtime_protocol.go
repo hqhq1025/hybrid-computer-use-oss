@@ -30,6 +30,8 @@ type AXServiceRequest struct {
 	// FindWalk is request-local, like LightReadback: it is not part of the
 	// projection, so reads after a find use their own limits.
 	FindWalk        bool                  `json:"-"`
+	FindQuery       *ProviderFindQuery    `json:"-"`
+	FindResumeAfter []int                 `json:"-"`
 	TreeView        string                `json:"-"`
 	Scope           string                `json:"-"`
 	ObservationRoot map[string]any        `json:"-"`

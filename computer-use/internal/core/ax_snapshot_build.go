@@ -67,6 +67,14 @@ func buildAXSnapshot(snapshot *AppSnapshot) (*AXSnapshot, error) {
 			locatorKind:      locatorKind,
 			semanticTarget:   semanticTarget,
 		})
+		if snapshot.observationRoot != nil && record.Index == snapshot.observationRoot.Index {
+			node.ExplicitRoot = true
+			if entry := snapshot.observationRootEntry; entry != nil {
+				// A cropped subtree cannot replace the locator already resolved
+				// against the complete canonical window.
+				node.LocatorKind = entry.LocatorKind
+			}
+		}
 		out.ByID[id] = node
 		out.ByIndex[record.Index] = node
 		if providerIdentity != "" {
@@ -93,7 +101,8 @@ func newAXSnapshotHeader(snapshot *AppSnapshot) *AXSnapshot {
 	coverage := providerCoverageSummary(snapshot.Annotations)
 	identityCoverageIncomplete :=
 		coverage.AcquisitionIncomplete > 0 ||
-			coverage.ExpandableHidden > 0
+			coverage.ExpandableHidden > 0 ||
+			snapshot.FindCandidatesOnly
 	return &AXSnapshot{
 		SchemaVersion:              "AXSnapshot",
 		AppRef:                     snapshot.publicAppRef,
