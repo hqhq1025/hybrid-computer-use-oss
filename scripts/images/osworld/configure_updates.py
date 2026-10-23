@@ -59,8 +59,14 @@ def configure(desktop_directory=Path("/var/lib/snapd/desktop/applications"), hom
     return {"notification_applications": applications, "snap_store_present": True}
 
 
-if __name__ == "__main__":
+def main(argv=None):
     if os.getuid() == 0:
         raise SystemExit("Run as the logged-in guest desktop user")
-    argparse.ArgumentParser(description=__doc__).parse_args()
-    print(json.dumps(configure()))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--home", type=Path, default=Path.home())
+    args = parser.parse_args(argv)
+    print(json.dumps(configure(home=args.home)))
+
+
+if __name__ == "__main__":
+    main()

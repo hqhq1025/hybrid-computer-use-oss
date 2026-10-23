@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import configure_updates
+import install
 
 
 class UpdateNotificationTests(unittest.TestCase):
@@ -53,6 +54,21 @@ class UpdateNotificationTests(unittest.TestCase):
                           return_value=SimpleNamespace(stdout="true\n")):
             with self.assertRaisesRegex(RuntimeError, "did not persist"):
                 configure_updates.configure(self.root, self.root / "home")
+
+    def test_preferences_installer_arguments_reach_cli_parser(self):
+        desktop_home = self.root / "desktop user"
+        user = SimpleNamespace(pw_name="desktop-user", pw_dir=str(desktop_home))
+        with patch.object(install, "run") as run:
+            install.install_phase("preferences", {}, self.root / "manifest.json",
+                                  self.root, user)
+        commands = [call.args[0] for call in run.call_args_list]
+        command = next(command for command in commands
+                       if Path(command[5]).name == "configure_updates.py")
+        self.assertEqual(command[:5], ["runuser", "-u", user.pw_name, "--", "python3"])
+        with patch.object(configure_updates.os, "getuid", return_value=1000), \
+                patch.object(configure_updates, "configure", return_value={}) as configure:
+            configure_updates.main(command[6:])
+        configure.assert_called_once_with(home=desktop_home)
 
 
 if __name__ == "__main__":
