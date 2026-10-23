@@ -250,6 +250,19 @@ internal sealed class LogicalWindowBoundary<T> where T : class
     }
 }
 
+internal static class InheritedWindowOwnership
+{
+    // A node without its own native window that is not a window itself
+    // belongs to its parent's logical window; LogicalWindowBoundary.Owner
+    // would walk to the parent and return the same answer. Roots, nodes with
+    // a native handle and semantic windows need the ownership probe.
+    internal static bool? FromParent(
+        bool? parentOwned, long nativeWindowHandle, bool semanticWindow) =>
+        parentOwned is bool owned && nativeWindowHandle == 0 && !semanticWindow
+            ? owned
+            : null;
+}
+
 internal static class WindowOwnershipObservation
 {
     internal static T Read<T>(Func<T> freshSample)

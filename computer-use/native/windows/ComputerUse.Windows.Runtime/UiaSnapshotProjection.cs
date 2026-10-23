@@ -39,8 +39,13 @@ internal sealed partial class UiaProvider
         var elapsed = Stopwatch.StartNew();
         try
         {
-            return WindowOwnershipObservation.Read(() => BuildSnapshotSample(
-                process, selectedWindow, observation, () => elapsed.Elapsed));
+            var attempt = 0;
+            return WindowOwnershipObservation.Read(() =>
+            {
+                if (attempt++ > 0) { NativeDesktop.RefreshReadOnlyWindowScope(); }
+                return BuildSnapshotSample(
+                    process, selectedWindow, observation, () => elapsed.Elapsed);
+            });
         }
         catch (WindowOwnershipUnavailableException error)
         {
@@ -61,13 +66,16 @@ internal sealed partial class UiaProvider
             process,
             NativeDesktop.ListWindows(process.Id));
         selectedWindow = projection.LogicalRecord(selectedWindow);
+        // Root and popup discovery share one read of the desktop's children.
+        var discovery = new UiaDesktopDiscovery(_automation);
         var roots = LogicalAutomationRoots(
             process,
             projection,
             selectedWindow,
             discoverTransients: false,
             annotation: Gap,
-            elapsed: elapsed);
+            elapsed: elapsed,
+            discovery: discovery);
         var initialRootIdentities = roots.Select(RuntimeObjectPath).ToArray();
         var maxNodes = OptionalInt(observation, "max_tree_nodes", DefaultNodeLimit);
         var maxDepth = OptionalInt(observation, "max_tree_depth", DefaultDepthLimit);
@@ -80,23 +88,25 @@ internal sealed partial class UiaProvider
         var lines = new JsonArray();
         var index = 0;
         var selectedHandle = OpaqueWindowHandle(process, selectedWindow.Handle);
-        var sampled = new List<(AutomationElement Element, JsonObject Record, int[] Path, int Depth)>();
-        var identities = new CanonicalNodeIdentitySet<AutomationElement>((left, right) =>
+        var sampled = new List<(CachedUiaNode Node, JsonObject Record, int[] Path, int Depth)>();
+        var identities = new CanonicalNodeIdentitySet<CachedUiaNode>((left, right) =>
         {
             visits.CheckTime();
-            return _automation.Compare(left, right);
+            return _automation.Compare(left.Element, right.Element);
         });
+        var processGeneration = ProcessGeneration(process);
+        var cache = new UiaSnapshotCache(_automation);
         var observedElementLeases =
             new Dictionary<string, ObservedElementLease<AutomationElement>>(
                 StringComparer.Ordinal);
-        var controlWalker =
-            _automation.TreeWalkerFactory.GetControlViewWalker();
 
-        using (CacheRequest.ForceNoCache())
+        // No ForceNoCache scope here: the snapshot cache activates its own
+        // requests, and every other call in this block runs uncached.
+        using (WindowsUiaAutomationFactory.SnapshotReadTimeout(_automation))
         {
             try
             {
-                Visit(roots);
+                Visit(ReadRoots(roots));
                 // Known window roots provide the main canonical tree. Searching
                 // the desktop again for raw-only popups must not delay it.
                 if (visits.Remaining > 0 && elapsed() < SnapshotSampleTimeout)
@@ -105,10 +115,11 @@ internal sealed partial class UiaProvider
                         process, projection, selectedWindow,
                         transientsOnly: true,
                         annotation: Gap, elapsed: elapsed,
-                        precedingRuntimeIdentities: initialRootIdentities);
+                        precedingRuntimeIdentities: initialRootIdentities,
+                        discovery: discovery);
                     // Keep the first root table frozen. New roots append to it;
                     // duplicate records skip emission, not their index slots.
-                    Visit(additionalRoots, roots.Count);
+                    Visit(ReadRoots(additionalRoots), roots.Count);
                 }
                 else
                 {
@@ -147,7 +158,7 @@ internal sealed partial class UiaProvider
             if (providerPath.StartsWith("runtime:", StringComparison.Ordinal))
             {
                 observedElementLeases[providerPath] =
-                    new ObservedElementLease<AutomationElement>(sample.Element, sample.Record);
+                    new ObservedElementLease<AutomationElement>(sample.Node.Element, sample.Record);
             }
             index++;
         }
@@ -191,14 +202,21 @@ internal sealed partial class UiaProvider
         };
         return snapshot;
 
-        bool Emit(AutomationElement element, int[] treePath, int depth)
+        bool Emit(CachedUiaNode node, int[] treePath, int depth)
         {
+            if (node.Facts is null)
+            {
+                Gap("node_read_failed");
+                return false;
+            }
             JsonObject record;
             try
             {
                 record = ElementJson(
-                    element,
+                    node.Element,
+                    node.Facts,
                     index,
+                    processGeneration,
                     process,
                     selectedWindow,
                     selectedHandle,
@@ -218,7 +236,7 @@ internal sealed partial class UiaProvider
                     record["name"]?.GetValue<string>() ?? string.Empty,
                     record["className"]?.GetValue<string>() ?? string.Empty,
                     record["frame"]?.ToJsonString() ?? string.Empty);
-                if (!identities.TryAdd(element, providerObjectPath, propertyKey, treePath[0])) { return false; }
+                if (!identities.TryAdd(node, providerObjectPath, propertyKey, treePath[0])) { return false; }
             }
             catch (ObservationDeadlineExceededException) { throw; }
             catch
@@ -226,24 +244,43 @@ internal sealed partial class UiaProvider
                 Gap("node_identity_unavailable");
                 return false;
             }
-            sampled.Add((element, record, treePath, depth));
+            sampled.Add((node, record, treePath, depth));
             index++;
             return true;
         }
 
-        void Visit(IReadOnlyList<AutomationElement> selectedRoots, int rootIndexOffset = 0)
+        void Visit(IReadOnlyList<CachedUiaNode> selectedRoots, int rootIndexOffset = 0)
         {
             LogicalWindowTraversal.Visit(
                 selectedRoots, visits, maxDepth,
-                element => boundary.Owner(element) == selectedWindow.Handle.ToInt64(),
+                Owned,
                 Emit,
-                element => ReadChild(() => controlWalker.GetFirstChild(element)),
-                element => ReadChild(() => controlWalker.GetNextSibling(element)),
+                node => ReadLink(() => cache.ReadFirstChild(node)),
+                node => ReadLink(() => cache.ReadNextSibling(node)),
                 Gap,
                 rootIndexOffset);
         }
 
-        AutomationElement? ReadChild(Func<AutomationElement?> read)
+        // Each read returns one parent's control-view children with every
+        // fact a record needs, so a level costs one cross-process call per
+        // parent instead of about twenty per node. A root that cannot be read
+        // keeps its slot, so later roots keep their indices.
+        IReadOnlyList<CachedUiaNode> ReadRoots(IReadOnlyList<AutomationElement> selectedRoots)
+        {
+            var nodes = new CachedUiaNode[selectedRoots.Count];
+            for (var rootIndex = 0; rootIndex < selectedRoots.Count; rootIndex++)
+            {
+                visits.CheckTime();
+                var root = selectedRoots[rootIndex];
+                CachedUiaNode? node;
+                try { node = cache.ReadRoot(root); }
+                catch { node = null; }
+                nodes[rootIndex] = node ?? new CachedUiaNode(root, null, null, 0);
+            }
+            return nodes;
+        }
+
+        CachedUiaNode? ReadLink(Func<CachedUiaNode?> read)
         {
             try
             {
@@ -255,6 +292,22 @@ internal sealed partial class UiaProvider
                 return null;
             }
         }
+
+        bool Owned(CachedUiaNode node)
+        {
+            if (node.Owned is bool known) { return known; }
+            var facts = node.Facts;
+            var owned = (facts is null
+                    ? null
+                    : InheritedWindowOwnership.FromParent(
+                        node.Parent?.Owned,
+                        facts.NativeWindowHandle,
+                        facts.Window || facts.ControlType == ControlType.Window)) ??
+                boundary.Owner(node.Element) == selectedWindow.Handle.ToInt64();
+            node.Owned = owned;
+            return owned;
+        }
+
 
         void Gap(string reason)
         {
@@ -270,24 +323,25 @@ internal sealed partial class UiaProvider
         }
     }
 
+    // Builds one record from facts read through the snapshot cache. Only a
+    // text control's selection support and document text need a live call.
     private JsonObject ElementJson(
         AutomationElement element,
+        UiaNodeFacts facts,
         int index,
+        string processGeneration,
         Process process,
         NativeDesktop.WindowRecord window,
         string windowHandle,
         IReadOnlyList<int> treePath)
     {
-        var role = UiaSnapshotNodeReads.RoleOrUnknown(
-            () => CanonicalRole(element.ControlType));
-        var name = index == 0
-            ? window.Title
-            : Safe(() => element.Name, string.Empty);
-        var rectangle = Safe(() => element.BoundingRectangle, Rectangle.Empty);
-        var hasKeyboardFocus = Safe(
-            () => element.Properties.HasKeyboardFocus.ValueOrDefault,
-            false);
-        var visibility = ReadVisibility(element);
+        var role = facts.ControlType is { } controlType
+            ? UiaSnapshotNodeReads.RoleOrUnknown(() => CanonicalRole(controlType))
+            : "unknown";
+        var name = index == 0 ? window.Title : facts.Name;
+        var rectangle = facts.Bounds;
+        var hasKeyboardFocus = facts.HasKeyboardFocus;
+        var visibility = facts.Visibility;
         var isEffectivelyVisible = visibility.EffectiveVisibility(
             hasKeyboardFocus,
             rectangle,
@@ -314,50 +368,29 @@ internal sealed partial class UiaProvider
                 ["reason"] = "focus_geometry_override",
             };
         }
-        var toggle = UiaSnapshotNodeReads.OptionalPattern(
-            () => element.Patterns.Toggle.PatternOrDefault);
-        var selectionItem = UiaSnapshotNodeReads.OptionalPattern(
-            () => element.Patterns.SelectionItem.PatternOrDefault);
-        var valuePattern = UiaSnapshotNodeReads.OptionalPattern(
-            () => element.Patterns.Value.PatternOrDefault);
-        var textPattern = UiaSnapshotNodeReads.OptionalPattern(
-            () => element.Patterns.Text.PatternOrDefault);
-        var valueWritable = valuePattern is not null &&
-            !Safe(() => valuePattern.IsReadOnly.Value, true);
-        var rangeValuePattern = UiaSnapshotNodeReads.OptionalPattern(
-            () => element.Patterns.RangeValue.PatternOrDefault);
-        var rangeValueWritable = rangeValuePattern is not null &&
-            !Safe(() => rangeValuePattern.IsReadOnly.Value, true);
+        var textPattern = facts.Text
+            ? UiaSnapshotNodeReads.OptionalPattern(() => element.Patterns.Text.PatternOrDefault)
+            : null;
+        var valueWritable = facts.Value && !facts.ValueReadOnly;
+        var rangeValueWritable = facts.RangeValue && !facts.RangeValueReadOnly;
         var actions = new JsonArray();
+        AddAction(actions, facts.Invoke, "invoke");
+        AddAction(actions, facts.Toggle, "toggle");
         AddAction(
             actions,
-            UiaSnapshotNodeReads.OptionalPattern(
-                () => element.Patterns.Invoke.PatternOrDefault) is not null,
-            "invoke");
-        AddAction(actions, toggle is not null, "toggle");
-        AddAction(
-            actions,
-            selectionItem is not null || textPattern is not null &&
+            facts.SelectionItem || textPattern is not null &&
                 Safe(() => textPattern.SupportedTextSelection !=
                     FlaUI.Core.Definitions.SupportedTextSelection.None, false),
             "select");
-        AddAction(
-            actions,
-            UiaSnapshotNodeReads.OptionalPattern(
-                () => element.Patterns.ExpandCollapse.PatternOrDefault) is not null,
-            "expand");
-        AddAction(
-            actions,
-            UiaSnapshotNodeReads.OptionalPattern(
-                () => element.Patterns.ScrollItem.PatternOrDefault) is not null,
-            "scrollIntoView");
+        AddAction(actions, facts.ExpandCollapse, "expand");
+        AddAction(actions, facts.ScrollItem, "scrollIntoView");
         AddAction(
             actions,
             valueWritable ||
                 UiaSetValueRouting.PrefersRange(role, rangeValueWritable),
             "setValue");
         var states = new List<string>();
-        if (Safe(() => element.IsEnabled, false))
+        if (facts.IsEnabled == true)
         {
             states.Add("enabled");
         }
@@ -365,48 +398,37 @@ internal sealed partial class UiaProvider
         {
             states.Add("focused");
         }
-        if (toggle is not null)
+        if (facts.Toggle && facts.ToggleState is { } toggleState)
         {
-            var toggleState = ProviderValueReads.OptionalString(
-                () => WindowsToggleState.Canonicalize(
-                    toggle.ToggleState.ValueOrDefault.ToString()));
-            if (!string.IsNullOrEmpty(toggleState))
+            var canonical = ProviderValueReads.OptionalString(
+                () => WindowsToggleState.Canonicalize(toggleState.ToString()));
+            if (!string.IsNullOrEmpty(canonical))
             {
-                states.Add(toggleState);
+                states.Add(canonical);
             }
         }
-        if (selectionItem is not null)
+        if (facts.SelectionItem)
         {
-            states.Add(Safe(
-                () => selectionItem.IsSelected.ValueOrDefault,
-                false)
-                ? "selected"
-                : "unselected");
+            states.Add(facts.IsSelected == true ? "selected" : "unselected");
         }
         var value = string.Empty;
-        if (valuePattern is not null)
+        if (facts.Value)
         {
-            var valuePatternValue =
-                Safe(() => valuePattern.Value.Value, string.Empty);
             var documentText = textPattern is null
                 ? null
                 : ProviderValueReads.OptionalString(
-                    () => textPattern.DocumentRange.GetText(-1));
+                    () => textPattern.DocumentRange.GetText(MaxDocumentTextLength));
             value = LiveValueReadback.CanonicalTextValue(
-                valuePatternValue,
+                facts.ValueText ?? string.Empty,
                 documentText);
         }
-        else if (rangeValuePattern is not null)
+        else if (facts.RangeValue && facts.RangeValueNumber is { } number)
         {
-            value = Safe(
-                () => rangeValuePattern.Value.Value.ToString(
-                    "R",
-                    System.Globalization.CultureInfo.InvariantCulture),
-                string.Empty);
+            value = number.ToString(
+                "R",
+                System.Globalization.CultureInfo.InvariantCulture);
         }
-        var nativeRuntimeId = Safe(
-            () => element.Properties.RuntimeId.ValueOrDefault ?? Array.Empty<int>(),
-            Array.Empty<int>());
+        var nativeRuntimeId = facts.RuntimeId;
         var providerBusName = $"uia3:pid:{process.Id}";
         var providerObjectPath = nativeRuntimeId.Length == 0
             ? string.Empty
@@ -416,31 +438,29 @@ internal sealed partial class UiaProvider
             ["index"] = index,
             ["runtimeId"] = new JsonArray(
                 treePath.Select(value => JsonValue.Create(value)).ToArray()),
-            ["automationId"] = Safe(() => element.AutomationId, string.Empty),
+            ["automationId"] = facts.AutomationId,
             ["providerBusName"] = providerBusName,
             ["providerObjectPath"] = providerObjectPath,
-            ["processGeneration"] = ProcessGeneration(process),
+            ["processGeneration"] = processGeneration,
             ["providerIdentityScope"] = nativeRuntimeId.Length == 0
                 ? "snapshot_only"
                 : "self",
             ["providerWindowBusName"] = $"win32:pid:{process.Id}",
             ["providerWindowObjectPath"] = windowHandle,
-            ["providerWindowProcessGeneration"] = ProcessGeneration(process),
+            ["providerWindowProcessGeneration"] = processGeneration,
             ["providerWindowRole"] = "window",
             ["providerWindowName"] = window.Title,
             ["showing"] = isEffectivelyVisible,
             ["visible"] = isEffectivelyVisible,
             ["name"] = name,
             ["controlType"] = role,
-            ["localizedControlType"] = Safe(
-                () => element.Properties.LocalizedControlType.ValueOrDefault,
-                string.Empty),
-            ["className"] = Safe(() => element.ClassName, string.Empty),
+            ["localizedControlType"] = facts.LocalizedControlType,
+            ["className"] = facts.ClassName,
             ["value"] = value,
             ["frame"] = RectangleJson(rectangle),
             ["actions"] = actions,
             ["states"] = string.Join(' ', states),
-            ["description"] = Safe(() => element.HelpText, string.Empty),
+            ["description"] = facts.HelpText,
         };
         if (visibilityEvidence is not null)
         {
