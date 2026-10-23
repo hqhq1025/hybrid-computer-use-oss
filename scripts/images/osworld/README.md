@@ -65,6 +65,14 @@ Confirm that the refresh schedule reports `hold: forever`. Record the installed
 Snap revisions with the image. The hold prevents automatic refreshes; an explicit
 manual refresh that names a Snap can still update that application.
 
+The preferences phase also runs `configure_updates.py` as the desktop user.
+It disables Software's automatic update downloads and pop-up notification
+banners. A hidden desktop-entry alias lets GNOME associate Snap Store's
+notifications with its application policy. Notifications remain enabled in
+the notification center; Software's manual update controls and other
+applications' notification settings remain unchanged. Restart Software or
+start a fresh desktop session after applying these preferences.
+
 6. Start a fresh desktop session and verify application startup and input.
 7. Remove the copied scripts, archives and extracted staging files.
 8. Shut down the guest and export a new image without replacing the base.
