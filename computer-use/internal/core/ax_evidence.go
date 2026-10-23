@@ -202,9 +202,12 @@ func compactAXModelEvidence(
 	}
 	targetedCoverageFailure := coverageIncomplete &&
 		axTargetedCoverageFailure(full, mode, isError)
+	// A find page lists only matches the walk reached: when the walk
+	// stopped at a cap, later matches may be missing.
+	findPage := mode == contract.AXModeFind && full["find_delivery_complete"] == true
 	if coverageIncomplete &&
 		(mode == contract.AXModeObserve || axFinalObservationHasTree(full) ||
-			targetedCoverageFailure) {
+			targetedCoverageFailure || findPage) {
 		compact["coverage"] = "partial"
 		compact["tree_complete"] = false
 	}

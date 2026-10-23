@@ -10,6 +10,19 @@ import tarfile
 import zipfile
 
 
+def configure_freecad_resources(destination, resource_path=Path("/usr/share/freecad")):
+    resources = destination / "usr/share/freecad"
+    if not (resources / "Mod/Start/StartPage/StartPage.html").is_file():
+        raise RuntimeError("FreeCAD package resources are incomplete")
+    # The Ubuntu binary compiles this absolute resource path into getResourceDir().
+    # Keep native libraries private while restoring the package's resource layout.
+    if resource_path.is_symlink() and resource_path.resolve() == resources.resolve():
+        return
+    if resource_path.exists() or resource_path.is_symlink():
+        raise RuntimeError("FreeCAD resource path is already occupied: " + str(resource_path))
+    resource_path.symlink_to(resources, target_is_directory=True)
+
+
 def install_freecad(bundle_archive, expected_manifest):
     bundle = bundle_archive.parent / "freecad-expanded"
     bundle.mkdir(exist_ok=True)
@@ -43,6 +56,7 @@ def install_freecad(bundle_archive, expected_manifest):
     liblink = destination / "usr/lib/freecad/lib"
     if not liblink.exists():
         liblink.symlink_to("../freecad-python3/lib")
+    configure_freecad_resources(destination)
     launcher = Path("/usr/local/bin/freecad")
     launcher.write_text("#!/bin/sh\n"
         "export QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1\n"

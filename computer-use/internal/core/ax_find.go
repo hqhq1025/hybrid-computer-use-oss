@@ -172,13 +172,38 @@ func (s *Service) findMatches(
 	if result.IsError {
 		return nil, result
 	}
-	found := &findMatch{snapshot: snapshot, matched: []ElementRecord{}}
+	matched := findQueryMatches(snapshot, role, name, text, state, nameExact, textExact)
+	// The observe read stops at the render budget. When it found nothing and
+	// stopped early, the Linux provider walks again with the find caps; see
+	// ProviderObservationOptions.FindWalk. A match in the budgeted read
+	// returns at once: the caller sees partial coverage and can narrow.
+	if len(matched) == 0 &&
+		s.platformBackend().HostInfo().Platform == "linux" &&
+		providerCoverageSummary(snapshot.Annotations).AcquisitionIncomplete > 0 {
+		request.FindWalk = true
+		walked, walkNotes, walkResult := s.refreshProjectedSnapshot(app, request)
+		if walkResult.IsError {
+			return nil, walkResult
+		}
+		snapshot, notes = walked, walkNotes
+		matched = findQueryMatches(snapshot, role, name, text, state, nameExact, textExact)
+	}
+	found := &findMatch{snapshot: snapshot, matched: matched}
 	if note := s.consumeFailedObservation(app, snapshot); note != "" {
 		notes = append([]string{note}, notes...)
 		found.followsFailedAction = true
 	}
 	found.notes = compactFindNotes(notes)
+	found.query = describeQuery(role, name, text, state, nameExact, textExact)
+	return found, ToolCallResult{}
+}
 
+func findQueryMatches(
+	snapshot *AppSnapshot,
+	role, name, text, state string,
+	nameExact, textExact bool,
+) []ElementRecord {
+	matched := []ElementRecord{}
 	for _, record := range snapshot.Elements {
 		if !recordInAXScope(snapshot, &record) {
 			continue
@@ -198,11 +223,10 @@ func (s *Service) findMatches(
 				record.FindMatchedField = field
 				record.FindMatchedText = value
 			}
-			found.matched = append(found.matched, record)
+			matched = append(matched, record)
 		}
 	}
-	found.query = describeQuery(role, name, text, state, nameExact, textExact)
-	return found, ToolCallResult{}
+	return matched
 }
 
 func (s *Service) find(

@@ -4,6 +4,7 @@ package provider
 
 import (
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -53,6 +54,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/ui_events.py",
 		"native/linux/provider/window_diagnostics.py",
 		"native/linux/provider/window_resolver.py",
+		"native/linux/provider/window_scale.py",
 		"native/linux/provider/wire.py",
 		"native/linux/provider/wire_request.py",
 		"native/linux/provider/x11_windows.py",
@@ -66,6 +68,20 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 	if strings.Join(gotPaths, "\n") != strings.Join(wantPaths, "\n") {
 		t.Fatalf("Linux runtime bundle paths differ:\ngot:\n%s\nwant:\n%s",
 			strings.Join(gotPaths, "\n"), strings.Join(wantPaths, "\n"))
+	}
+}
+
+func TestLinuxRuntimeBundleIncludesEveryProviderModule(t *testing.T) {
+	bundle := linuxRuntimeBundle()
+	modules, err := filepath.Glob(filepath.Join("..", "..", "native", "linux", "provider", "*.py"))
+	if err != nil || len(modules) == 0 {
+		t.Fatalf("list provider modules: %v (%d found)", err, len(modules))
+	}
+	for _, module := range modules {
+		path := "native/linux/provider/" + filepath.Base(module)
+		if _, ok := bundle[path]; !ok {
+			t.Errorf("%s is not in the Linux runtime bundle; the provider cannot import it", path)
+		}
 	}
 }
 
