@@ -45,9 +45,9 @@ from hcu.osworld.agents import (
     grok_config,
     grok_system_prompt,
     public_tools,
-    launcher_script,
     task_gateway_base,
 )
+from hcu.osworld.launcher import launcher_script
 from hcu.osworld.diagnostics import collect_guest_infra_diagnostic
 from hcu.gateway.common import TASK_AFFINITY_PREFIX
 from hcu.osworld.evaluation import run_official_evaluator
