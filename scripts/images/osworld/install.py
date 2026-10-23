@@ -76,7 +76,8 @@ def install_phase(phase, manifest, manifest_path, assets, user):
         install_special(manifest, assets, user)
     elif phase == "preferences":
         for script, arguments in (("configure_editor.py", []),
-                                  ("configure_desktop.py", ["--manifest", str(manifest_path)])):
+                                  ("configure_desktop.py", ["--manifest", str(manifest_path)]),
+                                  ("configure_updates.py", [])):
             run(["runuser", "-u", user.pw_name, "--", "python3", str(ROOT / script),
                  "--home", user.pw_dir, *arguments])
 
