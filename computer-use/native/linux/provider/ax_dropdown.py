@@ -6,11 +6,15 @@ the option's SELECTED state, or for a combo box that names itself after its
 choice (GTK, Qt), that name.
 """
 
+from collections import deque
+
+from . import action_evidence
 from .foundation import (
     Atspi,
     FIND_FIRST_BUDGET,
     MAX_CHILD_FANOUT,
     OBJECT_REPLACEMENT,
+    OperationFailure,
     node_name,
     node_role,
     provider_object_path,
@@ -29,7 +33,7 @@ from .ax_select import (
     _wait_until,
     text_between,
 )
-from .input_primitives import require_window_focus
+from .input_primitives import InputEmissionError, require_window_focus
 
 
 DROPDOWN_ROLES = ("combo box", "list box")
@@ -43,22 +47,81 @@ MAX_DROPDOWN_OPTIONS = 500
 
 
 def _dropdown_options(node):
-    """Return the option nodes below a drop-down, in tree order."""
+    """Return all options in tree order, or reject an incomplete scan.
+
+    A prefix cannot prove that an option name is unique or absent. Apply
+    the same bound to queued and visited nodes so wide trees stay bounded.
+    """
     options = []
-    stack = [node]
+    stack = deque([node])
     seen = 0
-    while stack and seen < MAX_DROPDOWN_OPTIONS:
-        current = stack.pop(0)
+    while stack:
+        current = stack.popleft()
         seen += 1
-        if current is not node and node_role(current) in OPTION_ROLES:
+        role = safe(current.get_role_name)
+        if role is None:
+            raise _incomplete_options()
+        if current is not node and role in OPTION_ROLES:
+            if safe(current.get_name) is None:
+                raise _incomplete_options()
             options.append(current)
             continue
-        count = int(safe(current.get_child_count, 0) or 0)
-        for index in range(min(count, MAX_DROPDOWN_OPTIONS)):
+        count = safe(current.get_child_count)
+        if (count is None or count < 0
+                or seen + len(stack) + count > MAX_DROPDOWN_OPTIONS):
+            raise _incomplete_options()
+        for index in range(count):
             child = safe(lambda index=index: current.get_child_at_index(index))
-            if child is not None:
-                stack.append(child)
+            if child is None:
+                raise _incomplete_options()
+            stack.append(child)
     return options
+
+
+def _incomplete_options():
+    return _failure(
+        "select_options_incomplete: the drop-down options could not be read "
+        "completely; a unique choice cannot be established. Inspect the "
+        "open list and select the option with GUI.",
+        emitted=_dropdown_input_emitted())
+
+
+def _dropdown_input_emitted():
+    return bool((action_evidence.current() or {}).get("input_emitted"))
+
+
+def _emit_dropdown_action(callback):
+    # A lost reply does not prove emission or rejection. Keep that uncertainty
+    # separate from requests that the provider explicitly accepted.
+    try:
+        accepted = callback()
+    except OperationFailure as exc:
+        if exc.input_events_emitted:
+            action_evidence.update(input_emitted=True, route="semantic_action")
+        elif not exc.failure_facts_complete:
+            exc.partial_input_possible = True
+        raise
+    except Exception as exc:
+        exc.partial_input_possible = True
+        raise
+    if accepted:
+        action_evidence.update(input_emitted=True, route="semantic_action")
+    return accepted
+
+
+def _send_dropdown_key(key):
+    try:
+        send_key(key)
+    except InputEmissionError:
+        raise
+    except OperationFailure as exc:
+        if not exc.failure_facts_complete:
+            exc.partial_input_possible = True
+        raise
+    except Exception as exc:
+        exc.partial_input_possible = True
+        raise
+    action_evidence.update(input_emitted=True, route="keyboard_synthesis")
 
 
 def _option_selected(option):
@@ -73,7 +136,10 @@ def _option_selected(option):
 
 
 def option_name(option):
-    return str(node_name(option) or "").strip()
+    name = safe(option.get_name)
+    if name is None:
+        raise _incomplete_options()
+    return str(name).strip()
 
 
 def _shown_choice(node):
@@ -115,7 +181,7 @@ def _open_popup(combo, option):
              for k in range(count)]
     for wanted in POPUP_OPEN_ACTIONS:
         if wanted in names:
-            safe(lambda: combo.do_action(names.index(wanted)), False)
+            _emit_dropdown_action(lambda: combo.do_action(names.index(wanted)))
             return _wait_until(lambda: _popup_open(combo, option), 1.0)
     return False
 
@@ -143,13 +209,13 @@ def _commit_from_popup(combo, option, window):
         current = _focused_index(options)
         if target is None or current is None or current == target:
             break
-        send_key("Down" if target > current else "Up")
+        _send_dropdown_key("Down" if target > current else "Up")
         if not _wait_until(lambda c=current: _focused_index(options) != c, 0.6):
             break
     if target is None or _focused_index(options) != target:
-        send_key("Escape")
+        _send_dropdown_key("Escape")
         return False
-    send_key("Return")
+    _send_dropdown_key("Return")
     return True
 
 
@@ -196,13 +262,11 @@ def select_dropdown_option(node, text, window=None):
 
     if committed():
         return wanted
-    emitted = False
     count = int(safe(option.get_n_actions, 0) or 0)
     names = [str(safe(lambda k=k: option.get_action_name(k), "") or "")
              for k in range(count)]
     if "select" in names:
-        emitted = True
-        safe(lambda: option.do_action(names.index("select")), False)
+        _emit_dropdown_action(lambda: option.do_action(names.index("select")))
         if _wait_until(committed, 0.6):
             return wanted
     index = safe(lambda: option.get_index_in_parent())
@@ -212,18 +276,15 @@ def select_dropdown_option(node, text, window=None):
             and _same(safe(parent.get_parent), node)):
         # GTK commits through the combo box's own Selection, which sets the
         # active item; the popup menu's Selection only highlights an item.
-        emitted = True
-        safe(lambda: Atspi.Selection.select_child(node, int(index)), False)
+        _emit_dropdown_action(lambda: Atspi.Selection.select_child(node, int(index)))
         if _wait_until(committed, 0.6):
             return wanted
     container = _selection_container(option)
     if container is not None and index is not None and index >= 0:
-        emitted = True
-        safe(lambda: Atspi.Selection.select_child(container, int(index)), False)
+        _emit_dropdown_action(lambda: Atspi.Selection.select_child(container, int(index)))
         if _wait_until(committed, 0.6):
             return wanted
     if shows_choice:
-        emitted = True
         if _commit_from_popup(node, option, window) and _wait_until(committed, 1.0):
             return wanted
         raise _failure(
@@ -231,8 +292,8 @@ def select_dropdown_option(node, text, window=None):
             "its choice may have changed. Open it, then press Return on the "
             "option or click it with the GUI.".format(
                 _quote(_shown_choice(node)), _quote(text)),
-            code="effect_unknown", emitted=True, phase="readback")
-    if not emitted:
+            code="effect_unknown", emitted=_dropdown_input_emitted(), phase="readback")
+    if not _dropdown_input_emitted():
         raise _failure(
             "select_unavailable: the option {} has no select action and its "
             "list has no selection interface; no input was emitted. Open the "
@@ -240,7 +301,7 @@ def select_dropdown_option(node, text, window=None):
     raise _failure(
         "select_unverified: the option {} did not report itself selected."
         .format(_quote(text)),
-        code="effect_unknown", emitted=True, phase="readback")
+        code="effect_unknown", emitted=_dropdown_input_emitted(), phase="readback")
 
 
 def owning_dropdown(node):
@@ -330,7 +391,7 @@ def _click_toggle(toggle):
              for k in range(count)]
     if "click" not in names:
         return False
-    return bool(safe(lambda: toggle.do_action(names.index("click")), False))
+    return bool(_emit_dropdown_action(lambda: toggle.do_action(names.index("click"))))
 
 
 def _open_projected_list(toggle):
@@ -360,8 +421,8 @@ def _activate_list_row(option):
     moves the cursor.
     """
     component = safe(option.get_component_iface)
-    if component is None or not safe(
-            lambda: Atspi.Component.grab_focus(component), False):
+    if component is None or not _emit_dropdown_action(
+            lambda: Atspi.Component.grab_focus(component)):
         return False
     if not _wait_until(
             lambda: state_contains(option, Atspi.StateType.FOCUSED), 0.6):
@@ -371,7 +432,7 @@ def _activate_list_row(option):
              for k in range(count)]
     if "activate" not in names:
         return False
-    return bool(safe(lambda: option.do_action(names.index("activate")), False))
+    return bool(_emit_dropdown_action(lambda: option.do_action(names.index("activate"))))
 
 
 def select_projected_option(toggle, text):
@@ -395,8 +456,9 @@ def select_projected_option(toggle, text):
             "select_unavailable: the drop-down list could not be found as one "
             "open popup; no option was chosen. Click the drop-down, then "
             "select the option.",
-            code="effect_unknown" if clicked else "select_unavailable",
-            emitted=clicked, phase="emission" if clicked else "precondition")
+            code="effect_unknown" if _dropdown_input_emitted() else "select_unavailable",
+            emitted=_dropdown_input_emitted(),
+            phase="emission" if _dropdown_input_emitted() else "precondition")
     options = _dropdown_options(popup)
     matches = [option for option in options if option_name(option) == wanted]
     if len(matches) != 1:
@@ -409,7 +471,7 @@ def select_projected_option(toggle, text):
                 "is not" if not matches else "occurs more than once",
                 ", ".join(_quote(name) for name in names[:30])
                 or "none readable"),
-            code="invalid_argument", emitted=True)
+            code="invalid_argument", emitted=_dropdown_input_emitted())
     choice = ""
     if _activate_list_row(matches[0]) and _wait_until(
             lambda: not state_contains(toggle, Atspi.StateType.CHECKED), 1.0):
@@ -432,7 +494,7 @@ def select_projected_option(toggle, text):
         "choice may have changed. Open it and click the option with the GUI."
         .format(_quote(choice) if choice else "no readable choice",
                 _quote(text)),
-        code="effect_unknown", emitted=True, phase="readback")
+        code="effect_unknown", emitted=_dropdown_input_emitted(), phase="readback")
 
 
 def projected_list_owner(option):

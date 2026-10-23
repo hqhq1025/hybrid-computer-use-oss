@@ -8,6 +8,36 @@ from runtime_test_support import *  # noqa: F401,F403
 
 
 class RuntimeActionEvidenceFailureTests(unittest.TestCase):
+    def test_generic_input_exception_preserves_confirmed_events(self):
+        action_evidence.replace({"input_emitted": False})
+        self.addCleanup(action_evidence.reset)
+        error = RuntimeError("transport lost after one click")
+        error.events_emitted = True
+        response = runtime.unexpected_operation_failure_response(error)
+        self.assertTrue(response["input_events_emitted"])
+        self.assertTrue(response["mutation_unknown"])
+        self.assertEqual(response["failureCode"], "effect_unknown")
+
+    def test_uncertain_semantic_dispatch_matches_shared_wire_fixture(self):
+        action_evidence.replace({"input_emitted": False})
+        self.addCleanup(action_evidence.reset)
+        error = RuntimeError("D-Bus reply lost")
+        error.partial_input_possible = True
+        response = runtime.unexpected_operation_failure_response(error, object())
+        self.assertNotIn("recoveryContext", response)
+        result = wire._accessibility_result(response)
+        fixture = json.loads((Path(__file__).parents[1] / "testdata" /
+                              "provider-wire" / "semantic-reply-lost.response.json")
+                             .read_text())
+        expected = fixture["accessibility"]
+        self.assertEqual(result["error"], expected["error"])
+        for key, value in expected["failure"].items():
+            self.assertEqual(result["failure"][key], value)
+        for key, value in expected["mutation"].items():
+            self.assertEqual(result["mutation"][key], value)
+        self.assertFalse(result["mutation"]["input_events_emitted"])
+        self.assertFalse(result["action_evidence"]["input_emitted"])
+
     def test_partial_apps_wire_preserves_typed_unknown_coverage(self):
         issues = [{"app": "Busy app", "reason": "AXWindows unavailable"}]
         result = wire._accessibility_result({

@@ -7,6 +7,29 @@ import (
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 )
 
+func TestUncertainSemanticDispatchSurvivesWireAndService(t *testing.T) {
+	response, err := DecodeProviderWireResponse(readProviderFixture(t, "semantic-reply-lost.response.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ProviderMutationCanInvalidate(response.Accessibility.Mutation) {
+		t.Fatal("a lost semantic reply must invalidate the previous observation")
+	}
+	service := NewServiceWithBackend(&recordingPlatformBackend{})
+	result := service.runtimeReportedFailure("Editor", AXServiceRequest{
+		Action: AXClickCommand{}, App: "Editor",
+	}, *response.Accessibility)
+	if !result.IsError || result.StructuredContent["input_events_emitted"] != false ||
+		result.StructuredContent["partial_input_possible"] != true ||
+		result.StructuredContent["mutation_unknown"] != true {
+		t.Fatalf("semantic dispatch uncertainty was changed or lost: %#v", result)
+	}
+	if strings.Contains(ResultText(result), "input was emitted") ||
+		strings.Contains(ResultText(result), "before input") {
+		t.Fatalf("uncertainty became a definite input claim: %s", ResultText(result))
+	}
+}
+
 func TestMissingPostActionSnapshotPreservesUnknownMutationEvidence(t *testing.T) {
 	backend := &recordingPlatformBackend{
 		accessibilityResponse: &ProviderAccessibilityResult{

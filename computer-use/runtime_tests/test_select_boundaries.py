@@ -189,6 +189,8 @@ class WrappedSelectionItemTests(AtspiPatchedTestCase):
 class SelectBoundaryTests(AtspiPatchedTestCase):
     def setUp(self):
         super().setUp()
+        action_evidence.reset()
+        self.addCleanup(action_evidence.reset)
         for name, value in (("time", _FakeClock()),
                             ("require_window_focus", lambda *args: None)):
             patch = mock.patch.object(runtime, name, value)
@@ -457,6 +459,129 @@ class ComboOptionSelectTests(SelectBoundaryTests):
         self.assertFalse(caught.exception.input_events_emitted)
         self.assertIn("Seattle", str(caught.exception))
 
+    def test_rejected_semantic_requests_do_not_claim_confirmed_input(self):
+        combo, items = self._combo(selection_api=False)
+        for item in items:
+            item.do_action = lambda _index: False
+        evidence = {"input_emitted": False}
+        self.addCleanup(action_evidence.reset)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Seattle"}, None, combo,
+                                   {}, None, [], evidence)
+        response = runtime.operation_failure_response(caught.exception)
+        self.assertFalse(response["input_events_emitted"])
+        self.assertFalse(response["partial_input_possible"])
+        self.assertFalse(response["mutation_unknown"])
+        self.assertIn(STATE.SELECTED, items[0].states)
+
+    def test_scan_limit_never_proves_uniqueness_or_absence(self):
+        for wanted in ("Seattle", "Last city", "Missing"):
+            with self.subTest(wanted=wanted):
+                names = ["Beijing", "Seattle"] + ["City" + str(i)
+                                                   for i in range(499)]
+                names += ["Seattle", "Last city"]
+                combo, items = self._combo(options=names)
+                evidence = {"input_emitted": False}
+                action_evidence.replace(evidence)
+                self.addCleanup(action_evidence.reset)
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.perform_select({"text": wanted}, None, combo,
+                                           {}, None, [], evidence)
+                response = runtime.operation_failure_response(caught.exception)
+                self.assertIn("select_options_incomplete", response["error"])
+                self.assertFalse(response["input_events_emitted"])
+                self.assertEqual([i for i, item in enumerate(items)
+                                  if STATE.SELECTED in item.states], [0])
+
+    def test_complete_scan_at_budget_can_choose_last_option(self):
+        # The combo and menu consume two nodes of the traversal budget.
+        names = ["City" + str(i) for i in range(498)]
+        combo, items = self._combo(value=names[0], options=names)
+        runtime.perform_select({"text": names[-1]}, None, combo, {}, None, [], {})
+        self.assertIn(STATE.SELECTED, items[-1].states)
+
+    def test_unreadable_child_cannot_hide_a_duplicate(self):
+        for failure in (None, RuntimeError("disconnected")):
+            with self.subTest(failure=failure):
+                combo, items = self._combo(options=("Beijing", "Seattle", "Seattle"))
+                menu = combo.children[0]
+
+                def child(index):
+                    if index == 2:
+                        if failure is not None:
+                            raise failure
+                        return None
+                    return items[index]
+
+                menu.get_child_at_index = child
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.perform_select({"text": "Seattle"}, None, combo,
+                                           {}, None, [], {})
+                self.assertIn("select_options_incomplete", str(caught.exception))
+                self.assertFalse(caught.exception.input_events_emitted)
+                self.assertNotIn(STATE.SELECTED, items[1].states)
+
+    def test_unreadable_count_role_or_name_cannot_prove_unique_choice(self):
+        for getter in ("get_child_count", "get_role_name", "get_name"):
+            with self.subTest(getter=getter):
+                combo, items = self._combo(options=("Beijing", "Seattle", "Seattle"))
+                node = combo.children[0] if getter == "get_child_count" else items[2]
+                setattr(node, getter, mock.Mock(side_effect=RuntimeError("disconnected")))
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.perform_select({"text": "Seattle"}, None, combo,
+                                           {}, None, [], {})
+                self.assertIn("select_options_incomplete", str(caught.exception))
+                self.assertFalse(caught.exception.input_events_emitted)
+
+    def test_name_disappearing_after_scan_cannot_hide_duplicate(self):
+        combo, items = self._combo(options=("Beijing", "Seattle", "Seattle"))
+        items[2].get_name = mock.Mock(side_effect=["Seattle", RuntimeError("lost")])
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Seattle"}, None, combo,
+                                   {}, None, [], {})
+        self.assertIn("select_options_incomplete", str(caught.exception))
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertNotIn(STATE.SELECTED, items[1].states)
+
+    def test_semantic_reply_failure_preserves_dispatch_and_stops_fallback(self):
+        combo, items = self._combo()
+        error = runtime.OperationFailure("provider lost the selection reply",
+                                        "input_failed", "emission",
+                                        failure_facts_complete=False)
+        items[2].do_action = mock.Mock(side_effect=error)
+        evidence = {"input_emitted": False}
+        action_evidence.replace(evidence)
+        self.addCleanup(action_evidence.reset)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Seattle"}, None, combo,
+                                   {}, None, [], evidence)
+        self.assertIs(caught.exception, error)
+        response = runtime.operation_failure_response(caught.exception)
+        self.assertFalse(response["input_events_emitted"])
+        self.assertTrue(response["partial_input_possible"])
+        self.assertTrue(response["mutation_unknown"])
+        self.assertEqual(response["failureCode"], "effect_unknown")
+        self.assertEqual(response["underlyingFailureCode"], "input_failed")
+        self.assertNotIn(STATE.SELECTED, items[2].states)
+
+    def test_generic_semantic_reply_failure_is_possible_not_confirmed_input(self):
+        combo, items = self._combo()
+        error = RuntimeError("D-Bus reply lost")
+        items[2].do_action = mock.Mock(side_effect=error)
+        evidence = {"input_emitted": False}
+        action_evidence.replace(evidence)
+        self.addCleanup(action_evidence.reset)
+        with self.assertRaises(RuntimeError) as caught:
+            runtime.perform_select({"text": "Seattle"}, None, combo,
+                                   {}, None, [], evidence)
+        self.assertIs(caught.exception, error)
+        response = runtime.unexpected_operation_failure_response(error)
+        self.assertFalse(response["input_events_emitted"])
+        self.assertTrue(response["partial_input_possible"])
+        self.assertTrue(response["mutation_unknown"])
+        self.assertNotIn("before input", response["error"])
+        self.assertNotIn("partial_input_possible", response["actionEvidence"])
+
     def test_option_that_does_not_take_reports_unknown_effect(self):
         combo, _ = self._combo(item_action=False, selection_api=False)
         self.assert_unknown(lambda: runtime.perform_select(
@@ -540,6 +665,83 @@ class DropdownCommitTests(SelectBoundaryTests):
         self.assertEqual(combo.title, "Audio")
         self.assertEqual(state["keys"], ["Down", "Return"])
         self.assertTrue(any("Audio" in note for note in notes))
+
+    def test_open_popup_evidence_survives_keyboard_transport_failure(self):
+        for error in (RuntimeError("D-Bus transport failed"),
+                      runtime.InputEmissionError("key refused", events_emitted=False)):
+            with self.subTest(error=error):
+                combo, _items, _state = self._qt_combo()
+                evidence = {"input_emitted": False}
+                action_evidence.replace(evidence)
+                self.addCleanup(action_evidence.reset)
+                with mock.patch.object(runtime, "send_key", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        runtime.perform_select({"text": "Audio"}, None, combo,
+                                               {}, None, [], evidence)
+                response = runtime.unexpected_operation_failure_response(caught.exception)
+                self.assertEqual(combo.children[0].component.extents.width, 235)
+                self.assertTrue(response["input_events_emitted"])
+                self.assertTrue(response["mutation_unknown"])
+                self.assertEqual(response["failureCode"], "effect_unknown")
+
+    def test_existing_popup_keeps_first_key_when_return_fails(self):
+        combo, _items, state = self._qt_combo()
+        combo.do_action(0)
+        original = runtime.send_key
+
+        def send(key):
+            if key == "Return":
+                raise RuntimeError("D-Bus transport failed")
+            original(key)
+
+        evidence = {"input_emitted": False}
+        action_evidence.replace(evidence)
+        self.addCleanup(action_evidence.reset)
+        with mock.patch.object(runtime, "send_key", side_effect=send):
+            with self.assertRaises(RuntimeError) as caught:
+                runtime.perform_select({"text": "Audio"}, None, combo,
+                                       {}, None, [], evidence)
+        response = runtime.unexpected_operation_failure_response(caught.exception)
+        self.assertEqual(state["keys"], ["Down"])
+        self.assertTrue(response["input_events_emitted"])
+        self.assertEqual(response["actionEvidence"]["route"], "keyboard_synthesis")
+
+    def test_existing_popup_first_key_reply_loss_is_uncertain(self):
+        combo, _items, _state = self._qt_combo()
+        combo.do_action(0)
+        evidence = {"input_emitted": False}
+        self.addCleanup(action_evidence.reset)
+        with mock.patch.object(runtime, "send_key", side_effect=RuntimeError("lost")):
+            with self.assertRaises(RuntimeError) as caught:
+                runtime.perform_select({"text": "Audio"}, None, combo,
+                                       {}, None, [], evidence)
+        response = runtime.unexpected_operation_failure_response(caught.exception)
+        self.assertFalse(response["input_events_emitted"])
+        self.assertTrue(response["partial_input_possible"])
+        self.assertTrue(response["mutation_unknown"])
+
+    def test_popup_growth_rejects_before_navigation_and_keeps_open_evidence(self):
+        combo, _items, state = self._qt_combo()
+        original = combo.do_action
+
+        def open_and_grow(index):
+            original(index)
+            combo.children[0].add(*[_Node(role="list item", name=str(i))
+                                     for i in range(500)])
+            return True
+
+        combo.do_action = open_and_grow
+        evidence = {"input_emitted": False}
+        action_evidence.replace(evidence)
+        self.addCleanup(action_evidence.reset)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Audio"}, None, combo,
+                                   {}, None, [], evidence)
+        response = runtime.operation_failure_response(caught.exception)
+        self.assertIn("select_options_incomplete", str(caught.exception))
+        self.assertEqual(state["keys"], [])
+        self.assertTrue(response["input_events_emitted"])
+        self.assertEqual(response["failureCode"], "effect_unknown")
 
     def test_choice_above_the_current_one_moves_up(self):
         combo, _items, state = self._qt_combo()

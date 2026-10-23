@@ -21,6 +21,7 @@ def operation_failure_response(exc, recovery_operation=None):
     emitted = bool(
         exc.input_events_emitted or evidence.get("input_emitted")
     )
+    partial = bool(getattr(exc, "partial_input_possible", False))
     facts_complete = bool(exc.failure_facts_complete)
     if emitted != bool(exc.input_events_emitted):
         facts_complete = False
@@ -28,12 +29,14 @@ def operation_failure_response(exc, recovery_operation=None):
     failure_phase = exc.failure_phase
     error_text = str(exc)
     underlying_failure_code = ""
-    if emitted:
+    if emitted or partial:
         underlying_failure_code = failure_code
         failure_code = "effect_unknown"
         failure_phase = "post_action_observation"
         error_text = (
             "post_action_observation_failed; input was emitted; "
+            "the final effect is unknown." if emitted else
+            "post_action_observation_failed; input may have been emitted; "
             "the final effect is unknown."
         )
         facts_complete = False
@@ -43,8 +46,8 @@ def operation_failure_response(exc, recovery_operation=None):
         "failureCode": failure_code,
         "failurePhase": failure_phase,
         "input_events_emitted": emitted,
-        "partial_input_possible": False,
-        "mutation_unknown": emitted,
+        "partial_input_possible": partial,
+        "mutation_unknown": emitted or partial,
         "failureFactsComplete": facts_complete,
     }
     if underlying_failure_code:
@@ -54,7 +57,7 @@ def operation_failure_response(exc, recovery_operation=None):
     if exc.replacement_window:
         response["replacementWindow"] = exc.replacement_window
     read_only_stale_window = bool(
-        not emitted
+        not emitted and not partial
         and failure_code == "stale_window_ref"
         and failure_phase == "precondition"
         and facts_complete
@@ -81,11 +84,10 @@ def unexpected_operation_failure_response(exc, recovery_operation=None):
     evidence = action_evidence.snapshot()
     emitted = bool(
         evidence.get("input_emitted")
-        or (
-            isinstance(exc, InputEmissionError)
-            and exc.events_emitted
-        )
+        or getattr(exc, "events_emitted", False)
     )
+    partial = bool(getattr(exc, "partial_input_possible", False))
+    unknown = emitted or partial
     if evidence:
         evidence["input_emitted"] = emitted
     response = {
@@ -94,15 +96,18 @@ def unexpected_operation_failure_response(exc, recovery_operation=None):
             "effect_unknown: an unexpected accessibility runtime failure "
             "occurred after input; inspect fresh state before retrying."
             if emitted
+            else "effect_unknown: input may have been emitted before an "
+            "accessibility runtime failure; inspect fresh state before retrying."
+            if partial
             else "input_failed: the accessibility runtime failed before input."
         ),
-        "failureCode": "effect_unknown" if emitted else "input_failed",
-        "failurePhase": "post_action_observation" if emitted else "emit",
+        "failureCode": "effect_unknown" if unknown else "input_failed",
+        "failurePhase": "post_action_observation" if unknown else "emit",
         "input_events_emitted": emitted,
         "partial_input_possible": bool(
-            emitted or isinstance(exc, InputEmissionError)
+            unknown or isinstance(exc, InputEmissionError)
         ),
-        "mutation_unknown": emitted,
+        "mutation_unknown": unknown,
         "failureFactsComplete": False,
     }
     if emitted:
