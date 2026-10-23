@@ -502,8 +502,9 @@ class ComboOptionSelectTests(SelectBoundaryTests):
     def test_scan_limit_never_proves_uniqueness_or_absence(self):
         for wanted in ("Seattle", "Last city", "Missing"):
             with self.subTest(wanted=wanted):
-                names = ["Beijing", "Seattle"] + ["City" + str(i)
-                                                   for i in range(499)]
+                names = ["Beijing", "Seattle"] + [
+                    "City" + str(i)
+                    for i in range(runtime.MAX_DROPDOWN_OPTIONS - 1)]
                 names += ["Seattle", "Last city"]
                 combo, items = self._combo(options=names)
                 evidence = {"input_emitted": False}
@@ -520,7 +521,8 @@ class ComboOptionSelectTests(SelectBoundaryTests):
 
     def test_complete_scan_at_budget_can_choose_last_option(self):
         # The combo and menu consume two nodes of the traversal budget.
-        names = ["City" + str(i) for i in range(498)]
+        names = ["City" + str(i)
+                 for i in range(runtime.MAX_DROPDOWN_OPTIONS - 2)]
         combo, items = self._combo(value=names[0], options=names)
         runtime.perform_select({"text": names[-1]}, None, combo, {}, None, [], {})
         self.assertIn(STATE.SELECTED, items[-1].states)
@@ -753,8 +755,9 @@ class DropdownCommitTests(SelectBoundaryTests):
 
         def open_and_grow(index):
             original(index)
-            combo.children[0].add(*[_Node(role="list item", name=str(i))
-                                     for i in range(500)])
+            combo.children[0].add(*[
+                _Node(role="list item", name=str(i))
+                for i in range(runtime.MAX_DROPDOWN_OPTIONS)])
             return True
 
         combo.do_action = open_and_grow

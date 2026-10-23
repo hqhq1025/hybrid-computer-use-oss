@@ -41,8 +41,10 @@ DROPDOWN_ROLES = ("combo box", "list box")
 POPUP_OPEN_ACTIONS = ("showmenu", "press", "open")
 OPTION_ROLES = ("menu item", "list item", "option", "check menu item",
                 "radio menu item", "table cell")
-# Options read below one drop-down; HTML <select> lists rarely exceed this.
-MAX_DROPDOWN_OPTIONS = 500
+# Nodes read below one drop-down before its option list counts as
+# incomplete. Proving a name unique needs the whole list, so the bound
+# admits long lists such as time-zone pickers.
+MAX_DROPDOWN_OPTIONS = 2000
 
 
 def _dropdown_options(node):
