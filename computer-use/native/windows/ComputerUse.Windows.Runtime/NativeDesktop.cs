@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -18,9 +19,6 @@ internal static partial class NativeDesktop
     private const int DwmwaCloaked = 14;
     private const string ApplicationFrameClass = "ApplicationFrameWindow";
     private const string UwpCoreWindowClass = "Windows.UI.Core.CoreWindow";
-    private const int ClipboardPasteSettleMilliseconds = 500;
-    private const int ClipboardRetryCount = 10;
-    private const int ClipboardRetryMilliseconds = 20;
     private const int PublishedLayoutHistoryLimit = 32;
     private const int WindowActivationDirectTimeoutMilliseconds = 250;
     private const int WindowActivationPollMilliseconds = 25;
@@ -222,6 +220,25 @@ internal static partial class NativeDesktop
 
     // IsWindow sees hidden and zero-size windows that ListWindows leaves out.
     internal static bool WindowExists(nint handle) => handle != 0 && IsWindow(handle);
+
+    // Returns when the foreground process has no pending input, or after the
+    // timeout. A process without a message loop returns at once.
+    internal static void WaitForForegroundInputIdle(int timeoutMilliseconds)
+    {
+        try
+        {
+            if (!TryGetWindowProcessId(GetForegroundWindow(), out var processId))
+            {
+                return;
+            }
+            using var process = Process.GetProcessById(processId);
+            _ = process.WaitForInputIdle(timeoutMilliseconds);
+        }
+        catch (Exception error) when (error is InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
+        {
+            // Console and exited processes have no input queue to wait for.
+        }
+    }
 
     internal static bool TryGetWindowProcessId(
         nint handle,

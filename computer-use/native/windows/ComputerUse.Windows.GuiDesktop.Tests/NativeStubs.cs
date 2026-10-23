@@ -8,12 +8,11 @@ namespace ComputerUse.Windows.Runtime;
 // and screenshot retry loop run as is.
 internal static partial class NativeDesktop
 {
-    internal sealed record InputEvent(uint Type, int X, int Y, uint Flags, uint Data, ushort Key);
+    internal sealed record InputEvent(uint Type, int X, int Y, uint Flags, uint Data, ushort Key, ushort Scan = 0);
     internal static List<InputEvent[]> Calls { get; } = new();
     internal static Queue<uint> SendCounts { get; } = new();
     internal static Action? AfterSend { get; set; }
     internal static Rectangle Bounds { get; set; } = new(0, 0, 1920, 1080);
-    internal static int Typed { get; private set; }
     // Scripted layouts are read first; once they run out, the layout is the
     // current Bounds and never changes.
     internal static Queue<Layout> Layouts { get; } = new();
@@ -24,9 +23,9 @@ internal static partial class NativeDesktop
     {
         Calls.Clear();
         SendCounts.Clear();
+        InputIdleWaits = 0;
         AfterSend = null;
         Bounds = new(0, 0, 1920, 1080);
-        Typed = 0;
         Layouts.Clear();
         foreach (var layout in layouts) Layouts.Enqueue(layout);
         Captures.Clear();
@@ -39,7 +38,7 @@ internal static partial class NativeDesktop
             ? new InputEvent(value.Type, value.Union.Mouse.Dx, value.Union.Mouse.Dy,
                 value.Union.Mouse.Flags, value.Union.Mouse.MouseData, 0)
             : new InputEvent(value.Type, 0, 0, value.Union.Keyboard.Flags, 0,
-                value.Union.Keyboard.VirtualKey)).ToArray());
+                value.Union.Keyboard.VirtualKey, value.Union.Keyboard.Scan)).ToArray());
         AfterSend?.Invoke();
         return SendCounts.Count > 0 ? SendCounts.Dequeue() : count;
     }
@@ -73,7 +72,8 @@ internal static partial class NativeDesktop
     internal static bool PixelsIdentical(ScreenFrame a, ScreenFrame b) => a == b;
     internal static void LogStaleLayout(string expected, Layout current) { }
     internal static JsonObject SnapshotJson(ScreenFrame frame) => new();
-    internal static void TypeText(string text) => Typed++;
+    internal static int InputIdleWaits { get; set; }
+    internal static void WaitForForegroundInputIdle(int timeoutMilliseconds) => InputIdleWaits++;
     internal static JsonObject Zoom(JsonObject action, string frameId) =>
         throw new NotSupportedException();
 }

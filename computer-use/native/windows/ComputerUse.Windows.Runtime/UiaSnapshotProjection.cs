@@ -68,6 +68,7 @@ internal sealed partial class UiaProvider
         selectedWindow = projection.LogicalRecord(selectedWindow);
         // Root and popup discovery share one read of the desktop's children.
         var discovery = new UiaDesktopDiscovery(_automation);
+        var maxNodes = OptionalInt(observation, "max_tree_nodes", DefaultNodeLimit);
         var roots = LogicalAutomationRoots(
             process,
             projection,
@@ -75,9 +76,11 @@ internal sealed partial class UiaProvider
             discoverTransients: false,
             annotation: Gap,
             elapsed: elapsed,
-            discovery: discovery);
+            discovery: discovery,
+            // A one-node read returns the window root, which the window's own
+            // native handles give; the desktop scan finds only further roots.
+            scanDesktop: maxNodes > 1);
         var initialRootIdentities = roots.Select(RuntimeObjectPath).ToArray();
-        var maxNodes = OptionalInt(observation, "max_tree_nodes", DefaultNodeLimit);
         var maxDepth = OptionalInt(observation, "max_tree_depth", DefaultDepthLimit);
         var visits = new OwnershipProbeBudget(
             maxNodes, SnapshotSampleTimeout, elapsed);

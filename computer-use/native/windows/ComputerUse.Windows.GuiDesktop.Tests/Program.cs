@@ -91,7 +91,7 @@ foreach (var later in new[] { """{"type":"keypress","keys":["CTRL","!"]}""", """
     NativeDesktop.Reset();
     var request = JsonNode.Parse("{\"actions\":[{\"type\":\"type\",\"text\":\"do not type\"}," + later + "]}")!.AsObject();
     var failure = Fails<ProviderFailureException>(() => DesktopProvider.ExecuteBatch(request));
-    Check(failure.Phase == "precondition" && !failure.InputEventsEmitted && NativeDesktop.Typed == 0 &&
+    Check(failure.Phase == "precondition" && !failure.InputEventsEmitted &&
         NativeDesktop.Calls.Count == 0 && NativeDesktop.Captures.Count == 0,
         "A bad later key did not reject the batch before capture and input");
     cases++;
@@ -145,7 +145,7 @@ foreach (var invalid in new[] { 2000.01, -2000.01, double.NaN, double.PositiveIn
     var request = new JsonObject { ["actions"] = new JsonArray(
         new JsonObject { ["type"] = "type", ["text"] = "must not happen" }, scroll) };
     var failure = Fails<ProviderFailureException>(() => DesktopProvider.ExecuteBatch(request));
-    Check(failure.Phase == "precondition" && !failure.InputEventsEmitted && NativeDesktop.Typed == 0 &&
+    Check(failure.Phase == "precondition" && !failure.InputEventsEmitted &&
         NativeDesktop.Calls.Count == 0 && NativeDesktop.Captures.Count == 0,
         "An invalid scroll delta did not reject the batch before input");
     cases++;
@@ -213,6 +213,41 @@ foreach (var pixels in new[] { false, true })
         Check(error.Code == "desktop_layout_unstable" && NativeDesktop.Captures.Count == 3 &&
             NativeDesktop.Published.Count == 0, "Capture retries were unbounded or published an unstable frame");
     }
+    cases++;
+}
+
+// Consecutive keys wait for the application's input queue, not a fixed delay.
+{
+    NativeDesktop.Reset();
+    var watch = System.Diagnostics.Stopwatch.StartNew();
+    DesktopProvider.ExecuteBatch(JsonNode.Parse(
+        """{"actions":[{"type":"keypress","keys":["A"]},{"type":"keypress","keys":["B"]}]}""")!.AsObject());
+    Check(NativeDesktop.InputIdleWaits == 1 && watch.ElapsedMilliseconds < 400,
+        "Two keys did not wait once for input idle, or slept a fixed delay");
+    cases++;
+}
+// Text is typed as Unicode key events, with real Enter and Tab keys.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.TypeText("a\u00e9\r\n\t\U0001F600");
+    var events = NativeDesktop.Calls.SelectMany(call => call).ToArray();
+    var downs = events.Where(value => (value.Flags & 0x0002) == 0).ToArray();
+    Check(events.Length == 12 && downs.Length == 6 &&
+        downs[0].Scan == 'a' && (downs[0].Flags & 0x0004) != 0 && downs[0].Key == 0 &&
+        downs[1].Scan == 0x00e9 && downs[2].Key == 0x0D && (downs[2].Flags & 0x0004) == 0 &&
+        downs[3].Key == 0x09 && downs[4].Scan == 0xD83D && downs[5].Scan == 0xDE00,
+        "Text did not become one Unicode key per UTF-16 unit with Enter and Tab keys");
+    cases++;
+}
+// A long text is sent in whole-key chunks; a failure after the first chunk reports prior input.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.SendCounts.Enqueue(128);
+    NativeDesktop.SendCounts.Enqueue(0);
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText(new string('x', 100)));
+    Check(NativeDesktop.Calls.Count == 2 && NativeDesktop.Calls[0].Length == 128 &&
+        failure.InputEventsEmitted && failure.MutationUnknown,
+        "A failed later text chunk lost the input of the earlier chunk");
     cases++;
 }
 

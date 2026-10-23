@@ -8,26 +8,35 @@ internal static class ValueReadbackRoutingTests
         var readbackSampleCount = 0;
         var liveReadbackVerified = LiveValueReadback.Verify(
             "Tamiflu",
-            () =>
-            {
-                readbackSampleCount++;
-                return "Tamiflu";
-            },
+            () => ++readbackSampleCount < 3 ? "Tami" : "Tamiflu",
             delay =>
             {
-                if (delay != LiveValueReadback.SettleDelay)
+                if (delay != LiveValueReadback.PollInterval)
                 {
                     throw new InvalidDataException(
-                        "set_value live readback used the wrong bounded barrier.");
+                        "set_value live readback used the wrong poll interval.");
                 }
                 readbackDelayCount++;
             });
         if (!liveReadbackVerified ||
-            readbackDelayCount != 1 ||
-            readbackSampleCount != 1)
+            readbackDelayCount != 2 ||
+            readbackSampleCount != 3)
         {
             throw new InvalidDataException(
-                "set_value did not verify one fresh exact value after its barrier.");
+                "set_value readback did not stop at the first matching sample.");
+        }
+        var immediateDelays = 0;
+        if (!LiveValueReadback.Verify("done", () => "done", _ => immediateDelays++) || immediateDelays != 0)
+        {
+            throw new InvalidDataException("A value that already matches must not wait.");
+        }
+        var boundedSamples = 0;
+        var boundedDelays = 0;
+        if (LiveValueReadback.Verify("expected", () => { boundedSamples++; return "different"; }, _ => boundedDelays++) ||
+            boundedDelays != (int)(LiveValueReadback.Timeout / LiveValueReadback.PollInterval) ||
+            boundedSamples != boundedDelays + 1)
+        {
+            throw new InvalidDataException("A persistent mismatch must stop after the bounded timeout.");
         }
         if (LiveValueReadback.Verify(
                 "expected",
@@ -40,6 +49,20 @@ internal static class ValueReadbackRoutingTests
         {
             throw new InvalidDataException(
                 "set_value live readback accepted a mismatch or unreadable target.");
+        }
+        if (!LiveValueReadback.VerifyTextValue(
+                "replaced text",
+                () => "replaced tttt\r",
+                () => "replaced text\r",
+                _ => { }) ||
+            LiveValueReadback.VerifyTextValue(
+                "replaced text",
+                () => "replaced tttt\r",
+                () => "replaced tttt\r",
+                _ => { }))
+        {
+            throw new InvalidDataException(
+                "A document's text, less its final paragraph mark, must decide when Value lags.");
         }
         var multilineValueReads = 0;
         var multilineTextReads = 0;

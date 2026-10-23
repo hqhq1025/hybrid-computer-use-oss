@@ -758,7 +758,8 @@ internal sealed partial class UiaProvider : IDisposable
         Action<string>? annotation = null,
         Func<TimeSpan>? elapsed = null,
         IReadOnlyCollection<string>? precedingRuntimeIdentities = null,
-        UiaDesktopDiscovery? discovery = null)
+        UiaDesktopDiscovery? discovery = null,
+        bool scanDesktop = true)
     {
         var watch = Stopwatch.StartNew();
         elapsed ??= () => watch.Elapsed;
@@ -791,7 +792,7 @@ internal sealed partial class UiaProvider : IDisposable
         discovery ??= new UiaDesktopDiscovery(_automation);
         var controlView = discovery.ControlView;
         var rawView = discovery.RawView;
-        if (!transientsOnly)
+        if (!transientsOnly && scanDesktop)
         {
             AddDesktopRoots(controlView);
             AddDesktopRoots(rawView);
