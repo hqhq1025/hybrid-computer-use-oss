@@ -229,12 +229,13 @@ func identityCapacityAfterInputPreservesEmissionAndReset() {
         capacity: 0, hash: { _ in 7 }, equal: ==
     )
     do {
-        _ = try observeAfterConfirmedInput(route: "test.input") {
-            try registry.bind([1], scope: "app")
-        }
+        _ = try registry.bind([1], scope: "app")
         Issue.record("Expected post-input identity capacity failure")
     } catch {
-        let result = postInputObservationFailureResult(error)
+        let result = postInputObservationFailureResult(
+            error,
+            evidence: ["route": "test.input"]
+        )
         #expect(result["input_events_emitted"] as? Bool == true)
         #expect(result["partial_input_possible"] as? Bool == false)
         #expect(result["providerResetRequired"] as? Bool == true)

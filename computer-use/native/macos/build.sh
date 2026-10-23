@@ -104,8 +104,6 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     "${runtime_root}/Sources/ComputerUseProviderKit/PostInputObservation.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ProviderLineTransport.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ProviderObjectIdentity.swift"
-    "${runtime_root}/Sources/ComputerUseProviderKit/ProviderRequestDesktopValidation.swift"
-    "${runtime_root}/Sources/ComputerUseProviderKit/ProviderRequestStructureValidation.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ProviderRequestValidator.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ProviderSnapshotProjection.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/ProviderServer.swift"

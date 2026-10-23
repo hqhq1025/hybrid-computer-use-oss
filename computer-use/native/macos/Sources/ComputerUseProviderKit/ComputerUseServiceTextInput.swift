@@ -7,13 +7,6 @@ struct AXTextMutationFingerprint: Equatable {
     let selectedText: String?
     let selectedRangeLocation: Int?
     let selectedRangeLength: Int?
-
-    var isObservable: Bool {
-        value != nil ||
-            selectedText != nil ||
-            selectedRangeLocation != nil ||
-            selectedRangeLength != nil
-    }
 }
 
 func pasteboardRetentionBarrierSatisfied(

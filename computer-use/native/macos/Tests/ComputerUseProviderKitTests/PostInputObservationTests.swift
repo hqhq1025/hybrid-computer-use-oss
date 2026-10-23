@@ -28,49 +28,34 @@ func postInputCaptureFailurePreservesDeliveryAndReadback() {
         ("ax.action.scrolldownbypage", false, nil),
         ("ax.attribute.value.set", true, true),
     ] {
-        var captures = 0
-        do {
-            let _: Int = try observeAfterConfirmedInput(
-                route: route,
-                readbackSampled: sampled,
-                readbackVerified: verified
-            ) {
-                captures += 1
-                throw ComputerUseError.stateUnavailable("provider_identity_conflict")
-            }
-            Issue.record("Capture failure must escape")
-        } catch {
-            #expect(error is PostInputObservationError)
-            let result = postInputObservationFailureResult(error)
-            let wire = ProviderResponseBuilder.domainResult(result, operation: "resolve_and_act")
-            let mutation = wire["mutation"] as? [String: Any]
-            let failure = wire["failure"] as? [String: Any]
-            let evidence = wire["action_evidence"] as? [String: Any]
-            #expect(wire["ok"] as? Bool == false)
-            #expect(wire["snapshot"] == nil)
-            #expect(mutation?["input_events_emitted"] as? Bool == true)
-            #expect(mutation?["partial_input_possible"] as? Bool == false)
-            #expect(mutation?["mutation_unknown"] as? Bool == true)
-            #expect(failure?["phase"] as? String == "observation")
-            #expect(failure?["code"] as? String == "effect_unknown")
-            #expect(failure?["facts_complete"] as? Bool == false)
-            #expect(evidence?["route"] as? String == route)
-            #expect(evidence?["readback_sampled"] as? Bool == sampled)
-            #expect(evidence?["readback_verified"] as? Bool == verified)
+        var sent: [String: Any] = ["route": route, "readback_sampled": sampled]
+        if let verified {
+            sent["readback_verified"] = verified
         }
-        #expect(captures == 1)
+        let result = postInputObservationFailureResult(
+            ComputerUseError.stateUnavailable("provider_identity_conflict"),
+            evidence: sent
+        )
+        let wire = ProviderResponseBuilder.domainResult(result, operation: "resolve_and_act")
+        let mutation = wire["mutation"] as? [String: Any]
+        let failure = wire["failure"] as? [String: Any]
+        let evidence = wire["action_evidence"] as? [String: Any]
+        #expect(wire["ok"] as? Bool == false)
+        #expect(wire["snapshot"] == nil)
+        #expect(mutation?["input_events_emitted"] as? Bool == true)
+        #expect(mutation?["partial_input_possible"] as? Bool == false)
+        #expect(mutation?["mutation_unknown"] as? Bool == true)
+        #expect(failure?["phase"] as? String == "observation")
+        #expect(failure?["code"] as? String == "effect_unknown")
+        #expect(failure?["facts_complete"] as? Bool == false)
+        #expect(evidence?["route"] as? String == route)
+        #expect(evidence?["readback_sampled"] as? Bool == sampled)
+        #expect(evidence?["readback_verified"] as? Bool == verified)
     }
 }
 
 @Test
-func postInputCaptureSuccessAndPureReadFailureRemainUnchanged() throws {
-    var captures = 0
-    let value = try observeAfterConfirmedInput(route: "input.cg_event.keyboard") {
-        captures += 1
-        return ["revision": 7]
-    }
-    #expect(value == ["revision": 7])
-    #expect(captures == 1)
+func pureReadFailureReportsNoInput() {
     let pureRead = runtimeFailureResult(ComputerUseError.stateUnavailable("unavailable"))
     #expect(pureRead["input_events_emitted"] as? Bool == false)
     #expect(pureRead["mutation_unknown"] as? Bool == false)
@@ -107,16 +92,17 @@ func expansionObservationFailurePreservesInputEvidence() {
         #expect(result["mutation_unknown"] as? Bool == false)
     }
     do {
-        try observeAfterConfirmedInput(
-            route: "ax.attribute.value.set",
-            readbackSampled: true,
-            readbackVerified: true,
-            capture: capture
-        )
+        try capture()
         Issue.record("Post-input observation must fail")
     } catch {
-        #expect(error is PostInputObservationError)
-        let result = postInputObservationFailureResult(error)
+        let result = postInputObservationFailureResult(
+            error,
+            evidence: [
+                "route": "ax.attribute.value.set",
+                "readback_sampled": true,
+                "readback_verified": true,
+            ]
+        )
         let wire = ProviderResponseBuilder.domainResult(result, operation: "resolve_and_act")
         let mutation = wire["mutation"] as? [String: Any]
         let failure = wire["failure"] as? [String: Any]
@@ -137,16 +123,12 @@ func expansionObservationFailurePreservesInputEvidence() {
 
 @Test
 func postInputCaptureFailureRetainsProviderReset() {
-    do {
-        let _: Int = try observeAfterConfirmedInput(route: "input.cg_event.keyboard") {
-            throw ComputerUseError.providerResetRequired("capture timed out")
-        }
-        Issue.record("Expected capture failure")
-    } catch {
-        let result = postInputObservationFailureResult(error)
-        #expect(result["providerResetRequired"] as? Bool == true)
-        #expect(result["input_events_emitted"] as? Bool == true)
-    }
+    let result = postInputObservationFailureResult(
+        ComputerUseError.providerResetRequired("capture timed out"),
+        evidence: ["route": "input.cg_event.keyboard"]
+    )
+    #expect(result["providerResetRequired"] as? Bool == true)
+    #expect(result["input_events_emitted"] as? Bool == true)
 }
 
 @Test

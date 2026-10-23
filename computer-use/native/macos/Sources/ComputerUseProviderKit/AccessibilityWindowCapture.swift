@@ -66,24 +66,6 @@ struct WindowCapture {
             bounds: best.bounds
         )
     }
-
-    static func resolveAXOnly(
-        pid: pid_t,
-        window: AXUIElement
-    ) -> WindowCapture? {
-        guard let bounds = resolveLocalFrame(of: window, windowBounds: nil),
-              bounds.width > 0,
-              bounds.height > 0
-        else {
-            return nil
-        }
-        return WindowCapture(
-            windowID: windowNumber(window),
-            windowHandle: macAXWindowHandle(pid: pid, window: window),
-            layer: 0,
-            bounds: bounds
-        )
-    }
 }
 
 struct WindowCaptureCandidate {
