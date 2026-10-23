@@ -39,13 +39,10 @@ class RuntimeActionEvidenceFailureTests(unittest.TestCase):
         self.assertTrue(evidence["geometry_sampled"])
         self.assertTrue(evidence["input_emitted"])
         self.assertFalse(evidence["readback_sampled"])
-        self.assertEqual(response["failureCode"], "effect_unknown")
-        self.assertEqual(
-            response["failurePhase"], "post_action_observation"
-        )
-        self.assertEqual(
-            response["underlyingFailureCode"], "post_emit_failure"
-        )
+        self.assertEqual(response["failureCode"], "post_emit_failure")
+        self.assertEqual(response["failurePhase"], "readback")
+        self.assertNotIn("underlyingFailureCode", response)
+        self.assertEqual(response["error"], "post emit failure")
         self.assertNotIn("no action was attempted", response["error"])
 
 

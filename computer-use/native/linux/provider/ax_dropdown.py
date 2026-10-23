@@ -155,7 +155,7 @@ def select_dropdown_option(node, text, window=None):
     shown choice, the popup's own commit path is used: open it, move its
     current item to the option and press Return (Qt). A LibreOffice
     drop-down (a projected toggle) commits through its separate popup list;
-    see select_projected_option(). Returns the chosen option's name.
+    see select_projected_option(). Returns (chosen name, input emitted).
     """
     if _projected_toggle(node):
         return select_projected_option(node, text)
@@ -180,7 +180,7 @@ def select_dropdown_option(node, text, window=None):
         return _option_selected(option)
 
     if committed():
-        return wanted
+        return wanted, False
     emitted = False
     count = int(safe(option.get_n_actions, 0) or 0)
     names = [str(safe(lambda k=k: option.get_action_name(k), "") or "")
@@ -189,7 +189,7 @@ def select_dropdown_option(node, text, window=None):
         emitted = True
         safe(lambda: option.do_action(names.index("select")), False)
         if _wait_until(committed, 0.6):
-            return wanted
+            return wanted, True
     index = safe(lambda: option.get_index_in_parent())
     parent = safe(option.get_parent)
     if (index is not None and index >= 0 and parent is not None
@@ -200,17 +200,17 @@ def select_dropdown_option(node, text, window=None):
         emitted = True
         safe(lambda: Atspi.Selection.select_child(node, int(index)), False)
         if _wait_until(committed, 0.6):
-            return wanted
+            return wanted, True
     container = _selection_container(option)
     if container is not None and index is not None and index >= 0:
         emitted = True
         safe(lambda: Atspi.Selection.select_child(container, int(index)), False)
         if _wait_until(committed, 0.6):
-            return wanted
+            return wanted, True
     if shows_choice:
         emitted = True
         if _commit_from_popup(node, option, window) and _wait_until(committed, 1.0):
-            return wanted
+            return wanted, True
         raise _failure(
             "select_unverified: the drop-down shows {} after choosing {}; "
             "its choice may have changed. Open it, then press Return on the "
@@ -370,7 +370,7 @@ def select_projected_option(toggle, text):
     wanted = str(text).strip()
     shown = _projected_shown_choice(toggle)
     if not state_contains(toggle, Atspi.StateType.CHECKED) and shown == wanted:
-        return wanted
+        return wanted, False
     clicked = not state_contains(toggle, Atspi.StateType.CHECKED)
     popup = _open_projected_list(toggle)
     if popup is None:
@@ -405,7 +405,7 @@ def select_projected_option(toggle, text):
         else:
             choice = _list_choice(toggle)
         if choice == wanted:
-            return wanted
+            return wanted, True
     if state_contains(toggle, Atspi.StateType.CHECKED):
         _click_toggle(toggle)
         _wait_until(

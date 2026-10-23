@@ -589,10 +589,12 @@ class DropdownCommitTests(SelectBoundaryTests):
 
     def test_option_already_shown_needs_no_input(self):
         combo, _items, state = self._qt_combo()
-
-        runtime.perform_select({"text": "Video"}, None, combo, {}, None, [], {})
+        evidence = {}
+        runtime.perform_select({"text": "Video"}, None, combo, {}, None, [], evidence)
 
         self.assertEqual(state["keys"], [])
+        self.assertFalse(evidence["input_emitted"])
+        self.assertTrue(evidence["readback_verified"])
 
     def test_select_on_a_popup_item_commits_its_combo(self):
         combo, items, state = self._qt_combo()
@@ -849,11 +851,27 @@ class ProjectedComboSelectTests(SelectBoundaryTests):
 
     def test_choice_already_shown_needs_no_input(self):
         toggle, _entry, _cells, state = self._lo_combo()
-
+        evidence = {}
         runtime.perform_select(
-            {"text": "10 pt"}, None, toggle, {}, None, [], {})
+            {"text": "10 pt"}, None, toggle, {}, None, [], evidence)
 
         self.assertEqual(state["clicks"], 0)
+        self.assertFalse(evidence["input_emitted"])
+        self.assertTrue(evidence["readback_verified"])
+
+    def test_missing_option_preserves_known_failure_and_popup_input(self):
+        toggle, entry, _cells, state = self._lo_combo()
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select(
+                {"text": "missing"}, None, toggle, {}, None, [], {})
+        response = runtime.operation_failure_response(caught.exception)
+        self.assertEqual(response["failureCode"], "invalid_argument")
+        self.assertIn("list was closed without choosing", response["error"])
+        self.assertTrue(response["input_events_emitted"])
+        self.assertTrue(response["mutation_unknown"])
+        self.assertTrue(response["failureFactsComplete"])
+        self.assertEqual(state["clicks"], 2)
+        self.assertEqual(entry.text_iface.text, "10 pt")
 
     def test_list_only_choice_is_read_back_from_the_reopened_list(self):
         toggle, _entry, _cells, state = self._lo_combo(list_only=True)
