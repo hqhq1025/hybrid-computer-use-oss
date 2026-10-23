@@ -277,6 +277,10 @@ func (s *Service) axBatchRun(
 				return s.recoverAXBatchObservation(context, stopped, obs)
 			}
 		}
+		context.settleBaseline = nil
+		if axSettleWaitFollows(actions, index) {
+			context.settleBaseline = s.readAXSettleState(context, nil)
+		}
 		trace.recordBefore(s, index)
 		result := ToolCallResult{}
 		actionEntry := map[string]any{}
@@ -312,6 +316,7 @@ func (s *Service) axBatchRun(
 				)
 			}
 			actionEntry = batchActionEvidenceEntry(index, action.actionType, result)
+			context.settleBaseline.notePixelChange(result)
 		}
 		if result.IsError && index+1 < len(actions) && actions[index+1].actionType == "wait" &&
 			axReadbackOnlyFailure(result) {

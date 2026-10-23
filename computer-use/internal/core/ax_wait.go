@@ -18,8 +18,9 @@ import (
 //	{"type":"wait","query":{...find query...}}      an element appears in the batch app's windows
 //	{"type":"wait","ref":"r31","value":"14"}        an element condition: value, state, or text
 //	{"type":"wait","text":"Saved"}                  text appears in the batch window
+//	{"type":"wait","settle":true}                   the UI changes after the step before it, then stops changing
 //
-// gone inverts any form. The evaluation reuses the polling the earlier until
+// gone inverts every form but settle. The evaluation reuses the polling the earlier until
 // predicate used: window titles, application-wide element search with find's
 // matching, and live ref resolution.
 
@@ -27,13 +28,16 @@ const axWaitPollInterval = 400 * time.Millisecond
 
 // axWait is one decoded wait step.
 type axWait struct {
-	window    string
-	query     map[string]any
-	ref       string
-	value     string
-	state     string
-	text      string
-	gone      bool
+	window string
+	query  map[string]any
+	ref    string
+	value  string
+	state  string
+	text   string
+	gone   bool
+	// settle waits for any change after the input step before it; see
+	// waitForSettle.
+	settle    bool
 	timeoutMS int
 }
 
@@ -53,7 +57,7 @@ func axWaitQueryText(query map[string]any) string {
 }
 
 // decodeAXWait checks one wait step. It needs exactly one of window, query,
-// ref, or a bare text; value, state, and text qualify a ref.
+// ref, a bare text, or settle; value, state, and text qualify a ref.
 func decodeAXWait(object map[string]any, path string) (*axWait, *axArgError) {
 	wait := &axWait{timeoutMS: contract.AXDefaultWaitTimeout}
 	example := `{"type":"wait","window":"Export"}`
@@ -100,6 +104,14 @@ func decodeAXWait(object map[string]any, path string) (*axWait, *axArgError) {
 		}
 		wait.gone = gone
 	}
+	if raw, present := object["settle"]; present {
+		settle, ok := raw.(bool)
+		if !ok || !settle {
+			return nil, axInvalid(path+".settle", "settle must be true; to wait for a known state use window, query, ref, or text",
+				`{"type":"wait","settle":true}`)
+		}
+		wait.settle = true
+	}
 	if raw, present := object["timeout_ms"]; present {
 		timeout, ok := axInteger(raw)
 		if !ok || timeout < 1 || timeout > contract.MaxVerifyTimeout {
@@ -110,7 +122,7 @@ func decodeAXWait(object map[string]any, path string) (*axWait, *axArgError) {
 		wait.timeoutMS = timeout
 	}
 	subjects := 0
-	for _, present := range []bool{wait.window != "", wait.query != nil, wait.ref != ""} {
+	for _, present := range []bool{wait.window != "", wait.query != nil, wait.ref != "", wait.settle} {
 		if present {
 			subjects++
 		}
@@ -118,8 +130,15 @@ func decodeAXWait(object map[string]any, path string) (*axWait, *axArgError) {
 	if subjects == 0 && wait.text != "" {
 		subjects = 1
 	}
+	if wait.settle && wait.text != "" {
+		subjects++
+	}
 	if subjects != 1 {
-		return nil, axInvalid(path, "wait needs exactly one of window, query, ref, or text", example).withRule(axRuleOneOf)
+		return nil, axInvalid(path, "wait needs exactly one of window, query, ref, text, or settle", example).withRule(axRuleOneOf)
+	}
+	if wait.settle && wait.gone {
+		return nil, axInvalid(path+".gone", "settle waits for any change and has no gone form; gone needs window, query, ref, or text",
+			`{"type":"wait","settle":true}`).withRule(axRuleOneOf)
 	}
 	qualifiers := 0
 	for _, value := range []string{wait.value, wait.state} {

@@ -61,6 +61,12 @@ option. Follow the current tool schema for argument shapes and actions.
   sends no input. After a `window` wait, keys and text without `ref` go to
   that window. Prefer waiting for the next state to appear over waiting for
   an old node to vanish, and skip a wait the report already answers.
+- Use `{"type":"wait","settle":true}` after an action when you know the UI
+  will change but not what it becomes, such as the exact title of the next
+  dialog. It waits until the UI changes and then stops changing, names what
+  changed, and fails with "no change" only when nothing changed. Keys after it
+  go to the window that took focus. Keep `window`, `query`, `ref`, and `text`
+  waits for a state you know. Give a slow operation a longer `timeout_ms`.
 
 ## Recovery And Verification
 

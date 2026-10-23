@@ -20,6 +20,9 @@ type AXBatchContext struct {
 	// report records the snapshots the batch passes through for the act
 	// report; nil outside act.
 	report *actReportTrace
+	// settleBaseline is the state read before the input step that a settle
+	// wait follows; nil when no settle wait follows the current step.
+	settleBaseline *axSettleState
 }
 
 type axWindowContinuity string

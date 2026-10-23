@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- AX `act` takes a wait step `{"type":"wait","settle":true}` that needs no
+  predicted state: after an input step it waits until the UI changes (windows,
+  focus, or the window's tree) and stops changing, names what
+  changed, and fails with "no change" only when nothing changed. The SDK and
+  CLI `--wait` accept it.
 - The OSWorld runner and `hcu.render_agent_config` take `--code-mode`
   (queue config `"code_mode": true`) for Codex. It keeps the computer-use MCP
   server registered for code to call, turns on Codex code mode with

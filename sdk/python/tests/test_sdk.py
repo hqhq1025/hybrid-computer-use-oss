@@ -29,7 +29,7 @@ def recording_transport(calls):
 
 # Wait step kinds: the decoder accepts exactly one per step. The schema has
 # no enum for them; published_items checks each is a published step field.
-WAIT_SUBJECTS = ("window", "query", "ref", "text")
+WAIT_SUBJECTS = ("window", "query", "ref", "text", "settle")
 
 # Published items that the SDK reaches only through its generic calls
 # (act, gui, call), not through a dedicated helper.
@@ -140,6 +140,7 @@ class SDKAgainstDaemon(unittest.TestCase):
         builder.click("r1", wait={"ref": "r1", "state": "checked", "timeout_ms": 1})
         builder.type("hello", ref="r2")
         builder.type("hello")
+        builder.key("ctrl+o", wait={"settle": True, "timeout_ms": 1})
         builder.key("ctrl+s")
         builder.set_value("r2", "42")
         builder.select("r2", text="ell")
