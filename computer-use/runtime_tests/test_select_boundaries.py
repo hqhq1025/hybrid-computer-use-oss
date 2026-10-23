@@ -638,13 +638,14 @@ class ProjectedComboSelectTests(SelectBoundaryTests):
     """
 
     def _lo_combo(self, value="10 pt", options=("8 pt", "10 pt", "12 pt"),
-                  grab_moves_cursor=True, list_only=False):
+                  grab_moves_cursor=True, list_only=False, opener_role="toggle button"):
         app = _Node(role="application", name="soffice")
         frame = _Node(role="frame", name="Untitled 1 - LibreOffice Calc")
         entry = _Node(role="text", states=(
             STATE.SHOWING, STATE.VISIBLE, STATE.EDITABLE))
         entry.text_iface = _Text("" if list_only else value)
-        toggle = _Node(role="toggle button")
+        toggle = _Node(role=opener_role,
+                       name="Font Size" if opener_role == "combo box" else "")
         frame.add(_Node(role="tool bar").add(_Node(role="filler").add(
             entry, _Node(role="combo box", states=()), toggle)))
         popup = _Node(role="window", states=())
@@ -781,3 +782,32 @@ class ProjectedComboSelectTests(SelectBoundaryTests):
         self.assertEqual(state["value"], "10 pt")
         self.assertIn("\"10 pt\"", str(failure))
         self.assertNotIn(STATE.CHECKED, toggle.states)
+
+
+class NativeCompositeComboSelectTests(ProjectedComboSelectTests):
+    """A named combo opener uses the same sibling editor and popup contract."""
+
+    def _lo_combo(self, *args, **kwargs):
+        return super()._lo_combo(*args, **kwargs, opener_role="combo box")
+
+    def test_two_visible_combos_do_not_form_a_composite(self):
+        opener, _entry, _cells, state = self._lo_combo()
+        opener.parent.children[1].states.add(STATE.SHOWING)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_dropdown_option(opener, "12 pt")
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertEqual(state["clicks"], 0)
+
+    def test_combo_without_click_does_not_borrow_sibling_popup(self):
+        opener, _entry, _cells, state = self._lo_combo()
+        opener.get_action_name = lambda _index: "press"
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_dropdown_option(opener, "12 pt")
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertEqual(state["clicks"], 0)
+
+    def test_combo_with_children_keeps_its_own_option_path(self):
+        opener, _entry, _cells, state = self._lo_combo()
+        opener.add(_Node(role="menu"))
+        self.assertIsNone(runtime.gtk_combo_partner(opener, "combo box"))
+        self.assertEqual(state["clicks"], 0)
