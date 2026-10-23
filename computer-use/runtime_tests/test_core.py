@@ -585,7 +585,9 @@ class PerformOperationGuardTests(FailureRecoveryCases, AtspiPatchedTestCase):
             "pages": 1,
         })
 
-        self.assertEqual(calls, ["w2:private"])
+        # Resolution binds the input, then the post-action read checks whether
+        # that window remains or a visible modal has taken over.
+        self.assertEqual(calls, ["w2:private", "w2:private", None])
 
     def test_failed_focus_aborts_before_any_synthesis(self):
         def refuse(window, what):

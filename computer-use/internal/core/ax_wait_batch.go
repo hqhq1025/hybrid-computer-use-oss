@@ -207,7 +207,7 @@ func (s *Service) axBatchContinuityStop(
 		failureCode = "observation_incomplete"
 		messageCode = "batch_window_unknown"
 	}
-	recovery, hint := s.axBatchContinuityRecovery(context)
+	recovery, hint, currentRef := s.axBatchContinuityRecovery(context)
 	stopped := TextResult(
 		fmt.Sprintf(
 			"%s: step %d/%d completed, but the logical window is %s "+
@@ -235,26 +235,31 @@ func (s *Service) axBatchContinuityStop(
 		"observation_required":                 true,
 		"retry_same_request":                   false,
 	}
+	if currentRef != "" {
+		// The recovery read must follow the window that stopped the batch,
+		// just as the hint does, rather than rereading the original window.
+		stopped.StructuredContent["current_window_ref"] = currentRef
+	}
 	return s.recoverAXBatchObservation(context, stopped, obs), true
 }
 
 // Use the read that detected the change. A popup need not have a title or
 // an addressable window, and closing a dialog can reveal an existing window.
-func (s *Service) axBatchContinuityRecovery(context *AXBatchContext) (string, string) {
+func (s *Service) axBatchContinuityRecovery(context *AXBatchContext) (string, string, string) {
 	var snapshot *AppSnapshot
 	if s != nil && context != nil {
 		snapshot = s.currentSnapshot(context.AppToken)
 	}
 	if snapshot == nil || snapshot.WindowAbsent {
-		return "List current windows, inspect the intended window, then send only the remaining actions.", `{"mode":"apps"}`
+		return "List current windows, inspect the intended window, then send only the remaining actions.", `{"mode":"apps"}`, ""
 	}
 	if ref := snapshot.publicWindowRef; ref != "" {
 		if entry, err := s.WindowRefRegistry.Resolve(ref, ""); err == nil && entry.WindowHandle == snapshot.WindowHandle {
 			return "The latest read shows " + ref + ". Observe that window before sending only the remaining actions.",
-				axHintJSON(map[string]any{"mode": "observe", "window_ref": ref})
+				axHintJSON(map[string]any{"mode": "observe", "window_ref": ref}), ref
 		}
 	}
-	return "The latest window has no usable wN. Use GUI screenshot to inspect the window or popup before replanning the remaining actions.", GUIScreenshotCall
+	return "The latest window has no usable wN. Use GUI screenshot to inspect the window or popup before replanning the remaining actions.", GUIScreenshotCall, ""
 }
 
 // axWaitOnly runs an act call whose steps are all waits. It sends no

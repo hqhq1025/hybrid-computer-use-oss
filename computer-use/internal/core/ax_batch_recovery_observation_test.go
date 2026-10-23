@@ -194,6 +194,41 @@ func TestRecoveryObservationDoesNotRetryUnrelatedFailureAtAppRoot(t *testing.T) 
 	}
 }
 
+func TestRecoveryObservationRejectsForeignOrStaleCurrentWindow(t *testing.T) {
+	for _, invalid := range []string{"foreign", "stale"} {
+		t.Run(invalid, func(t *testing.T) {
+			service, backend := reportService(t, reportMain())
+			window, _ := reportObserve(t, service)
+			context, err := service.deriveAXBatchContext(window, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentRef := service.WindowRefRegistry.Acquire(
+				"editor", reportDialogHandle, `dialog "Confirm changes"`, "current",
+				":1.84", "/window/dialog", "pid:10:start:100", "dialog", "Confirm changes", context.AppRef,
+			)
+			if invalid == "foreign" {
+				service.WindowRefRegistry.entries[currentRef].AppRef = "a999"
+			} else {
+				delete(service.WindowRefRegistry.entries, currentRef)
+			}
+			failed := ToolCallResult{IsError: true, StructuredContent: map[string]any{
+				"failure_code": "stale_target", "failure_phase": "between_actions",
+				"current_window_ref": currentRef, "input_events_emitted": true,
+				"mutation_unknown": true, "retry_same_request": false,
+			}}
+			result := service.recoverAXBatchObservation(context, failed, observation{mode: contract.ObserveDiff})
+			if !result.IsError || len(backend.actionRequests) != 0 {
+				t.Fatalf("recovery changed the failure or emitted input: %#v", result)
+			}
+			request := backend.observeRequests[len(backend.observeRequests)-1]
+			if request.WindowHandle != context.WindowHandle {
+				t.Fatalf("%s current ref changed observation ownership: %#v", invalid, request)
+			}
+		})
+	}
+}
+
 func TestRecoveryObservationPreservesNonObserveContinuation(t *testing.T) {
 	failed := ToolCallResult{
 		IsError: true,
