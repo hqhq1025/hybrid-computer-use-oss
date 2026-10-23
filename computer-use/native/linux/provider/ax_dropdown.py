@@ -153,6 +153,23 @@ def _commit_from_popup(combo, option, window):
     return True
 
 
+def _list_selection_first(node):
+    """Return True when a closed drop-down's option list should be tried first.
+
+    This holds for an EXPANDABLE combo box that is not EXPANDED and has no
+    Selection of its own, as browsers expose a closed HTML <select>. Firefox
+    ignores the option's "select" action on such a list but commits through
+    the list's Selection.select_child. Chrome returns False from that call
+    and changes nothing, so its option action follows without a wait. An
+    open list keeps the option action first: its Selection may only move the
+    highlight.
+    """
+    return (node_role(node) == "combo box"
+            and state_contains(node, Atspi.StateType.EXPANDABLE)
+            and not state_contains(node, Atspi.StateType.EXPANDED)
+            and safe(node.get_selection_iface) is None)
+
+
 def select_dropdown_option(node, text, window=None):
     """Choose the option named ``text`` of a closed or open drop-down.
 
@@ -161,7 +178,9 @@ def select_dropdown_option(node, text, window=None):
     not showing and carry no refs. The option's own action is tried first
     (Chrome's Selection.select_child returns False), then the combo box's
     own Selection.select_child (GTK sets the active item through it), then
-    the option container's Selection.select_child (Firefox accepts it).
+    the option container's Selection.select_child (Firefox accepts it). A
+    closed list that holds its own selection is tried through its Selection
+    first; see _list_selection_first().
 
     A combo box that shows its choice (GTK and Qt name themselves after it)
     succeeds only when it shows the option afterwards; otherwise the
@@ -197,6 +216,16 @@ def select_dropdown_option(node, text, window=None):
     if committed():
         return wanted
     emitted = False
+    index = safe(lambda: option.get_index_in_parent())
+    container = _selection_container(option)
+    list_tried = False
+    if (container is not None and index is not None and index >= 0
+            and not shows_choice and _list_selection_first(node)):
+        emitted = list_tried = True
+        # A False return means the list refused and changed nothing.
+        if (safe(lambda: Atspi.Selection.select_child(container, int(index)), False)
+                and _wait_until(committed, 0.6)):
+            return wanted
     count = int(safe(option.get_n_actions, 0) or 0)
     names = [str(safe(lambda k=k: option.get_action_name(k), "") or "")
              for k in range(count)]
@@ -205,7 +234,6 @@ def select_dropdown_option(node, text, window=None):
         safe(lambda: option.do_action(names.index("select")), False)
         if _wait_until(committed, 0.6):
             return wanted
-    index = safe(lambda: option.get_index_in_parent())
     parent = safe(option.get_parent)
     if (index is not None and index >= 0 and parent is not None
             and safe(node.get_selection_iface) is not None
@@ -216,8 +244,8 @@ def select_dropdown_option(node, text, window=None):
         safe(lambda: Atspi.Selection.select_child(node, int(index)), False)
         if _wait_until(committed, 0.6):
             return wanted
-    container = _selection_container(option)
-    if container is not None and index is not None and index >= 0:
+    if (container is not None and index is not None and index >= 0
+            and not list_tried):
         emitted = True
         safe(lambda: Atspi.Selection.select_child(container, int(index)), False)
         if _wait_until(committed, 0.6):

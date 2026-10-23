@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Linux: AX `select` on a closed Firefox `<select>` takes about 0.3 s
+  instead of 0.9 s. A closed browser drop-down is tried through its option
+  list first; Firefox commits there, and Chrome refuses it at once and
+  takes the option's own action.
 - AX observations over the 12,000-character tree budget keep the controls
   inside unnamed wrappers (Chrome's toolbar and address bar, VS Code's
   menus) and cut a long run of same-role items (cards, rows, cells) from its
