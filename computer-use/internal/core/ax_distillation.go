@@ -528,6 +528,7 @@ func markAXDistinguishingAncestors(roots []*AXNode) {
 		for _, path := range paths {
 			if prefix < len(path)-1 {
 				path[prefix].ForceKeep = true
+				path[prefix].DistinguishesDuplicates = true
 			}
 		}
 	}

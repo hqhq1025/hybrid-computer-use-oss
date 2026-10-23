@@ -210,3 +210,36 @@ func TestEmptyCellSummaryIsRenderedOnTheTable(t *testing.T) {
 		t.Fatalf("empty-cell summary was counted as a coverage gap: %#v", coverage)
 	}
 }
+
+// MuseScore's own accessibility layer answers most child slots of its Qt
+// Quick windows with null references. The window then looks empty; the
+// count must reach the rendered tree on the parent, and it stays a coverage
+// gap because the toolkit reports content that AX cannot read.
+func TestNullChildReferencesAreRenderedOnTheirParent(t *testing.T) {
+	detail := "76 of 78 child references returned no object; AX cannot read " +
+		"or address that part of the window. Use GUI there."
+	snapshot := &AppSnapshot{
+		App:          AppDescriptor{Name: "MuseScore4", PID: 42},
+		WindowTitle:  "MuseScore Studio",
+		WindowHandle: "0x42",
+		SnapshotID:   "null-children",
+		Elements: []ElementRecord{
+			{Index: 0, RuntimeID: []int{0}, ControlType: "frame", Name: "MuseScore Studio"},
+		},
+		Annotations: []axProviderAnnotation{{
+			ParentRuntimeID: []int{0},
+			Kind:            "provider_omission",
+			Count:           76,
+			Reason:          axNullReferenceReason,
+			Detail:          detail,
+		}},
+		Scope: contract.AXScopeWindow,
+	}
+	text := typedTreeTextForTest(t, snapshot)
+	if !strings.Contains(text, "/null-children: ") || !strings.Contains(text, "76 of 78 child references returned no object") {
+		t.Fatalf("null-children summary missing from the rendered window:\n%s", text)
+	}
+	if coverage := providerCoverageSummary(snapshot.Annotations); coverage.AcquisitionIncomplete != 76 {
+		t.Fatalf("null children are not a coverage gap: %#v", coverage)
+	}
+}
