@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Windows: an observation reads each tree node and its facts in one UI
+  Automation call and reads the desktop's top-level windows once, so
+  Notepad, File Explorer, Settings and Edge observe three to five times
+  faster with the same tree.
 - Windows: observation reads stop at a shared 15-second budget and return
   partial coverage instead of timing out (LibreOffice Calc), `apps` and observe
   name LibreOffice windows whose accessibility bridge is not loaded, `close`
