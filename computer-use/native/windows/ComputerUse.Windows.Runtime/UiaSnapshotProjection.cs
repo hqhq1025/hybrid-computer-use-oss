@@ -218,7 +218,7 @@ internal sealed partial class UiaProvider
                     record["name"]?.GetValue<string>() ?? string.Empty,
                     record["className"]?.GetValue<string>() ?? string.Empty,
                     record["frame"]?.ToJsonString() ?? string.Empty);
-                if (!identities.TryAdd(element, providerObjectPath, propertyKey)) { return false; }
+                if (!identities.TryAdd(element, providerObjectPath, propertyKey, treePath[0])) { return false; }
             }
             catch (ObservationDeadlineExceededException) { throw; }
             catch

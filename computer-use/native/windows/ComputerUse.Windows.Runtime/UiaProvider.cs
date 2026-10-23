@@ -97,6 +97,7 @@ internal sealed partial class UiaProvider : IDisposable
             .GroupBy(window => window.ProcessId)
             .ToDictionary(group => group.Key, group => group.ToArray());
         var entries = new List<(string Name, int Pid, string Text, JsonObject App)>();
+        var notes = new JsonArray();
         foreach (var group in groups)
         {
             try
@@ -136,6 +137,10 @@ internal sealed partial class UiaProvider : IDisposable
                         ["active"] = window.Active,
                         ["inputTarget"] = targets.Contains(window.Handle.ToInt64()),
                     });
+                    if (AccessibilityBridgeNote(process, window) is { } note)
+                    {
+                        notes.Add(note);
+                    }
                 }
                 var host = group.AppProcessId == group.OwnerProcessId
                     ? string.Empty
@@ -166,7 +171,44 @@ internal sealed partial class UiaProvider : IDisposable
                 ordered.Select(entry => entry.Text)),
             ["apps"] = new JsonArray(
                 ordered.Select(entry => (JsonNode)entry.App).ToArray()),
+            ["notes"] = notes,
         };
+    }
+
+    // Names a window whose toolkit has not loaded its accessibility bridge;
+    // see WindowsAccessibilityBridgeNote. Only VCL frame windows pay for the
+    // module and root-children reads.
+    private string? AccessibilityBridgeNote(Process process, NativeDesktop.WindowRecord window)
+    {
+        if (!string.Equals(
+                window.ClassName,
+                WindowsAccessibilityBridgeNote.VclFrameClass,
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+        var children = WindowsAccessibilityBridgeNote.RootChildrenAreTitleBars(() =>
+        {
+            var walker = _automation.TreeWalkerFactory.GetControlViewWalker();
+            var root = _automation.FromHandle(window.Handle);
+            return Read();
+
+            IEnumerable<bool> Read()
+            {
+                for (var child = walker.GetFirstChild(root);
+                     child is not null;
+                     child = walker.GetNextSibling(child))
+                {
+                    yield return child.ControlType == ControlType.TitleBar;
+                }
+            }
+        });
+        return WindowsAccessibilityBridgeNote.Note(
+            window.ClassName,
+            window.Title,
+            process.Id,
+            WindowsAccessibilityBridgeNote.ModuleNames(process),
+            children);
     }
 
     internal JsonObject Observe(JsonObject request)
@@ -181,7 +223,7 @@ internal sealed partial class UiaProvider : IDisposable
                 OptionalString(request, "window_handle", string.Empty),
                 "stale_window_ref",
                 scope);
-            return new JsonObject
+            var response = new JsonObject
             {
                 ["ok"] = true,
                 ["snapshot"] = BuildSnapshot(
@@ -189,6 +231,11 @@ internal sealed partial class UiaProvider : IDisposable
                     selected,
                     request["observation"] as JsonObject),
             };
+            if (AccessibilityBridgeNote(process, selected) is { } note)
+            {
+                response["notes"] = new JsonArray(note);
+            }
+            return response;
         }
         catch (ProviderFailureException error) when (
             error.Code == "stale_window_ref")
@@ -742,15 +789,22 @@ internal sealed partial class UiaProvider : IDisposable
 
         void AddDesktopTransientRoots(ITreeWalker walker)
         {
+            var insideProjectedWindow = false;
             var result = BoundedTreeDiscovery.Visit(
                 () => walker.GetFirstChild(desktop),
                 element => walker.GetFirstChild(element),
                 element => walker.GetNextSibling(element),
-                (element, _) =>
+                (element, depth) =>
                 {
                     var rootProcessId = Safe(
                         () => element.Properties.ProcessId.ValueOrDefault,
                         0);
+                    if (depth == 1)
+                    {
+                        insideProjectedWindow = projectedHandles.Contains(Safe(
+                            () => element.Properties.NativeWindowHandle.ValueOrDefault.ToInt64(),
+                            0L));
+                    }
                     if (rootProcessId != 0 && rootProcessId != process.Id)
                     {
                         return false;
@@ -773,7 +827,11 @@ internal sealed partial class UiaProvider : IDisposable
                     return true;
                 },
                 MaxDesktopTransientCandidates, MaxDesktopTransientDepth,
-                timeout, elapsed);
+                timeout, elapsed,
+                // The window traversal already covers a projected window's
+                // control view, so a depth limit inside it loses at most a
+                // raw-only popup nested that deep, as the unbounded walk did.
+                depthLimitIsGap: () => !insideProjectedWindow);
             RecordDiscoveryLimit(result, "transient_discovery");
         }
 

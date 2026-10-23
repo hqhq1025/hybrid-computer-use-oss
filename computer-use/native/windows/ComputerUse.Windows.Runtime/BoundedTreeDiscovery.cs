@@ -26,7 +26,8 @@ internal static class BoundedTreeDiscovery
         int maxNodes,
         int maxDepth,
         TimeSpan timeout,
-        Func<TimeSpan>? elapsed = null) where T : class
+        Func<TimeSpan>? elapsed = null,
+        Func<bool>? depthLimitIsGap = null) where T : class
     {
         if (maxNodes < 0) { throw new ArgumentOutOfRangeException(nameof(maxNodes)); }
         if (maxDepth < 1) { throw new ArgumentOutOfRangeException(nameof(maxDepth)); }
@@ -45,7 +46,8 @@ internal static class BoundedTreeDiscovery
             if (descend && parents.Count + 1 >= maxDepth)
             {
                 // We cannot prove this node is a leaf without exceeding the depth.
-                depthLimited = true;
+                // The caller decides whether that subtree can hold a result.
+                depthLimited |= depthLimitIsGap?.Invoke() ?? true;
                 descend = false;
             }
             if (descend)
