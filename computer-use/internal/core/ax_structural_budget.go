@@ -16,6 +16,11 @@ type axBudgetCandidate struct {
 	// chunks of the run that saves most go first, last chunk first.
 	runSavings int
 	fromEnd    int
+	// runID names the run a chunk belongs to (its first node), and
+	// summaryChars is the size of the summary that replaces the chunk.
+	// Adjacent chunks of one run share one summary.
+	runID        string
+	summaryChars int
 }
 
 // axBudgetChunkNodes splits a long run of siblings into candidates that are
@@ -36,6 +41,42 @@ func axStructuralTreeBudget() int {
 
 func axCriticalState(node *AXNode) bool {
 	return axNodeHasState(node)
+}
+
+// axSubtreeContainsCritical reports whether a subtree holds a node that must
+// stay visible: a forced node or one with state (focus, selection, checked,
+// expanded). Such a subtree is never folded into a budget summary. A node
+// kept only to tell same-named controls apart does not count: folding its
+// whole subtree removes those controls as well.
+func axSubtreeContainsCritical(node *AXNode) bool {
+	if node == nil {
+		return false
+	}
+	if (node.ForceKeep && !node.DistinguishesDuplicates) || axCriticalState(node) {
+		return true
+	}
+	for _, child := range node.Children {
+		if axSubtreeContainsCritical(child) {
+			return true
+		}
+	}
+	return false
+}
+
+// axBudgetSubtreePriority is the highest priority in a subtree. A wrapper is
+// worth what it holds: an unnamed group around the toolbar buttons ranks with
+// the buttons, not below them.
+func axBudgetSubtreePriority(node *AXNode) int {
+	if node == nil {
+		return 0
+	}
+	priority := axBudgetPriority(node)
+	for _, child := range node.Children {
+		if current := axBudgetSubtreePriority(child); current > priority {
+			priority = current
+		}
+	}
+	return priority
 }
 
 func axSubtreeContainsCriticalOrBoundary(node *AXNode) bool {
@@ -152,7 +193,7 @@ func newAXBudgetCandidate(
 	omittedTargets := 0
 	for _, node := range run {
 		nodeIDs = append(nodeIDs, node.ID)
-		if current := axBudgetPriority(node); current > priority {
+		if current := axBudgetSubtreePriority(node); current > priority {
 			priority = current
 		}
 		rendered += axRenderedNodeChars(node, depth+1)
@@ -165,15 +206,62 @@ func newAXBudgetCandidate(
 		omittedNodes,
 		omittedTargets,
 	)
-	savings := rendered - axRenderedNodeChars(summary, depth+1)
+	summaryChars := axRenderedNodeChars(summary, depth+1)
+	savings := rendered - summaryChars
 	return axBudgetCandidate{
-		parentID:   parent.ID,
-		nodeIDs:    nodeIDs,
-		depth:      depth,
-		priority:   priority,
-		savings:    savings,
-		runSavings: savings,
+		parentID:     parent.ID,
+		nodeIDs:      nodeIDs,
+		depth:        depth,
+		priority:     priority,
+		savings:      savings,
+		runSavings:   savings,
+		summaryChars: summaryChars,
 	}, savings > 0
+}
+
+// appendAXBudgetRun adds the candidates of one run of siblings. A short run
+// is one candidate. A long run is cut into chunks that are removed from its
+// end, so an over-budget list keeps its first items and summarizes the rest.
+func appendAXBudgetRun(parent *AXNode, run []*AXNode, depth int, out *[]axBudgetCandidate) {
+	whole, ok := newAXBudgetCandidate(parent, run, depth)
+	if len(run) == 0 || !ok {
+		return
+	}
+	if len(run) <= axBudgetChunkNodes {
+		*out = append(*out, whole)
+		return
+	}
+	for end, fromEnd := len(run), 0; end > 0; end, fromEnd =
+		end-axBudgetChunkNodes, fromEnd+1 {
+		start := end - axBudgetChunkNodes
+		if start < 0 {
+			start = 0
+		}
+		chunk, ok := newAXBudgetCandidate(parent, run[start:end], depth)
+		if !ok {
+			continue
+		}
+		chunk.priority = whole.priority
+		chunk.runSavings = whole.savings
+		chunk.fromEnd = fromEnd
+		chunk.runID = run[0].ID
+		*out = append(*out, chunk)
+	}
+}
+
+// axBudgetRunIsCollection reports whether a long run of siblings is a
+// collection: items of one role, such as the cards of a page, the rows of a
+// list or the entries of a tree.
+func axBudgetRunIsCollection(run []*AXNode) bool {
+	if len(run) <= axBudgetChunkNodes {
+		return false
+	}
+	for _, node := range run[1:] {
+		if node.Role != run[0].Role {
+			return false
+		}
+	}
+	return true
 }
 
 func collectAXBudgetCandidates(
@@ -186,33 +274,28 @@ func collectAXBudgetCandidates(
 		run := []*AXNode{}
 		flush := func() {
 			defer func() { run = nil }()
-			whole, ok := newAXBudgetCandidate(parent, run, depth)
-			if !ok {
+			// The items of a collection are cut from its end even when each
+			// item is a semantic boundary (a card group): otherwise every
+			// item keeps its shell with a summary inside it. Elsewhere a
+			// boundary keeps its frame and is trimmed inside, so a lone
+			// table or toolbar never folds as a whole.
+			if axBudgetRunIsCollection(run) {
+				appendAXBudgetRun(parent, run, depth, out)
 				return
 			}
-			if len(run) <= axBudgetChunkNodes {
-				*out = append(*out, whole)
-				return
-			}
-			for end, fromEnd := len(run), 0; end > 0; end, fromEnd =
-				end-axBudgetChunkNodes, fromEnd+1 {
-				start := end - axBudgetChunkNodes
-				if start < 0 {
-					start = 0
-				}
-				chunk, ok := newAXBudgetCandidate(parent, run[start:end], depth)
-				if !ok {
+			part := []*AXNode{}
+			for _, node := range run {
+				if axSubtreeContainsCriticalOrBoundary(node) {
+					appendAXBudgetRun(parent, part, depth, out)
+					part = nil
 					continue
 				}
-				chunk.priority = whole.priority
-				chunk.runSavings = whole.savings
-				chunk.fromEnd = fromEnd
-				*out = append(*out, chunk)
+				part = append(part, node)
 			}
+			appendAXBudgetRun(parent, part, depth, out)
 		}
 		for _, child := range parent.Children {
-			if child.Synthetic ||
-				axSubtreeContainsCriticalOrBoundary(child) {
+			if child.Synthetic || axSubtreeContainsCritical(child) {
 				flush()
 				continue
 			}
@@ -305,6 +388,9 @@ func selectAXBudgetPlan(
 	parents := axBudgetParentMap(roots)
 	selected := make([]axBudgetCandidate, 0, len(candidates))
 	savings := 0
+	// The last selected chunk of each run: the next chunk of that run merges
+	// into its summary, so it also saves the summary it would have added.
+	lastChunk := map[string]int{}
 	for _, candidate := range candidates {
 		if savings >= requiredSavings {
 			break
@@ -321,6 +407,13 @@ func selectAXBudgetPlan(
 		}
 		selected = append(selected, candidate)
 		savings += candidate.savings
+		if candidate.runID != "" {
+			key := candidate.parentID + "\x00" + candidate.runID
+			if previous, ok := lastChunk[key]; ok && previous == candidate.fromEnd-1 {
+				savings += candidate.summaryChars
+			}
+			lastChunk[key] = candidate.fromEnd
+		}
 	}
 	return selected
 }
