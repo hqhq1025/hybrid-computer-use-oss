@@ -10,6 +10,7 @@ from .foundation import (
     node_role,
     process_generation,
     provider_bus_name,
+    safe,
     provider_object_path,
     state_contains,
 )
@@ -78,6 +79,9 @@ def list_apps_inventory():
     # untracked_window_notes.
     accessible_titles = {}
     accessible_coverage = {}
+    # Toolkit names of registrations without windows, by process; see
+    # invisible_window_notes.
+    windowless_toolkits = {}
     for app in sorted(
         apps,
         key=lambda item: (node_name(item).lower(), node_pid(item)),
@@ -104,6 +108,8 @@ def list_apps_inventory():
             })
         if not windows:
             record_window_coverage(accessible_coverage, app, windows)
+            windowless_toolkits.setdefault(pid, set()).add(
+                str(safe(app.get_toolkit_name, "") or "").strip().lower())
             continue
         strong = strong_window_instance_handles(app, windows)
         record_window_coverage(accessible_coverage, app, windows, strong)
@@ -197,7 +203,12 @@ def list_apps_inventory():
         inventory_issues.extend({"reason": error} for error in inventory_errors(native_windows))
         native_entries = native_app_entries(native_windows)
         lines.extend(entry["displayText"] for entry in native_entries)
-        notes.extend(invisible_window_notes(managed, accessible_pids))
+        notes.extend(invisible_window_notes(
+            managed, accessible_pids,
+            windowless_toolkits={
+                pid: toolkits for pid, toolkits in windowless_toolkits.items()
+                if not any(accessible_titles.get(pid) or ())
+            }))
         if not unreadable:
             # A window listed above with a native handle needs no second
             # mention; the note covers only windows still left out.

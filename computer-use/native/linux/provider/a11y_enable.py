@@ -31,6 +31,7 @@ invisible if their toolkit reads the setting only at startup;
 """
 
 import os
+import re
 import time
 
 from .foundation import provider_bus_name, safe
@@ -208,26 +209,46 @@ def request_full_trees(apps):
 # path is a marker when it ends with the given name or contains it as a
 # directory component, so versioned libraries match.
 _TOOLKIT_MARKERS = (
-    ("Qt", ("libQt5Core.so", "libQt6Core.so")),
+    # Prefixes, not file names: vendors rename bundled Qt (WPS Office maps
+    # libQt5CoreKso.so.5.12.10).
+    ("Qt", ("libQt5Core", "libQt6Core")),
     ("Gecko", ("libxul.so",)),
     ("Chromium", ("chrome_100_percent.pak",)),
+    # Before GTK: a Java runtime may load GTK for its look and feel.
+    ("Java", ("libjvm.so",)),
     ("GTK 2", ("libgtk-x11-2.0.so",)),
     ("GTK", ("libgtk-3.so", "libgtk-4.so")),
 )
 
 
-def process_toolkit(pid, proc_root="/proc"):
-    """Return the UI toolkit a process has mapped, or "" when unknown."""
+def _mapped_library_names(pid, proc_root):
     try:
         with open(os.path.join(proc_root, str(int(pid)), "maps"),
                   encoding="utf-8", errors="replace") as maps:
-            names = {
+            return {
                 os.path.basename(line.split()[-1])
                 for line in maps
                 if "/" in line
             }
     except (OSError, ValueError):
-        return ""
+        return set()
+
+
+_QT_CORE_VERSION = re.compile(r"^libQt[56]Core\w*\.so\.(\d+)\.(\d+)")
+
+
+def process_qt_version(pid, proc_root="/proc"):
+    """Return (major, minor) of the Qt core library a process maps, or None."""
+    for name in _mapped_library_names(pid, proc_root):
+        match = _QT_CORE_VERSION.match(name)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def process_toolkit(pid, proc_root="/proc"):
+    """Return the UI toolkit a process has mapped, or "" when unknown."""
+    names = _mapped_library_names(pid, proc_root)
     for toolkit, markers in _TOOLKIT_MARKERS:
         for marker in markers:
             if any(name.startswith(marker) or name == marker for name in names):
@@ -239,6 +260,21 @@ _RESTART_ADVICE = {
     "Qt": (
         "Qt reads the accessibility setting only when it starts; restart the "
         "application"
+    ),
+    # Qt 5.15 and later also read IsEnabled, which the provider switches on.
+    # Earlier Qt reads only ScreenReaderEnabled, which is bound to the
+    # desktop's screen-reader setting, so the provider leaves it alone.
+    "Qt before 5.15": (
+        "This Qt version exports a tree only when started with "
+        "QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 in its environment; restart it "
+        "that way"
+    ),
+    "Java": (
+        "Java exports a tree only through the Java ATK wrapper; restart it "
+        "with -Djavax.accessibility.assistive_technologies="
+        "org.GNOME.Accessibility.AtkWrapper (for example in "
+        "JDK_JAVA_OPTIONS) and the wrapper jar and its native library on the "
+        "runtime's boot class path and boot library path"
     ),
     "Gecko": (
         "Gecko reads the accessibility setting only when it starts; restart "
@@ -261,23 +297,40 @@ _RESTART_ADVICE = {
 }
 
 
-def invisible_window_notes(managed_windows, accessible_pids, proc_root="/proc"):
+def invisible_window_notes(managed_windows, accessible_pids, proc_root="/proc",
+                           windowless_toolkits=None):
     """Name titled windows whose process has no accessibility application.
 
     Without this the window is simply absent from the listing, and the
     agent cannot tell an application that exports nothing from one that
     needs a restart.
+
+    ``windowless_toolkits`` maps a process that is on the bus without any
+    accessible window to the toolkit names of its registrations. Such a
+    process gets the advice when its UI toolkit is not among them: WPS
+    Office loads GTK for its Qt platform theme, GTK registers an empty
+    application, and the Qt windows stay off the bus.
     """
+    windowless_toolkits = windowless_toolkits or {}
     seen = set()
     notes = []
     for window in managed_windows:
         pid = int(window.get("pid") or 0)
         title = str(window.get("title") or "").strip()
-        if pid <= 0 or not title or pid in accessible_pids or pid in seen:
+        if pid <= 0 or not title or pid in seen:
+            continue
+        if pid in accessible_pids and pid not in windowless_toolkits:
             continue
         seen.add(pid)
         toolkit = process_toolkit(pid, proc_root)
-        advice = _RESTART_ADVICE.get(toolkit)
+        if toolkit.lower() in windowless_toolkits.get(pid, ()):
+            continue
+        version = process_qt_version(pid, proc_root) if toolkit == "Qt" else None
+        if version is not None and version < (5, 15):
+            advice = _RESTART_ADVICE["Qt before 5.15"]
+            toolkit = "Qt {}.{}".format(*version)
+        else:
+            advice = _RESTART_ADVICE.get(toolkit)
         if advice is None:
             # No known toolkit: nothing would make the application export a
             # tree, and its windows are already listed as having none.
