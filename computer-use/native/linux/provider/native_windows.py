@@ -1,4 +1,4 @@
-"""Top-level windows of processes that export no accessibility tree.
+"""Managed windows without a corresponding accessibility top-level window.
 
 Some applications never register on the AT-SPI bus (Blender draws its own
 interface), and Qt, Gecko and Chromium applications started before
@@ -15,6 +15,7 @@ from .foundation import (
     AX_WINDOW_ACTION_POLL_SECONDS,
     AX_WINDOW_ACTION_TIMEOUT_SECONDS,
     OperationFailure,
+    InventoryResult,
     inventory_complete,
     node_pid,
     process_generation,
@@ -23,7 +24,10 @@ from . import action_evidence
 from .x11_windows import (
     _x11_managed_windows,
     _x11_window_inventory_cache,
+    app_windows,
     iter_apps,
+    strong_window_instance_handles,
+    unmapped_window_indices,
     window_handle_for_pid,
     x11_root_window_state,
     x11_window_type,
@@ -45,31 +49,56 @@ def process_name(pid, proc_root="/proc"):
         return ""
 
 
-def native_only_windows(managed, accessible_pids, active_window_id=None,
+def record_window_coverage(coverage, app, windows, strong=None):
+    """Record native handles already owned by AX, retaining uncertain matches.
+
+    Registration on the bus says nothing about window coverage. An empty,
+    complete application root owns no windows; an unreadable or ambiguous
+    root does not establish which native windows lack a tree.
+    """
+    pid = node_pid(app)
+    if strong is None:
+        strong = strong_window_instance_handles(app, windows) if windows else {}
+    hidden = unmapped_window_indices(app, windows, strong) if windows else set()
+    entry = coverage.setdefault(pid, {"handles": set(), "complete": True})
+    entry["handles"].update(strong.values())
+    entry["complete"] = entry["complete"] and inventory_complete(windows) and all(
+        index in strong or index in hidden for index, _ in windows)
+
+
+def native_only_windows(managed, accessible_coverage, active_window_id=None,
                         proc_root="/proc"):
-    """Return the on-screen titled windows whose process is not on the bus.
+    """Return on-screen titled windows not owned by an AX top-level window.
 
     Each entry has the process id and name, the X11 window id, its title,
     the strong w2 handle derived like the handles of accessible windows, and
     whether the window manager reports it active.
     """
-    windows = []
+    windows, errors = [], []
     for window in managed:
         pid = int(window.get("pid") or 0)
         title = str(window.get("title") or "").strip()
         width = int(window.get("width") or 0)
         height = int(window.get("height") or 0)
-        if pid <= 0 or pid in accessible_pids or not title:
+        if pid <= 0 or not title:
             continue
         if width <= 0 or height <= 0:
             continue
         if (int(window.get("x") or 0) + width <= 0
                 or int(window.get("y") or 0) + height <= 0):
             continue
-        if x11_window_type(window.get("id")) not in APPLICATION_WINDOW_TYPES:
-            continue
         handle = window_handle_for_pid(pid, window.get("id"))
         if not handle:
+            continue
+        coverage = accessible_coverage.get(pid, {})
+        if handle in coverage.get("handles", set()):
+            continue
+        if x11_window_type(window.get("id")) not in APPLICATION_WINDOW_TYPES:
+            continue
+        if not coverage.get("complete", True):
+            errors.append(
+                'The accessibility coverage of window "{}" is uncertain; '
+                "its native window could not be matched safely.".format(title))
             continue
         windows.append({
             "pid": pid,
@@ -81,7 +110,7 @@ def native_only_windows(managed, accessible_pids, active_window_id=None,
             "active": bool(active_window_id)
             and window["id"] == active_window_id,
         })
-    return windows
+    return InventoryResult(windows, complete=not errors, errors=errors)
 
 
 def native_app_entries(windows):
@@ -132,8 +161,11 @@ def native_window_for_operation(operation):
     if not inventory_complete(managed) or not inventory_complete(apps):
         return None
     root = x11_root_window_state()
+    coverage = {}
+    for app in apps:
+        record_window_coverage(coverage, app, app_windows(app))
     candidates = native_only_windows(
-        managed, {node_pid(app) for app in apps},
+        managed, coverage,
         root.get("activeWindow") if root else None)
     for window in candidates:
         if window["handle"] == handle:

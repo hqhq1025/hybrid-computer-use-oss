@@ -43,7 +43,8 @@ class NativeOnlyWindowTests(AtspiPatchedTestCase):
                 _window(30, "0x5", "Dock"),
                 _window(30, "0x6", "Empty", width=0),
             ],
-            accessible_pids={21},
+            accessible_coverage={21: {"handles": {
+                runtime.window_handle_for_pid(21, "0x2")}, "complete": True}},
             active_window_id="0x1",
         )
 
@@ -92,6 +93,80 @@ class NativeOnlyWindowTests(AtspiPatchedTestCase):
         self.assertEqual(1, len(notes))
         self.assertIn('"VLC media player" (pid 20, Qt)', notes[0])
 
+    def test_registered_process_without_windows_still_lists_native_window(self):
+        app = _TreeNode(role="application", name="paint3d", kids=())
+        app.get_process_id = lambda: 30
+        with mock.patch.object(runtime, "iter_apps", return_value=[app]), \
+                mock.patch.object(runtime, "_x11_managed_windows", return_value=_managed(
+                    _window(30, "0x1", "Scene - Paint3D"))), \
+                mock.patch.object(runtime, "process_toolkit", return_value=""):
+            inventory = runtime.list_apps_inventory()
+
+        windows = [window for entry in inventory["apps"] for window in entry["windows"]]
+        self.assertEqual(["Scene - Paint3D"], [window["title"] for window in windows])
+        self.assertTrue(windows[0]["noAccessibilityTree"])
+        self.assertEqual(runtime.window_handle_for_pid(30, "0x1"), windows[0]["handle"])
+
+    def test_native_sibling_of_accessible_window_gets_its_own_handle(self):
+        frame = _TreeNode(role="frame", name="Main")
+        app = _TreeNode(role="application", name="paint3d", kids=(frame,))
+        app.get_process_id = lambda: 30
+        main_handle = runtime.window_handle_for_pid(30, "0x1")
+        with mock.patch.object(runtime, "iter_apps", return_value=[app]), \
+                mock.patch.object(runtime, "_x11_managed_windows", return_value=_managed(
+                    _window(30, "0x1", "Main"), _window(30, "0x2", "Native dialog"))), \
+                mock.patch.object(runtime, "strong_window_instance_handles", return_value={0: main_handle}), \
+                mock.patch.object(runtime, "unmapped_window_indices", return_value=set()), \
+                mock.patch.object(runtime, "process_toolkit", return_value=""):
+            inventory = runtime.list_apps_inventory()
+
+        windows = [window for entry in inventory["apps"] for window in entry["windows"]]
+        self.assertEqual(["Main", "Native dialog"], [window["title"] for window in windows])
+        self.assertEqual(2, len({window["handle"] for window in windows}))
+        self.assertTrue(windows[1]["noAccessibilityTree"])
+        # The listed native window is the only inventory entry for it; the
+        # untracked-window note would repeat it with GUI-only advice.
+        self.assertEqual([], [note for note in inventory["notes"] if "Native dialog" in note])
+
+    def test_ambiguous_accessible_root_does_not_gain_a_second_native_alias(self):
+        app = _TreeNode(role="application", name="paint3d", kids=(
+            _TreeNode(role="frame", name="Untitled"),))
+        app.get_process_id = lambda: 30
+        with mock.patch.object(runtime, "iter_apps", return_value=[app]), \
+                mock.patch.object(runtime, "_x11_managed_windows", return_value=_managed(
+                    _window(30, "0x1", "Untitled"))), \
+                mock.patch.object(runtime, "strong_window_instance_handles", return_value={}), \
+                mock.patch.object(runtime, "process_toolkit", return_value=""):
+            inventory = runtime.list_apps_inventory()
+
+        windows = [window for entry in inventory["apps"] for window in entry["windows"]]
+        self.assertEqual(1, len(windows))
+        self.assertEqual("", windows[0]["handle"])
+        self.assertTrue(inventory["inventory_issues"])
+        self.assertFalse(windows[0].get("noAccessibilityTree"))
+
+    def test_multiple_accessibility_roots_share_native_coverage(self):
+        empty = _TreeNode(role="application", name="paint3d", kids=())
+        full = _TreeNode(role="application", name="paint3d", kids=(
+            _TreeNode(role="frame", name="Main"),))
+        empty.get_process_id = full.get_process_id = lambda: 30
+        coverage = {}
+        handle = runtime.window_handle_for_pid(30, "0x1")
+        runtime.record_window_coverage(coverage, empty, [], {})
+        runtime.record_window_coverage(coverage, full, [(0, full.get_child_at_index(0))], {0: handle})
+        windows = runtime.native_only_windows(_managed(_window(30, "0x1", "Main")), coverage)
+        self.assertEqual([], list(windows))
+
+    def test_incomplete_empty_root_is_not_evidence_of_absent_accessibility(self):
+        app = _TreeNode(role="application", name="paint3d", kids=())
+        app.get_process_id = lambda: 30
+        coverage = {}
+        runtime.record_window_coverage(coverage, app,
+            runtime.InventoryResult([], complete=False, errors=["timeout"]), {})
+        windows = runtime.native_only_windows(_managed(_window(30, "0x1", "Main")), coverage)
+        self.assertEqual([], list(windows))
+        self.assertFalse(windows.complete)
+
 
 class NativeWindowActionTests(AtspiPatchedTestCase):
     def setUp(self):
@@ -129,6 +204,66 @@ class NativeWindowActionTests(AtspiPatchedTestCase):
         self.assertTrue(response["ok"])
         self.assertTrue(response["input_events_emitted"])
 
+    def test_registered_empty_root_resolves_exact_native_window_and_rejects_replacement(self):
+        app = _TreeNode(role="application", name="paint3d", kids=())
+        app.get_process_id = lambda: 30
+        managed = _managed(_window(30, "0x1", "Scene - Paint3D"))
+        with mock.patch.object(runtime, "iter_apps", return_value=[app]), \
+                mock.patch.object(runtime, "_x11_managed_windows", return_value=managed), \
+                mock.patch.object(runtime, "x11_window_type", return_value="NORMAL"), \
+                mock.patch.object(runtime, "process_generation", return_value="first-generation"), \
+                mock.patch.object(runtime, "x11_root_window_state", return_value={"activeWindow": "0x1"}):
+            handle = runtime.window_handle_for_pid(30, "0x1")
+            operation = {"window_handle": handle, "target": {"windowHandle": handle}}
+            self.assertEqual("0x1", runtime.native_window_for_operation(operation)["id"])
+            managed[0]["id"] = "0x2"
+            self.assertIsNone(runtime.native_window_for_operation(operation))
+            managed[0]["id"] = "0x1"
+            with mock.patch.object(runtime, "process_generation", return_value="new-generation"):
+                self.assertIsNone(runtime.native_window_for_operation(operation))
+
+    def test_native_window_is_not_reused_after_accessibility_claims_it(self):
+        app = _TreeNode(role="application", name="paint3d", kids=(
+            _TreeNode(role="frame", name="Main"),))
+        app.get_process_id = lambda: 30
+        with mock.patch.object(runtime, "iter_apps", return_value=[app]), \
+                mock.patch.object(runtime, "_x11_managed_windows", return_value=_managed(
+                    _window(30, "0x1", "Main"))), \
+                mock.patch.object(runtime, "x11_window_type", return_value="NORMAL"), \
+                mock.patch.object(runtime, "process_generation", return_value="gen"), \
+                mock.patch.object(runtime, "x11_root_window_state", return_value={"activeWindow": "0x1"}):
+            handle = runtime.window_handle_for_pid(30, "0x1")
+            with mock.patch.object(runtime, "strong_window_instance_handles", return_value={0: handle}):
+                self.assertIsNone(runtime.native_window_for_operation({"window_handle": handle}))
+
+    def test_dispatcher_rejects_native_ref_after_ax_claims_window_before_app_lookup(self):
+        app = _TreeNode(role="application", name="paint3d", kids=(
+            _TreeNode(role="frame", name="Main"),))
+        app.get_process_id = lambda: 30
+        with mock.patch.object(runtime, "iter_apps", return_value=[app]), \
+                mock.patch.object(runtime, "_x11_managed_windows", return_value=_managed(
+                    _window(30, "0x1", "Main"))), \
+                mock.patch.object(runtime, "x11_window_type", return_value="NORMAL"), \
+                mock.patch.object(runtime, "process_generation", return_value="gen"), \
+                mock.patch.object(runtime, "x11_root_window_state", return_value={"activeWindow": "0x1"}), \
+                mock.patch.object(runtime, "resolve_operation_app",
+                    side_effect=AssertionError("A native ref must not fall back to app-name lookup")) as resolve, \
+                mock.patch.object(runtime, "_emit") as native_emit, \
+                mock.patch.object(runtime, "_emit_native_window_command") as ax_emit:
+            handle = runtime.window_handle_for_pid(30, "0x1")
+            operation = {"app": "paint3d", "action": "activate", "window_handle": handle,
+                         "target": {"selector": 'window "Main"', "hasName": True,
+                                    "name": "Main", "role": "window", "windowHandle": handle}}
+            with mock.patch.object(runtime, "strong_window_instance_handles", return_value={0: handle}):
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.perform_provider_request("window_action", operation)
+            self.assertIn(caught.exception.failure_code, {"invalid_target", "stale_window_ref"})
+            self.assertEqual("precondition", caught.exception.failure_phase)
+            self.assertFalse(caught.exception.input_events_emitted)
+            resolve.assert_not_called()
+            native_emit.assert_not_called()
+            ax_emit.assert_not_called()
+
     def test_close_that_leaves_the_window_is_effect_unknown(self):
         with mock.patch.object(runtime, "_emit"), \
                 mock.patch.object(runtime, "x11_root_window_state",
@@ -140,6 +275,32 @@ class NativeWindowActionTests(AtspiPatchedTestCase):
 
         self.assertEqual("effect_unknown", caught.exception.failure_code)
         self.assertTrue(caught.exception.input_events_emitted)
+
+
+class NativeWindowTypeTests(AtspiPatchedTestCase):
+    def test_standard_type_is_not_a_substring_of_a_vendor_extension(self):
+        result = subprocess.CompletedProcess([], 0,
+            "_NET_WM_WINDOW_TYPE(ATOM) = _KDE_NET_WM_WINDOW_TYPE_OVERRIDE, "
+            "_NET_WM_WINDOW_TYPE_NORMAL\n", "")
+        with mock.patch.object(runtime.subprocess, "run", return_value=result):
+            self.assertEqual("NORMAL", runtime.x11_window_type("0x1"))
+
+    def test_standard_type_order_and_missing_type_are_preserved(self):
+        for value, expected in (("_NET_WM_WINDOW_TYPE_DIALOG, _NET_WM_WINDOW_TYPE_NORMAL", "DIALOG"),
+                                ("_NET_WM_WINDOW_TYPE_DOCK", "DOCK"),
+                                ("_NET_WM_WINDOW_TYPE: not found.", "")):
+            with self.subTest(value=value), mock.patch.object(runtime.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0, value, "")):
+                self.assertEqual(expected, runtime.x11_window_type("0x1"))
+
+    def test_type_suffix_is_not_shortened_into_an_application_type(self):
+        for atom in ("NORMAL2", "NORMAL_custom", "DIALOG_aux", "DIALOG9"):
+            with self.subTest(atom=atom), mock.patch.object(runtime.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0,
+                        "_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_" + atom, "")):
+                parsed = runtime.x11_window_type("0x1")
+                self.assertEqual(atom, parsed)
+                self.assertNotIn(parsed, runtime.APPLICATION_WINDOW_TYPES)
 
 
 class HiddenWindowListingTests(AtspiPatchedTestCase):

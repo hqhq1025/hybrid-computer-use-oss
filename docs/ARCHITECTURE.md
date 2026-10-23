@@ -294,6 +294,9 @@ across windows fail before input.
 The canonical AX tree stays complete. The model sees a compact working
 projection that drops empty leaves and collapses neutral containers, while
 `find`, selectors, references and actions keep querying canonical records.
+An explicit observation root stays in that projection even without a label.
+A root selected through a ref retains its resolved identity. Root protection
+does not make hidden controls actionable or bypass action checks.
 
 ## GUI state model
 
