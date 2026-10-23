@@ -1,4 +1,5 @@
 import ApplicationServices
+import CoreGraphics
 import Foundation
 
 /// Attributes one snapshot render reads from each node. A single
@@ -217,4 +218,56 @@ final class AXNodeFactsCache {
 func readAttribute(_ element: AXUIElement, _ attribute: String) -> AXRead {
     AXNodeFactsCache.current?.attribute(element, attribute)
         ?? singleAttributeRead(element, attribute)
+}
+
+/// Raw attributes that identify an element and where it is. A snapshot
+/// stores one sample per record; an action compares it with one live sample
+/// and walks the tree again only when they differ.
+struct AXLiveIdentity: Equatable {
+    static let attributes: [String] = [
+        kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute,
+        kAXDescriptionAttribute, kAXIdentifierAttribute,
+        kAXPositionAttribute, kAXSizeAttribute,
+    ]
+
+    let texts: [String?]
+    let frame: CGRect?
+
+    /// Returns nil when the role cannot be read, for example because the
+    /// element no longer exists.
+    init?(reads: [AXRead]) {
+        guard reads.count == Self.attributes.count,
+              reads[0].status == .success,
+              reads[0].value as? String != nil else {
+            return nil
+        }
+        texts = reads[0..<5].map { read in
+            read.status == .success ? read.value as? String : nil
+        }
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        if reads[5].status == .success, reads[6].status == .success,
+           let position = reads[5].value.flatMap(checkedAXValue),
+           let extent = reads[6].value.flatMap(checkedAXValue),
+           AXValueGetValue(position, .cgPoint, &origin),
+           AXValueGetValue(extent, .cgSize, &size) {
+            frame = CGRect(origin: origin, size: size)
+        } else {
+            frame = nil
+        }
+    }
+
+    /// Inside a snapshot scope this costs no IPC: the node batch holds
+    /// every attribute.
+    static func sample(_ element: AXUIElement) -> AXLiveIdentity? {
+        AXLiveIdentity(reads: attributes.map { readAttribute(element, $0) })
+    }
+
+    /// One batched read of the element as it is now.
+    static func readLive(_ element: AXUIElement) -> AXLiveIdentity? {
+        guard case .values(let reads) = multipleAttributeRead(element, attributes) else {
+            return nil
+        }
+        return AXLiveIdentity(reads: reads)
+    }
 }

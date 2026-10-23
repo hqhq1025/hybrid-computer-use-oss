@@ -280,6 +280,48 @@ enum InputSimulation {
         }
     }
 
+    /// Posts `text` as Unicode key events to one process. A background
+    /// application receives them without a focus change or a clipboard write.
+    static func typeTextToProcess(_ text: String, pid: pid_t) throws {
+        for chunk in keyboardUnicodeChunks(for: text) {
+            var units = chunk
+            guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
+                throw ComputerUseError.message("Failed to create keyboard event.")
+            }
+            units.withUnsafeMutableBufferPointer { buffer in
+                guard let baseAddress = buffer.baseAddress else {
+                    return
+                }
+                down.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: baseAddress)
+                up.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: baseAddress)
+            }
+            down.postToPid(pid)
+            up.postToPid(pid)
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+    }
+
+    /// Pastes `text` into one process with Command-V and restores the
+    /// clipboard afterwards.
+    static func pasteTextToProcess(
+        _ text: String,
+        pid: pid_t,
+        awaitConsumption: (() throws -> Void)? = nil
+    ) throws {
+        guard !text.isEmpty else {
+            return
+        }
+        try withTemporaryPasteboardText(
+            text,
+            pasteboard: .general,
+            consumptionDelay: pasteConsumptionDelay,
+            awaitConsumption: awaitConsumption
+        ) {
+            try pressKey("CMD+V", pid: pid)
+        }
+    }
+
     static func withTemporaryPasteboardText(
         _ text: String,
         pasteboard: NSPasteboard,
