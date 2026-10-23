@@ -241,24 +241,12 @@ enum BlockingAsyncBridge {
     }
 
     private static func waitForSignal(_ semaphore: DispatchSemaphore, timeout: TimeInterval?) -> Bool {
-        let deadline = timeout.map { Date(timeIntervalSinceNow: $0) }
-
-        if Thread.isMainThread {
-            while semaphore.wait(timeout: .now()) == .timedOut {
-                if let deadline, Date() >= deadline {
-                    return false
-                }
-
-                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
-            }
+        // Callers run on the accessibility thread, never on the main thread
+        // or the Swift concurrency pool that runs `operation`.
+        guard let timeout else {
+            semaphore.wait()
             return true
         }
-
-        if let timeout {
-            return semaphore.wait(timeout: .now() + timeout) == .success
-        }
-
-        semaphore.wait()
-        return true
+        return semaphore.wait(timeout: .now() + timeout) == .success
     }
 }

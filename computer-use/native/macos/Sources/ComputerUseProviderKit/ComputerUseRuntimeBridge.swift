@@ -19,32 +19,17 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
 
     public func execute(_ operation: [String: Any]) async -> [String: Any] {
         let tool = string(operation["tool"])
-        if tool == "gui" {
-            do {
-                return try await executeGUI(operation)
-            } catch {
-                return runtimeFailureResult(error)
+        do {
+            return try await AccessibilityThread.shared.run(
+                timeout: providerReadOnlyToolNeedsRuntimeBound(tool)
+                    ? accessibilityReadTimeout : nil
+            ) {
+                tool == "gui"
+                    ? try self.executeGUI(operation)
+                    : try self.executeSynchronousThrowing(operation)
             }
-        }
-        if providerReadOnlyToolNeedsRuntimeBound(tool) {
-            do {
-                return try BlockingSynchronousBridge.run(
-                    timeout: accessibilityReadTimeout
-                ) {
-                    try autoreleasepool {
-                        try self.executeSynchronousThrowing(operation)
-                    }
-                }
-            } catch {
-                return runtimeFailureResult(error)
-            }
-        }
-        return autoreleasepool {
-            do {
-                return try executeSynchronousThrowing(operation)
-            } catch {
-                return runtimeFailureResult(error)
-            }
+        } catch {
+            return runtimeFailureResult(error)
         }
     }
 
@@ -288,41 +273,6 @@ let accessibilityReadTimeout: TimeInterval = 8
 func providerReadOnlyToolNeedsRuntimeBound(_ tool: String) -> Bool {
     ["list_apps", "get_app_state", "list_app_windows", "resolve_target"]
         .contains(tool)
-}
-
-private final class SynchronousOperationBox<T>: @unchecked Sendable {
-    let operation: () throws -> T
-    var result: Result<T, Error>?
-
-    init(operation: @escaping () throws -> T) {
-        self.operation = operation
-    }
-}
-
-enum BlockingSynchronousBridge {
-    static func run<T>(
-        timeout: TimeInterval,
-        _ operation: @escaping () throws -> T
-    ) throws -> T {
-        let semaphore = DispatchSemaphore(value: 0)
-        let box = SynchronousOperationBox(operation: operation)
-        DispatchQueue.global(qos: .userInitiated).async {
-            box.result = Result {
-                try box.operation()
-            }
-            semaphore.signal()
-        }
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            throw ComputerUseError.providerResetRequired(
-                "macOS accessibility read timed out after \(timeout) seconds. The native provider must restart before another request."
-            )
-        }
-        return try box.result?.get() ?? {
-            throw ComputerUseError.message(
-                "macOS accessibility read finished without producing a result."
-            )
-        }()
-    }
 }
 
 func runtimeFailureResult(_ error: Error) -> [String: Any] {
