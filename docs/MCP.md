@@ -497,6 +497,11 @@ A `select` step selects without typing or clicking:
 - `"to_ref":"rB"` selects from the start of `rA` through the end of `rB`, for
   two cells of one table or two sibling text elements such as Writer
   paragraphs.
+- On a combo box or list box, `"text"` chooses the option with that name. On
+  an option of an open combo box popup, `{"ref":"rA"}` chooses that option.
+  A combo box that names itself after its choice, as in GTK and Qt, must
+  show the option afterwards; a Qt popup is committed by moving its current
+  item to the option and pressing Return.
 
 The provider reads the selection back and reports it as a note, for example
 `[select] selected 4 cells A2:B3`. It fails with `effect_unknown` when it

@@ -461,3 +461,166 @@ class ComboOptionSelectTests(SelectBoundaryTests):
         combo, _ = self._combo(item_action=False, selection_api=False)
         self.assert_unknown(lambda: runtime.perform_select(
             {"text": "Seattle"}, None, combo, {}, None, [], {}))
+
+
+class DropdownCommitTests(SelectBoundaryTests):
+    """A drop-down that shows its choice must show the chosen option afterwards.
+
+    A Qt combo box names itself after its current choice. Its popup items
+    have only a Toggle action, which marks an item SELECTED without changing
+    the choice, and the popup list has no Selection interface. The popup
+    commits its current (FOCUSED) item on Return; arrow keys move that item.
+    While the popup is closed the list reports a 0x0 frame.
+    """
+
+    def _qt_combo(self, value="Video", options=("Never", "Video", "", "Audio"),
+                  commits=True):
+        combo = _Node(role="combo box", name=value)
+        popup = _Node(role="list", x=0, y=0, w=0, h=0)
+        combo.add(popup)
+        items = [_Node(role="list item", name=name) for name in options]
+        popup.add(*items)
+        state = {"focus": None, "keys": []}
+
+        def set_open(opened):
+            popup.component.extents.width = 235 if opened else 0
+            popup.component.extents.height = 100 if opened else 0
+            state["focus"] = options.index(combo.title) if opened else None
+            for item in items:
+                item.states.discard(STATE.FOCUSED)
+            if opened:
+                items[state["focus"]].states.add(STATE.FOCUSED)
+
+        def combo_action(_index):
+            set_open(True)
+            return True
+
+        combo.get_n_actions = lambda: 2
+        combo.get_action_name = lambda index: ("ShowMenu", "Press")[index]
+        combo.do_action = combo_action
+        for item in items:
+            item.get_n_actions = lambda: 1
+            item.get_action_name = lambda _index: "Toggle"
+            item.do_action = (lambda _index, item=item:
+                              item.states.add(STATE.SELECTED) or True)
+
+        def send_key(key):
+            state["keys"].append(key)
+            focus = state["focus"]
+            if focus is None:
+                return
+            if key in ("Down", "Up"):
+                step = 1 if key == "Down" else -1
+                index = focus + step
+                # The separator item cannot become current.
+                while 0 <= index < len(items) and not items[index].title:
+                    index += step
+                if 0 <= index < len(items):
+                    items[focus].states.discard(STATE.FOCUSED)
+                    items[index].states.add(STATE.FOCUSED)
+                    state["focus"] = index
+            elif key == "Return":
+                if commits:
+                    combo.title = items[focus].title
+                set_open(False)
+            elif key == "Escape":
+                set_open(False)
+
+        patch = mock.patch.object(runtime, "send_key", send_key)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return combo, items, state
+
+    def test_qt_combo_choice_is_committed_and_read_back(self):
+        combo, _items, state = self._qt_combo()
+        notes = []
+
+        runtime.perform_select({"text": "Audio"}, None, combo, {}, None, notes, {})
+
+        self.assertEqual(combo.title, "Audio")
+        self.assertEqual(state["keys"], ["Down", "Return"])
+        self.assertTrue(any("Audio" in note for note in notes))
+
+    def test_choice_above_the_current_one_moves_up(self):
+        combo, _items, state = self._qt_combo()
+
+        runtime.perform_select({"text": "Never"}, None, combo, {}, None, [], {})
+
+        self.assertEqual(combo.title, "Never")
+        self.assertEqual(state["keys"], ["Up", "Return"])
+
+    def test_selected_but_uncommitted_option_is_not_success(self):
+        combo, items, state = self._qt_combo(commits=False)
+        items[3].states.add(STATE.SELECTED)
+
+        failure = self.assert_unknown(lambda: runtime.perform_select(
+            {"text": "Audio"}, None, combo, {}, None, [], {}))
+
+        self.assertEqual(combo.title, "Video")
+        self.assertIn("\"Video\"", str(failure))
+        self.assertIn("Return", state["keys"])
+
+    def test_option_already_shown_needs_no_input(self):
+        combo, _items, state = self._qt_combo()
+
+        runtime.perform_select({"text": "Video"}, None, combo, {}, None, [], {})
+
+        self.assertEqual(state["keys"], [])
+
+    def test_select_on_a_popup_item_commits_its_combo(self):
+        combo, items, state = self._qt_combo()
+        combo.do_action(0)
+
+        runtime.perform_select({}, None, items[0], {}, None, [], {})
+
+        self.assertEqual(combo.title, "Never")
+        self.assertEqual(state["keys"], ["Up", "Return"])
+
+    def test_gtk_combo_commits_through_its_own_selection_without_keys(self):
+        # GTK: Selection.select_child on the combo box sets its active item;
+        # on the popup menu it only highlights the item.
+        combo = _Node(role="combo box", name="Beijing")
+        menu = _Node(role="menu", x=-2147483648, y=-2147483648, w=1, h=1)
+        combo.add(menu)
+        items = [_Node(role="menu item", name=name)
+                 for name in ("Beijing", "Shanghai", "Seattle")]
+        menu.add(*items)
+        combo.selection_iface = mock.Mock()
+        menu.selection_iface = mock.Mock()
+        selection = mock.Mock()
+
+        def select_child(target, index):
+            if target is combo:
+                combo.title = items[index].title
+            else:
+                items[index].states.add(STATE.SELECTED)
+            return True
+
+        selection.select_child = select_child
+        selection.is_child_selected = (
+            lambda _target, index: STATE.SELECTED in items[index].states)
+        keys = []
+        with mock.patch.object(runtime.Atspi, "Selection", selection, create=True), \
+                mock.patch.object(runtime, "send_key", keys.append):
+            runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
+
+        self.assertEqual(combo.title, "Seattle")
+        self.assertEqual(keys, [])
+
+    def test_combo_value_is_the_choice_it_shows_not_a_stale_selected_item(self):
+        # GTK leaves SELECTED on the popup item highlighted first, and Qt on
+        # an item toggled without being committed.
+        combo, items, _state = self._qt_combo(value="Audio")
+        items[0].states.add(STATE.SELECTED)
+
+        self.assertEqual(runtime.element_value(combo), "Audio")
+
+    def test_labelled_combo_value_comes_from_its_selected_option(self):
+        combo = _Node(role="combo box", name="City")
+        menu = _Node(role="menu")
+        combo.add(menu)
+        menu.add(_Node(role="menu item", name="Beijing"),
+                 _Node(role="menu item", name="Seattle",
+                       states=(STATE.SELECTED,)))
+
+        self.assertEqual(runtime.element_value(combo), "Seattle")
