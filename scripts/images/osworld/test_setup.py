@@ -18,6 +18,52 @@ import install_libreoffice
 
 
 class SetupTests(unittest.TestCase):
+    def test_freecad_resources_are_readable_after_relocation_and_repeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "private"
+            page = destination / "usr/share/freecad/Mod/Start/StartPage/StartPage.html"
+            page.parent.mkdir(parents=True)
+            page.write_text("Start page")
+            resource_path = root / "freecad"
+            for _ in range(2):
+                install_qt.configure_freecad_resources(destination, resource_path)
+                self.assertEqual((resource_path / "Mod/Start/StartPage/StartPage.html").read_text(), "Start page")
+
+    def test_freecad_resources_preserve_conflicting_paths(self):
+        for kind in ("directory", "file", "symlink", "dangling_symlink"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                destination = root / "private"
+                page = destination / "usr/share/freecad/Mod/Start/StartPage/StartPage.html"
+                page.parent.mkdir(parents=True)
+                page.write_text("Start page")
+                conflict = root / "freecad"
+                if kind == "directory":
+                    conflict.mkdir()
+                elif kind == "file":
+                    conflict.write_text("keep")
+                else:
+                    target = root / "other"
+                    if kind == "symlink":
+                        target.mkdir()
+                    conflict.symlink_to(target)
+                with self.assertRaisesRegex(RuntimeError, "already occupied"):
+                    install_qt.configure_freecad_resources(destination, conflict)
+                if kind.endswith("symlink"):
+                    self.assertEqual(conflict.readlink(), target)
+                elif kind == "file":
+                    self.assertEqual(conflict.read_text(), "keep")
+                else:
+                    self.assertTrue(conflict.is_dir())
+
+    def test_freecad_incomplete_resources_do_not_create_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                install_qt.configure_freecad_resources(root / "private", root / "freecad")
+            self.assertFalse((root / "freecad").is_symlink())
+
     def test_spyder_repair_and_repeat_preserve_original(self):
         original = "image.scaled(image_width, image_height, Qt.KeepAspectRatio)\nsize = QSize(image_width, image_height)\n"
         with tempfile.TemporaryDirectory() as directory:
