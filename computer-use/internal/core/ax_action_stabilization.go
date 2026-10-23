@@ -422,6 +422,7 @@ func (s *Service) stabilizePostActionContent(
 		SourceRef:          snapshotLogicalWindowRef(after),
 		Scope:              contract.AXScopeWindow,
 		TreeView:           contract.TreeViewWorking,
+		RecheckAfterAction: s.platformBackend().HostInfo().Platform == "windows",
 	}
 	applyProjection(&refresh, after.projection)
 	probe := s.isolatedProbe()

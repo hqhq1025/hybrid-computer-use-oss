@@ -27,6 +27,23 @@
   `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`; WPS Office bundles a renamed Qt
   5.12), for Java applications (the Java ATK wrapper), and for processes
   that are on the bus only through another toolkit.
+- Windows: after an action that can change only the cell under the cursor
+  in LibreOffice Calc (a click or value on a cell, or text, an edit key or a
+  cursor key while the sheet has focus), the provider reads the window
+  again in part: the window root, the formula bar, the sheet and the cells
+  that hold a value or the cursor, plus two cells that show whether the
+  sheet scrolled. Other controls and the empty cells keep their last
+  observed state, and the result says so in a note. One cell action takes
+  about 0.4 s instead of 2 s, and a click, type and Enter batch about 1.2 s
+  instead of 7.5 s. The re-read 250 ms after an action without a visible
+  change reads the same parts (about 0.2 s instead of 1.8 s). A new window,
+  a scroll, a moved cell or other input since the last read falls back to
+  the full read.
+- Windows: LibreOffice 25.2 Calc sheets list their cells in view too.
+  25.2 reports no children for a sheet (24.8 lists every cell of the
+  sheet), so the provider did not recognize the sheet as a grid and showed
+  no cells. A table without children is now a sheet when the element at its
+  top-left corner is a cell named by A1 reference.
 - Windows: a LibreOffice Calc observation reads the sheet's visible cells
   by hit test instead of walking the sheet row by row, so it lists the
   cells that hold values (with refs) and summarizes the empty ones as
