@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- AX observations over the 12,000-character tree budget keep the controls
+  inside unnamed wrappers (Chrome's toolbar and address bar, VS Code's
+  menus) and cut a long run of same-role items (cards, rows, cells) from its
+  end under one summary. Before, every card kept an empty shell with its
+  own summary, and a spreadsheet lost all cells in view because the budget
+  plan removed far more than it needed.
+- Linux: content scrolled far out of view keeps its screen frame, so AX
+  `find` reaches it. A container with more children than the walk
+  enumerates and no MANAGES_DESCENDANTS state (a long web table) is read
+  through the children in view; the rest is reported as not read, so
+  coverage is partial.
+- Linux: child slots that an application answers with null references are
+  shown as `/null-children` on their parent (MuseScore 4 answers most slots
+  of its windows that way).
+- Linux: `activate` of a window behind a modal dialog of the same
+  application fails before any input with `window_blocked` and names the
+  dialog to answer or close first.
+- Linux: AX `apps` gives restart advice for Qt before 5.15 (it needs
+  `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`; WPS Office bundles a renamed Qt
+  5.12), for Java applications (the Java ATK wrapper), and for processes
+  that are on the bus only through another toolkit.
 - Linux: when AX `find` walks past the observe budget, it reads the full
   record only of elements whose name or text can match the query, so a
   3000-row web table is searched to the end within the walk's time limit.
