@@ -68,6 +68,26 @@ class EmbeddedOriginTests(unittest.TestCase):
             nodes[0].children.append(nodes[1])
             self.assertEqual(foundation.extents(nodes[-1]), nodes[-1].bounds)
 
+    def test_embedding_is_found_when_parent_reply_names_detached_frame_twin(self):
+        nodes = self.tree()
+        window, root = nodes[0], nodes[3]
+        app = self.Node("application", None)
+        window.parent = app
+        app.children.append(window)
+        twin = self.Node("frame", dict(x=70, y=27, width=800, height=612))
+        twin.children.append(root)
+        for index, node in enumerate(nodes + (twin, app)):
+            node.path = "/accessible/" + str(index)
+            node.get_application = lambda app=app: app
+        root.parent = twin
+        with mock.patch.object(foundation, "raw_extents", lambda n: n.bounds):
+            self.assertEqual(foundation.extents(nodes[-1])["y"], 91)
+            # A second window that lists the same root pane makes the host
+            # ambiguous, so no translation is applied.
+            other = self.Node("frame", window.bounds, app)
+            self.Node("panel", window.bounds, other).children.append(root)
+            self.assertEqual(foundation.extents(nodes[-1]), nodes[-1].bounds)
+
     def test_new_geometry_read_does_not_reuse_previous_translation(self):
         window, outer, host, root, button = self.tree()
         with mock.patch.object(foundation, "raw_extents", lambda n: n.bounds):

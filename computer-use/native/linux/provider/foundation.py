@@ -813,7 +813,17 @@ def embedded_host_panels(node, parent):
     target = (provider_bus_name(node), provider_object_path(node))
     if not target[1]:
         return None, None
-    pending = [(parent, [])]
+    host = embedded_host_search([parent], target)
+    if host is None and safe(getattr(parent, "get_parent", None)) is None:
+        # Some bridges answer the root pane's Parent with a frame twin that
+        # is not in the application's window list. Search the windows the
+        # application does list for the panels that hold this root pane.
+        host = embedded_host_search(attached_windows(parent), target)
+    return host or (None, None)
+
+
+def embedded_host_search(windows, target):
+    pending = [(window, []) for window in windows]
     matches = []
     visited = 0
     while pending and visited < 64:
@@ -821,17 +831,30 @@ def embedded_host_panels(node, parent):
         visited += 1
         count = safe(current.get_child_count)
         if count is None or count > 32:
-            return None, None
+            return None
         for index in range(count):
             child = safe(lambda: current.get_child_at_index(index))
             if child is None:
-                return None, None
+                return None
             if (provider_bus_name(child), provider_object_path(child)) == target:
                 if ancestors:
                     matches.append((current, ancestors[-1]))
             elif len(ancestors) < 3 and node_role(child) == "panel":
                 pending.append((child, ancestors + [current]))
-    return matches[0] if len(matches) == 1 and not pending else (None, None)
+    return matches[0] if len(matches) == 1 and not pending else None
+
+
+def attached_windows(detached, limit=32):
+    application = safe(getattr(detached, "get_application", None))
+    count = safe(getattr(application, "get_child_count", None))
+    if count is None or count > limit:
+        return []
+    windows = []
+    for index in range(count):
+        window = safe(lambda: application.get_child_at_index(index))
+        if window is not None and node_role(window) in AX_WINDOW_ROLES:
+            windows.append(window)
+    return windows
 
 
 def embedded_origin_offset(node, cache=None, remaining=32, role=None):
