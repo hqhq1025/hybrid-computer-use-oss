@@ -15,6 +15,7 @@ class MissingWindowGeometryTests(AtspiPatchedTestCase):
         self.extents = self.patch("extents", return_value=None)
         self.patch("process_generation", return_value="process-one")
         self.handle = runtime.window_handle_for_pid(41, "0x11")
+        self.bind_windows = runtime.strong_window_instance_handle_inventory
         self.binding = self.patch("strong_window_instance_handle_inventory",
                                   return_value=runtime.InventoryResult([(0, self.handle)]))
         self.native_read = self.patch("x11_window_inventory_for_pid",
@@ -43,6 +44,12 @@ class MissingWindowGeometryTests(AtspiPatchedTestCase):
 
     def test_ambiguous_binding_cannot_guess_from_title(self):
         self.binding.return_value = runtime.InventoryResult([])
+        self.assertIsNone(self.read())
+
+    def test_two_indistinguishable_ax_roots_cannot_share_native_geometry(self):
+        sibling = _TreeNode(role="frame", name="Document")
+        self.app.children = [self.window, sibling]
+        self.binding.side_effect = self.bind_windows
         self.assertIsNone(self.read())
 
     def test_native_geometry_never_comes_from_a_sibling_window(self):
