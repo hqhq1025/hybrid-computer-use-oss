@@ -9,6 +9,7 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/a11y_enable.py",
 	"native/linux/provider/node_facts.py",
 	"native/linux/provider/x11_windows.py",
+	"native/linux/provider/window_scale.py",
 	"native/linux/provider/atspi_inventory.py",
 	"native/linux/provider/ax_node_properties.py",
 	"native/linux/provider/ax_records.py",

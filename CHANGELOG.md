@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Linux: AX element boxes, coordinate clicks, hit tests and scrolls land on
+  the element under a desktop scale (GTK, Qt, Firefox and Chromium browser
+  views at scale 2) and on LibreOffice 7.3 toolbars. AX `find` searches past
+  the observe budget (rows of a long web table) within its own time and
+  size caps, and a find page reports `coverage: partial` when a cap stopped
+  the search.
 - AX `act` takes a wait step `{"type":"wait","settle":true}` that needs no
   predicted state: after an input step it waits until the UI changes (windows,
   focus, or the window's tree) and stops changing, names what

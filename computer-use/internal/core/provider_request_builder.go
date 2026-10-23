@@ -98,6 +98,7 @@ func providerObservationOptionsFromOperation(
 		Prune:             operation.Prune,
 		Boxes:             operation.Boxes,
 		IncludeScreenshot: &noImage,
+		FindWalk:          operation.FindWalk,
 		CaptureSnapshot:   captureSnapshot,
 	}
 }

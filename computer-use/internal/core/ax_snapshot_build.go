@@ -14,6 +14,7 @@ func buildAXSnapshot(snapshot *AppSnapshot) (*AXSnapshot, error) {
 	out := newAXSnapshotHeader(snapshot)
 	byProviderIdentity := map[string]*AXNode{}
 	processIdentityEvidence := map[string]*AXNode{}
+	identities := newSemanticIdentityIndex(snapshot)
 	for index := range snapshot.Elements {
 		record := &snapshot.Elements[index]
 		if !recordInObservation(snapshot, record) {
@@ -29,7 +30,7 @@ func buildAXSnapshot(snapshot *AppSnapshot) (*AXSnapshot, error) {
 		parent := nearestAXSnapshotParent(out, record.RuntimeID)
 		providerRole := ontologyProviderRole(record)
 		descriptor := canonicalRoleDescriptor(providerRole, parent)
-		semanticTarget := semanticRefForRecord(snapshot, *record)
+		semanticTarget := indexedSemanticRef(snapshot, identities, *record)
 		providerIdentity := completeAXProviderIdentity(
 			snapshot.publicWindowRef,
 			record.ProcessGeneration,
