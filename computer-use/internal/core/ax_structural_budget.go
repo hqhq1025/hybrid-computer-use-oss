@@ -249,21 +249,6 @@ func appendAXBudgetRun(parent *AXNode, run []*AXNode, depth int, out *[]axBudget
 	}
 }
 
-// axBudgetRunIsCollection reports whether a long run of siblings is a
-// collection: items of one role, such as the cards of a page, the rows of a
-// list or the entries of a tree.
-func axBudgetRunIsCollection(run []*AXNode) bool {
-	if len(run) <= axBudgetChunkNodes {
-		return false
-	}
-	for _, node := range run[1:] {
-		if node.Role != run[0].Role {
-			return false
-		}
-	}
-	return true
-}
-
 func collectAXBudgetCandidates(
 	nodes []*AXNode,
 	depth int,
@@ -274,23 +259,34 @@ func collectAXBudgetCandidates(
 		run := []*AXNode{}
 		flush := func() {
 			defer func() { run = nil }()
-			// The items of a collection are cut from its end even when each
-			// item is a semantic boundary (a card group): otherwise every
-			// item keeps its shell with a summary inside it. Elsewhere a
-			// boundary keeps its frame and is trimmed inside, so a lone
-			// table or toolbar never folds as a whole.
-			if axBudgetRunIsCollection(run) {
-				appendAXBudgetRun(parent, run, depth, out)
-				return
-			}
+			// A stretch of more than one chunk of same-role siblings is a
+			// collection (the cards of a page, the rows of a list): its
+			// items are cut from its end even when each item is a semantic
+			// boundary. Otherwise every card kept its shell with a summary
+			// inside it. Elsewhere a boundary keeps its frame and is trimmed
+			// inside, so a lone table or toolbar never folds as a whole.
 			part := []*AXNode{}
-			for _, node := range run {
-				if axSubtreeContainsCriticalOrBoundary(node) {
+			for start := 0; start < len(run); {
+				end := start + 1
+				for end < len(run) && run[end].Role == run[start].Role {
+					end++
+				}
+				segment := run[start:end]
+				start = end
+				if len(segment) > axBudgetChunkNodes {
 					appendAXBudgetRun(parent, part, depth, out)
 					part = nil
+					appendAXBudgetRun(parent, segment, depth, out)
 					continue
 				}
-				part = append(part, node)
+				for _, node := range segment {
+					if axSubtreeContainsCriticalOrBoundary(node) {
+						appendAXBudgetRun(parent, part, depth, out)
+						part = nil
+						continue
+					}
+					part = append(part, node)
+				}
 			}
 			appendAXBudgetRun(parent, part, depth, out)
 		}

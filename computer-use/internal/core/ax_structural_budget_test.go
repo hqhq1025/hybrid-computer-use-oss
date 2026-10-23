@@ -81,7 +81,16 @@ func TestStructuralBudgetKeepsWrappedControlsAndTrimsLongRunsFromTheEnd(t *testi
 			budgetTestNode(fmt.Sprintf("more-%d", index), "button", "More options", fmt.Sprintf("r%d", 101+2*index)),
 		))
 	}
-	document := budgetTestNode("document", "document", "FeedView", "r50", cards...)
+	// Chromium flattens the page landmarks, so the header controls and the
+	// navigation links are siblings of the cards.
+	page := []*AXNode{
+		budgetTestNode("menu", "button", "Menu", "r40"),
+		budgetTestNode("search", "textbox", "Search", "r41"),
+	}
+	for index := 0; index < 30; index++ {
+		page = append(page, budgetTestNode(fmt.Sprintf("section-%d", index), "link", fmt.Sprintf("Section %d", index), fmt.Sprintf("r%d", 500+index)))
+	}
+	document := budgetTestNode("document", "document", "FeedView", "r50", append(page, cards...)...)
 	document.States.Active = TriTrue
 	root := budgetTestNode("window", "window", "FeedView - Google Chrome", "r60", toolbar, document)
 
