@@ -1,6 +1,6 @@
 using ComputerUse.Windows.Runtime;
 
-internal static class AccessibilityBridgeNoteTests
+internal static class WindowsFactTests
 {
     internal static void Run()
     {
@@ -28,7 +28,12 @@ internal static class AccessibilityBridgeNoteTests
         Check(WindowsAccessibilityBridgeNote.RootChildrenAreTitleBars(
                 () => throw new InvalidOperationException("gone")) is null,
             "A failed root read is an unknown fact.");
-        Console.WriteLine("Accessibility bridge note tests passed.");
+        Check(WindowsProcessIdentity.ReadGeneration(() => throw new InvalidOperationException("access denied")) is null &&
+            WindowsProcessIdentity.ReadGeneration(() => default) is null &&
+            WindowsProcessIdentity.ReadGeneration(() => new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc)) ==
+                new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc).Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "An unreadable start time is no generation; a PID alone cannot tell a replacement process apart.");
+        Console.WriteLine("Windows fact tests passed.");
     }
 
     private static void Check(bool condition, string message)

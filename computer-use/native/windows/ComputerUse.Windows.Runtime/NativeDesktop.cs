@@ -181,6 +181,9 @@ internal static partial class NativeDesktop
         return processId is > 0 and <= int.MaxValue ? (int)processId : 0;
     }
 
+    // IsWindow sees hidden and zero-size windows that ListWindows leaves out.
+    internal static bool WindowExists(nint handle) => handle != 0 && IsWindow(handle);
+
     internal static bool TryGetWindowProcessId(
         nint handle,
         out int processId)

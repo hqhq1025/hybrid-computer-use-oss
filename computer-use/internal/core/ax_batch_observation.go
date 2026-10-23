@@ -298,9 +298,12 @@ func (s *Service) finalObservationContinuation(
 	inventoryComplete, _ :=
 		result.StructuredContent["recovery_inventory_complete"].(bool)
 	currentRef, _ := result.StructuredContent["current_window_ref"].(string)
+	// Following a replacement window needs complete lifecycle facts.
+	factsComplete, _ := result.StructuredContent["failure_facts_complete"].(bool)
 	if code != "stale_window_ref" ||
 		sourceStatus != "gone" ||
 		!inventoryComplete ||
+		!factsComplete ||
 		!isShortAXWindowRef(currentRef) ||
 		currentRef == context.WindowRef {
 		return nil, false

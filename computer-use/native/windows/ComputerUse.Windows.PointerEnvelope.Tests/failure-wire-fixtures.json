@@ -372,6 +372,87 @@
       }
     }
   },
+  "observe_lifecycle_alive": {
+    "protocol": "computer-use-provider",
+    "schema_version": 2,
+    "request_id": "test-1",
+    "operation": "observe",
+    "accessibility": {
+      "ok": false,
+      "error": "The exact window is unavailable for observation.",
+      "failure": {
+        "code": "stale_window_ref",
+        "phase": "precondition",
+        "facts_complete": true,
+        "subject": "window"
+      },
+      "mutation": {
+        "input_events_emitted": false,
+        "partial_input_possible": false,
+        "desktop_state_mutated": false,
+        "mutation_unknown": false
+      },
+      "recovery_context": {
+        "sourceAppStatus": "alive",
+        "sourceWindowStatus": "present",
+        "inventoryComplete": true
+      }
+    }
+  },
+  "observe_lifecycle_gone": {
+    "protocol": "computer-use-provider",
+    "schema_version": 2,
+    "request_id": "test-1",
+    "operation": "observe",
+    "accessibility": {
+      "ok": false,
+      "error": "The exact window is unavailable for observation.",
+      "failure": {
+        "code": "stale_window_ref",
+        "phase": "precondition",
+        "facts_complete": true,
+        "subject": "window"
+      },
+      "mutation": {
+        "input_events_emitted": false,
+        "partial_input_possible": false,
+        "desktop_state_mutated": false,
+        "mutation_unknown": false
+      },
+      "recovery_context": {
+        "sourceAppStatus": "alive",
+        "sourceWindowStatus": "gone",
+        "inventoryComplete": true
+      }
+    }
+  },
+  "observe_lifecycle_unknown": {
+    "protocol": "computer-use-provider",
+    "schema_version": 2,
+    "request_id": "test-1",
+    "operation": "observe",
+    "accessibility": {
+      "ok": false,
+      "error": "The exact window is unavailable for observation.",
+      "failure": {
+        "code": "stale_window_ref",
+        "phase": "precondition",
+        "facts_complete": false,
+        "subject": "window"
+      },
+      "mutation": {
+        "input_events_emitted": false,
+        "partial_input_possible": false,
+        "desktop_state_mutated": false,
+        "mutation_unknown": false
+      },
+      "recovery_context": {
+        "sourceAppStatus": "alive",
+        "sourceWindowStatus": "unknown",
+        "inventoryComplete": true
+      }
+    }
+  },
   "ambiguous_app": {
     "protocol": "computer-use-provider",
     "schema_version": 2,

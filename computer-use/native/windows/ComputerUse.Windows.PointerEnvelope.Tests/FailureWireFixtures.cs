@@ -43,6 +43,19 @@ internal static class FailureWireFixtures
             {
                 ["sourceAppStatus"] = "alive", ["sourceWindowStatus"] = "gone", ["inventoryComplete"] = true,
             }), "observe");
+        // The production mapping from a sampled window lifecycle to the
+        // observe recovery envelope that the Go decoder and close proof read.
+        foreach (var state in new[] { WindowLifecycleStatus.Alive, WindowLifecycleStatus.Gone, WindowLifecycleStatus.Unknown })
+        {
+            Add("observe_lifecycle_" + state.ToString().ToLowerInvariant(),
+                WindowsProviderFailures.StaleWindow("The exact window is unavailable for observation.",
+                    new JsonObject
+                    {
+                        ["sourceAppStatus"] = "alive",
+                        ["sourceWindowStatus"] = WindowsWindowIdentityPolicy.RecoveryStatus(state),
+                        ["inventoryComplete"] = true,
+                    }, factsComplete: state != WindowLifecycleStatus.Unknown), "observe");
+        }
         Add("ambiguous_app", new ProviderFailureException("ax_app_ambiguous", "precondition", "two processes",
             factsComplete: true, subject: "app", candidates: new JsonArray(
                 new JsonObject { ["name"] = "explorer", ["providerBusName"] = "uia3:pid:6800", ["processGeneration"] = "1" },

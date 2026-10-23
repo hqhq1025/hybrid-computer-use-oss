@@ -121,6 +121,13 @@ internal sealed partial class UiaProvider : IDisposable
                 {
                     continue;
                 }
+                if (WindowsProcessIdentity.ReadGeneration(() => process.StartTime) is null)
+                {
+                    notes.Add(
+                        $"Process identity is unavailable for {process.ProcessName} " +
+                        $"(pid {process.Id}); its windows get no references. Use GUI for them.");
+                    continue;
+                }
                 var generation = ProcessGeneration(process);
                 var windowInventory = new JsonArray();
                 foreach (var window in windows)
@@ -215,12 +222,14 @@ internal sealed partial class UiaProvider : IDisposable
     {
         var query = RequiredString(request, "app");
         var (process, scope) = ResolveApp(request, query);
+        var requestedHandle = OptionalString(request, "window_handle", string.Empty);
+        _windowHandles.TryGetValue(requestedHandle, out var expectedBinding);
         try
         {
             var selected = ResolveWindow(
                 process,
                 null,
-                OptionalString(request, "window_handle", string.Empty),
+                requestedHandle,
                 "stale_window_ref",
                 scope);
             var response = new JsonObject
@@ -240,9 +249,11 @@ internal sealed partial class UiaProvider : IDisposable
         catch (ProviderFailureException error) when (
             error.Code == "stale_window_ref")
         {
+            var recovery = StaleWindowRecoveryContext(process, expectedBinding);
             throw WindowsProviderFailures.StaleWindow(
                 error.Message,
-                StaleWindowRecoveryContext(process));
+                recovery,
+                factsComplete: recovery["sourceWindowStatus"]?.GetValue<string>() != "unknown");
         }
     }
 
@@ -332,19 +343,23 @@ internal sealed partial class UiaProvider : IDisposable
             }
             commandEmitted = true;
             var remaining = action == "close"
-                ? WaitForWindowToDisappear(appPid, binding.Handle)
+                ? WaitForWindowToDisappear(appPid, binding)
                 : ProjectNativeWindows(
                     process,
                     NativeDesktop.ListWindows(appPid)).LogicalWindows();
             if (action == "close")
             {
-                _windowHandles.Remove(opaqueWindowHandle);
-                if (remaining.Any(value => value.Handle == binding.Handle))
+                // Canceled closes, save prompts, hidden and zero-size windows
+                // keep the native instance; only its retirement proves close.
+                var lifecycle = BoundWindowLifecycle(binding);
+                if (lifecycle != WindowLifecycleStatus.Gone)
                 {
                     throw new ProviderFailureException(
                         "window_close_not_observed",
                         "postcondition",
-                        "The close request was emitted, but the exact window remained visible.");
+                        lifecycle == WindowLifecycleStatus.Alive
+                            ? "The close request was emitted, but the exact window remains alive."
+                            : "The close request was emitted, but the exact window's retirement could not be verified.");
                 }
             }
             var result = new JsonObject
@@ -374,6 +389,12 @@ internal sealed partial class UiaProvider : IDisposable
                 result["snapshot"] = BuildWindowlessSnapshot(
                     app,
                     opaqueWindowHandle);
+            }
+            if (action == "close")
+            {
+                // Keep the identity until readback succeeds, so that a failed
+                // readback leaves recovery able to prove retirement.
+                _windowHandles.Remove(opaqueWindowHandle);
             }
             return result;
         }
@@ -618,7 +639,7 @@ internal sealed partial class UiaProvider : IDisposable
         return name;
     }
 
-    private JsonObject StaleWindowRecoveryContext(Process process)
+    private JsonObject StaleWindowRecoveryContext(Process process, WindowBinding? expectedBinding)
     {
         var windows = ProjectNativeWindows(
             process,
@@ -626,7 +647,10 @@ internal sealed partial class UiaProvider : IDisposable
         var recovery = new JsonObject
         {
             ["sourceAppStatus"] = "alive",
-            ["sourceWindowStatus"] = "gone",
+            // A stale token or a window missing from the visible inventory
+            // is not retirement; the bound native instance decides.
+            ["sourceWindowStatus"] = WindowsWindowIdentityPolicy.RecoveryStatus(
+                BoundWindowLifecycle(expectedBinding)),
             ["inventoryComplete"] = true,
         };
         if (windows.Count == 0)
@@ -645,6 +669,29 @@ internal sealed partial class UiaProvider : IDisposable
             ["processGeneration"] = ProcessGeneration(process),
         };
         return recovery;
+    }
+
+    private WindowLifecycleStatus BoundWindowLifecycle(WindowBinding? binding)
+    {
+        return WindowsWindowIdentityPolicy.ReadLifecycle(
+            binding is not null,
+            () => NativeDesktop.WindowExists(binding!.Handle),
+            () =>
+            {
+                if (!NativeDesktop.TryGetWindowProcessId(binding!.Handle, out var currentPid))
+                {
+                    // The HWND may have retired between samples. A second native
+                    // existence check distinguishes that from an unreadable owner.
+                    if (!NativeDesktop.WindowExists(binding.Handle)) { return WindowLifecycleStatus.Gone; }
+                    throw new InvalidOperationException("The native window owner could not be sampled.");
+                }
+                if (currentPid != binding.ProcessId) { return WindowLifecycleStatus.Gone; }
+                using var currentProcess = Process.GetProcessById(currentPid);
+                return WindowsWindowIdentityPolicy.ReadExistingInstance(
+                    binding.ProcessId, binding.ProcessGeneration,
+                    binding.LifecycleGeneration, currentPid,
+                    ProcessGeneration(currentProcess), _windowLifecycle.Generation(binding.Handle));
+            });
     }
 
     private NativeWindowProjection ProjectNativeWindows(

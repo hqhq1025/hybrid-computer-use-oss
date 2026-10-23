@@ -28,6 +28,9 @@
       Include="../ComputerUse.Windows.Runtime/WindowsAccessibilityBridgeNote.cs"
       Link="WindowsAccessibilityBridgeNote.cs" />
     <Compile
+      Include="../ComputerUse.Windows.Runtime/WindowsProcessIdentity.cs"
+      Link="WindowsProcessIdentity.cs" />
+    <Compile
       Include="../ComputerUse.Windows.Runtime/BoundedTreeDiscovery.cs"
       Link="BoundedTreeDiscovery.cs" />
     <Compile

@@ -287,12 +287,17 @@ func validateProviderRecoveryEnvelope(
 		)
 	}
 	if operation == ProviderWireObserve {
+		// A provider that cannot read the bound window's lifecycle reports
+		// its status as unknown, with incomplete facts. Present and gone
+		// still require complete facts.
+		unknownWindowFacts := failure != nil && failure.Subject == "window" &&
+			context.SourceWindowStatus == "unknown"
 		if failure == nil ||
 			failure.Code != "stale_window_ref" ||
 			failure.Phase != "precondition" ||
-			!failure.FactsComplete {
+			(!failure.FactsComplete && !unknownWindowFacts) {
 			return errors.New(
-				"observe recovery context requires a complete stale_window_ref precondition failure",
+				"observe recovery context requires stale_window_ref precondition facts that are complete or explicitly unknown for the window",
 			)
 		}
 		if mutation != nil &&

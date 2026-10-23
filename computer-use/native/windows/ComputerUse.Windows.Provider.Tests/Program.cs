@@ -13,7 +13,7 @@ LogicalWindowBoundaryTests.Run();
 BoundedTreeDiscoveryTests.Run();
 CanonicalNodeIdentitySetTests.Run();
 ProjectedRootSlotTests.Run();
-AccessibilityBridgeNoteTests.Run();
+WindowsFactTests.Run();
 HandlelessSemanticWindowTests.Run();
 if (OptionalRoleRegression.Run() != 0)
 {
