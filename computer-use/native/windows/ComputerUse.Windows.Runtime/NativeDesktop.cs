@@ -102,7 +102,46 @@ internal static partial class NativeDesktop
     [DllImport("user32.dll")]
     private static extern nint GetAncestor(nint handle, uint flags);
 
+    // A read-only operation enumerates the desktop's windows once; every
+    // listing inside the scope filters that sample, so all parts of one
+    // observation see the same windows and the same foreground window.
+    [ThreadStatic]
+    private static IReadOnlyList<WindowRecord>? _operationWindows;
+
+    internal static IDisposable ReadOnlyWindowScope()
+    {
+        var previous = _operationWindows;
+        _operationWindows = EnumerateWindows(null);
+        return new WindowScope(() => _operationWindows = previous);
+    }
+
+    // A retry inside the scope must see windows that retired meanwhile.
+    internal static void RefreshReadOnlyWindowScope()
+    {
+        if (_operationWindows is not null)
+        {
+            _operationWindows = EnumerateWindows(null);
+        }
+    }
+
+    private sealed class WindowScope(Action restore) : IDisposable
+    {
+        public void Dispose() => restore();
+    }
+
     internal static IReadOnlyList<WindowRecord> ListWindows(int? processId = null)
+    {
+        var sample = _operationWindows;
+        if (sample is not null)
+        {
+            return processId.HasValue
+                ? sample.Where(window => window.ProcessId == processId.Value).ToArray()
+                : sample;
+        }
+        return EnumerateWindows(processId);
+    }
+
+    private static IReadOnlyList<WindowRecord> EnumerateWindows(int? processId)
     {
         var windows = new List<WindowRecord>();
         var foreground = GetForegroundWindow();

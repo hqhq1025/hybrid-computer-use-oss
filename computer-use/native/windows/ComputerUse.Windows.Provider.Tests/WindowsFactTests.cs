@@ -33,6 +33,13 @@ internal static class WindowsFactTests
             WindowsProcessIdentity.ReadGeneration(() => new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc)) ==
                 new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc).Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "An unreadable start time is no generation; a PID alone cannot tell a replacement process apart.");
+        Check(InheritedWindowOwnership.FromParent(true, 0, false) == true &&
+            InheritedWindowOwnership.FromParent(false, 0, false) == false,
+            "A plain descendant inherits its parent's window ownership.");
+        Check(InheritedWindowOwnership.FromParent(true, 0x1234, false) is null &&
+            InheritedWindowOwnership.FromParent(true, 0, true) is null &&
+            InheritedWindowOwnership.FromParent(null, 0, false) is null,
+            "Native windows, semantic windows and roots need the ownership probe.");
         Console.WriteLine("Windows fact tests passed.");
     }
 
