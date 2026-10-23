@@ -4,27 +4,42 @@ internal static class LiveValueReadback
 {
     private const double RangeTolerance = 1e-9;
 
-    internal static readonly TimeSpan SettleDelay =
-        TimeSpan.FromMilliseconds(120);
+    // The application applies input asynchronously. Readback samples at
+    // once and then every PollInterval until the value matches or Timeout
+    // passes, instead of sleeping a fixed delay before one sample.
+    internal static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(25);
+    internal static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(1000);
+
+    private static bool Poll(Func<bool> matches, Action<TimeSpan>? delay)
+    {
+        delay ??= Thread.Sleep;
+        var waited = TimeSpan.Zero;
+        while (true)
+        {
+            bool matched;
+            try
+            {
+                matched = matches();
+            }
+            catch
+            {
+                matched = false;
+            }
+            if (matched) { return true; }
+            if (waited >= Timeout) { return false; }
+            delay(PollInterval);
+            waited += PollInterval;
+        }
+    }
 
     internal static bool Verify(
         string expected,
         Func<string?> readFreshValue,
         Action<TimeSpan>? delay = null)
     {
-        delay ??= Thread.Sleep;
-        delay(SettleDelay);
-        try
-        {
-            return string.Equals(
-                readFreshValue(),
-                expected,
-                StringComparison.Ordinal);
-        }
-        catch
-        {
-            return false;
-        }
+        return Poll(
+            () => string.Equals(readFreshValue(), expected, StringComparison.Ordinal),
+            delay);
     }
 
     internal static bool VerifyTextValue(
@@ -33,28 +48,27 @@ internal static class LiveValueReadback
         Func<string?> readFreshDocumentText,
         Action<TimeSpan>? delay = null)
     {
-        delay ??= Thread.Sleep;
-        delay(SettleDelay);
-        try
+        return Poll(() =>
         {
-            if (!HasLineBreak(expected))
+            if (!HasLineBreak(expected) &&
+                string.Equals(readFreshValue(), expected, StringComparison.Ordinal))
             {
-                return string.Equals(
-                    readFreshValue(),
-                    expected,
-                    StringComparison.Ordinal);
+                return true;
             }
+            // A document's text is its content. Rich edit controls end it
+            // with one paragraph mark, and after a typed replacement their
+            // Value property can lag behind the text.
             var documentText = readFreshDocumentText();
-            return documentText is not null &&
-                string.Equals(
-                    NormalizeLineEndings(documentText),
-                    NormalizeLineEndings(expected),
-                    StringComparison.Ordinal);
-        }
-        catch
-        {
-            return false;
-        }
+            if (documentText is null)
+            {
+                return false;
+            }
+            var actual = NormalizeLineEndings(documentText);
+            var wanted = NormalizeLineEndings(expected);
+            return string.Equals(actual, wanted, StringComparison.Ordinal) ||
+                actual.EndsWith('\n') &&
+                string.Equals(actual[..^1], wanted, StringComparison.Ordinal);
+        }, delay);
     }
 
     internal static string CanonicalTextValue(
@@ -92,16 +106,10 @@ internal static class LiveValueReadback
         Func<double?> readFreshValue,
         Action<TimeSpan>? delay = null)
     {
-        delay ??= Thread.Sleep;
-        delay(SettleDelay);
-        try
+        return Poll(() =>
         {
             var actual = readFreshValue();
             return actual is not null && RangeEquals(actual.Value, expected);
-        }
-        catch
-        {
-            return false;
-        }
+        }, delay);
     }
 }

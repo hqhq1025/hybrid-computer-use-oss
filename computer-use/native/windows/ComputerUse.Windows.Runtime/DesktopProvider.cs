@@ -5,7 +5,7 @@ namespace ComputerUse.Windows.Runtime;
 
 internal static class DesktopProvider
 {
-    private const int KeyboardActionIntervalMilliseconds = 500;
+    private const int KeyboardInputIdleTimeoutMilliseconds = 250;
     private const double MaximumScrollDelta = 2000;
 
     internal static JsonObject ExecuteBatch(JsonObject request)
@@ -73,7 +73,9 @@ internal static class DesktopProvider
                     actions[index + 1] is JsonObject nextAction &&
                     IsInputAction(UiaProvider.RequiredString(nextAction, "type")))
                 {
-                    Thread.Sleep(KeyboardActionIntervalMilliseconds);
+                    // The next input waits until the foreground application
+                    // has processed this key, instead of a fixed delay.
+                    NativeDesktop.WaitForForegroundInputIdle(KeyboardInputIdleTimeoutMilliseconds);
                 }
             }
             catch (ProviderFailureException error)
