@@ -29,6 +29,13 @@ The filenames must match `manifest.json`. Copy only software packages from an
 OSWorld asset distribution. Do not copy task documents, evaluator materials or
 credentials. No binary archives belong in this repository.
 
+The `qt` phase also installs Ubuntu's Java ATK wrapper and native JNI library.
+These packages let Java desktop applications expose controls through AT-SPI.
+A portable application with its own Java runtime must enable the wrapper in its
+launcher. Installing the packages alone does not configure a bundled runtime.
+Keep that configuration local to the application's Java command; do not export
+accessibility options globally to unrelated Java processes.
+
 ## Install in a fresh guest
 
 The examples assume that the desktop account is `user`. Replace that account

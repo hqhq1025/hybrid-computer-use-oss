@@ -99,7 +99,8 @@ def install_kicad(bundle, expected_version):
 def bootstrap(assets, manifest, uid, gid):
     if os.geteuid() != 0:
         raise RuntimeError("Run the image bootstrap as root")
-    subprocess.run(["apt-get", "install", "-y", "--no-install-recommends", *manifest["qt_packages"]],
+    subprocess.run(["apt-get", "install", "-y", "--no-install-recommends", *manifest["qt_packages"],
+                    "libatk-wrapper-java", "libatk-wrapper-java-jni"],
         check=True, env={**os.environ,"DEBIAN_FRONTEND":"noninteractive"})
     result = {"spyder":repair_spyder_integer_pixmap_dimensions(),
               "freecad":install_freecad(assets / manifest["freecad"]["file"],
