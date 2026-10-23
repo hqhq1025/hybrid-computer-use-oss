@@ -139,7 +139,10 @@ func describeQuery(
 // findMatch is the read step of find: the refreshed snapshot and the
 // records that match the query, in canonical order.
 type findMatch struct {
-	snapshot            *AppSnapshot
+	snapshot *AppSnapshot
+	// nearSnapshot lists the closest elements when nothing matched. A find
+	// walk holds records only for candidates, so it keeps the observe read.
+	nearSnapshot        *AppSnapshot
 	matched             []ElementRecord
 	query               string
 	notes               []string
@@ -177,18 +180,22 @@ func (s *Service) findMatches(
 	// stopped early, the Linux provider walks again with the find caps; see
 	// ProviderObservationOptions.FindWalk. A match in the budgeted read
 	// returns at once: the caller sees partial coverage and can narrow.
+	nearSnapshot := snapshot
 	if len(matched) == 0 &&
 		s.platformBackend().HostInfo().Platform == "linux" &&
 		providerCoverageSummary(snapshot.Annotations).AcquisitionIncomplete > 0 {
 		request.FindWalk = true
-		walked, walkNotes, walkResult := s.refreshProjectedSnapshot(app, request)
+		request.FindQuery = &ProviderFindQuery{
+			Name: name, NameExact: nameExact, Text: text, TextExact: textExact,
+		}
+		walked, walkNotes, walkResult := s.readFindWalk(app, request)
 		if walkResult.IsError {
 			return nil, walkResult
 		}
 		snapshot, notes = walked, walkNotes
 		matched = findQueryMatches(snapshot, role, name, text, state, nameExact, textExact)
 	}
-	found := &findMatch{snapshot: snapshot, matched: matched}
+	found := &findMatch{snapshot: snapshot, nearSnapshot: nearSnapshot, matched: matched}
 	if note := s.consumeFailedObservation(app, snapshot); note != "" {
 		notes = append([]string{note}, notes...)
 		found.followsFailedAction = true
@@ -245,6 +252,7 @@ func (s *Service) find(
 		return failure
 	}
 	snapshot, matched, query := found.snapshot, found.matched, found.query
+	nearSnapshot := found.nearSnapshot
 	notes, followsFailedAction := found.notes, found.followsFailedAction
 	var out strings.Builder
 	if len(matched) == 0 {
@@ -257,7 +265,7 @@ func (s *Service) find(
 		if line := snapshot.scopeFallbackLine(); line != "" {
 			out.WriteString(line + "\n")
 		}
-		out.WriteString(s.findZeroMatchText(snapshot, newAXNearQuery(role, name, text, state)))
+		out.WriteString(s.findZeroMatchText(nearSnapshot, newAXNearQuery(role, name, text, state)))
 		response := withFailedActionContinuity(
 			snapshot.textWithNotes(out.String(), notes),
 			followsFailedAction,

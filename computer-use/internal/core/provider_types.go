@@ -97,6 +97,19 @@ type ProviderObservationOptions struct {
 	// instead of the render budget. Other providers reject the field, so
 	// only the Linux backend receives it.
 	FindWalk bool `json:"find_walk,omitempty"`
+	// FindQuery goes with FindWalk: the provider builds full records only
+	// for nodes that can match it and for their ancestors.
+	FindQuery *ProviderFindQuery `json:"find_query,omitempty"`
+}
+
+// ProviderFindQuery is the name and text part of an AX find query. The
+// provider prefilters with it and never rejects a node that the core's
+// query match would accept; the core still matches every returned record.
+type ProviderFindQuery struct {
+	Name      string `json:"name,omitempty"`
+	NameExact bool   `json:"name_exact,omitempty"`
+	Text      string `json:"text,omitempty"`
+	TextExact bool   `json:"text_exact,omitempty"`
 }
 
 type ProviderTextLimit struct {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Linux: when AX `find` walks past the observe budget, it reads the full
+  record only of elements whose name or text can match the query, so a
+  3000-row web table is searched to the end within the walk's time limit.
+  A match carries the same ref, role, name and value as in an observation;
+  its context lists its ancestors only.
 - Windows: `type` and `set_value` send Unicode key events instead of pasting
   through the clipboard, so they no longer replace the clipboard or wait a
   fixed half second; GUI keys wait for the application instead of 500 ms.

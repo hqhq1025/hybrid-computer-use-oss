@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from .find_walk import FIND_WALK_FIELDS, find_fields_problem
 from .foundation import GUI_MAX_SETTLE_MS
 
 
@@ -59,7 +60,7 @@ OBSERVATION_FIELDS = {
     "include_screenshot",
     "capture_snapshot",
     "find_walk",
-}
+} | FIND_WALK_FIELDS
 APP_IDENTITY_FIELDS = {"providerBusName", "processGeneration"}
 EXPECTED_WINDOW_FIELDS = {
     "windowHandle",
@@ -236,6 +237,9 @@ def _validate_observation(value, path):
                 "invalid_provider_request",
                 "{}.{} must be a boolean".format(path, field),
             )
+    problem = find_fields_problem(observation)
+    if problem:
+        raise ProviderRequestError("invalid_provider_request", path + problem)
     if observation.get("include_screenshot") is True:
         # AX images are full-desktop GUI frames that the core captures with
         # a desktop batch; this provider never captures a window image.

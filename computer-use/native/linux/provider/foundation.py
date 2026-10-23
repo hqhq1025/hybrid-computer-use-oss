@@ -770,6 +770,9 @@ def should_enumerate_children(node, count=None, facts=None):
     """
     if count is None:
         count = child_count(node) if facts is None else facts.child_count()
+    if count == 0:
+        # Nothing to enumerate either way; skip the state read.
+        return True
     if count > HARD_CHILD_CAP:
         return False
     manages = (

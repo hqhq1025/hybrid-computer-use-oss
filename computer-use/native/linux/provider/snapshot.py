@@ -26,6 +26,7 @@ from .foundation import (
 )
 
 from .ax_snapshot import FIND_WALK_LIMITS, FocusProbe, render_tree
+from .find_walk import FindFilter, FindWalk
 from .tree_reuse import (
     ContentProbe,
     RecordingIndexer,
@@ -318,6 +319,7 @@ def build_snapshot(
     target_window_handle=None,
     reuse_tree=False,
     find_walk=False,
+    find_query=None,
 ):
     """Build an application snapshot.
 
@@ -327,7 +329,11 @@ def build_snapshot(
     pass False so that the tree after an action is always read fresh.
 
     ``find_walk=True`` walks with the AX find caps (FIND_WALK_LIMITS)
-    instead of the render budget; see FIND_WALK_MAX_RECORDS.
+    instead of the render budget; see FIND_WALK_MAX_RECORDS. The snapshot
+    then holds records only for nodes that can match ``find_query`` (the
+    wire ``find_query`` object) and their ancestors; see find_walk. A find
+    walk is never reused or stored for reuse: its records depend on the
+    query.
 
     The snapshot carries no image. AX observe=full/screenshot returns the
     full-desktop GUI frame, which the Go core captures through the desktop
@@ -369,6 +375,12 @@ def build_snapshot(
     fingerprint = window_fingerprint(
         bounds, title, child_count(window), window_selection
     )
+    find = (
+        FindWalk(FindFilter.from_wire(find_query))
+        if find_walk else None
+    )
+    if find is not None:
+        reuse_tree = False
     cached = (
         TREES.lookup(app_bus, reuse_key, fingerprint, known_refs)
         if reuse_tree
@@ -384,10 +396,10 @@ def build_snapshot(
         focus_probe = cached[1]
         lap("snapshot.reuse_tree")
     else:
-        walk = TREES.begin_walk(app_bus)
+        walk = TREES.begin_walk(app_bus) if find is None else None
         indexer = RecordingIndexer(known_refs)
         focus_probe = FocusProbe()
-        content_probe = ContentProbe(text_limit)
+        content_probe = ContentProbe(text_limit) if find is None else None
         limits = (
             FIND_WALK_LIMITS if find_walk
             else {"max_tree_nodes": max_tree_nodes}
@@ -403,6 +415,7 @@ def build_snapshot(
             indexer=indexer,
             focus_probe=focus_probe,
             content_probe=content_probe,
+            find=find,
             **limits,
         )
         if walk is not None and walk_is_reusable(annotations):
@@ -464,6 +477,11 @@ def build_snapshot(
         # encoding/json ignores it; the dispatcher pops it into the notes.
         "modalNotes": modal_diagnostic(window, app) + foreign_foreground_note(app),
     }
+    if find is not None and find.candidates_only:
+        # Refs minted from these records must be bound to provider objects:
+        # a selector that is unique among candidates need not be unique in
+        # the window.
+        snapshot["findCandidatesOnly"] = True
     lap("snapshot.inventory_and_notes")
     return snapshot
 

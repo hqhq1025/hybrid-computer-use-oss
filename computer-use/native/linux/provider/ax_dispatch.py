@@ -230,12 +230,20 @@ def _observe_operation(operation, observation):
         # tree_reuse. Post-action snapshots below always walk.
         reuse_tree=True,
         find_walk=observation.get("find_walk") is True,
+        find_query=observation.get("find_query"),
     )
     response = {"ok": True, "snapshot": snapshot}
     lap("observe_snapshot")
     # Modal notes come first: they determine how the rest of the tree
     # should be read.
     elements = snapshot.get("elements") or []
+    if observation.get("find_walk") is True:
+        # A find walk returns only candidate records, so the tree-shape
+        # diagnostics below would misread its sparse record list.
+        notes = snapshot.pop("modalNotes", [])
+        if notes:
+            response["notes"] = notes
+        return response
     shell_notes = snapshot_diagnostics(elements)
     # The two diagnostics describe degrees of the same problem and are
     # never emitted together: snapshot_diagnostics covers a tree reduced to

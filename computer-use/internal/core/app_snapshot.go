@@ -172,6 +172,11 @@ type AppSnapshot struct {
 	Elements            []ElementRecord        `json:"elements,omitempty"`
 	Refs                map[string]elementRef  `json:"refs,omitempty"`
 	Annotations         []axProviderAnnotation `json:"annotations,omitempty"`
+	// FindCandidatesOnly marks a Linux find walk whose records cover only
+	// nodes that can match the query and their ancestors. Its tree is not
+	// a complete identity inventory, so refs minted from it are bound to
+	// provider objects instead of selectors.
+	FindCandidatesOnly bool `json:"findCandidatesOnly,omitempty"`
 
 	// The fields below are set by the Go service when the snapshot is cached;
 	// the provider does not send them. Snapshot age matters on the desktop:
