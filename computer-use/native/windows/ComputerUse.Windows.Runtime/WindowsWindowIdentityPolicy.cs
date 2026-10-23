@@ -11,6 +11,16 @@ internal static class WindowsWindowIdentityPolicy
         _ => "unknown",
     };
 
+    // Why a bound window is missing from the visible inventory. A hidden or
+    // zero-size window leaves the inventory but keeps its native instance.
+    internal static string MissingWindowMessage(WindowLifecycleStatus status) => status switch
+    {
+        WindowLifecycleStatus.Alive =>
+            "The exact window still exists but is hidden or has no size, so it cannot be read; no input was emitted.",
+        WindowLifecycleStatus.Gone => "The exact window disappeared; no input was emitted.",
+        _ => "The exact window is not visible, and whether it still exists could not be verified; no input was emitted.",
+    };
+
     // A stale token or a missing visible-inventory entry is not retirement.
     // The callbacks sample the recorded native instance, including hidden HWNDs.
     internal static WindowLifecycleStatus ReadLifecycle(

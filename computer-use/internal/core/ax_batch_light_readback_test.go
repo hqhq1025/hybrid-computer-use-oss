@@ -136,6 +136,39 @@ func TestKeyBatchUsesRootOnlyReadsBetweenActions(t *testing.T) {
 	}
 }
 
+// rootOnlyDesktop also lists the windows that window waits poll.
+type rootOnlyDesktop struct {
+	*rootOnlyBackend
+}
+
+func (b *rootOnlyDesktop) ObserveApps(request ProviderObserveAppsRequest) (ProviderAccessibilityResult, error) {
+	return (&reportDesktop{b.reportBackend}).ObserveApps(request)
+}
+
+// A batch whose input ends with window waits reads the tree once, after
+// the waits: each key reads the window root only, so that final read is the
+// batch's only tree and cannot be skipped.
+func TestWindowWaitBatchReadsTheTreeOnceAfterTheWaits(t *testing.T) {
+	s, backend := rootOnlyService(t, false, reportMain())
+	s.Backend = &rootOnlyDesktop{backend}
+	window, _ := reportObserve(t, s)
+	observes := len(backend.observeRequests)
+	actions := append(keys("a", "b"),
+		map[string]any{"type": "wait", "window": "Report", "timeout_ms": 1000})
+	result := s.callTool(contract.PublicToolAX, map[string]any{
+		"mode": "act", "window_ref": window, "actions": actions,
+	})
+	if result.IsError {
+		t.Fatalf("batch failed: %s", ResultText(result))
+	}
+	if backend.rootOnlyReads != 2 || backend.fullReads != 0 {
+		t.Fatalf("root-only reads %d, full action reads %d", backend.rootOnlyReads, backend.fullReads)
+	}
+	if got := len(backend.observeRequests) - observes; got != 1 {
+		t.Fatalf("tree reads after the waits: %d, want 1", got)
+	}
+}
+
 // A dialog that opens after a step must still stop the batch before the
 // next key, although the read after that step covered the root only.
 func TestRootOnlyReadStillStopsWhenTheWindowChanges(t *testing.T) {

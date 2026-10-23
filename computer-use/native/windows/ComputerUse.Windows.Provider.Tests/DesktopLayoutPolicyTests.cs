@@ -147,6 +147,21 @@ internal static class DesktopLayoutPolicyTests
             throw new InvalidDataException(
                 "Stable window identity did not preserve HWND and lifecycle boundaries.");
         }
+        // A window that leaves the visible inventory is described by its
+        // native instance: hidden or zero-size windows are not "gone".
+        var alive = WindowsWindowIdentityPolicy.MissingWindowMessage(WindowLifecycleStatus.Alive);
+        var gone = WindowsWindowIdentityPolicy.MissingWindowMessage(WindowLifecycleStatus.Gone);
+        var unknown = WindowsWindowIdentityPolicy.MissingWindowMessage(WindowLifecycleStatus.Unknown);
+        if (!alive.Contains("still exists", StringComparison.Ordinal) ||
+            alive.Contains("disappeared", StringComparison.Ordinal) ||
+            !gone.Contains("disappeared", StringComparison.Ordinal) ||
+            !unknown.Contains("could not be verified", StringComparison.Ordinal) ||
+            new[] { alive, gone, unknown }.Any(text =>
+                !text.EndsWith("no input was emitted.", StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException(
+                "A window missing from the visible inventory must be described by its lifecycle.");
+        }
 
         var desktopBounds = new System.Drawing.Rectangle(0, 0, 1280, 800);
         if (!WindowsCaptureBounds.TryResolve(

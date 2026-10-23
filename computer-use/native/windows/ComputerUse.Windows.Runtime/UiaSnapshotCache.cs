@@ -28,6 +28,9 @@ internal sealed class CachedUiaNode(
     internal CachedUiaNode? NextSibling { get; set; }
     // Whether the node belongs to the selected logical window; decided once.
     internal bool? Owned { get; set; }
+    // A spreadsheet grid's cells were read by hit tests; its children are
+    // not walked.
+    internal bool CellsRead { get; set; }
 }
 
 internal sealed record UiaNodeFacts(
@@ -112,6 +115,14 @@ internal sealed class UiaSnapshotCache
             node.NextSiblingRead = true;
         }
         return node.NextSibling;
+    }
+
+    // Reads the element at a screen point with its facts in one call. The
+    // node records parent as its parent; the caller checks that it is one.
+    internal CachedUiaNode? ReadAtPoint(Point point, CachedUiaNode parent)
+    {
+        var hit = Step(() => _automation.FromPoint(point));
+        return hit is null ? null : new CachedUiaNode(hit.Value.Element, hit.Value.Facts, parent, 0);
     }
 
     private (AutomationElement Element, UiaNodeFacts Facts)? Step(Func<AutomationElement?> read)
