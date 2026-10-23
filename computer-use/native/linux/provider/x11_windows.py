@@ -685,7 +685,7 @@ def x11_window_type(window_id):
         return ""
     # Vendor atoms can contain the standard prefix inside their own name.
     # Match an entire EWMH atom, not that suffix of a vendor extension.
-    match = re.search(r"(?<![A-Za-z0-9_])_NET_WM_WINDOW_TYPE_([A-Z_]+)", result.stdout or "")
+    match = re.search(r"(?<![A-Za-z0-9_])_NET_WM_WINDOW_TYPE_([A-Za-z0-9_]+)", result.stdout or "")
     return match.group(1) if match else ""
 
 

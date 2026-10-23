@@ -262,6 +262,15 @@ class NativeWindowTypeTests(AtspiPatchedTestCase):
                     return_value=subprocess.CompletedProcess([], 0, value, "")):
                 self.assertEqual(expected, runtime.x11_window_type("0x1"))
 
+    def test_type_suffix_is_not_shortened_into_an_application_type(self):
+        for atom in ("NORMAL2", "NORMAL_custom", "DIALOG_aux", "DIALOG9"):
+            with self.subTest(atom=atom), mock.patch.object(runtime.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0,
+                        "_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_" + atom, "")):
+                parsed = runtime.x11_window_type("0x1")
+                self.assertEqual(atom, parsed)
+                self.assertNotIn(parsed, runtime.APPLICATION_WINDOW_TYPES)
+
 
 class HiddenWindowListingTests(AtspiPatchedTestCase):
     """AT-SPI windows that cannot be on screen leave the window listings."""
