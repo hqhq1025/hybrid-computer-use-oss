@@ -16,6 +16,9 @@ class EmbeddedOriginTests(unittest.TestCase):
         def get_role_name(self):
             return self.role
 
+        def get_name(self):
+            return ""
+
         def get_parent(self):
             return self.parent
 
@@ -114,6 +117,129 @@ class EmbeddedOriginTests(unittest.TestCase):
             self.assertIs(actionability._deepest_accessible_at(nodes[0], 140, 108), nodes[-1])
         self.assertEqual([(x,y) for _,x,y in calls],
                          [(140,108)]*3 + [(140,83)]*2)
+
+
+class HiDPIGeometryTests(unittest.TestCase):
+    """AT-SPI extents in toolkit units are reported in X11 root pixels."""
+
+    Node = EmbeddedOriginTests.Node
+    rect = staticmethod(lambda x, y, w, h: dict(x=x, y=y, width=w, height=h))
+
+    def app(self, *natives):
+        app = self.Node("application", None)
+        app.get_process_id = lambda: 77
+        managed = foundation.InventoryResult([
+            dict(pid=77, id=hex(0x100 + index), x=0, y=0,
+                 width=native["client"]["width"],
+                 height=native["client"]["height"], title=native["title"])
+            for index, native in enumerate(natives)])
+        rects = {hex(0x100 + index): native for index, native in enumerate(natives)}
+        self.patches = [
+            mock.patch.object(x11_windows, "_x11_managed_windows", lambda: managed),
+            mock.patch.object(window_scale, "native_window_rects", rects.get),
+            mock.patch.object(foundation, "raw_extents", lambda n: n.bounds),
+            mock.patch.object(window_scale, "raw_extents", lambda n: n.bounds),
+        ]
+        for patch in self.patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        x11_windows._x11_window_inventory_cache.clear()
+        self.addCleanup(x11_windows._x11_window_inventory_cache.clear)
+        return app
+
+    def window(self, app, role, title, bounds):
+        window = self.Node(role, bounds, app)
+        window.get_name = lambda: title
+        for node in (app, window):
+            node.get_application = lambda app=app: app
+        return window
+
+    def child(self, role, bounds, parent, name=""):
+        node = self.Node(role, bounds, parent)
+        node.get_name = lambda: name
+        node.path = "/n/%d" % id(node)
+        return node
+
+    def native(self, title, client, frame=None):
+        return dict(title=title, client=client, frame=frame or client)
+
+    def test_gtk_window_whose_frame_includes_decorations_scales_by_two(self):
+        app = self.app(self.native("GeoGTK", self.rect(305, 83, 1400, 992),
+                                   self.rect(300, 54, 1410, 1026)))
+        window = self.window(app, "frame", "GeoGTK", self.rect(150, 27, 705, 513))
+        button = self.child("push button", self.rect(192, 81, 120, 60),
+                            self.child("panel", self.rect(192, 81, 620, 416), window))
+        self.assertEqual(foundation.extents(button), foundation.frame(384, 162, 240, 120))
+        self.assertEqual(foundation.extents(window), foundation.frame(300, 54, 1410, 1026))
+
+    def test_top_level_container_without_window_role_is_scaled(self):
+        app = self.app(self.native("GeoQt", self.rect(305, 75, 1400, 1000)))
+        window = self.window(app, "filler", "GeoQt", self.rect(153, 38, 700, 500))
+        button = self.child("push button", self.rect(223, 103, 120, 60), window)
+        self.assertEqual(foundation.extents(button), foundation.frame(446, 206, 240, 120))
+
+    def test_scale_one_windows_keep_raw_extents(self):
+        app = self.app(self.native("GeoGTK", self.rect(155, 149, 700, 500),
+                                   self.rect(150, 120, 710, 534)))
+        window = self.window(app, "frame", "GeoGTK", self.rect(150, 120, 710, 534))
+        button = self.child("push button", self.rect(195, 189, 120, 60), window)
+        self.assertEqual(foundation.extents(button), button.bounds)
+
+    def test_chromium_browser_ui_scales_but_web_content_stays_physical(self):
+        app = self.app(self.native("GeoWeb - Google Chrome",
+                                   self.rect(128, 54, 1800, 1400)))
+        window = self.window(app, "frame", "GeoWeb - Google Chrome",
+                             self.rect(64, 27, 900, 700))
+        reload_button = self.child("push button", self.rect(146, 73, 34, 34), window, "Reload")
+        view = self.child("panel", self.rect(68, 170, 892, 553), window)
+        document = self.child("document web", self.rect(136, 340, 1784, 1106), view)
+        target = self.child("push button", self.rect(276, 460, 240, 120), document, "B11")
+        self.assertEqual(foundation.extents(reload_button), foundation.frame(292, 146, 68, 68))
+        self.assertEqual(foundation.extents(document), document.bounds)
+        self.assertEqual(foundation.extents(target), target.bounds)
+
+        calls = []
+        chain = [window, view, document, target]
+        def hit(node, x, y, coord):
+            calls.append((node.get_role_name(), x, y))
+            index = chain.index(node)
+            return chain[index + 1] if index + 1 < len(chain) else None
+        with mock.patch.object(foundation.Atspi.Component, "get_accessible_at_point", hit):
+            self.assertIs(actionability._deepest_accessible_at(window, 396, 520), target)
+        self.assertEqual(calls, [("frame", 198, 260), ("panel", 198, 260),
+                                 ("document web", 396, 520), ("push button", 396, 520)])
+
+    def test_document_in_toolkit_units_inherits_window_scale(self):
+        app = self.app(self.native("GeoWeb - Mozilla Firefox",
+                                   self.rect(0, 78, 1920, 1002)))
+        window = self.window(app, "frame", "GeoWeb - Mozilla Firefox",
+                             self.rect(0, 39, 960, 501))
+        holder = self.child("internal frame", self.rect(0, 124, 960, 416), window)
+        document = self.child("document web", self.rect(0, 124, 960, 416), holder)
+        target = self.child("push button", self.rect(70, 184, 120, 60), document)
+        self.assertEqual(foundation.extents(target), foundation.frame(140, 368, 240, 120))
+
+    def test_popup_without_native_match_uses_the_process_scale(self):
+        app = self.app(self.native("Main", self.rect(128, 54, 1800, 1400)))
+        self.window(app, "frame", "Main", self.rect(64, 27, 900, 700))
+        popup = self.window(app, "window", "", self.rect(300, 100, 200, 300))
+        item = self.child("menu item", self.rect(310, 110, 180, 20), popup)
+        self.assertEqual(foundation.extents(item), foundation.frame(620, 220, 360, 40))
+
+    def test_geometry_that_only_matches_in_size_is_not_scaled(self):
+        app = self.app(self.native("Main", self.rect(900, 700, 1800, 1400)))
+        window = self.window(app, "frame", "Main", self.rect(64, 27, 900, 700))
+        button = self.child("push button", self.rect(74, 73, 34, 34), window)
+        self.assertEqual(foundation.extents(button), button.bounds)
+
+    def test_embedded_root_pane_offset_is_applied_before_scaling(self):
+        app = self.app(self.native("Doc", self.rect(0, 54, 1600, 1200)))
+        window = self.window(app, "frame", "Doc", self.rect(0, 27, 800, 600))
+        outer = self.child("panel", self.rect(0, 64, 800, 563), window)
+        host = self.child("panel", self.rect(0, 89, 800, 538), outer)
+        root = self.child("root pane", self.rect(0, 64, 800, 538), host)
+        button = self.child("push button", self.rect(48, 66, 44, 35), root)
+        self.assertEqual(foundation.extents(button), foundation.frame(96, 182, 88, 70))
 
 
 class ProviderIdentityPrimitiveTests(unittest.TestCase):

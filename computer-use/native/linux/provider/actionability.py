@@ -7,7 +7,7 @@ from .foundation import (
     CLICK_COVERED_ACTIONS,
     NON_SELF_ACTIONS,
     OperationFailure,
-    embedded_origin_offset,
+    screen_transform,
     extents,
     frame,
     node_name,
@@ -333,9 +333,9 @@ def _deepest_accessible_at(window, x, y, max_depth=32):
         component = safe(node.get_component_iface)
         if component is None:
             break
-        dx, dy = embedded_origin_offset(node, origins)
+        scale, dx, dy = screen_transform(node, origins)
         child = safe(lambda: Atspi.Component.get_accessible_at_point(
-            component, int(round(x - dx)), int(round(y - dy)),
+            component, int(round(x / scale - dx)), int(round(y / scale - dy)),
             Atspi.CoordType.SCREEN))
         if child is None or _same_object(child, node):
             break
