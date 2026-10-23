@@ -24,7 +24,8 @@ from .foundation import (
     state_contains,
 )
 
-from .ax_snapshot import FIND_WALK_LIMITS, FocusProbe, render_tree
+from .ax_snapshot import FIND_WALK_LIMITS, render_tree
+from .focus_probe import FocusProbe
 from .find_walk import FindFilter, FindWalk
 from .tree_reuse import (
     ContentProbe,
