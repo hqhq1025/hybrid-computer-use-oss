@@ -111,6 +111,9 @@ level. It does not bypass UAC, secure desktops, or session isolation. UIA
 visibility reported by the application can differ from visible pixels;
 reobserve instead of forcing a stale or offscreen semantic target.
 
+Text input sends Unicode key events, with Enter and Tab keys for line
+breaks and tabs. It does not use the clipboard.
+
 GUI scroll deltas send one wheel notch per 100 units, and at least one notch
 for any non-zero delta, as on Linux. A single-character key must be an ASCII
 letter, digit or US-layout punctuation key. Other characters, such as `!` or

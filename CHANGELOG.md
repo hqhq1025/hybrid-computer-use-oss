@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Windows: `type` and `set_value` send Unicode key events instead of pasting
+  through the clipboard, so they no longer replace the clipboard or wait a
+  fixed half second; GUI keys wait for the application instead of 500 ms.
 - Windows: an observation reads each tree node and its facts in one UI
   Automation call and reads the desktop's top-level windows once, so
   Notepad, File Explorer, Settings and Edge observe three to five times
