@@ -79,3 +79,16 @@ func TestNeverIssuedRefIsStaleRefWithHint(t *testing.T) {
 		t.Fatalf("evidence line %s", line)
 	}
 }
+
+// A native window ref that no longer names its window cannot be recovered
+// by find inside that window; only a new apps listing gives a valid wN.
+func TestStaleNativeWindowRefHintsAppsListing(t *testing.T) {
+	public := axPublicEvidence(map[string]any{
+		"failure_code":    "invalid_target",
+		"failure_phase":   "precondition",
+		"failure_subject": "window",
+	}, true, nil)
+	if public["code"] != "stale_ref" || public["hint"] != `{"mode":"apps"}` {
+		t.Fatalf("stale window ref evidence = %#v", public)
+	}
+}

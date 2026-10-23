@@ -627,6 +627,10 @@ func axPublicEvidence(full map[string]any, isError bool, content []ContentItem) 
 		if coordinateUnverified {
 			hint = GUIScreenshotCall
 		}
+		if hint == "" && code == contract.AXCodeStaleRef && full["failure_subject"] == "window" {
+			// A window that no longer exists cannot be found inside itself.
+			hint = `{"mode":"apps"}`
+		}
 		if hint == "" {
 			hint = axPublicHints[code]
 		}

@@ -199,7 +199,12 @@ def list_apps_inventory():
         lines.extend(entry["displayText"] for entry in native_entries)
         notes.extend(invisible_window_notes(managed, accessible_pids))
         if not unreadable:
-            notes.extend(untracked_window_notes(managed, accessible_titles))
+            # A window listed above with a native handle needs no second
+            # mention; the note covers only windows still left out.
+            listed = {window["id"] for window in native_windows}
+            notes.extend(untracked_window_notes(
+                [window for window in managed if window.get("id") not in listed],
+                accessible_titles))
     return {
         "text": "\n".join(lines),
         "notes": notes,

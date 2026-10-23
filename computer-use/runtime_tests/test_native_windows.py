@@ -124,6 +124,9 @@ class NativeOnlyWindowTests(AtspiPatchedTestCase):
         self.assertEqual(["Main", "Native dialog"], [window["title"] for window in windows])
         self.assertEqual(2, len({window["handle"] for window in windows}))
         self.assertTrue(windows[1]["noAccessibilityTree"])
+        # The listed native window is the only inventory entry for it; the
+        # untracked-window note would repeat it with GUI-only advice.
+        self.assertEqual([], [note for note in inventory["notes"] if "Native dialog" in note])
 
     def test_ambiguous_accessible_root_does_not_gain_a_second_native_alias(self):
         app = _TreeNode(role="application", name="paint3d", kids=(
