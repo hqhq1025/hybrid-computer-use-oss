@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Linux: keyboard input to a window that is not in front no longer waits
+  about 7 s for Qt dialogs. The provider asks the window manager to
+  activate the window first and checks that the X11 active window is that
+  window, not just a window of the same application.
 - AX trees show a table cell's value after its name when the two differ,
   for example `cell "A1" = "Year"` in a spreadsheet, clipped to 40
   characters, so reading a sheet no longer needs `find`. A tree over its
