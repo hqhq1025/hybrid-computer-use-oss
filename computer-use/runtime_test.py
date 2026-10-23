@@ -8,6 +8,7 @@ from runtime_tests.test_text_input import *  # noqa: F401,F403
 from runtime_tests.test_input_method import *  # noqa: F401,F403
 from runtime_tests.test_window_focus import *  # noqa: F401,F403
 from runtime_tests.test_action_notes import *  # noqa: F401,F403
+from runtime_tests.test_post_action_window import *  # noqa: F401,F403
 from runtime_tests.test_gui import *  # noqa: F401,F403
 from runtime_tests.test_gui_capture import *  # noqa: F401,F403
 from runtime_tests.test_gui_input import *  # noqa: F401,F403

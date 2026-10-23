@@ -321,6 +321,7 @@ def build_snapshot(
     find_walk=False,
     find_query=None,
     find_resume_after=None,
+    selected_window=None,
 ):
     """Build an application snapshot.
 
@@ -328,6 +329,10 @@ def build_snapshot(
     earlier walk instead of walking it again; see tree_reuse for the checks.
     Every walk, reused or not, may be reused later. Post-action snapshots
     pass False so that the tree after an action is always read fresh.
+
+    ``selected_window`` is an internal selection from the current operation.
+    Post-action reads share this selection with their pixel captures so a
+    foreground change cannot select a different sibling between the two reads.
 
     ``find_walk=True`` walks with the AX find caps (FIND_WALK_LIMITS)
     instead of the render budget; see FIND_WALK_MAX_RECORDS. The snapshot
@@ -355,8 +360,9 @@ def build_snapshot(
         else resolve_app(query)
     )
     lap("snapshot.resolve_app")
-    window_index, window, window_selection = select_window_by_handle(
-        app, target_window_handle
+    window_index, window, window_selection = (
+        selected_window if selected_window is not None
+        else select_window_by_handle(app, target_window_handle)
     )
     lap("snapshot.select_window")
     bounds = extents(window)
