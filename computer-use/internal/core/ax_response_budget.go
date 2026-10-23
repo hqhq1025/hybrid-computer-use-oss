@@ -181,8 +181,8 @@ func providerCoverageSummary(
 	summary := axCoverageSummary{}
 	reasons := map[string]bool{}
 	for _, annotation := range annotations {
-		if annotation.Kind == axCellSummaryAnnotation {
-			// A summary of cells left out by design, not a coverage gap.
+		if annotation.Kind == axCellSummaryAnnotation || annotation.Kind == axFocusEvidenceAnnotation {
+			// Descriptive evidence does not count as an acquisition gap.
 			continue
 		}
 		count := annotation.Count

@@ -34,6 +34,8 @@ option. Follow the current tool schema for argument shapes and actions.
   records even when the compact tree omits containers. Partial coverage does not
   invalidate returned targets, and projection summaries are not action targets.
   Prefer focused or rooted observations to repeated full-window trees.
+  Read the focused object's role: a focused window does not prove editor or
+  caret focus inside it.
 - Actions take current `rN` element refs or `wN` window refs, copied exactly.
   `activate` and `close` also take a window title substring. `keypress` and
   `type` without `ref` go to the window that has focus.

@@ -472,6 +472,11 @@ gaps; an unread branch can contain more nodes than the provider could count.
 can narrow the read but cannot guarantee that an unread region becomes
 available. GUI can show content that accessibility could not read.
 
+`/focus-evidence` explains a resolved conflict between the current focused
+object and an earlier focus flag. This explanation does not count as unread
+content. A focused window is evidence about that window, not about a specific
+editor or caret inside it.
+
 Find matches include a `text` excerpt when their role's value is absent from
 the rendered fields, as with paragraphs and clipped cell values. The excerpt
 contains at most 80 Unicode code points, plus an ellipsis when clipped.

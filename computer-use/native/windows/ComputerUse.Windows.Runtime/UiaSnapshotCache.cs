@@ -37,7 +37,7 @@ internal sealed record UiaNodeFacts(
     ControlType? ControlType,
     string Name,
     Rectangle Bounds,
-    bool HasKeyboardFocus,
+    WindowsKeyboardFocusRead KeyboardFocus,
     WindowsVisibilityRead Visibility,
     bool? IsEnabled,
     string AutomationId,
@@ -60,7 +60,10 @@ internal sealed record UiaNodeFacts(
     double? RangeValueNumber,
     bool RangeValueReadOnly,
     ToggleState? ToggleState,
-    bool? IsSelected);
+    bool? IsSelected)
+{
+    internal bool HasKeyboardFocus => KeyboardFocus.Value == true;
+}
 
 internal sealed class UiaSnapshotCache
 {
@@ -187,7 +190,11 @@ internal sealed class UiaSnapshotCache
             properties.ControlType.TryGetValue(out var controlType) ? controlType : null,
             properties.Name.TryGetValue(out var name) ? name ?? string.Empty : string.Empty,
             properties.BoundingRectangle.TryGetValue(out var bounds) ? bounds : Rectangle.Empty,
-            properties.HasKeyboardFocus.TryGetValue(out var focused) && focused,
+            WindowsKeyboardFocusRead.Read(() =>
+            {
+                var supported = properties.HasKeyboardFocus.TryGetValue(out var focused);
+                return (supported, focused);
+            }),
             WindowsVisibilityRead.Read(() =>
             {
                 var supported = properties.IsOffscreen.TryGetValue(out var offscreen);

@@ -238,6 +238,9 @@ func renderAXProperties(node *AXNode, options AXRenderOptions) [][2]string {
 		properties = append(properties, [2]string{"/omitted", node.Properties.Omitted})
 	}
 	for _, annotation := range node.Annotations {
+		if annotation.Kind == axFocusEvidenceAnnotation && annotation.Detail != "" {
+			properties = append(properties, [2]string{"/focus-evidence", annotation.Detail})
+		}
 		if annotation.Kind == axCellSummaryAnnotation && annotation.Detail != "" {
 			properties = append(properties, [2]string{"/empty-cells", annotation.Detail})
 		}
