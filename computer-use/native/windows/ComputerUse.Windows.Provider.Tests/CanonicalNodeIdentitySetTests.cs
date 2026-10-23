@@ -33,6 +33,19 @@ internal static class CanonicalNodeIdentitySetTests
                 !mixed.TryAdd(new Node("mixed-object", 20), secondId),
                 "Either side missing identity must compare the underlying element.");
         }
+        var bucketed = 0;
+        var keyed = new CanonicalNodeIdentitySet<Node>((left, right) =>
+        {
+            bucketed++;
+            return left.Object == right.Object;
+        });
+        for (var index = 0; index < 50; index++)
+        {
+            Check(keyed.TryAdd(new Node($"object-{index}", 40), string.Empty, $"button|item {index}"),
+                "Distinct unidentified nodes must be accepted.");
+        }
+        Check(!keyed.TryAdd(new Node("object-7", 40), string.Empty, "button|item 7") && bucketed == 1,
+            "Only nodes with equal observed properties need a native comparison.");
         CheckComparisonFailure(string.Empty);
         CheckComparisonFailure("runtime:retry");
     }
