@@ -48,11 +48,12 @@ def test_entrypoint_help_imports_with_osworld_checkout(module, expected):
 STAGING_PROBE = """
 import argparse, json, sys
 from pathlib import Path
-from hcu.osworld import run_task
+from hcu.osworld import staging
+from hcu.osworld.agents import AGENT_PROFILES
 
 root, out, agent = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 instructions_file = Path(sys.argv[4]) if sys.argv[4] else None
-profile = run_task.AGENT_PROFILES[agent]
+profile = AGENT_PROFILES[agent]
 args = argparse.Namespace(
     agent=agent, model=profile["default_model"],
     effort=profile["default_effort"],
@@ -61,7 +62,7 @@ args = argparse.Namespace(
     asset_cache="/unused/cache", offline_assets=False,
     benchmark_version="v1", channels="", task_id="001", task_domain="",
 )
-run = run_task.TaskRun(
+run = staging.TaskRun(
     args=args, run_tag="RUN", result_dir=out,
     token_log=out / "tokens.jsonl", affinity_task="task-RUN",
     agent_binary=out / profile["artifact"],
@@ -75,15 +76,15 @@ run = run_task.TaskRun(
     explicit_task_date=None, guest_image="",
 )
 out.mkdir(parents=True, exist_ok=True)
-run_task.stage_local_files(run)
-uploads, executables = run_task.runtime_uploads(run)
+staging.stage_local_files(run)
+uploads, executables = staging.runtime_uploads(run)
 print(json.dumps({
     "endpoint": run.agent_endpoint,
     "uploads": {row["path"]: Path(row["local_path"]).name for row in uploads},
     "executables": executables,
     "system_prompt": run.base_instructions_copy.read_text(),
     "instructions": run.instructions_copy.read_text() if run.instructions_copy.exists() else None,
-    "metadata": run_task.initial_meta(run, {}),
+    "metadata": staging.initial_meta(run, {}),
     "launcher": run.launcher_path.read_text(),
 }))
 """
