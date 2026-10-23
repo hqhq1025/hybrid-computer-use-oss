@@ -380,3 +380,56 @@ class HiddenWindowListingTests(AtspiPatchedTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BlockingModalTests(AtspiPatchedTestCase):
+    """A modal dialog of the same process keeps the input.
+
+    MuseScore 4 opens its "Getting started" dialog modal and transient for
+    the main window. Activating the main window then sent the command, the
+    window manager kept focus in the dialog, and the result was a timeout
+    reported as effect_unknown.
+    """
+
+    XPROP = {
+        "0x2": "WM_TRANSIENT_FOR(WINDOW): window id # 0x1\n"
+               "_NET_WM_STATE(ATOM) = _NET_WM_STATE_MODAL, _NET_WM_STATE_FOCUSED\n",
+        "0x3": "WM_TRANSIENT_FOR(WINDOW): window id # 0x1\n"
+               "_NET_WM_STATE(ATOM) = _NET_WM_STATE_SKIP_TASKBAR\n",
+        "0x4": "WM_TRANSIENT_FOR(WINDOW): window id # 0x1\n"
+               "_NET_WM_STATE(ATOM) = _NET_WM_STATE_MODAL\n",
+        "0x5": "WM_TRANSIENT_FOR(WINDOW): window id # 0x1\n"
+               "_NET_WM_STATE(ATOM) = _NET_WM_STATE_MODAL, _NET_WM_STATE_HIDDEN\n",
+    }
+
+    def setUp(self):
+        super().setUp()
+        managed = runtime.InventoryResult([
+            {"pid": 30, "id": "0x1", "title": "Score", "x": 0, "y": 0, "width": 800, "height": 600},
+            {"pid": 30, "id": "0x2", "title": "Getting started", "x": 100, "y": 100, "width": 400, "height": 300},
+            {"pid": 30, "id": "0x3", "title": "Palette", "x": 100, "y": 100, "width": 100, "height": 100},
+            {"pid": 31, "id": "0x4", "title": "Other app modal", "x": 0, "y": 0, "width": 100, "height": 100},
+            {"pid": 30, "id": "0x5", "title": "Minimized modal", "x": 0, "y": 0, "width": 100, "height": 100},
+        ], complete=True)
+        for name, value in (
+            ("_x11_managed_windows", lambda: managed),
+            ("_xprop_text", lambda window_id, *atoms: self.XPROP.get(window_id, "")),
+        ):
+            patcher = mock.patch.object(runtime, name, side_effect=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_only_a_visible_modal_transient_of_the_same_process_blocks(self):
+        blocking = runtime.modal_transient_windows("0x1", 30)
+        self.assertEqual(["Getting started"], [window["title"] for window in blocking])
+
+    def test_native_activate_names_the_modal_and_emits_nothing(self):
+        window = {"pid": 30, "id": "0x1", "title": "Score", "app": "score",
+                  "handle": "h", "generation": "g", "active": False}
+        with mock.patch.object(runtime, "_emit") as emit:
+            with self.assertRaises(runtime.OperationFailure) as raised:
+                runtime.perform_native_window_action("activate", window)
+        emit.assert_not_called()
+        self.assertEqual("window_blocked", raised.exception.failure_code)
+        self.assertFalse(raised.exception.input_events_emitted)
+        self.assertIn('"Getting started"', str(raised.exception))

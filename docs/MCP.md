@@ -131,15 +131,51 @@ Sessions that already have accessibility on see only reads.
 | --- | --- | --- |
 | GTK 3, GTK 4 (including LibreOffice with the gtk3 plugin) | Visible | Visible |
 | GTK 2 (GIMP) | Visible | Visible within seconds when an XSETTINGS manager runs (Xfce, GNOME) |
-| Qt 5/6 (VLC, Kate, Okular) | Visible | Not visible; restart the application |
+| Qt 5.15 and later, Qt 6 (VLC, Kate, Okular) | Visible | Not visible; restart the application |
+| Qt before 5.15 (WPS Office 11 bundles Qt 5.12) | Not visible; start it with `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` | Same |
+| Java Swing and AWT (GeoGebra Classic 5) | Not visible; start it with the Java ATK wrapper (below) | Same |
 | Gecko (Firefox) | Visible | Not visible; restart the application |
 | Chromium, Electron (Chrome, VS Code, Joplin, XMind) | Visible | Not visible; quit every window and start it again |
 
 `AX {"mode":"apps"}` names each titled window whose process is not on the
 accessibility bus, with its toolkit and the restart that makes it visible.
-Until the restart, only GUI can read and operate that window. It also names
-windows that an application on the bus shows outside its tree, such as the
-native message boxes of Electron applications; use GUI for those.
+Until the restart, only GUI can read and operate that window. The same note
+covers a process that is on the bus only through another toolkit: WPS
+Office loads GTK for its Qt theme plugin, GTK registers an empty
+application, and the Qt windows stay off the bus. Windows that an
+application on the bus shows outside its tree, such as the native message
+boxes of Electron applications, are listed as `wN` without a tree.
+
+Qt before 5.15 reads only `ScreenReaderEnabled`, not `IsEnabled`, so it
+needs `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` in its environment at launch.
+The provider does not set `ScreenReaderEnabled` (see above).
+
+Java applications export a tree only through the Java ATK wrapper (Debian
+and Ubuntu packages `libatk-wrapper-java` and `libatk-wrapper-java-jni`).
+Start the application with these Java options:
+
+```sh
+JDK_JAVA_OPTIONS="-Djavax.accessibility.assistive_technologies=org.GNOME.Accessibility.AtkWrapper \
+  -Xbootclasspath/a:/usr/share/java/java-atk-wrapper.jar \
+  -Dsun.boot.library.path=$JAVA_HOME/lib:/usr/lib/x86_64-linux-gnu/jni"
+```
+
+`JAVA_HOME` is the runtime the application starts, which can be a runtime
+bundled with the application. Use `JDK_JAVA_OPTIONS`, because some launch
+scripts unset `JAVA_TOOL_OPTIONS` (GeoGebra's does). The wrapper class loads
+from the boot class path, so its native library must be on the boot library
+path; `java.library.path` is not searched for it.
+
+Some windows stay GUI-only although `apps` lists them, and AX can still
+activate, close and wait for them:
+
+- Applications that draw their own interface export no tree: Blender,
+  REAPER (its controls are drawn on plain GDK windows) and canvas games.
+- MuseScore 4 answers most child slots of its Qt Quick windows with null
+  references. The tree shows their count as `/null-children` on the parent.
+- When a modal dialog of the same application is open, `activate` of the
+  window behind it fails with `window_blocked` and names the dialog to
+  answer or close first.
 
 A new Firefox profile opens a Terms of Use dialog over its first tab.
 Until the dialog is accepted, Firefox exposes only the dialog, so `find`

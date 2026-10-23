@@ -26,6 +26,7 @@ from .x11_windows import (
     _x11_window_inventory_cache,
     app_windows,
     iter_apps,
+    refuse_activation_behind_modal,
     strong_window_instance_handles,
     unmapped_window_indices,
     window_handle_for_pid,
@@ -219,6 +220,8 @@ def _confirmed(action, window_id):
 
 def perform_native_window_action(action, window):
     """Activate or close one native-only window and confirm the effect."""
+    if action == "activate":
+        refuse_activation_behind_modal(window["id"], window["pid"], window["title"])
     _emit(action, window["id"])
     action_evidence.update(route="native_window_command", input_emitted=True)
     if not _confirmed(action, window["id"]):

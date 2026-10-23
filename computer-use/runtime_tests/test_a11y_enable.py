@@ -244,6 +244,75 @@ class InvisibleWindowNoteTests(AtspiPatchedTestCase):
         self.assertEqual(
             toolkits, ["Qt", "Gecko", "Chromium", "GTK 2", "GTK", "", ""])
 
+    def test_vendor_renamed_qt_and_java_are_recognized(self):
+        # WPS Office ships Qt 5.12 renamed to libQt5CoreKso; GeoGebra runs
+        # on its own Java runtime.
+        with tempfile.TemporaryDirectory() as root:
+            self._proc(root, 16, ["/opt/kingsoft/wps-office/office6/libQt5CoreKso.so.5.12.10",
+                                  "/usr/lib/libgtk-3.so.0.2404.29"])
+            self._proc(root, 17, ["/opt/geogebra/jre/lib/server/libjvm.so"])
+            self.assertEqual("Qt", runtime.process_toolkit(16, root))
+            self.assertEqual((5, 12), runtime.process_qt_version(16, root))
+            self.assertEqual("Java", runtime.process_toolkit(17, root))
+
+    def test_qt_before_5_15_needs_the_always_on_variable(self):
+        # Qt before 5.15 reads only ScreenReaderEnabled, not IsEnabled.
+        with tempfile.TemporaryDirectory() as root:
+            self._proc(root, 30, ["/opt/kingsoft/wps-office/office6/libQt5CoreKso.so.5.12.10"])
+            notes = runtime.invisible_window_notes(
+                [{"pid": 30, "title": "Untitled - WPS Writer"}],
+                accessible_pids=set(), proc_root=root)
+        self.assertEqual(1, len(notes))
+        self.assertIn("(pid 30, Qt 5.12)", notes[0])
+        self.assertIn("QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1", notes[0])
+
+    def test_registration_through_another_toolkit_still_gets_advice(self):
+        # WPS loads GTK for its Qt platform theme; GTK registers an empty
+        # application while the Qt windows stay off the bus.
+        with tempfile.TemporaryDirectory() as root:
+            self._proc(root, 30, ["/opt/kingsoft/wps-office/office6/libQt5CoreKso.so.5.12.10",
+                                  "/usr/lib/libgtk-3.so.0.2404.29"])
+            window = [{"pid": 30, "title": "Untitled - WPS Writer"}]
+            mismatched = runtime.invisible_window_notes(
+                window, accessible_pids={30}, proc_root=root,
+                windowless_toolkits={30: {"gtk"}})
+            registered = runtime.invisible_window_notes(
+                window, accessible_pids={30}, proc_root=root,
+                windowless_toolkits={30: {"qt"}})
+        self.assertEqual(1, len(mismatched))
+        self.assertIn("QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1", mismatched[0])
+        self.assertEqual([], registered)
+
+    def test_java_advice_names_the_atk_wrapper(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._proc(root, 40, ["/opt/geogebra/jre/lib/server/libjvm.so"])
+            notes = runtime.invisible_window_notes(
+                [{"pid": 40, "title": "GeoGebra Classic 5"}],
+                accessible_pids=set(), proc_root=root)
+        self.assertEqual(1, len(notes))
+        self.assertIn("(pid 40, Java)", notes[0])
+        self.assertIn("org.GNOME.Accessibility.AtkWrapper", notes[0])
+
+    def test_listing_gives_advice_for_a_windowless_registration(self):
+        app = _TreeNode(role="application", name="wps", kids=())
+        app.get_process_id = lambda: 30
+        app.get_toolkit_name = lambda: "gtk"
+        original_apps = runtime.iter_apps
+        runtime.iter_apps = lambda: [app]
+        self.addCleanup(setattr, runtime, "iter_apps", original_apps)
+        managed = runtime.InventoryResult([
+            {"pid": 30, "id": "0x1", "x": 0, "y": 0, "width": 900, "height": 700,
+             "title": "Untitled - WPS Writer"},
+        ])
+        with mock.patch.object(runtime, "_x11_managed_windows", return_value=managed), \
+                mock.patch.object(runtime, "process_toolkit", return_value="Qt"), \
+                mock.patch.object(runtime, "process_qt_version", return_value=(5, 12)), \
+                mock.patch.object(runtime, "process_generation", return_value="7"), \
+                mock.patch.object(runtime, "correlation_root_window_state", return_value=None):
+            notes = runtime.list_apps_inventory()["notes"]
+        self.assertEqual(1, len(notes), notes)
+        self.assertIn('"Untitled - WPS Writer" (pid 30, Qt 5.12)', notes[0])
+
     def test_names_windows_of_processes_missing_from_the_bus(self):
         with tempfile.TemporaryDirectory() as root:
             self._proc(root, 20, ["/usr/lib/libQt5Core.so.5"])

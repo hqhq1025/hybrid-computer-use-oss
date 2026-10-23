@@ -355,6 +355,62 @@ def _x11_managed_windows():
     return inventory
 
 
+
+def _xprop_text(window_id, *atoms):
+    """Return xprop's text for the given atoms of one window, or ""."""
+    try:
+        result = subprocess.run(
+            ["xprop", "-id", window_id] + list(atoms),
+            capture_output=True, text=True, timeout=2,
+        )
+    except Exception:
+        return ""
+    return result.stdout if result.returncode == 0 else ""
+
+
+_TRANSIENT_FOR_RE = re.compile(
+    r"WM_TRANSIENT_FOR\(WINDOW\): window id # (0x[0-9a-fA-F]+)")
+
+
+def modal_transient_windows(window_id, pid):
+    """Return the modal windows of process ``pid`` transient for ``window_id``.
+
+    The window manager keeps input in such a dialog, so it refuses to
+    activate the window behind it. A minimized (hidden) dialog does not
+    block. Only the X11 hints count here, because some toolkits never report
+    the AT-SPI MODAL state (MuseScore 4's dialogs have no accessible tree).
+    """
+    target = normalize_x11_window_id(window_id)
+    blocking = []
+    for window in _x11_managed_windows():
+        if int(window.get("pid") or 0) != int(pid or 0) or window.get("id") == target:
+            continue
+        text = _xprop_text(window["id"], "WM_TRANSIENT_FOR", "_NET_WM_STATE")
+        match = _TRANSIENT_FOR_RE.search(text)
+        if not match or normalize_x11_window_id(match.group(1)) != target:
+            continue
+        if "_NET_WM_STATE_MODAL" in text and "_NET_WM_STATE_HIDDEN" not in text:
+            blocking.append(window)
+    return blocking
+
+
+def refuse_activation_behind_modal(window_id, pid, title):
+    """Raise before input when a modal dialog of the app blocks activation."""
+    blocking = modal_transient_windows(window_id, pid)
+    if not blocking:
+        return
+    dialog = str(blocking[0].get("title") or "").strip() or "(untitled)"
+    raise OperationFailure(
+        'window_blocked: "{}" has a modal dialog of the same application '
+        'open, "{}", and the window manager keeps the input there. Answer or '
+        'close "{}" first (activate and close take its title). No input was '
+        "emitted.".format(str(title or "").strip() or "(untitled)", dialog, dialog),
+        failure_code="window_blocked",
+        failure_phase="precondition",
+        input_events_emitted=False,
+        failure_subject="window",
+    )
+
 # Children of the root window inspected for override-redirect popups.
 MAX_POPUP_CANDIDATES = 64
 _ROOT_CHILD_RE = re.compile(

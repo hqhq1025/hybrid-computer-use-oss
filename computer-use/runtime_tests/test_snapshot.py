@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Linux provider snapshot enumeration, rendering, pruning, and node description tests."""
 
+import types
+
 from runtime_test_support import *  # noqa: F401,F403
 
 
@@ -409,11 +411,17 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
             ["Window", "Container"],
         )
         self.assertNotIn("Missing", "\n".join(lines))
-        self.assertTrue(any(
-            item.get("kind") == "provider_omission"
-            and item.get("reason") == "provider_probe_error"
-            and item.get("count") == 1
-            for item in annotations
+        # A null reference is reported with its own reason and count on the
+        # parent, so the agent learns that this part has no AX objects.
+        nulls = [item for item in annotations
+                 if item.get("reason") == "null_reference"]
+        self.assertEqual(1, len(nulls), annotations)
+        self.assertEqual("provider_omission", nulls[0]["kind"])
+        self.assertEqual(1, nulls[0]["count"])
+        self.assertEqual([0, 0], nulls[0]["parentRuntimeId"])
+        self.assertIn("1 of 1 child references returned no object", nulls[0]["detail"])
+        self.assertFalse(any(
+            item.get("reason") == "provider_probe_error" for item in annotations
         ), annotations)
 
     def test_one_bad_node_does_not_abort_sibling_rendering(self):
@@ -1277,3 +1285,68 @@ class PruneCostTests(AtspiPatchedTestCase):
 
         self.assertEqual(len(records), 5)
         self.assertEqual(records[-1]["controlType"], "push button")
+
+
+class SaneRectFrameTests(unittest.TestCase):
+    """Screen frames of content scrolled far away are real.
+
+    A web table of 6000 rows of 25 px is 150,000 px tall, and its last rows
+    sit 150,000 px below the viewport. A 100,000 px limit dropped their
+    frames, so observe and find lost them, and the table itself had no frame
+    for coordinate cell reads. Unrendered GTK controls still report origins
+    near INT_MIN, which stay rejected.
+    """
+
+    @staticmethod
+    def rect(x, y, width, height):
+        return types.SimpleNamespace(x=x, y=y, width=width, height=height)
+
+    def test_far_scrolled_content_keeps_its_frame(self):
+        self.assertIsNotNone(runtime.sane_rect_frame(self.rect(0, 149975, 800, 25)))
+        self.assertIsNotNone(runtime.sane_rect_frame(self.rect(0, -60, 800, 150000)))
+
+    def test_sentinel_geometry_is_rejected(self):
+        self.assertIsNone(runtime.sane_rect_frame(self.rect(-2147483648, -2147483648, 1, 1)))
+        self.assertIsNone(runtime.sane_rect_frame(self.rect(0, 0, 2147483647, 20)))
+        self.assertIsNone(runtime.sane_rect_frame(self.rect(0, 0, 0, 20)))
+
+
+class LongContainerViewTests(AtspiPatchedTestCase):
+    """A container with more children than the walk enumerates.
+
+    A web table of 6000 rows exceeds HARD_CHILD_CAP. The walk then fell back
+    to coordinate cell reads, which a web table does not support (hit tests
+    return the table itself), and reported one cell with complete coverage.
+    """
+
+    def _table(self, scroll):
+        rows = tuple(
+            _TreeNode(role="table row", name="Row {}".format(index),
+                      x=0, y=index * 25 - scroll, w=800, h=25)
+            for index in range(6000))
+        table = _TreeNode(role="table", name="Big", x=0, y=-scroll, w=800,
+                          h=150000, kids=rows)
+        return _TreeNode(role="frame", name="Window", w=1920, h=1080,
+                         kids=(table,))
+
+    def test_rows_in_view_are_read_and_the_rest_is_reported(self):
+        root = self._table(scroll=10000)
+        records, _, annotations = runtime.render_tree(
+            root, runtime.frame(0, 0, 1920, 1080), [0], prune=False,
+            indexer=runtime.StableIndexer({}))
+        names = {record["name"] for record in records}
+        self.assertIn("Row 400", names)
+        self.assertIn("Row 440", names)
+        self.assertNotIn("Row 0", names)
+        self.assertNotIn("Row 5999", names)
+        omissions = [item for item in annotations
+                     if "outside_view" in str(item.get("reason"))]
+        self.assertEqual(1, len(omissions), annotations)
+        self.assertGreater(omissions[0]["count"], 5900)
+
+    def test_a_hit_on_the_container_itself_is_no_cell_range(self):
+        table = _TreeNode(role="table", name="Big", w=800, h=1000)
+        table.get_table_iface = lambda: table
+        with mock.patch.object(runtime.Atspi.Component, "get_accessible_at_point",
+                               return_value=table, create=True):
+            self.assertIsNone(runtime.visible_cell_range(table))

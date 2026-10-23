@@ -3,12 +3,14 @@
 from .foundation import (
     Atspi,
     DEFAULT_TEXT_LIMIT,
+    MAX_CHILD_FANOUT,
     MAX_ELEMENTS,
     node_pid,
     node_role,
     process_generation,
     provider_bus_name,
     provider_object_path,
+    raw_extents,
     safe,
 )
 from .ax_node_properties import text_value_with_status
@@ -54,7 +56,9 @@ def visible_cell_range(node):
                 component, x, y, Atspi.CoordType.SCREEN
             )
         )
-        if cell is None:
+        if cell is None or cell == node:
+            # A hit on the container itself (Chromium tables answer hit
+            # tests that way) names no cell.
             return None
         index = safe(cell.get_index_in_parent)
         if index is None:
@@ -70,6 +74,56 @@ def visible_cell_range(node):
     rows = sorted(f[0] for f in found)
     cols = sorted(f[1] for f in found)
     return rows[0], rows[1], cols[0], cols[1]
+
+
+# Child slots read to find the first child in view of a long container.
+VISIBLE_SPAN_PROBES = 64
+
+
+def visible_child_span(node, count, window_bounds):
+    """Return ``(first, last)`` indices of the children in view, or None.
+
+    For a container that reports more children than the walk enumerates and
+    does not manage its descendants (a web table with thousands of rows).
+    Its children are laid out top to bottom, so a binary search on their
+    screen frames finds the first one in view; the span then runs while the
+    children stay in view, at most MAX_CHILD_FANOUT of them. Returns None
+    when the window bounds or a child frame are unknown, or when the order
+    does not hold.
+    """
+    if not window_bounds or count <= 0:
+        return None
+    top = window_bounds["y"]
+    bottom = top + window_bounds["height"]
+
+    def box(index):
+        child = safe(lambda: node.get_child_at_index(index))
+        return raw_extents(child) if child is not None else None
+
+    low, high, probes = 0, count - 1, 0
+    while low < high:
+        probes += 1
+        if probes > VISIBLE_SPAN_PROBES:
+            return None
+        middle = (low + high) // 2
+        current = box(middle)
+        if current is None:
+            return None
+        if current["y"] + current["height"] <= top:
+            low = middle + 1
+        else:
+            high = middle
+    first_box = box(low)
+    if (first_box is None or first_box["y"] >= bottom
+            or first_box["y"] + first_box["height"] <= top):
+        return None
+    last = low
+    while last + 1 < count and last - low + 1 < MAX_CHILD_FANOUT:
+        current = box(last + 1)
+        if current is None or current["y"] >= bottom:
+            break
+        last += 1
+    return low, last
 
 
 def render_visible_cells(

@@ -120,13 +120,16 @@ type AXNode struct {
 	Parent                          *AXNode        `json:"-"`
 	Synthetic                       bool           `json:"-"`
 	ForceKeep                       bool           `json:"-"`
-	FindMatch                       bool           `json:"-"`
-	ExplicitRoot                    bool           `json:"-"`
-	SemanticIdentityAmbiguous       bool           `json:"-"`
-	AddressabilityEvaluated         bool           `json:"-"`
-	AddressabilityReason            string         `json:"-"`
-	BudgetOmittedNodes              int            `json:"-"`
-	BudgetOmittedTargets            int            `json:"-"`
+	// DistinguishesDuplicates marks a node kept only as the context that
+	// tells same-named controls below it apart.
+	DistinguishesDuplicates   bool   `json:"-"`
+	FindMatch                 bool   `json:"-"`
+	ExplicitRoot              bool   `json:"-"`
+	SemanticIdentityAmbiguous bool   `json:"-"`
+	AddressabilityEvaluated   bool   `json:"-"`
+	AddressabilityReason      string `json:"-"`
+	BudgetOmittedNodes        int    `json:"-"`
+	BudgetOmittedTargets      int    `json:"-"`
 }
 
 type DistillationStageReport struct {

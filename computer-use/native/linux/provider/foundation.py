@@ -71,10 +71,11 @@ DEFAULT_TEXT_LIMIT = 500
 # really moves focus inside the application, so only a few likely candidates
 # are tried instead of scanning the whole tree.
 FOCUS_GRAB_CANDIDATES = 8
-# Upper bound for plausible screen coordinates and sizes. Larger values can
-# only be INT_MIN-style sentinels of unrendered controls; no multi-monitor
-# layout reaches this magnitude.
-MAX_SANE_EXTENT = 100000
+# Upper bound for plausible screen coordinates and sizes. Content scrolled
+# out of view is real and can be far away: a web table of 6000 rows of 25 px
+# is 150,000 px tall, and Chromium lays out pages up to about 33.5 million
+# px. Larger values are INT_MIN-style sentinels of unrendered controls.
+MAX_SANE_EXTENT = 1 << 24
 # Minimum settle time between an action and the next snapshot. When the set
 # of top-level windows is unchanged, this is the whole wait.
 SETTLE_MIN_SECONDS = 0.12
