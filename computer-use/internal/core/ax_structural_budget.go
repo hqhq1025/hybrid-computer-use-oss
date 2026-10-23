@@ -12,7 +12,16 @@ type axBudgetCandidate struct {
 	depth    int
 	priority int
 	savings  int
+	// runSavings and fromEnd order the chunks of one sibling run: the
+	// chunks of the run that saves most go first, last chunk first.
+	runSavings int
+	fromEnd    int
 }
+
+// axBudgetChunkNodes splits a long run of siblings into candidates that are
+// removed from the end of the run. An over-budget table or list then keeps
+// its first rows and summarizes the rest, instead of collapsing whole.
+const axBudgetChunkNodes = 10
 
 func axStructuralTreeBudget() int {
 	limit := 12000
@@ -131,6 +140,42 @@ func countAXTargets(nodes []*AXNode) int {
 	return count
 }
 
+func newAXBudgetCandidate(
+	parent *AXNode,
+	run []*AXNode,
+	depth int,
+) (axBudgetCandidate, bool) {
+	nodeIDs := make([]string, 0, len(run))
+	priority := 0
+	rendered := 0
+	omittedNodes := 0
+	omittedTargets := 0
+	for _, node := range run {
+		nodeIDs = append(nodeIDs, node.ID)
+		if current := axBudgetPriority(node); current > priority {
+			priority = current
+		}
+		rendered += axRenderedNodeChars(node, depth+1)
+		omittedNodes += countAXNodes([]*AXNode{node})
+		omittedTargets += countAXTargets([]*AXNode{node})
+	}
+	summary := newAXBudgetSummary(
+		parent,
+		parent.ID+"/budget-estimate",
+		omittedNodes,
+		omittedTargets,
+	)
+	savings := rendered - axRenderedNodeChars(summary, depth+1)
+	return axBudgetCandidate{
+		parentID:   parent.ID,
+		nodeIDs:    nodeIDs,
+		depth:      depth,
+		priority:   priority,
+		savings:    savings,
+		runSavings: savings,
+	}, savings > 0
+}
+
 func collectAXBudgetCandidates(
 	nodes []*AXNode,
 	depth int,
@@ -140,40 +185,30 @@ func collectAXBudgetCandidates(
 		collectAXBudgetCandidates(parent.Children, depth+1, out)
 		run := []*AXNode{}
 		flush := func() {
-			if len(run) == 0 {
+			defer func() { run = nil }()
+			whole, ok := newAXBudgetCandidate(parent, run, depth)
+			if !ok {
 				return
 			}
-			nodeIDs := make([]string, 0, len(run))
-			priority := 0
-			rendered := 0
-			omittedNodes := 0
-			omittedTargets := 0
-			for _, node := range run {
-				nodeIDs = append(nodeIDs, node.ID)
-				if current := axBudgetPriority(node); current > priority {
-					priority = current
+			if len(run) <= axBudgetChunkNodes {
+				*out = append(*out, whole)
+				return
+			}
+			for end, fromEnd := len(run), 0; end > 0; end, fromEnd =
+				end-axBudgetChunkNodes, fromEnd+1 {
+				start := end - axBudgetChunkNodes
+				if start < 0 {
+					start = 0
 				}
-				rendered += axRenderedNodeChars(node, depth+1)
-				omittedNodes += countAXNodes([]*AXNode{node})
-				omittedTargets += countAXTargets([]*AXNode{node})
+				chunk, ok := newAXBudgetCandidate(parent, run[start:end], depth)
+				if !ok {
+					continue
+				}
+				chunk.priority = whole.priority
+				chunk.runSavings = whole.savings
+				chunk.fromEnd = fromEnd
+				*out = append(*out, chunk)
 			}
-			summary := newAXBudgetSummary(
-				parent,
-				parent.ID+"/budget-estimate",
-				omittedNodes,
-				omittedTargets,
-			)
-			savings := rendered - axRenderedNodeChars(summary, depth+1)
-			if savings > 0 {
-				*out = append(*out, axBudgetCandidate{
-					parentID: parent.ID,
-					nodeIDs:  nodeIDs,
-					depth:    depth,
-					priority: priority,
-					savings:  savings,
-				})
-			}
-			run = nil
 		}
 		for _, child := range parent.Children {
 			if child.Synthetic ||
@@ -258,6 +293,12 @@ func selectAXBudgetPlan(
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].priority != candidates[j].priority {
 			return candidates[i].priority < candidates[j].priority
+		}
+		if candidates[i].runSavings != candidates[j].runSavings {
+			return candidates[i].runSavings > candidates[j].runSavings
+		}
+		if candidates[i].fromEnd != candidates[j].fromEnd {
+			return candidates[i].fromEnd < candidates[j].fromEnd
 		}
 		return candidates[i].savings > candidates[j].savings
 	})

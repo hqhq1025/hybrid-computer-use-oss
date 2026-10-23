@@ -221,6 +221,23 @@ class ProviderWireTests(unittest.TestCase):
             rejected += 1
         self.assertEqual(rejected, 2)
 
+    def test_observation_find_walk_requires_boolean(self):
+        def request(value):
+            return {
+                "protocol": "computer-use-provider",
+                "schema_version": 2,
+                "request_id": "req-find-walk",
+                "operation": "observe",
+                "observe": {
+                    "protocol_version": 2,
+                    "app": "editor",
+                    "observation": {"find_walk": value},
+                },
+            }
+        wire.validate_request(request(True))
+        with self.assertRaises(wire.ProviderRequestError):
+            wire.validate_request(request("yes"))
+
     def test_observation_capture_snapshot_requires_boolean(self):
         request = {
             "protocol": "computer-use-provider",

@@ -34,7 +34,10 @@ func TestWindowsKeyPreflightChordBoundaries(t *testing.T) {
 			t.Errorf("valid chord %q: %v", key, err)
 		}
 	}
-	for _, key := range []string{"", " ", "+", "Ctrl++a", "a+", "UnknownKey", "F0", "F25", "\U0001f600"} {
+	for _, key := range []string{"", " ", "+", "Ctrl++a", "a+", "UnknownKey", "F0", "F25", "\U0001f600",
+		// A single character that is not an ASCII letter, digit or OEM key
+		// has no virtual key; casting it would press an unrelated key.
+		"!", "?", "_", "中", "é", "ı"} {
 		if err := validateWindowsKeypress(key); err == nil {
 			t.Errorf("invalid chord %q passed preflight", key)
 		}

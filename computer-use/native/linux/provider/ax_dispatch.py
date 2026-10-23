@@ -244,6 +244,7 @@ def _observe_operation(operation, observation):
         # An unchanged window may return its previous tree; see
         # tree_reuse. Post-action snapshots below always walk.
         reuse_tree=True,
+        find_walk=observation.get("find_walk") is True,
     )
     response = {"ok": True, "snapshot": snapshot}
     lap("observe_snapshot")

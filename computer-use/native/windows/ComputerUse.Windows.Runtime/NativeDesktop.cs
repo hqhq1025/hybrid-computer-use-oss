@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -18,11 +19,6 @@ internal static partial class NativeDesktop
     private const int DwmwaCloaked = 14;
     private const string ApplicationFrameClass = "ApplicationFrameWindow";
     private const string UwpCoreWindowClass = "Windows.UI.Core.CoreWindow";
-    private const int ClipboardPasteSettleMilliseconds = 500;
-    private const int ClipboardRetryCount = 10;
-    private const int ClipboardRetryMilliseconds = 20;
-    private const int CaptureLayoutRetryCount = 3;
-    private const int CaptureLayoutRetryMilliseconds = 25;
     private const int PublishedLayoutHistoryLimit = 32;
     private const int WindowActivationDirectTimeoutMilliseconds = 250;
     private const int WindowActivationPollMilliseconds = 25;
@@ -87,6 +83,14 @@ internal static partial class NativeDesktop
         internal int Y;
     }
 
+    // Declared here, not beside the input code, so a portable test can
+    // supply the native boundary and run the production input methods.
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(
+        uint inputCount,
+        [In] Input[] inputs,
+        int inputSize);
+
     [DllImport("user32.dll")]
     private static extern nint WindowFromPoint(NativePoint point);
 
@@ -96,7 +100,46 @@ internal static partial class NativeDesktop
     [DllImport("user32.dll")]
     private static extern nint GetAncestor(nint handle, uint flags);
 
+    // A read-only operation enumerates the desktop's windows once; every
+    // listing inside the scope filters that sample, so all parts of one
+    // observation see the same windows and the same foreground window.
+    [ThreadStatic]
+    private static IReadOnlyList<WindowRecord>? _operationWindows;
+
+    internal static IDisposable ReadOnlyWindowScope()
+    {
+        var previous = _operationWindows;
+        _operationWindows = EnumerateWindows(null);
+        return new WindowScope(() => _operationWindows = previous);
+    }
+
+    // A retry inside the scope must see windows that retired meanwhile.
+    internal static void RefreshReadOnlyWindowScope()
+    {
+        if (_operationWindows is not null)
+        {
+            _operationWindows = EnumerateWindows(null);
+        }
+    }
+
+    private sealed class WindowScope(Action restore) : IDisposable
+    {
+        public void Dispose() => restore();
+    }
+
     internal static IReadOnlyList<WindowRecord> ListWindows(int? processId = null)
+    {
+        var sample = _operationWindows;
+        if (sample is not null)
+        {
+            return processId.HasValue
+                ? sample.Where(window => window.ProcessId == processId.Value).ToArray()
+                : sample;
+        }
+        return EnumerateWindows(processId);
+    }
+
+    private static IReadOnlyList<WindowRecord> EnumerateWindows(int? processId)
     {
         var windows = new List<WindowRecord>();
         var foreground = GetForegroundWindow();
@@ -173,6 +216,28 @@ internal static partial class NativeDesktop
         }
         _ = GetWindowThreadProcessId(core, out var processId);
         return processId is > 0 and <= int.MaxValue ? (int)processId : 0;
+    }
+
+    // IsWindow sees hidden and zero-size windows that ListWindows leaves out.
+    internal static bool WindowExists(nint handle) => handle != 0 && IsWindow(handle);
+
+    // Returns when the foreground process has no pending input, or after the
+    // timeout. A process without a message loop returns at once.
+    internal static void WaitForForegroundInputIdle(int timeoutMilliseconds)
+    {
+        try
+        {
+            if (!TryGetWindowProcessId(GetForegroundWindow(), out var processId))
+            {
+                return;
+            }
+            using var process = Process.GetProcessById(processId);
+            _ = process.WaitForInputIdle(timeoutMilliseconds);
+        }
+        catch (Exception error) when (error is InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
+        {
+            // Console and exited processes have no input queue to wait for.
+        }
     }
 
     internal static bool TryGetWindowProcessId(

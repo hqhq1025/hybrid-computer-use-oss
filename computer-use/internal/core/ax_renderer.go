@@ -146,6 +146,9 @@ func renderAXNodeIdentityLabel(node *AXNode) string {
 	if node.Name != "" {
 		label += " " + strconv.Quote(node.Name)
 	}
+	if value, _ := axInlineCellValue(node); value != "" {
+		label += " = " + strconv.Quote(value)
+	}
 	states := renderAXStateTokens(node.States)
 	if len(states) > 0 {
 		label += " [" + strings.Join(states, " ") + "]"
@@ -183,6 +186,26 @@ func roleExposesWorkingValue(role CanonicalRole) bool {
 	default:
 		return false
 	}
+}
+
+// axInlineCellValueRunes bounds a cell value shown on the cell's line; find
+// shows up to maxFindTextRunes of a longer one.
+const axInlineCellValueRunes = 40
+
+// axInlineCellValue returns the value shown after a cell's name and whether
+// it was shortened. A spreadsheet names a cell by its address (A1), so its
+// content is only in the value; item views name a cell by its text, which
+// the name already shows.
+func axInlineCellValue(node *AXNode) (string, bool) {
+	if node == nil || (node.Role != "cell" && node.Role != "gridcell") {
+		return "", false
+	}
+	value := strings.TrimSpace(strings.ToValidUTF8(node.Properties.Value, "\uFFFD"))
+	if comparableTreeText(value) == "" || semanticTextEqual(value, node.Name) ||
+		pureNonSemanticUnicode(value, node) {
+		return "", false
+	}
+	return shortenAtWord(strings.Join(strings.Fields(value), " "), axInlineCellValueRunes)
 }
 
 func renderAXProperties(node *AXNode, options AXRenderOptions) [][2]string {

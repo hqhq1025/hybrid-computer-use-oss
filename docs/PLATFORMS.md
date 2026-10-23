@@ -111,6 +111,33 @@ level. It does not bypass UAC, secure desktops, or session isolation. UIA
 visibility reported by the application can differ from visible pixels;
 reobserve instead of forcing a stale or offscreen semantic target.
 
+Text input sends Unicode key events, with Enter and Tab keys for line
+breaks and tabs. It does not use the clipboard.
+
+GUI scroll deltas send one wheel notch per 100 units, and at least one notch
+for any non-zero delta, as on Linux. A single-character key must be an ASCII
+letter, digit or US-layout punctuation key. Other characters, such as `!` or
+`é`, are rejected before any input in the batch; enter them with `type`.
+
+An observation reads the window tree for at most 15 seconds. A larger tree,
+such as a LibreOffice Calc window, returns the part read so far with partial
+coverage instead of an error. Controls in the unread part are not
+addressable; use `find`, a subtree root, or GUI for them.
+
+LibreOffice draws its controls with its own toolkit, VCL, and loads the
+Windows accessibility bridge only when its process asks for it. Some
+releases, including 24.8, need `SAL_FORCE_IACCESSIBLE2=1` in the environment
+of the LibreOffice process; without it a window exposes only its title bar.
+LibreOffice 25.2 exposes its controls without the variable. The provider
+cannot change the environment of a running application, so
+`AX {"mode":"apps"}` and observe name such a window and the restart that fixes
+it. To enable the bridge:
+
+1. Set the variable for your account: `setx SAL_FORCE_IACCESSIBLE2 1`.
+2. Quit every LibreOffice window, including the Quickstarter in the
+   notification area, because a running instance keeps its environment.
+3. Start LibreOffice again from the Start menu or from a new shell.
+
 An uncertain focus or pointer preparation failure is different from a stale
 target. The requested input may be known not to have been emitted while a
 queued focus request can still change the desktop later. Honor an explicit

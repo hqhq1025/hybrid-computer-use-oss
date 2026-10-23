@@ -147,10 +147,10 @@ internal sealed partial class UiaProvider
             throw new ProviderFailureException(
                 "stale_element_ref", "precondition",
                 "The target's live logical-window ownership could not be verified; " +
-                $"no input was emitted ({error.GetType().Name}).");
+                $"the ownership read failed ({error.GetType().Name}).");
         }
         throw new ProviderFailureException(
             "stale_element_ref", "precondition",
-            "The target does not belong to the bound logical window; no input was emitted.");
+            "The target does not belong to the bound logical window.");
     }
 }

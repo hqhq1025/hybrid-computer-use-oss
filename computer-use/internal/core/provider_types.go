@@ -93,6 +93,10 @@ type ProviderObservationOptions struct {
 	Boxes             *bool              `json:"boxes,omitempty"`
 	IncludeScreenshot *bool              `json:"include_screenshot,omitempty"`
 	CaptureSnapshot   *bool              `json:"capture_snapshot,omitempty"`
+	// FindWalk asks the Linux provider to walk with its AX find caps
+	// instead of the render budget. Other providers reject the field, so
+	// only the Linux backend receives it.
+	FindWalk bool `json:"find_walk,omitempty"`
 }
 
 type ProviderTextLimit struct {

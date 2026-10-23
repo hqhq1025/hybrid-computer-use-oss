@@ -113,6 +113,9 @@ func findMatchText(node *AXNode) (string, bool, bool) {
 	if node == nil || roleExposesWorkingValue(node.Role) {
 		return "", false, false
 	}
+	if inline, clipped := axInlineCellValue(node); inline != "" && !clipped {
+		return "", false, false
+	}
 	value := strings.TrimSpace(strings.ToValidUTF8(node.Properties.Value, "\uFFFD"))
 	if comparableTreeText(value) == "" {
 		return "", false, false

@@ -554,6 +554,16 @@ HARD_CHILD_CAP = 4096
 # MANAGES_DESCENDANTS.
 MAX_CHILD_FANOUT = 512
 
+# AX find walks the window with its own caps. Find returns matches, not the
+# tree, so the render caps above (records, characters, fan-out) would hide
+# rows of a long list or web table that find must search. The walk is still
+# bounded in records, fan-out and time; when a cap stops it, the snapshot
+# carries the usual omission annotation and find reports partial coverage.
+FIND_WALK_MAX_RECORDS = 20000
+FIND_WALK_MAX_RENDERED_CHARS = 1000000
+FIND_WALK_MAX_CHILD_FANOUT = HARD_CHILD_CAP
+FIND_WALK_DEADLINE_SECONDS = 8.0
+
 # Containers that declare MANAGES_DESCENDANTS are still enumerated when they
 # report at most this many children. The state hints that a container may be
 # large; it does not prove it. The Nautilus sidebar declares it with only 12
@@ -813,7 +823,17 @@ def embedded_host_panels(node, parent):
     target = (provider_bus_name(node), provider_object_path(node))
     if not target[1]:
         return None, None
-    pending = [(parent, [])]
+    host = embedded_host_search([parent], target)
+    if host is None and safe(getattr(parent, "get_parent", None)) is None:
+        # Some bridges answer the root pane's Parent with a frame twin that
+        # is not in the application's window list. Search the windows the
+        # application does list for the panels that hold this root pane.
+        host = embedded_host_search(attached_windows(parent), target)
+    return host or (None, None)
+
+
+def embedded_host_search(windows, target):
+    pending = [(window, []) for window in windows]
     matches = []
     visited = 0
     while pending and visited < 64:
@@ -821,43 +841,81 @@ def embedded_host_panels(node, parent):
         visited += 1
         count = safe(current.get_child_count)
         if count is None or count > 32:
-            return None, None
+            return None
         for index in range(count):
             child = safe(lambda: current.get_child_at_index(index))
             if child is None:
-                return None, None
+                return None
             if (provider_bus_name(child), provider_object_path(child)) == target:
                 if ancestors:
                     matches.append((current, ancestors[-1]))
             elif len(ancestors) < 3 and node_role(child) == "panel":
                 pending.append((child, ancestors + [current]))
-    return matches[0] if len(matches) == 1 and not pending else (None, None)
+    return matches[0] if len(matches) == 1 and not pending else None
 
 
-def embedded_origin_offset(node, cache=None, remaining=32, role=None):
-    """Correct an embedded tree anchored to its host's outer container.
+def attached_windows(detached, limit=32):
+    application = safe(getattr(detached, "get_application", None))
+    count = safe(getattr(application, "get_child_count", None))
+    if count is None or count > limit:
+        return []
+    windows = []
+    for index in range(count):
+        window = safe(lambda: application.get_child_at_index(index))
+        if window is not None and node_role(window) in AX_WINDOW_ROLES:
+            windows.append(window)
+    return windows
 
-    Some bridges put a root pane at the outer GTK panel's origin although
-    its equally sized host panel starts below a menu strip. The host and
-    its outer panel describe the same rectangle except for that strip.
-    Derive the translation from those three rectangles, never an app name
-    or a fixed decoration size. Cache only within one snapshot or hit test.
+
+IDENTITY_TRANSFORM = (1.0, 0, 0)
+# Roles whose subtree a browser may report in device pixels while the
+# browser's own views around it use logical pixels.
+WEB_DOCUMENT_ROLES = {"document web", "document frame"}
+
+
+def screen_transform(node, cache=None, remaining=32, role=None, bounds=None):
+    """Return (scale, dx, dy) mapping a node's AT-SPI extents to root pixels.
+
+    Root pixels are ((raw + d) * scale). The scale comes from the node's
+    top-level window (window_scale); ``bounds`` are the node's raw extents
+    when the caller has already read them. Chromium reports web content in device
+    pixels inside browser views in logical pixels: a web document whose
+    frame is exactly its parent's frame times the scale starts a subtree
+    with scale 1.
+
+    The offset corrects an embedded tree anchored to its host's outer
+    container: some bridges put a root pane at the outer GTK panel's origin
+    although its equally sized host panel starts below a menu strip. The
+    host and its outer panel describe the same rectangle except for that
+    strip. Derive the translation from those three rectangles, never an app
+    name or a fixed decoration size. Cache only within one snapshot or hit
+    test.
     """
     if node is None or remaining <= 0:
-        return (0, 0)
+        return IDENTITY_TRANSFORM
     cache = {} if cache is None else cache
     key = (provider_bus_name(node), provider_object_path(node))
     if not key[1]:
         key = id(node)
     if key in cache:
         return cache[key]
-    cache[key] = (0, 0)  # Bound malformed parent cycles.
+    cache[key] = IDENTITY_TRANSFORM  # Bound malformed parent cycles.
     role = node_role(node) if role is None else role
-    if role in AX_WINDOW_ROLES or role == "application":
+    if role == "application":
         return cache[key]
     parent = safe(getattr(node, "get_parent", None))
-    inherited = embedded_origin_offset(parent, cache, remaining - 1)
-    offset = inherited
+    # Qt may report a top-level window as a filler or panel, so any child of
+    # the application is a top-level window here.
+    top_level = parent is not None and node_role(parent) == "application"
+    if role in AX_WINDOW_ROLES or top_level:
+        if top_level or parent is None:
+            from .window_scale import window_scale
+            transform = (window_scale(node, bounds), 0, 0)
+        else:
+            transform = (screen_transform(parent, cache, remaining - 1)[0], 0, 0)
+        cache[key] = transform
+        return transform
+    scale, dx, dy = screen_transform(parent, cache, remaining - 1)
     if role == "root pane":
         host_node, outer = embedded_host_panels(node, parent)
         if (host_node is not None and node_role(host_node) == "panel"
@@ -865,29 +923,36 @@ def embedded_origin_offset(node, cache=None, remaining=32, role=None):
             child_frame, host, container = (
                 raw_extents(node), raw_extents(host_node), raw_extents(outer))
             if child_frame and host and container:
-                dx = host["x"] - container["x"]
-                dy = host["y"] - container["y"]
+                inset_x = host["x"] - container["x"]
+                inset_y = host["y"] - container["y"]
                 same_size = all(child_frame[k] == host[k]
                                 for k in ("width", "height"))
                 outer_origin = all(child_frame[k] == container[k]
                                    for k in ("x", "y"))
-                inset = (dx >= 0 and dy >= 0 and (dx > 0 or dy > 0)
+                inset = (inset_x >= 0 and inset_y >= 0
+                         and (inset_x > 0 or inset_y > 0)
                          and host["x"] + host["width"] ==
                          container["x"] + container["width"]
                          and host["y"] + host["height"] ==
                          container["y"] + container["height"])
                 if same_size and outer_origin and inset:
-                    offset = (inherited[0] + dx, inherited[1] + dy)
-    cache[key] = offset
-    return offset
+                    dx, dy = dx + inset_x, dy + inset_y
+    elif scale != 1 and role in WEB_DOCUMENT_ROLES:
+        own, outer = raw_extents(node), raw_extents(parent)
+        if own and outer and all(
+                abs(outer[k] * scale - own[k]) <= scale + 1
+                for k in ("x", "y", "width", "height")):
+            scale, dx, dy = IDENTITY_TRANSFORM
+    cache[key] = (scale, dx, dy)
+    return cache[key]
 
 
 def corrected_screen_frame(node, bounds, cache=None, role=None):
     if bounds is None:
         return None
-    dx, dy = embedded_origin_offset(node, cache, role=role)
-    return frame(bounds["x"] + dx, bounds["y"] + dy,
-                 bounds["width"], bounds["height"])
+    scale, dx, dy = screen_transform(node, cache, role=role, bounds=bounds)
+    return frame((bounds["x"] + dx) * scale, (bounds["y"] + dy) * scale,
+                 bounds["width"] * scale, bounds["height"] * scale)
 
 
 def extents(node):

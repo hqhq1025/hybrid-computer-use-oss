@@ -64,6 +64,7 @@ func TestFinalObservationContinuationRequiresCompleteGoneSourceAndSameApp(t *tes
 			"failure_code":                "stale_window_ref",
 			"source_window_status":        "gone",
 			"recovery_inventory_complete": true,
+			"failure_facts_complete":      true,
 			"current_window_ref":          currentWindowRef,
 		},
 	}
@@ -78,6 +79,9 @@ func TestFinalObservationContinuationRequiresCompleteGoneSourceAndSameApp(t *tes
 		},
 		"source not gone": func(fields map[string]any) {
 			fields["source_window_status"] = "present"
+		},
+		"unknown lifecycle facts": func(fields map[string]any) {
+			fields["failure_facts_complete"] = false
 		},
 		"wrong failure": func(fields map[string]any) {
 			fields["failure_code"] = "observation_incomplete"

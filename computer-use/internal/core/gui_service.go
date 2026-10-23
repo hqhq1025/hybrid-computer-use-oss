@@ -79,7 +79,7 @@ func (s *Service) gui(actions any, settleMS int) ToolCallResult {
 		var timeout *RuntimeTimeoutError
 		var transport *RuntimeTransportError
 		mayMutate := guiBatchCanEmitInput(providerActions)
-		requestMayHaveReachedProvider := errors.As(err, &timeout) ||
+		requestMayHaveReachedProvider := (errors.As(err, &timeout) && !timeout.PreDispatch) ||
 			(errors.As(err, &transport) && transport.RequestSent)
 		mutationUnknown := mayMutate && requestMayHaveReachedProvider
 		if mutationUnknown {

@@ -167,23 +167,24 @@ internal sealed partial class UiaProvider
         };
     }
 
-    private static IReadOnlyList<NativeDesktop.WindowRecord> WaitForWindowToDisappear(
+    // Waits for the bound native window instance to retire. Leaving the
+    // visible inventory is not enough: a window can hide itself or shrink to
+    // zero size instead of closing.
+    private IReadOnlyList<NativeDesktop.WindowRecord> WaitForWindowToDisappear(
         int processId,
-        nint windowHandle)
+        WindowBinding binding)
     {
         var deadline = DateTime.UtcNow.AddSeconds(2);
-        IReadOnlyList<NativeDesktop.WindowRecord> windows;
         do
         {
-            windows = NativeDesktop.ListWindows(processId);
-            if (!windows.Any(value => value.Handle == windowHandle))
+            if (BoundWindowLifecycle(binding) == WindowLifecycleStatus.Gone)
             {
-                return windows;
+                break;
             }
             Thread.Sleep(50);
         }
         while (DateTime.UtcNow < deadline);
-        return windows;
+        return NativeDesktop.ListWindows(processId);
     }
 
     private static bool TryInvoke(

@@ -25,6 +25,7 @@ internal static class LogicalWindowBoundaryTests
         CheckAncestryAndTransient();
         CheckReparentAfterFocus();
         CheckTraversalBudget();
+        LogicalWindowTraversalTests.Run();
         CheckAmbiguousCandidateIsolation();
         CheckObservationRetry();
     }
@@ -219,7 +220,7 @@ internal static class LogicalWindowBoundaryTests
             node => { reads++; return node.First; },
             node => { reads++; return node.Next; }, gaps.Add);
         Check(budget.Used == 2 && records.SequenceEqual(new[] { root.Id }) &&
-            gaps.Contains("node_budget") && reads == 2,
+            gaps.Contains("node_budget") && reads == 1,
             "Rejected nodes consume budget; traversal neither descends them nor hides truncation.");
         records.Clear();
         gaps.Clear();
@@ -288,7 +289,7 @@ internal static class LogicalWindowBoundaryTests
         var timed = new OwnershipProbeBudget(5, TimeSpan.FromSeconds(1), () => elapsed);
         timed.Take();
         elapsed = TimeSpan.FromSeconds(2);
-        Throws<WindowOwnershipUnavailableException>(timed.Take);
+        Throws<ObservationDeadlineExceededException>(timed.Take);
     }
 
     private static void CheckAmbiguousCandidateIsolation()

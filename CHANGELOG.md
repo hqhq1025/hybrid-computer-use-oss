@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- Windows: `type` and `set_value` send Unicode key events instead of pasting
+  through the clipboard, so they no longer replace the clipboard or wait a
+  fixed half second; GUI keys wait for the application instead of 500 ms.
+- Windows: an observation reads each tree node and its facts in one UI
+  Automation call and reads the desktop's top-level windows once, so
+  Notepad, File Explorer, Settings and Edge observe three to five times
+  faster with the same tree.
+- Windows: observation reads stop at a shared 15-second budget and return
+  partial coverage instead of timing out (LibreOffice Calc), `apps` and observe
+  name LibreOffice windows whose accessibility bridge is not loaded, `close`
+  succeeds only when the window instance is gone. On every platform, an `act`
+  batch whose input ends with window waits reads only the window root between
+  its keys and reads the tree once at the end.
+- AX trees show a table cell's value after its name when the two differ,
+  for example `cell "A1" = "Year"` in a spreadsheet, clipped to 40
+  characters, so reading a sheet no longer needs `find`. A tree over its
+  budget now drops elements from the end of a long list or table instead
+  of replacing the whole list with one summary line.
+- Linux: AX `select` with an option name now changes the choice of GTK
+  and Qt combo boxes and succeeds only when the combo box shows that
+  option afterwards. For Qt, the provider moves the popup's current item
+  to the option and presses Return; otherwise the step reports
+  `effect_unknown`. `select` on an option of an open combo popup does the
+  same. A combo box's value now matches the choice it shows instead of an
+  option left highlighted in its popup.
+- Linux: AX element boxes, coordinate clicks, hit tests and scrolls land on
+  the element under a desktop scale (GTK, Qt, Firefox and Chromium browser
+  views at scale 2) and on LibreOffice 7.3 toolbars. AX `find` searches past
+  the observe budget (rows of a long web table) within its own time and
+  size caps, and a find page reports `coverage: partial` when a cap stopped
+  the search.
 - AX `act` takes a wait step `{"type":"wait","settle":true}` that needs no
   predicted state: after an input step it waits until the UI changes (windows,
   focus, or the window's tree) and stops changing, names what
