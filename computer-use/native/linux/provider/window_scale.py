@@ -14,8 +14,9 @@ import re
 import subprocess
 
 from .foundation import (
-    node_pid, provider_bus_name, provider_object_path, raw_extents, safe,
+    node_pid, provider_bus_name, provider_object_path, safe,
 )
+from .node_geometry import raw_extents
 from .x11_windows import (
     _x11_window_inventory_cache,
     normalize_x11_window_id,

@@ -7,14 +7,13 @@ from .foundation import (
     CLICK_COVERED_ACTIONS,
     NON_SELF_ACTIONS,
     OperationFailure,
-    screen_transform,
-    extents,
     frame,
     node_name,
     node_role,
     normalized_action,
     safe,
 )
+from .node_geometry import screen_transform, extents
 
 from .x11_windows import (
     desktop_bounds,

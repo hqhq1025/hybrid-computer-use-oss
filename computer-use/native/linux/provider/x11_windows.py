@@ -15,7 +15,6 @@ from .foundation import (
     OperationFailure,
     desktop,
     enumerate_children,
-    extents,
     frame,
     inventory_complete,
     inventory_errors,
@@ -27,6 +26,7 @@ from .foundation import (
     safe,
     state_contains,
 )
+from .node_geometry import extents
 from .a11y_enable import request_full_trees
 from .primitives import semantic_text_key
 

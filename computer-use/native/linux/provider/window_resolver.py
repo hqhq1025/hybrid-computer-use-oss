@@ -7,7 +7,6 @@ from .foundation import (
     AX_WINDOW_ACTION_TIMEOUT_SECONDS,
     AX_WINDOW_ROLES,
     OperationFailure,
-    extents,
     inventory_complete,
     node_name,
     node_pid,
@@ -16,6 +15,7 @@ from .foundation import (
     provider_bus_name,
     provider_object_path,
 )
+from .node_geometry import extents
 from . import action_evidence
 from .ax_records import effective_role
 from .x11_windows import (

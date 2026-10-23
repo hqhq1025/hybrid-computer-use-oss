@@ -43,6 +43,8 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/input_primitives.py",
 		"native/linux/provider/native_windows.py",
 		"native/linux/provider/node_facts.py",
+		"native/linux/provider/node_geometry.py",
+		"native/linux/provider/node_visibility.py",
 		"native/linux/provider/phase_timing.py",
 		"native/linux/provider/primitives.py",
 		"native/linux/provider/recovery.py",

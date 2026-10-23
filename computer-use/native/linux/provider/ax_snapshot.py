@@ -16,7 +16,6 @@ from .foundation import (
     MAX_ELEMENTS,
     MAX_RENDERED_CHARS,
     FIND_FIRST_BUDGET,
-    MENU_ROLES,
     TREE_DEADLINE_SECONDS,
     is_interactive_role,
     node_role,
@@ -25,9 +24,9 @@ from .foundation import (
     provider_object_path,
     safe,
     should_enumerate_children,
-    showing_state,
     state_contains,
 )
+from .node_visibility import MENU_ROLES, showing_state
 from .node_facts import (
     NodeFacts,
     strict_prune_probe,

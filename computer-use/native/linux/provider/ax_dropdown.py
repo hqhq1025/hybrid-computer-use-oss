@@ -16,11 +16,11 @@ from .foundation import (
     node_name,
     node_role,
     provider_object_path,
-    raw_extents,
     safe,
     should_enumerate_children,
     state_contains,
 )
+from .node_geometry import raw_extents
 from .ax_records import gtk_combo_partner
 from .ax_node_properties import committed_dropdown_value
 from .ax_actions import send_key
