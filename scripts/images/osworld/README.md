@@ -190,6 +190,7 @@ first-launch interface, then verify Writer, Spreadsheets and Presentation.
 | VS Code | Enables editor accessibility for the next application launch while preserving other JSON settings. |
 | Joplin | Installs the upstream AppImage contents with the Chromium sandbox enabled. |
 | REAPER | Selects the guest's PulseAudio backend. |
+| Thunderbird | Disables unsolicited donation, data-reporting and welcome pages through application defaults. Mail accounts, stored messages and network settings remain unchanged. |
 | WPS, MuseScore and Slicer | Save desktop preferences that suppress first-launch prompts and update checks. |
 | OpenBoard | Installs the selected Snap channel. The channel can advance independently of this manifest. |
 | Support | Installs NSS certificate tools and IBus bindings. Certificate import and the active desktop input source remain the deployment's responsibility. |
