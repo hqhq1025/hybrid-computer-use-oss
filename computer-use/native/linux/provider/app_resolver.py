@@ -4,6 +4,7 @@ from .foundation import (
     Atspi,
     OperationFailure,
     inventory_complete,
+    inventory_errors,
     node_name,
     node_pid,
     node_role,
@@ -19,7 +20,7 @@ from .atspi_inventory import (
 )
 from .snapshot import snapshot_digest, utc_timestamp
 from .a11y_enable import invisible_window_notes, untracked_window_notes
-from .native_windows import native_app_entries, native_only_windows
+from .native_windows import native_app_entries, native_only_windows, record_window_coverage
 from .x11_windows import (
     _x11_managed_windows,
     accessible_window_title,
@@ -76,6 +77,7 @@ def list_apps_inventory():
     # Titles of every AT-SPI top-level window, by process; see
     # untracked_window_notes.
     accessible_titles = {}
+    accessible_coverage = {}
     for app in sorted(
         apps,
         key=lambda item: (node_name(item).lower(), node_pid(item)),
@@ -101,8 +103,10 @@ def list_apps_inventory():
                 "reason": "The accessibility window inventory did not answer completely; missing windows remain unknown.",
             })
         if not windows:
+            record_window_coverage(accessible_coverage, app, windows)
             continue
         strong = strong_window_instance_handles(app, windows)
+        record_window_coverage(accessible_coverage, app, windows, strong)
         hidden = unmapped_window_indices(app, windows, strong)
         if hidden:
             windows = [item for item in windows if item[0] not in hidden]
@@ -186,11 +190,12 @@ def list_apps_inventory():
     native_entries = []
     if inventory_complete(apps) and inventory_complete(managed):
         accessible_pids = {node_pid(app) for app in apps}
-        # Windows of processes that are not on the bus are listed with a
-        # native handle, so they can be activated, closed and awaited; the
-        # note adds the restart advice when the toolkit can export a tree.
-        native_entries = native_app_entries(native_only_windows(
-            managed, accessible_pids, active_window_id))
+        # A registered application can expose no windows, or expose only
+        # some of them. Bind the remaining native windows independently.
+        native_windows = native_only_windows(
+            managed, accessible_coverage, active_window_id)
+        inventory_issues.extend({"reason": error} for error in inventory_errors(native_windows))
+        native_entries = native_app_entries(native_windows)
         lines.extend(entry["displayText"] for entry in native_entries)
         notes.extend(invisible_window_notes(managed, accessible_pids))
         if not unreadable:
