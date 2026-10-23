@@ -128,7 +128,9 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
     traversal are unchanged, but a kept node gets a record only when it can
     match the query or is the ancestor of one that can (see
     find_walk.FindFilter); the other kept nodes still count against the
-    node budget.
+    node budget. The walk skips what ``find.resume_after`` says an earlier
+    walk searched, and records in ``find.stop_path`` the first node it did
+    not visit because a budget or the deadline ran out.
     """
     records = []
     lines = []
@@ -156,6 +158,10 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
 
     def kept():
         return len(records) + light["count"]
+
+    def note_stop(path):
+        if find is not None:
+            find.note_stop(path)
 
     def emit(record, path, render_depth, node=None, facts=None):
         """Index, store and render a kept node's record."""
@@ -333,10 +339,13 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         """
         if node is None:
             return
+        if find is not None and find.relation(path) == "searched":
+            return
         if kept() >= max_tree_nodes:
             if node is not None:
                 dropped["count"] += 1
                 dropped["budget"] += 1
+                note_stop(path)
             if focus_probe is not None:
                 focus_probe.skipped()
             return
@@ -351,6 +360,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         if budget["chars"] >= max_rendered_chars:
             dropped["count"] += 1
             dropped["chars"] += 1
+            note_stop(path)
             if focus_probe is not None:
                 focus_probe.skipped()
             return
@@ -360,6 +370,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         if deadline is not None and records and time.monotonic() >= deadline:
             dropped["count"] += 1
             dropped["time"] += 1
+            note_stop(path)
             if focus_probe is not None:
                 focus_probe.skipped()
             return
@@ -625,6 +636,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                     )
                     dropped["count"] += remaining
                     dropped["budget"] += remaining
+                    # Children are enumerated in index order.
+                    note_stop(path + [child_slots_seen])
                     break
                 try:
                     child_index, child = next(child_iterator)
@@ -742,15 +755,18 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             if not children_allowed:
                 return
             child_iterator = iter(children)
+            child_slots_seen = 0
             while True:
                 if kept() >= max_tree_nodes:
                     dropped["count"] += 1
                     dropped["budget"] += 1
+                    note_stop(path + [child_slots_seen])
                     break
                 try:
                     child_index, child = next(child_iterator)
                 except StopIteration:
                     break
+                child_slots_seen += 1
                 if child is None:
                     continue
                 visit(

@@ -100,6 +100,9 @@ type ProviderObservationOptions struct {
 	// FindQuery goes with FindWalk: the provider builds full records only
 	// for nodes that can match it and for their ancestors.
 	FindQuery *ProviderFindQuery `json:"find_query,omitempty"`
+	// FindResumeAfter continues a walk of the same query and window from
+	// the AppSnapshot.FindResume it reported.
+	FindResumeAfter []int `json:"find_resume_after,omitempty"`
 }
 
 // ProviderFindQuery is the name and text part of an AX find query. The

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux provider AX find walk: query prefilter and candidate records."""
+"""Linux provider AX find walk: query prefilter, candidate records, resume."""
 
 from runtime_test_support import *  # noqa: F401,F403
 
@@ -89,6 +89,7 @@ class FindWalkCandidateTests(AtspiPatchedTestCase):
         find = _query(name="Item 3")
         _walk(_table(20), find=find)
         self.assertTrue(find.candidates_only)
+        self.assertTrue(find_walk.FindWalk(resume_after=[0, 1]).candidates_only)
 
     def test_text_query_matches_value_description_and_name(self):
         root = _table(20)
@@ -148,25 +149,95 @@ class FindFilterFoldTests(unittest.TestCase):
             "Item 20", str, str, str))
 
 
+class FindWalkResumeTests(AtspiPatchedTestCase):
+    def test_resumed_walks_cover_the_window_once(self):
+        root = _table(60)
+        full, _lines, _annotations = _walk(root)
+        expected = [record["name"] for record in full
+                    if record["name"].startswith("Item 1")]
+        found = []
+        resume = None
+        for _attempt in range(40):
+            find = find_walk.FindWalk(
+                find_walk.FindFilter(name="Item 1"), resume)
+            records, _lines, _annotations = _walk(
+                root, find=find, max_tree_nodes=25)
+            found += [record["name"] for record in records
+                      if record["name"].startswith("Item 1")]
+            if find.stop_path is None:
+                break
+            self.assertTrue(resume is None or find.stop_path > resume)
+            resume = find.stop_path
+        self.assertIsNone(find.stop_path)
+        self.assertEqual(found, expected)
+
+    def test_walk_stopped_by_the_deadline_resumes_where_it_stopped(self):
+        root = _table(30)
+        expected = [record["name"] for record in _walk(root)[0]
+                    if record["name"].startswith("Open")]
+        clock = [0.0]
+
+        def tick():
+            clock[0] += 1.0
+            return clock[0]
+
+        found, resume = [], None
+        with mock.patch.object(ax_snapshot.time, "monotonic", tick):
+            for _attempt in range(40):
+                find = find_walk.FindWalk(
+                    find_walk.FindFilter(name="Open"), resume)
+                records, _lines, annotations = _walk(
+                    root, find=find, deadline_seconds=40)
+                found += [record["name"] for record in records
+                          if record["name"].startswith("Open")]
+                if find.stop_path is None:
+                    break
+                self.assertIn("time", annotations[0]["reason"])
+                resume = find.stop_path
+        self.assertIsNotNone(resume)
+        self.assertEqual(found, expected)
+
+    def test_walk_within_its_caps_reports_no_stop(self):
+        find = _query(name="Item 1")
+        _walk(_table(10), find=find)
+        self.assertIsNone(find.stop_path)
+
+    def test_resume_relation(self):
+        find = find_walk.FindWalk(resume_after=[0, 2, 5])
+        self.assertEqual(find.relation([0]), "ancestor")
+        self.assertEqual(find.relation([0, 2]), "ancestor")
+        self.assertEqual(find.relation([0, 1, 9]), "searched")
+        self.assertEqual(find.relation([0, 2, 4, 7]), "searched")
+        self.assertEqual(find.relation([0, 2, 5]), "new")
+        self.assertEqual(find.relation([0, 2, 5, 0]), "new")
+        self.assertEqual(find.relation([0, 3]), "new")
+
+
 class FindWalkWireTests(unittest.TestCase):
     def _validate(self, observation):
         wire_request._validate_observation(observation, "observation")
 
-    def test_find_query_needs_find_walk(self):
-        with self.assertRaises(wire_request.ProviderRequestError):
-            self._validate({"find_query": {"name": "x"}})
+    def test_find_fields_need_find_walk(self):
+        for observation in ({"find_query": {"name": "x"}},
+                            {"find_resume_after": [0, 1]}):
+            with self.assertRaises(wire_request.ProviderRequestError):
+                self._validate(observation)
 
     def test_find_fields_are_typed(self):
         for observation in (
             {"find_walk": True, "find_query": {"name": 3}},
             {"find_walk": True, "find_query": {"role": "button"}},
             {"find_walk": True, "find_query": {"name_exact": "yes"}},
+            {"find_walk": True, "find_resume_after": []},
+            {"find_walk": True, "find_resume_after": [0, -1]},
+            {"find_walk": True, "find_resume_after": [0, True]},
         ):
             with self.assertRaises(wire_request.ProviderRequestError):
                 self._validate(observation)
         self._validate({"find_walk": True,
                         "find_query": {"name": "x", "name_exact": True,
-                                       "text": "", "text_exact": False}})
+                                       "text": "", "text_exact": False},
+                        "find_resume_after": [0, 3, 1]})
 
     def test_observe_passes_the_find_fields(self):
         seen = {}
@@ -178,6 +249,8 @@ class FindWalkWireTests(unittest.TestCase):
         with mock.patch.object(ax_dispatch, "build_snapshot", build):
             response = ax_dispatch._observe_operation(
                 {"app": "Editor"},
-                {"find_walk": True, "find_query": {"name": "x"}})
+                {"find_walk": True, "find_query": {"name": "x"},
+                 "find_resume_after": [0, 4]})
         self.assertEqual(seen["find_query"], {"name": "x"})
+        self.assertEqual(seen["find_resume_after"], [0, 4])
         self.assertNotIn("notes", response)

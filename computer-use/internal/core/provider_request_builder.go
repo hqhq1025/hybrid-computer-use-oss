@@ -100,6 +100,7 @@ func providerObservationOptionsFromOperation(
 		IncludeScreenshot: &noImage,
 		FindWalk:          operation.FindWalk,
 		FindQuery:         operation.FindQuery,
+		FindResumeAfter:   operation.FindResumeAfter,
 		CaptureSnapshot:   captureSnapshot,
 	}
 }

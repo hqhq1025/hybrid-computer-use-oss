@@ -320,6 +320,7 @@ def build_snapshot(
     reuse_tree=False,
     find_walk=False,
     find_query=None,
+    find_resume_after=None,
 ):
     """Build an application snapshot.
 
@@ -331,9 +332,11 @@ def build_snapshot(
     ``find_walk=True`` walks with the AX find caps (FIND_WALK_LIMITS)
     instead of the render budget; see FIND_WALK_MAX_RECORDS. The snapshot
     then holds records only for nodes that can match ``find_query`` (the
-    wire ``find_query`` object) and their ancestors; see find_walk. A find
-    walk is never reused or stored for reuse: its records depend on the
-    query.
+    wire ``find_query`` object) and their ancestors; see find_walk. A walk
+    that ran out of budget or time reports the first node it did not visit
+    as ``findResume``; passing it back as ``find_resume_after`` continues
+    there. A find walk is never reused or stored for reuse: its records
+    depend on the query.
 
     The snapshot carries no image. AX observe=full/screenshot returns the
     full-desktop GUI frame, which the Go core captures through the desktop
@@ -376,7 +379,7 @@ def build_snapshot(
         bounds, title, child_count(window), window_selection
     )
     find = (
-        FindWalk(FindFilter.from_wire(find_query))
+        FindWalk(FindFilter.from_wire(find_query), find_resume_after)
         if find_walk else None
     )
     if find is not None:
@@ -482,6 +485,8 @@ def build_snapshot(
         # a selector that is unique among candidates need not be unique in
         # the window.
         snapshot["findCandidatesOnly"] = True
+    if find is not None and find.stop_path is not None:
+        snapshot["findResume"] = find.stop_path
     lap("snapshot.inventory_and_notes")
     return snapshot
 

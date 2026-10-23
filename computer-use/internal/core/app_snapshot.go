@@ -177,6 +177,9 @@ type AppSnapshot struct {
 	// a complete identity inventory, so refs minted from it are bound to
 	// provider objects instead of selectors.
 	FindCandidatesOnly bool `json:"findCandidatesOnly,omitempty"`
+	// FindResume is the runtime path of the first node a Linux find walk
+	// did not visit because a budget or its deadline ran out.
+	FindResume []int `json:"findResume,omitempty"`
 
 	// The fields below are set by the Go service when the snapshot is cached;
 	// the provider does not send them. Snapshot age matters on the desktop:
@@ -222,6 +225,9 @@ type AppSnapshot struct {
 	externalDesktopTransition bool
 	// actedRef is the rN targeted by the action that produced this snapshot.
 	actedRef string
+	// findResume continues the find walk that read this snapshot; see
+	// ax_find_resume.go.
+	findResume *axFindResume
 }
 
 type TopLevelWindow struct {

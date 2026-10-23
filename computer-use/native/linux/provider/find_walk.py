@@ -116,12 +116,14 @@ def candidate_record(find, node, facts, path, window_bounds, text_limit,
 
     A named node that light_record_eligible() admits is checked from the
     probe's name and the fields a text query reads, and gets its record
-    only as a candidate. Any other node is checked on its full record.
-    ``probe_role`` is None when the walk did not probe the node.
+    only as a candidate. Any other node is checked on its full record. An
+    ancestor of the resume node is never a candidate. ``probe_role`` is None
+    when the walk did not probe the node.
     """
+    may_match = find.relation(path) == "new"
     if probe_role is not None and light_record_eligible(
             probe_role, facts.value("name", "")):
-        candidate = find.query.matches(
+        candidate = may_match and find.query.matches(
             probe_name,
             lambda: node_description(node, text_limit=text_limit, facts=facts),
             lambda: element_value(node, text_limit=text_limit, role=probe_role),
@@ -134,7 +136,7 @@ def candidate_record(find, node, facts, path, window_bounds, text_limit,
                           text_limit=text_limit, facts=facts), True
     record = record_for(node, None, path, window_bounds,
                         text_limit=text_limit, facts=facts)
-    return record, find.query.matches(
+    return record, may_match and find.query.matches(
         record["name"],
         lambda: record["description"],
         lambda: record["value"],
@@ -167,7 +169,7 @@ def repeats_parent_text(facts, parent_text, text_limit):
         return False
 
 
-FIND_WALK_FIELDS = {"find_query"}
+FIND_WALK_FIELDS = {"find_query", "find_resume_after"}
 FIND_QUERY_FIELDS = {"name": str, "name_exact": bool, "text": str,
                      "text_exact": bool}
 
@@ -175,30 +177,71 @@ FIND_QUERY_FIELDS = {"name": str, "name_exact": bool, "text": str,
 def find_fields_problem(observation):
     """Return what is wrong with the find fields of an observation, or ""."""
     query = observation.get("find_query")
-    if query is None:
+    resume = observation.get("find_resume_after")
+    if query is None and resume is None:
         return ""
     if observation.get("find_walk") is not True:
-        return ".find_query requires find_walk"
-    if not isinstance(query, dict) or any(
+        return ".find_query and find_resume_after require find_walk"
+    if resume is not None and (
+        not isinstance(resume, list) or not resume
+        or any(not isinstance(part, int) or isinstance(part, bool)
+               or part < 0 for part in resume)
+    ):
+        return ".find_resume_after must be a non-empty runtime path"
+    if query is not None and (not isinstance(query, dict) or any(
             field not in FIND_QUERY_FIELDS
             or not isinstance(value, FIND_QUERY_FIELDS[field])
-            for field, value in query.items()):
+            for field, value in query.items())):
         return (".find_query takes only the strings name and text and the "
                 "booleans name_exact and text_exact")
     return ""
 
 
 class FindWalk:
-    """State of one find walk: its query and what render_tree left out."""
+    """State of one find walk: its query, where it resumes, where it stopped.
 
-    __slots__ = ("query", "records_omitted")
+    ``resume_after`` is the runtime path of the first node an earlier walk
+    of the same query did not visit; this walk skips the nodes the earlier
+    one visited. render_tree sets ``stop_path`` to the first node this walk
+    did not visit because the node or character budget or the deadline ran
+    out. Those limits only tighten as a walk goes on, so every later node in
+    pre-order was left out too, and a walk resuming there misses nothing
+    this one skipped for those reasons.
+    """
 
-    def __init__(self, query=None):
+    __slots__ = ("query", "resume_after", "stop_path", "records_omitted")
+
+    def __init__(self, query=None, resume_after=None):
         self.query = query if query is not None else FindFilter()
+        self.resume_after = (
+            [int(part) for part in resume_after]
+            if resume_after is not None else None)
+        self.stop_path = None
         # Kept nodes the walk returned no record for; set by render_tree.
         self.records_omitted = 0
 
     @property
     def candidates_only(self):
         """Whether the records leave out kept nodes of the walked range."""
-        return bool(self.records_omitted)
+        return bool(self.records_omitted) or self.resume_after is not None
+
+    def relation(self, path):
+        """Place ``path`` relative to the node where the walk resumes.
+
+        Return "searched" for a node an earlier walk already visited in
+        pre-order, "ancestor" for an ancestor of the resume node (visited
+        again only to reach it, never a candidate), and "new" otherwise.
+        """
+        resume = self.resume_after
+        if resume is None:
+            return "new"
+        path = list(path)
+        if len(path) < len(resume) and resume[:len(path)] == path:
+            return "ancestor"
+        if path < resume:
+            return "searched"
+        return "new"
+
+    def note_stop(self, path):
+        if self.stop_path is None:
+            self.stop_path = [int(part) for part in path]

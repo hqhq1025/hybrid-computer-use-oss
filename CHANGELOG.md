@@ -7,6 +7,10 @@
   3000-row web table is searched to the end within the walk's time limit.
   A match carries the same ref, role, name and value as in an observation;
   its context lists its ancestors only.
+- Linux: an AX `find` walk that stops at its node, size or time limit
+  returns `next_cursor`, also with zero matches. Continuing it searches the
+  same window from the element where the walk stopped, without repeating
+  earlier matches.
 - Windows: `type` and `set_value` send Unicode key events instead of pasting
   through the clipboard, so they no longer replace the clipboard or wait a
   fixed half second; GUI keys wait for the application instead of 500 ms.

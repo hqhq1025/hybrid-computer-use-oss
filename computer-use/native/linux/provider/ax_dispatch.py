@@ -231,6 +231,7 @@ def _observe_operation(operation, observation):
         reuse_tree=True,
         find_walk=observation.get("find_walk") is True,
         find_query=observation.get("find_query"),
+        find_resume_after=observation.get("find_resume_after"),
     )
     response = {"ok": True, "snapshot": snapshot}
     lap("observe_snapshot")
