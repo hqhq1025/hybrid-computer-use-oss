@@ -7,6 +7,10 @@ from .foundation import (
     BUDGET_PRESSURE_RATIO,
     DEFAULT_TEXT_LIMIT,
     MAX_CHILD_FANOUT,
+    FIND_WALK_DEADLINE_SECONDS,
+    FIND_WALK_MAX_CHILD_FANOUT,
+    FIND_WALK_MAX_RECORDS,
+    FIND_WALK_MAX_RENDERED_CHARS,
     MAX_DEPTH,
     MAX_ELEMENTS,
     MAX_RENDERED_CHARS,
@@ -94,11 +98,20 @@ class FocusProbe:
         return self.state in (self.FOUND, self.NONE)
 
 
+FIND_WALK_LIMITS = {
+    "max_tree_nodes": FIND_WALK_MAX_RECORDS,
+    "max_rendered_chars": FIND_WALK_MAX_RENDERED_CHARS,
+    "max_child_fanout": FIND_WALK_MAX_CHILD_FANOUT,
+    "deadline_seconds": FIND_WALK_DEADLINE_SECONDS,
+}
+
+
 def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 boxes=True, indexer=None,
                 max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, prune=True,
                 max_rendered_chars=MAX_RENDERED_CHARS,
                 deadline_seconds=TREE_DEADLINE_SECONDS,
+                max_child_fanout=MAX_CHILD_FANOUT,
                 focus_probe=None, content_probe=None):
     """Render one window subtree; return ``(records, lines, annotations)``.
 
@@ -168,7 +181,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             def unknown_children():
                 consecutive_errors = 0
                 reached_cap = True
-                for child_index in range(MAX_CHILD_FANOUT):
+                for child_index in range(max_child_fanout):
                     try:
                         child = node.get_child_at_index(child_index)
                     except IndexError:
@@ -198,7 +211,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
 
         if not should_enumerate_children(node, count, facts=facts):
             return iter(()), False, count
-        fanout = min(count, MAX_CHILD_FANOUT)
+        fanout = min(count, max_child_fanout)
         if count > fanout:
             excess = count - fanout
             dropped["count"] += excess
@@ -709,7 +722,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             reasons.append(
                 "{} child root(s) not traversed because a container exceeded "
                 "MAX_CHILD_FANOUT={}; omitted subtrees are absent from this snapshot"
-                .format(dropped["fanout"], MAX_CHILD_FANOUT))
+                .format(dropped["fanout"], max_child_fanout))
         lines.append("({} node(s) omitted — {})".format(
             dropped["count"], "; ".join(reasons) if reasons else "cause not recorded"))
         annotations.append({

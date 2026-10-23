@@ -26,7 +26,10 @@ type AXServiceRequest struct {
 	CaptureSnapshot    *bool                  `json:"-"`
 	// LightReadback limits the post-action read to the window root. It is
 	// not part of the projection, so later reads keep their own limits.
-	LightReadback   bool                  `json:"-"`
+	LightReadback bool `json:"-"`
+	// FindWalk is request-local, like LightReadback: it is not part of the
+	// projection, so reads after a find use their own limits.
+	FindWalk        bool                  `json:"-"`
 	TreeView        string                `json:"-"`
 	Scope           string                `json:"-"`
 	ObservationRoot map[string]any        `json:"-"`

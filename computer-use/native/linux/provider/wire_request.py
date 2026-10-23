@@ -58,6 +58,7 @@ OBSERVATION_FIELDS = {
     "boxes",
     "include_screenshot",
     "capture_snapshot",
+    "find_walk",
 }
 APP_IDENTITY_FIELDS = {"providerBusName", "processGeneration"}
 EXPECTED_WINDOW_FIELDS = {
@@ -227,7 +228,8 @@ def _validate_observation(value, path):
                 "invalid_provider_request",
                 "{}.{} must be a non-negative integer".format(path, field),
             )
-    for field in ("prune", "boxes", "include_screenshot", "capture_snapshot"):
+    for field in ("prune", "boxes", "include_screenshot", "capture_snapshot",
+                  "find_walk"):
         field_value = observation.get(field)
         if field_value is not None and not isinstance(field_value, bool):
             raise ProviderRequestError(

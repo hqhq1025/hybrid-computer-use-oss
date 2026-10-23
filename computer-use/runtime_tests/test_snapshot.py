@@ -100,6 +100,56 @@ class _CountingNode(_TreeNode):
         return super().get_process_id()
 
 
+class FindWalkTests(AtspiPatchedTestCase):
+    """AX find walks the window with its own caps, not the render budget."""
+
+    def _wide_list(self, count):
+        items = [_TreeNode(role="list item", name="Item %d" % index, y=index)
+                 for index in range(count)]
+        return _TreeNode(role="frame", name="Window", w=100, h=100,
+                         kids=(_TreeNode(role="list", w=100, h=100, kids=items),))
+
+    def _names(self, **limits):
+        records, _lines, annotations = runtime.render_tree(
+            self._wide_list(700), None, [0],
+            indexer=runtime.StableIndexer({}), **limits)
+        return {record["name"] for record in records}, annotations
+
+    def test_find_walk_reaches_children_past_the_render_caps(self):
+        names, annotations = self._names()
+        self.assertNotIn("Item 699", names)
+        self.assertTrue(annotations)
+        names, annotations = self._names(**ax_snapshot.FIND_WALK_LIMITS)
+        self.assertIn("Item 699", names)
+        reasons = ",".join(str(annotation.get("reason")) for annotation in annotations)
+        for cap in ("fanout", "budget", "chars", "time"):
+            self.assertNotIn(cap, reasons)
+
+    def test_find_walk_marks_the_tree_partial_at_its_own_cap(self):
+        limits = dict(ax_snapshot.FIND_WALK_LIMITS, max_tree_nodes=50)
+        names, annotations = self._names(**limits)
+        self.assertNotIn("Item 699", names)
+        self.assertTrue(any(
+            annotation.get("kind") == "provider_omission"
+            for annotation in annotations))
+
+    def test_observe_request_selects_the_find_walk(self):
+        seen = []
+
+        class Stop(Exception):
+            pass
+
+        def build(*args, **kwargs):
+            seen.append(kwargs.get("find_walk"))
+            raise Stop()
+
+        with mock.patch.object(ax_dispatch, "build_snapshot", build):
+            for observation in ({}, {"find_walk": True}):
+                with self.assertRaises(Stop):
+                    ax_dispatch._observe_operation({"app": "Editor"}, observation)
+        self.assertEqual(seen, [False, True])
+
+
 class SingleReadPerNodeTests(AtspiPatchedTestCase):
     """Each provider field is read at most once per node per snapshot.
 

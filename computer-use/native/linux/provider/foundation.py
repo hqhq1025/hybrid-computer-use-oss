@@ -554,6 +554,16 @@ HARD_CHILD_CAP = 4096
 # MANAGES_DESCENDANTS.
 MAX_CHILD_FANOUT = 512
 
+# AX find walks the window with its own caps. Find returns matches, not the
+# tree, so the render caps above (records, characters, fan-out) would hide
+# rows of a long list or web table that find must search. The walk is still
+# bounded in records, fan-out and time; when a cap stops it, the snapshot
+# carries the usual omission annotation and find reports partial coverage.
+FIND_WALK_MAX_RECORDS = 20000
+FIND_WALK_MAX_RENDERED_CHARS = 1000000
+FIND_WALK_MAX_CHILD_FANOUT = HARD_CHILD_CAP
+FIND_WALK_DEADLINE_SECONDS = 8.0
+
 # Containers that declare MANAGES_DESCENDANTS are still enumerated when they
 # report at most this many children. The state hints that a container may be
 # large; it does not prove it. The Nautilus sidebar declares it with only 12

@@ -25,7 +25,7 @@ from .foundation import (
     state_contains,
 )
 
-from .ax_snapshot import FocusProbe, render_tree
+from .ax_snapshot import FIND_WALK_LIMITS, FocusProbe, render_tree
 from .tree_reuse import (
     ContentProbe,
     RecordingIndexer,
@@ -317,6 +317,7 @@ def build_snapshot(
     app_identity=None,
     target_window_handle=None,
     reuse_tree=False,
+    find_walk=False,
 ):
     """Build an application snapshot.
 
@@ -324,6 +325,9 @@ def build_snapshot(
     earlier walk instead of walking it again; see tree_reuse for the checks.
     Every walk, reused or not, may be reused later. Post-action snapshots
     pass False so that the tree after an action is always read fresh.
+
+    ``find_walk=True`` walks with the AX find caps (FIND_WALK_LIMITS)
+    instead of the render budget; see FIND_WALK_MAX_RECORDS.
 
     The snapshot carries no image. AX observe=full/screenshot returns the
     full-desktop GUI frame, which the Go core captures through the desktop
@@ -360,6 +364,7 @@ def build_snapshot(
         max_tree_depth,
         bool(prune),
         bool(boxes),
+        bool(find_walk),
     )
     fingerprint = window_fingerprint(
         bounds, title, child_count(window), window_selection
@@ -383,18 +388,22 @@ def build_snapshot(
         indexer = RecordingIndexer(known_refs)
         focus_probe = FocusProbe()
         content_probe = ContentProbe(text_limit)
+        limits = (
+            FIND_WALK_LIMITS if find_walk
+            else {"max_tree_nodes": max_tree_nodes}
+        )
         records, lines, annotations = render_tree(
             window,
             bounds,
             [window_index],
             text_limit=text_limit,
-            max_tree_nodes=max_tree_nodes,
             max_tree_depth=max_tree_depth,
             prune=prune,
             boxes=boxes,
             indexer=indexer,
             focus_probe=focus_probe,
             content_probe=content_probe,
+            **limits,
         )
         if walk is not None and walk_is_reusable(annotations):
             try:

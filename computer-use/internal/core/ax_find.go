@@ -168,6 +168,9 @@ func (s *Service) findMatches(
 	if len(targetWindowHandle) > 0 {
 		request.TargetWindowHandle = strings.TrimSpace(targetWindowHandle[0])
 	}
+	// The Linux provider can search past the render budget; see
+	// ProviderObservationOptions.FindWalk.
+	request.FindWalk = s.platformBackend().HostInfo().Platform == "linux"
 	snapshot, notes, result := s.refreshProjectedSnapshot(app, request)
 	if result.IsError {
 		return nil, result
