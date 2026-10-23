@@ -402,7 +402,9 @@ class _Builders:
     def wait(self, step, window_ref=None, observe="none"):
         """Wait without input: an act with one wait step, for example
         d.wait({"window": "Save"}) or d.wait({"ref": "r3", "state": "checked"}).
-        A step that does not hold raises hcu.WaitTimeout."""
+        A step that does not hold raises hcu.WaitTimeout. {"settle": True}
+        needs an input step before it: pass it as wait= of an input helper,
+        e.g. d.click("r4", wait={"settle": True})."""
         args = {"mode": "act", "actions": [_wait_step(step)], "observe": observe}
         if window_ref:
             args["window_ref"] = window_ref

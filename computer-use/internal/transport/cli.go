@@ -770,9 +770,9 @@ from standard input and --json @FILE from a file.
 Options: --session NAME (or HCU_SESSION), --socket PATH (or HCU_SOCKET),
 --request-id ID (act retries return the first result), --since SNAPSHOT_ID.
 Input commands also take --window wN, --as none|diff|tree, and --wait STEP_JSON:
-one wait step, e.g. '{"window":"Save"}' or '{"ref":"r3","state":"checked"}',
-that runs after the action; it fails with exit 3 (wait_timeout) when it does
-not hold.
+one wait step, e.g. '{"window":"Save"}', '{"ref":"r3","state":"checked"}', or
+'{"settle":true}' (any change, then quiet) that runs after the action; it
+fails with exit 3 (wait_timeout) when it does not hold.
 
 Exit status:
 `)

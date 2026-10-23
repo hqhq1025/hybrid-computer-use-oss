@@ -117,7 +117,7 @@ var axActionFields = map[string][]string{
 	"scroll":    {"ref", "direction", "pages"},
 	"activate":  {"ref", "title"},
 	"close":     {"ref", "title"},
-	"wait":      {"window", "query", "ref", "value", "state", "text", "gone", "timeout_ms"},
+	"wait":      {"window", "query", "ref", "value", "state", "text", "gone", "settle", "timeout_ms"},
 }
 
 // axRenamedFields maps field names from earlier interfaces, and names models
@@ -338,6 +338,11 @@ func decodeAXActions(raw any) ([]axBatchAction, *axArgError) {
 		totalText += len([]rune(action.text)) + len([]rune(action.value))
 		if totalText > contract.AXBatchMaxText {
 			return nil, axInvalid(path, fmt.Sprintf("text and value together are limited to %d characters per call", contract.AXBatchMaxText), "").withRule(contract.ArgumentRuleTextBudget)
+		}
+		if action.wait != nil && action.wait.settle && !axBatchHasInputBefore(actions) {
+			return nil, axInvalid(path, "settle waits for the change after an earlier step of this call; put it after an action",
+				`{"mode":"act","actions":[{"type":"click","ref":"r1"},{"type":"wait","settle":true}]}`).
+				withRule(axRuleRequiredForType)
 		}
 		if action.wait != nil {
 			totalWait += action.wait.timeoutMS

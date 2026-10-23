@@ -36,6 +36,7 @@ var cliGolden = []struct {
 	{"read r1 r2", "AX", `{"mode":"read","refs":["r1","r2"]}`},
 	{"click r41", "AX", `{"mode":"act","actions":[{"type":"click","ref":"r41"}]}`},
 	{`click r41 --wait {"ref":"r41","state":"checked"}`, "AX", `{"mode":"act","actions":[{"type":"click","ref":"r41"},{"type":"wait","ref":"r41","state":"checked"}]}`},
+	{`click r41 --wait {"settle":true}`, "AX", `{"mode":"act","actions":[{"type":"click","ref":"r41"},{"type":"wait","settle":true}]}`},
 	{`act --json {"actions":[{"type":"keypress","keys":["CTRL","O"]}]} --wait {"window":"Open"}`, "AX", `{"mode":"act","actions":[{"type":"keypress","keys":["CTRL","O"]},{"type":"wait","window":"Open"}]}`},
 	{"type r2 hello", "AX", `{"mode":"act","actions":[{"type":"type","ref":"r2","text":"hello"}]}`},
 	{"type hello --window w1", "AX", `{"mode":"act","actions":[{"type":"type","text":"hello"}],"window_ref":"w1"}`},

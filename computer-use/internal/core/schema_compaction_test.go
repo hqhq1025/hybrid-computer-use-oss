@@ -467,7 +467,7 @@ func TestAXSchemaSurvivesClientCompaction(t *testing.T) {
 	properties := visible["properties"].(map[string]any)
 	actionFields := properties["actions"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
 	for _, field := range []string{"type", "ref", "title", "text", "keys", "value", "direction", "pages",
-		"window", "query", "state", "gone", "timeout_ms"} {
+		"window", "query", "state", "gone", "settle", "timeout_ms"} {
 		if _, ok := actionFields[field]; !ok {
 			t.Fatalf("action field %q is not visible after normalization: %v", field, contract.SortedKeys(actionFields))
 		}

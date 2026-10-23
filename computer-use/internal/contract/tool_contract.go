@@ -236,6 +236,7 @@ func axInputSchema() map[string]any {
 						"query":     map[string]any{"$ref": "#/$defs/query"},
 						"state":     nonBlankString("wait: ref state, e.g. checked."),
 						"gone":      map[string]any{"type": "boolean", "description": "wait until it is absent."},
+						"settle":    map[string]any{"type": "boolean", "description": "wait: true waits until the UI changes after the step before it, then stops changing."},
 						"timeout_ms": map[string]any{
 							"type": "integer", "minimum": 1, "maximum": MaxVerifyTimeout,
 							"description": "wait: default 5000.",
@@ -426,8 +427,10 @@ const axToolDescription = "Accessibility for application windows. Modes: " +
 	"without ref go to the focused window. select marks ref, its text substring, or ref..to_ref " +
 	"(paragraphs, cells) and reports the selection read back. activate/close take a title substring or wN. " +
 	"A wait step sends no input and fails the batch on timeout: window (title, any app), " +
-	"query (as find), ref with value/state/text, or text; gone inverts. After a window " +
-	"wait, keys go to that window. Skip waits the report answers. Errors return code and " +
+	"query (as find), ref with value/state/text, or text; gone inverts. settle needs no " +
+	"prediction: it waits until the UI changes after the step before it and stops changing; " +
+	"it fails only if nothing changed. After a window wait, keys go to that window, after " +
+	"settle to the focused one. Skip waits the report answers. Errors return code and " +
 	"hint. Examples:\n" +
 	`{"mode":"act","actions":[{"type":"click","ref":"r12"},{"type":"wait","window":"Export"},{"type":"type","text":"q3.csv"},{"type":"keypress","keys":["ENTER"]}]}` + "\n" +
 	`{"mode":"find","window_ref":"w2","query":{"role":"button","name_contains":"Save"}}`
