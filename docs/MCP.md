@@ -410,10 +410,17 @@ expanded. Find and query waits accept the roles and states shown in the tree.
 A zero-result find lists at most five nearby candidates; these suggestions
 do not change the query or send input.
 
+A table cell whose value differs from its name shows the value after the
+name, for example `cell "A1" = "Year"` in a spreadsheet, where cells are
+named by address. The tree shows at most 40 Unicode code points of it, plus
+an ellipsis when clipped. When a tree exceeds its budget, a long run of
+sibling elements loses elements from its end first, so a table keeps its
+first rows; one `/omitted: "budget nodes=N ..."` line counts the rest.
+
 Find matches include a `text` excerpt when their role's value is absent from
-the rendered fields, as with paragraphs and cells. The excerpt contains at
-most 80 Unicode code points, plus an ellipsis when clipped. Clipped excerpts
-also carry `text_truncated=true`. Text already displayed in a name, property,
+the rendered fields, as with paragraphs and clipped cell values. The excerpt
+contains at most 80 Unicode code points, plus an ellipsis when clipped.
+Clipped excerpts also carry `text_truncated=true`. Text already displayed in a name, property,
 or matched-text field is not repeated. Excerpts are display-only and do not
 change canonical text, selectors, refs, or the response budget.
 
@@ -497,6 +504,11 @@ A `select` step selects without typing or clicking:
 - `"to_ref":"rB"` selects from the start of `rA` through the end of `rB`, for
   two cells of one table or two sibling text elements such as Writer
   paragraphs.
+- On a combo box or list box, `"text"` chooses the option with that name. On
+  an option of an open combo box popup, `{"ref":"rA"}` chooses that option.
+  A combo box that names itself after its choice, as in GTK and Qt, must
+  show the option afterwards; a Qt popup is committed by moving its current
+  item to the option and pressing Return.
 
 The provider reads the selection back and reports it as a note, for example
 `[select] selected 4 cells A2:B3`. It fails with `effect_unknown` when it

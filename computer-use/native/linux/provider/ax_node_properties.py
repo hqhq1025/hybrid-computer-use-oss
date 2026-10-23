@@ -124,7 +124,7 @@ def numeric_value(node):
 SELECTION_SCAN_BUDGET = 200
 
 
-def selected_option_name(node):
+def selected_option_name(node, shown=""):
     """Return the name of the dropdown's selected option, or "".
 
     Without it, dropdown values are invisible in the tree: Chrome's print
@@ -141,23 +141,35 @@ def selected_option_name(node):
     Some dropdowns expose no selection (Chrome's "Layout" combo box, for
     example). In that case return an empty string rather than guess: a
     missing value is better than an invented one.
+
+    ``shown`` is the text the dropdown shows itself: GTK and Qt combo boxes
+    name themselves after their current choice. An option with that name
+    is the choice. Their SELECTED states are not: GTK keeps it on the popup
+    item highlighted first, Qt on an item toggled without being committed.
     """
     if node is None:
         return ""
     stack = [node]
     seen = 0
+    selected = ""
     while stack and seen < SELECTION_SCAN_BUDGET:
         current = stack.pop()
         seen += 1
-        if current is not node and state_contains(current, Atspi.StateType.SELECTED):
-            name = str(node_name(current) or "").strip()
-            if name:
-                return name
+        if current is not node:
+            is_selected = state_contains(current, Atspi.StateType.SELECTED)
+            name = (str(node_name(current) or "").strip()
+                    if shown or is_selected else "")
+            if shown and name == shown:
+                return shown
+            if is_selected and name and not selected:
+                if not shown:
+                    return name
+                selected = name
         for index in range(min(child_count(current), 100)):
             child = safe(lambda: current.get_child_at_index(index))
             if child is not None:
                 stack.append(child)
-    return ""
+    return selected
 
 
 # Maximum embedded objects read to build an editor's value.
@@ -223,7 +235,8 @@ def element_value(node, text_limit=DEFAULT_TEXT_LIMIT, role=None):
         role = node_role(node)
     role = str(role or "")
     if role in ("combo box", "list box"):
-        return limit_text(selected_option_name(node), text_limit=text_limit)
+        shown = str(node_name(node) or "").strip() if role == "combo box" else ""
+        return limit_text(selected_option_name(node, shown), text_limit=text_limit)
     return direct
 
 

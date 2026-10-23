@@ -50,6 +50,9 @@ func axPropertySignature(node *AXNode) string {
 		return ""
 	}
 	parts := []string{string(node.Role), node.Name}
+	if value, _ := axInlineCellValue(node); value != "" {
+		parts = append(parts, "=", value)
+	}
 	for _, property := range renderAXProperties(node, AXRenderOptions{}) {
 		parts = append(parts, property[0], property[1])
 	}
