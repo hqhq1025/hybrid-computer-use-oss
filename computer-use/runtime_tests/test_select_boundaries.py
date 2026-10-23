@@ -771,12 +771,14 @@ class ProjectedComboSelectTests(SelectBoundaryTests):
         with self.assertRaises(runtime.OperationFailure) as caught:
             runtime.perform_select(
                 {"text": "missing"}, None, toggle, {}, None, [], {})
-        response = runtime.operation_failure_response(caught.exception)
+        response = runtime.operation_failure_response(
+            caught.exception, recovery_operation={"action": "select"})
         self.assertEqual(response["failureCode"], "invalid_argument")
         self.assertIn("list was closed without choosing", response["error"])
         self.assertTrue(response["input_events_emitted"])
         self.assertTrue(response["mutation_unknown"])
         self.assertTrue(response["failureFactsComplete"])
+        self.assertNotIn("recoveryContext", response)
         self.assertEqual(state["clicks"], 2)
         self.assertEqual(entry.text_iface.text, "10 pt")
 

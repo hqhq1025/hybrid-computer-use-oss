@@ -61,7 +61,11 @@ def operation_failure_response(exc, recovery_operation=None):
         and failure_phase == "precondition"
         and facts_complete
     )
-    if recovery_operation is not None and (emitted or read_only_stale_window):
+    observation_failure = bool(
+        emitted and failure_code == "effect_unknown"
+        and failure_phase == "post_action_observation"
+    )
+    if recovery_operation is not None and (observation_failure or read_only_stale_window):
         response["recoveryContext"] = _bounded_recovery_response(
             recovery_operation
         )
