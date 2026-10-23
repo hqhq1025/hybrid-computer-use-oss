@@ -39,39 +39,7 @@ func lookupBySelectorFor(snapshot *AppSnapshot, selector, declared, tool string)
 	// own because some toolkits describe many nodes that have no name.
 	//
 	// AT-SPI accessible_id would be a stronger tier, but it is unset in practice, so that tier is unavailable on the desktop.
-	var byName, byDescription []ElementRecord
-	for _, record := range snapshot.Elements {
-		if !selectorRoleMatches(&record, role) &&
-			!(roleKey(role) == "dialog" && modalWindowRoot(snapshot, &record)) {
-			continue
-		}
-		if len(preds) > 0 && !recordMatchesPredicates(&record, preds) {
-			continue
-		}
-		if !hasName {
-			// Without a role or predicate, an empty selector would match the
-			// whole tree. A predicate alone is a narrow enough identity: a desc
-			// such as `[desc="View options"]` can be the only difference
-			// between same-named toggle buttons.
-			if role == "" && len(preds) == 0 {
-				continue
-			}
-			byName = append(byName, record)
-			continue
-		}
-		if equalSemanticIdentity(record.Name, name) {
-			byName = append(byName, record)
-		} else if equalSemanticIdentity(record.Description, name) {
-			byDescription = append(byDescription, record)
-		}
-	}
-	matches := byName
-	if len(matches) == 0 {
-		// Fall back to description only when no name matches. Mixing
-		// lower-priority matches into a higher-priority hit would turn an
-		// exact name match into an ambiguity.
-		matches = byDescription
-	}
+	matches := selectorMatches(snapshot, snapshot.Elements, role, name, hasName, preds, 0)
 	if len(matches) == 1 {
 		copy := matches[0]
 		return &copy, nil
@@ -147,6 +115,109 @@ func lookupBySelectorFor(snapshot *AppSnapshot, selector, declared, tool string)
 			example + "`."
 	}
 	return nil, e
+}
+
+// selectorMatches returns the records among candidates that a parsed
+// selector resolves to: name matches, or description matches when no name
+// matches. A positive limit stops once that many name matches are found.
+func selectorMatches(
+	snapshot *AppSnapshot, candidates []ElementRecord,
+	role, name string, hasName bool, preds []selectorPredicate, limit int,
+) []ElementRecord {
+	var byName, byDescription []ElementRecord
+	for _, record := range candidates {
+		if !selectorRoleMatches(&record, role) &&
+			!(roleKey(role) == "dialog" && modalWindowRoot(snapshot, &record)) {
+			continue
+		}
+		if len(preds) > 0 && !recordMatchesPredicates(&record, preds) {
+			continue
+		}
+		if !hasName {
+			// Without a role or predicate, an empty selector would match the
+			// whole tree. A predicate alone is a narrow enough identity: a desc
+			// such as `[desc="View options"]` can be the only difference
+			// between same-named toggle buttons.
+			if role == "" && len(preds) == 0 {
+				continue
+			}
+			byName = append(byName, record)
+		} else if equalSemanticIdentity(record.Name, name) {
+			byName = append(byName, record)
+		} else if equalSemanticIdentity(record.Description, name) {
+			byDescription = append(byDescription, record)
+		}
+		if limit > 0 && len(byName) >= limit {
+			break
+		}
+	}
+	if len(byName) == 0 {
+		// Fall back to description only when no name matches. Mixing
+		// lower-priority matches into a higher-priority hit would turn an
+		// exact name match into an ambiguity.
+		return byDescription
+	}
+	return byName
+}
+
+// semanticIdentityIndex groups a snapshot's records by the normalized name,
+// description and placeholder that a selector's quoted part and its desc
+// and placeholder predicates compare with. Deriving a selector for every
+// record of a snapshot then checks each candidate against one group
+// instead of every record.
+type semanticIdentityIndex map[string][]ElementRecord
+
+func newSemanticIdentityIndex(snapshot *AppSnapshot) semanticIdentityIndex {
+	index := semanticIdentityIndex{}
+	for _, record := range snapshot.Elements {
+		keys := map[string]bool{}
+		for _, value := range []string{record.Name, record.Description, record.Placeholder} {
+			key := normalizedSemanticWhitespace(value)
+			if !keys[key] {
+				keys[key] = true
+				index[key] = append(index[key], record)
+			}
+		}
+	}
+	return index
+}
+
+// candidates returns a group that holds every record the selector can
+// match, or all records when the selector has no identity text.
+func (index semanticIdentityIndex) candidates(
+	snapshot *AppSnapshot, name string, hasName bool, preds []selectorPredicate,
+) []ElementRecord {
+	if index == nil {
+		return snapshot.Elements
+	}
+	if hasName {
+		return index[normalizedSemanticWhitespace(name)]
+	}
+	for _, pred := range preds {
+		if pred.kind == "desc" || pred.kind == "placeholder" {
+			return index[normalizedSemanticWhitespace(pred.value)]
+		}
+	}
+	return snapshot.Elements
+}
+
+// uniqueSelectorMatch reports the one record a selector resolves to, like
+// lookupBySelector without building an error. A nil index searches every
+// record.
+func uniqueSelectorMatch(
+	snapshot *AppSnapshot, index semanticIdentityIndex, selector string,
+) (*ElementRecord, bool) {
+	role, name, hasName, rest := parseSelector(selector)
+	preds, err := parsePredicates(rest)
+	if err != nil {
+		return nil, false
+	}
+	candidates := index.candidates(snapshot, name, hasName, preds)
+	matches := selectorMatches(snapshot, candidates, role, name, hasName, preds, 2)
+	if len(matches) != 1 {
+		return nil, false
+	}
+	return &matches[0], true
 }
 
 func selectorRoleMatches(record *ElementRecord, requested string) bool {

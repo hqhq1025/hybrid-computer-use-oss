@@ -345,6 +345,14 @@ func semanticSelectorForRecord(
 	snapshot *AppSnapshot,
 	record ElementRecord,
 ) string {
+	return indexedSemanticSelector(snapshot, nil, record)
+}
+
+func indexedSemanticSelector(
+	snapshot *AppSnapshot,
+	index semanticIdentityIndex,
+	record ElementRecord,
+) string {
 	role := strings.TrimSpace(record.ControlType)
 	candidates := []string{}
 	if record.Name != "" {
@@ -378,8 +386,8 @@ func semanticSelectorForRecord(
 		if selector == "" {
 			continue
 		}
-		match, err := lookupBySelector(snapshot, selector, "")
-		if err == nil && match.Index == record.Index {
+		match, ok := uniqueSelectorMatch(snapshot, index, selector)
+		if ok && match.Index == record.Index {
 			return selector
 		}
 	}
@@ -390,7 +398,15 @@ func semanticRefForRecord(
 	snapshot *AppSnapshot,
 	record ElementRecord,
 ) string {
-	selector := semanticSelectorForRecord(snapshot, record)
+	return indexedSemanticRef(snapshot, nil, record)
+}
+
+func indexedSemanticRef(
+	snapshot *AppSnapshot,
+	index semanticIdentityIndex,
+	record ElementRecord,
+) string {
+	selector := indexedSemanticSelector(snapshot, index, record)
 	if selector == "" {
 		return ""
 	}
