@@ -6,8 +6,10 @@
 - Python 3.10 or later. The provider tests also need PyGObject and the
   AT-SPI, GTK, GdkPixbuf and IBus typelibs (`python3-gi gir1.2-atspi-2.0
   gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-ibus-1.0` on Debian or Ubuntu).
-  Keyboard checks for Unicode, line feeds and tabs also require `ibus ibus-gtk ibus-gtk3` and an
-  active IBus Simple desktop input source; see [Linux setup](docs/MCP.md#desktop-runtime).
+  Live checks of input-method typing for Unicode, line feeds and tabs also
+  require `ibus ibus-gtk ibus-gtk3` and an active IBus Simple desktop input
+  source. Without one, the provider types that text as key events; see
+  [Linux setup](docs/MCP.md#desktop-runtime).
 - `pip install -e '.[test]'` for the runner and gateway tests.
 - Docker, KVM and an OSWorld-V2 checkout only for OSWorld runs; see
   [Running OSWorld](docs/OSWORLD.md).

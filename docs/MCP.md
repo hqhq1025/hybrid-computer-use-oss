@@ -58,8 +58,10 @@ QT_IM_MODULE
 XMODIFIERS
 ```
 
-The provider needs Python 3 with PyGObject and the AT-SPI, GTK, GdkPixbuf and
-IBus typelibs, plus `xdotool`, `wmctrl` and `x11-utils`. On Debian or Ubuntu:
+The provider needs Python 3 with PyGObject and the AT-SPI, GTK and GdkPixbuf
+typelibs, plus `xdotool`, `wmctrl` and `x11-utils`. The IBus typelib and
+packages are optional; they enable input-method keyboard typing. On Debian or
+Ubuntu:
 
 ```bash
 sudo apt-get install python3 python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 \
@@ -71,13 +73,21 @@ When `DISPLAY`, `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` is missing,
 for example under `docker exec`, the server finds the same user's session
 from `/run/user/<uid>` and the desktop processes.
 
-Keyboard text containing non-ASCII characters, line feeds or tabs requires
-an active IBus Simple input context, normally the desktop's `xkb` input source. Applications must inherit
-the desktop's input-method environment. Existing application processes may
-need a restart after that environment is corrected. AX editable-text writes
-continue to use the application's accessibility interface when available.
-Desktops without this input-method support reject keyboard text containing these characters;
-the provider does not fall back to temporary X keymap rebinding.
+AX editable-text writes use the application's accessibility interface when
+it is available. Keyboard text is typed in one of two ways:
+
+| Desktop state | Non-ASCII characters | Line feed and tab |
+| --- | --- | --- |
+| IBus Simple input context active, normally the desktop's `xkb` input source | Composed through the input method | Composed as text characters |
+| No IBus Simple input context | Typed as key events, one character at a time | Typed as Enter and Tab keys |
+
+ASCII text without line feeds or tabs is typed as key events on both
+desktops. When AX falls back to keyboard typing, its note says which way the
+text was typed. GUI results do not include notes.
+
+To use the input method, applications must inherit the desktop's
+input-method environment. Existing application processes may need a restart
+after that environment is corrected.
 
 Input-method keyboard typing waits for the input method to acknowledge composition,
 each hex digit and each committed character. It does not change the clipboard or input
@@ -85,11 +95,19 @@ source. If the input context cannot compose text, the operation stops. Failure
 after the initial `Ctrl+Shift+U` prefix reports partial input and can leave a
 visible preedit. Inspect the field before retrying; the provider does not
 send an automatic Escape that could cancel unrelated application state.
+The provider does not retry partial input-method text with key events.
 Commit acknowledgements prove input-method delivery, not the resulting field
 contents. Applications can filter literal control characters such as line feeds
-and tabs. The provider composes these characters as text; it does not replace
+and tabs. The input method composes these characters as text; it does not replace
 them with Enter or Tab keys. Use `keypress` when the intended operation is an Enter or Tab key,
 and inspect the resulting application state.
+
+Without the input method, each non-ASCII character uses a temporary X keymap
+binding, and the provider waits 35 ms after each one so that the application
+reads the binding before the next character reuses it. A call accepts at most
+500 non-ASCII characters. An Enter or Tab key keeps its normal effect in the
+focused control, for example submitting a form or moving focus. Text that
+contains NUL or an unpaired surrogate fails before any input on this path.
 
 ### Accessibility on Linux
 

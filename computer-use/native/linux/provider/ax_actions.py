@@ -2,6 +2,7 @@
 
 import math
 import time
+import unicodedata
 from .foundation import (
     Atspi,
     Gdk,
@@ -268,11 +269,78 @@ def send_key(key):
 
 
 # Keep the public keyboard-input bound; input method delivery also has a
-# whole-payload deadline below the provider timeout.
+# whole-payload deadline below the provider timeout. On the key event path,
+# 500 x NON_ASCII_KEY_INTERVAL_SECONDS = 17.5 s stays inside the 30 s
+# provider timeout.
 MAX_SYNTHESIZED_NON_ASCII_CHARACTERS = 500
+
+# Key event path only: pause after each synthesized non-ASCII character.
+# libatspi types a character without a keycode in the current layout by
+# rebinding a spare keycode to its keysym. A burst of such characters reuses
+# that keycode before the application has read the previous mapping, so one
+# STRING event with "Grüße 你好" can arrive as "Gr好好e 好好". 20 ms still
+# lost characters occasionally; 35 ms did not.
+NON_ASCII_KEY_INTERVAL_SECONDS = 0.035
+
+# Key event path only. AT-SPI STRING sends LF and Tab as control keysyms:
+# terminals receive the raw bytes, but GTK text views drop them. Enter and
+# Tab keys reach both.
+TEXT_CONTROL_KEYS = {"\n": "Return", "\t": "Tab"}
+
+INPUT_METHOD_TEXT_NOTE = (
+    "The text contained non-ASCII characters, line feeds or tabs, so it was "
+    "composed through the desktop input method.")
+KEY_EVENT_TEXT_NOTE = (
+    "No supported desktop input method was active, so the text was typed as "
+    "key events: non-ASCII characters one at a time, each line feed as an "
+    "Enter key and each tab as a Tab key. Enter and Tab keep their normal "
+    "effect in the focused control, for example submitting a form or moving "
+    "focus.")
+
+
+def key_event_runs(text):
+    """Split text into the ordered key event stream, before any input.
+
+    Returns ("text", ascii_run), ("char", non_ascii_character) and
+    ("key", keycode) items. Raises when a character has no key event form,
+    so that the call fails before it emits anything.
+    """
+    runs = []
+    ascii_run = ""
+    for char in text:
+        if char in TEXT_CONTROL_KEYS:
+            kind, value = "key", keycode(TEXT_CONTROL_KEYS[char])
+        elif char == "\0" or unicodedata.category(char) == "Cs":
+            # STRING is a C string: it stops at NUL and cannot encode a lone
+            # surrogate. Other control characters keep their STRING keysyms.
+            raise OperationFailure(
+                "No supported desktop input method is active, and key events "
+                "cannot type the character U+{:04X}. No input was emitted. "
+                "Remove the character and type the text again.".format(ord(char)),
+                failure_code="unsupported_action",
+                failure_phase="precondition",
+                input_events_emitted=False,
+            )
+        elif ord(char) >= 128:
+            kind, value = "char", char
+        else:
+            ascii_run += char
+            continue
+        if ascii_run:
+            runs.append(("text", ascii_run))
+            ascii_run = ""
+        runs.append((kind, value))
+    if ascii_run:
+        runs.append(("text", ascii_run))
+    return runs
 
 
 def send_text(text):
+    """Type text at the keyboard focus.
+
+    Returns a note naming the route when the text needed more than plain
+    ASCII key events, otherwise None.
+    """
     text = str(text)
     non_ascii = sum(1 for char in text if ord(char) >= 128)
     if non_ascii > MAX_SYNTHESIZED_NON_ASCII_CHARACTERS:
@@ -291,13 +359,33 @@ def send_text(text):
         return emit_keyboard_event(
             0, value, Atspi.KeySynthType.STRING, "text payload")
 
-    if non_ascii or "\n" in text or "\t" in text:
+    if not (non_ascii or "\n" in text or "\t" in text):
+        if text:
+            ascii_text(text)
+        return None
+    try:
+        composer = InputMethodText()
+    except OperationFailure:
+        # No IBus Simple input context. Opening the context emits nothing.
+        composer = None
+    if composer is not None:
         # Keep ASCII and Unicode in one ordered stream. Mixing X key events
         # with asynchronous input-method commits can reorder adjacent text.
         # AT-SPI STRING drops literal LF and Tab; compose their codepoints too.
-        InputMethodText().send(text, send_key, ascii_text)
-    elif text:
-        ascii_text(text)
+        composer.send(text, send_key, ascii_text)
+        return INPUT_METHOD_TEXT_NOTE
+    emitted = False
+    for kind, value in key_event_runs(text):
+        if kind == "key":
+            emitted = emit_keyboard_event(
+                value, None, Atspi.KeySynthType.PRESSRELEASE,
+                "text control key", emitted)
+            continue
+        emitted = emit_keyboard_event(
+            0, value, Atspi.KeySynthType.STRING, "text payload", emitted)
+        if kind == "char":
+            time.sleep(NON_ASCII_KEY_INTERVAL_SECONDS)
+    return KEY_EVENT_TEXT_NOTE
 
 
 def find_editable_text(root):

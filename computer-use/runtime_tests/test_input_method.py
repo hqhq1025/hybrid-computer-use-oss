@@ -1,5 +1,6 @@
 """Input method acknowledgements, focus changes and partial-emission evidence."""
 
+import contextlib
 from types import SimpleNamespace
 
 from runtime_test_support import *  # noqa: F401,F403
@@ -100,16 +101,6 @@ class InputMethodAcknowledgementTests(unittest.TestCase):
         self.assertEqual([value for _, kind, value in self.events if kind == "key"],
                          [key for _ in payload for key in ("CTRL+SHIFT+u", "ENTER")])
 
-    def test_ascii_control_text_without_input_method_fails_before_input(self):
-        for payload in ("line\nnext", "left\tright"):
-            with self.subTest(payload=payload), \
-                    mock.patch.object(runtime, "ibus_bindings", side_effect=ValueError("missing")), \
-                    mock.patch.object(runtime, "emit_keyboard_event") as keyboard:
-                with self.assertRaises(runtime.OperationFailure) as caught:
-                    runtime.send_text(payload)
-                self.assertFalse(caught.exception.input_events_emitted)
-                keyboard.assert_not_called()
-
     def test_missing_preedit_does_not_send_hex_or_enter(self):
         self.acknowledge_preedit = False
         with self.assertRaises(runtime.OperationFailure) as caught:
@@ -157,14 +148,6 @@ class InputMethodAcknowledgementTests(unittest.TestCase):
         self.assertEqual([value for _, _, value in self.events],
                          ["CTRL+SHIFT+u", "4"])
 
-    def test_missing_ibus_fails_before_keyboard_input(self):
-        with mock.patch.object(runtime, "ibus_bindings", side_effect=ValueError("missing")), \
-                mock.patch.object(runtime, "emit_keyboard_event") as keyboard:
-            with self.assertRaises(runtime.OperationFailure) as caught:
-                runtime.send_text("hello 中")
-        self.assertFalse(caught.exception.input_events_emitted)
-        keyboard.assert_not_called()
-
     def test_subscriptions_are_removed_after_failed_input(self):
         self.composer.connection = mock.Mock()
         self.composer.subscription = 17
@@ -190,3 +173,105 @@ class InputMethodAcknowledgementTests(unittest.TestCase):
             self.composer.send("中", self.key, self.text)
         self.assertFalse(caught.exception.input_events_emitted)
         self.assertEqual(self.events, [])
+
+
+class TextRouteTests(unittest.TestCase):
+    """send_text uses IBus Simple when it is active and key events otherwise."""
+
+    KEYCODES = {"Return": 36, "Tab": 23}
+
+    def setUp(self):
+        self.events = []
+        self.sleeps = []
+        for patcher in (
+                mock.patch.object(runtime, "keycode",
+                                  side_effect=self.KEYCODES.__getitem__),
+                mock.patch.object(runtime.time, "sleep",
+                                  side_effect=self.sleeps.append)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def generate(self, keyval, keystring, synth_type):
+        self.events.append((keyval, keystring, synth_type))
+        return True
+
+    def without_input_method(self, generate=None):
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(
+            runtime, "ibus_bindings", side_effect=ValueError("no IBus typelib")))
+        stack.enter_context(mock.patch.object(
+            runtime.Atspi, "generate_keyboard_event",
+            side_effect=generate or self.generate, create=True))
+        return stack
+
+    def test_input_method_composes_the_whole_text_when_active(self):
+        with mock.patch.object(runtime, "InputMethodText") as composer, \
+                mock.patch.object(runtime, "emit_keyboard_event") as keyboard:
+            note = runtime.send_text("a\tb 你好\n")
+        self.assertEqual(composer.return_value.send.call_args.args[0], "a\tb 你好\n")
+        keyboard.assert_not_called()
+        self.assertIn("input method", note)
+
+    def test_plain_ascii_does_not_open_the_input_method(self):
+        with mock.patch.object(runtime, "InputMethodText") as composer, \
+                self.without_input_method():
+            note = runtime.send_text("plain text")
+        composer.assert_not_called()
+        self.assertIsNone(note)
+        self.assertEqual([text for _, text, _ in self.events], ["plain text"])
+
+    def test_without_input_method_text_is_one_ordered_key_event_stream(self):
+        STRING = runtime.Atspi.KeySynthType.STRING
+        PRESSRELEASE = runtime.Atspi.KeySynthType.PRESSRELEASE
+        with self.without_input_method():
+            note = runtime.send_text("ab Grü\nx\t你!")
+        # libatspi rebinds a spare keycode for every non-ASCII character, and
+        # a burst reuses it before the application reads the previous
+        # mapping ("Grüße 你好" -> "Gr好好e 好好"); each one is paced.
+        self.assertEqual(self.events, [
+            (0, "ab Gr", STRING), (0, "ü", STRING), (36, None, PRESSRELEASE),
+            (0, "x", STRING), (23, None, PRESSRELEASE), (0, "你", STRING),
+            (0, "!", STRING)])
+        self.assertEqual(len(self.sleeps), 2)
+        self.assertTrue(all(0.03 <= delay <= 0.05 for delay in self.sleeps))
+        self.assertIn("key events", note)
+
+    def test_inactive_input_method_context_uses_key_events(self):
+        unavailable = runtime.OperationFailure(
+            "the active input method is not IBus Simple", "unsupported_action",
+            "precondition", input_events_emitted=False)
+        with mock.patch.object(runtime, "InputMethodText", side_effect=unavailable), \
+                self.without_input_method():
+            runtime.send_text("中")
+        self.assertEqual([text for _, text, _ in self.events], ["中"])
+
+    def test_character_without_key_event_form_fails_before_input(self):
+        for payload in ("first\0second\n", "中\ud800"):
+            with self.subTest(payload=payload), self.without_input_method():
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.send_text(payload)
+                self.assertEqual(caught.exception.failure_code, "unsupported_action")
+                self.assertFalse(caught.exception.input_events_emitted)
+        self.assertEqual(self.events, [])
+
+    def test_input_method_failure_after_emission_does_not_retry_with_key_events(self):
+        partial = runtime.OperationFailure(
+            "input method acknowledgement timed out", "input_emission_failed",
+            "emission", input_events_emitted=True)
+        with mock.patch.object(runtime, "InputMethodText") as composer, \
+                self.without_input_method():
+            composer.return_value.send.side_effect = partial
+            with self.assertRaises(runtime.OperationFailure) as caught:
+                runtime.send_text("中文")
+        self.assertIs(caught.exception, partial)
+        self.assertEqual(self.events, [])
+
+    def test_failed_control_key_reports_earlier_text_as_emitted(self):
+        def generate(keyval, keystring, synth_type):
+            self.events.append(keystring)
+            return keystring is not None
+        with self.without_input_method(generate):
+            with self.assertRaises(runtime.InputEmissionError) as caught:
+                runtime.send_text("first\nsecond")
+        self.assertTrue(caught.exception.events_emitted)
+        self.assertEqual(self.events, ["first", None])

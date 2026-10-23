@@ -542,7 +542,7 @@ def _perform_type(
                 "targeted type_text keyboard fallback")
             action_evidence["window_focus_verified"] = True
             action_evidence["target_focus_verified"] = True
-        send_text(action_input.get("text", ""))
+        text_route = send_text(action_input.get("text", ""))
         action_evidence["route"] = "keyboard_synthesis"
         action_evidence["focus_verified"] = True
         action_evidence["editable_verified"] = None
@@ -557,6 +557,7 @@ def _perform_type(
                 else "bringing the window to the foreground",
                 UNVERIFIED_SYNTHESIS,
             )
+            + (" " + text_route if text_route else "")
         )
 
 
@@ -631,7 +632,7 @@ def _perform_set_value(
         )
         send_key("ctrl+a")
         time.sleep(0.05)
-        send_text(value)
+        text_route = send_text(value)
         action_evidence["route"] = "keyboard_synthesis"
         action_evidence["window_focus_verified"] = True
         action_evidence["target_focus_verified"] = True
@@ -647,6 +648,7 @@ def _perform_set_value(
             "confirmation on this path, and keyboard synthesis is global — verify "
             "from the tree that the control now holds what you wanted. {}".format(
                 UNVERIFIED_SYNTHESIS)
+            + (" " + text_route if text_route else "")
         )
     else:
         action_evidence["route"] = "value_api"
