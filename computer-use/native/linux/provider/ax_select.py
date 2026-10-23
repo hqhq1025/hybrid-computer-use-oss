@@ -36,6 +36,7 @@ from .foundation import (
 )
 from .ax_actions import send_key
 from .ax_node_properties import embedded_editor_nodes
+from .ax_records import effective_role
 from .input_primitives import require_window_focus
 
 # Each ctrl+shift+Down extends a Writer selection by one paragraph; the
@@ -533,6 +534,7 @@ def perform_select(action_input, window, element, element_record, to_element,
         raise RuntimeError("select requires a target ref")
     role = node_role(element)
     text = action_input.get("text")
+    owner = owning_dropdown(element) if text is None and to_element is None else None
     if to_element is not None:
         if role in ("table cell", "cell"):
             first, last, count = select_cells(element, to_element)
@@ -544,14 +546,13 @@ def perform_select(action_input, window, element, element_record, to_element,
             action_evidence["route"] = "keyboard_synthesis"
             action_evidence["window_focus_verified"] = True
             action_evidence["input_emitted"] = emitted
-    elif text is not None and role in DROPDOWN_ROLES or (
-            text is None and owning_dropdown(element) is not None):
-        # select on an option of an open popup chooses it in its combo box.
-        dropdown = element if text is not None else owning_dropdown(element)
-        option = select_dropdown_option(
-            dropdown, text if text is not None else option_name(element),
-            window)
-        summary = "selected option {}".format(_quote(node_name(option)))
+    elif text is not None and effective_role(element, role) in DROPDOWN_ROLES or (
+            text is None and owner is not None):
+        # select on an option of an open popup chooses it in its drop-down.
+        chosen = select_dropdown_option(
+            element if text is not None else owner,
+            text if text is not None else option_name(element), window)
+        summary = "selected option {}".format(_quote(chosen))
         action_evidence["route"] = "semantic_action"
     elif text is not None or _text_iface(element) is not None and role not in (
             "list item", "table cell", "cell", "tree item", "icon"):

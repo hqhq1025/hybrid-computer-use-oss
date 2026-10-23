@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Linux: AX `select` chooses options of LibreOffice drop-downs (toolbar
+  boxes such as font size, and dialog lists such as Line Spacing), both
+  with an option name on the combo box and on a cell of its open list. It
+  succeeds only when the drop-down shows the option afterwards.
 - Linux: keyboard input to a window that is not in front no longer waits
   about 7 s for Qt dialogs. The provider asks the window manager to
   activate the window first and checks that the X11 active window is that
