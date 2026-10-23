@@ -241,6 +241,9 @@ func renderAXProperties(node *AXNode, options AXRenderOptions) [][2]string {
 		if annotation.Kind == axCellSummaryAnnotation && annotation.Detail != "" {
 			properties = append(properties, [2]string{"/empty-cells", annotation.Detail})
 		}
+		if annotation.Reason == axNullReferenceReason && annotation.Detail != "" {
+			properties = append(properties, [2]string{"/null-children", annotation.Detail})
+		}
 	}
 	if node.FindMatch {
 		properties = append(properties, [2]string{"/match", "true"})

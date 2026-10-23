@@ -409,11 +409,17 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
             ["Window", "Container"],
         )
         self.assertNotIn("Missing", "\n".join(lines))
-        self.assertTrue(any(
-            item.get("kind") == "provider_omission"
-            and item.get("reason") == "provider_probe_error"
-            and item.get("count") == 1
-            for item in annotations
+        # A null reference is reported with its own reason and count on the
+        # parent, so the agent learns that this part has no AX objects.
+        nulls = [item for item in annotations
+                 if item.get("reason") == "null_reference"]
+        self.assertEqual(1, len(nulls), annotations)
+        self.assertEqual("provider_omission", nulls[0]["kind"])
+        self.assertEqual(1, nulls[0]["count"])
+        self.assertEqual([0, 0], nulls[0]["parentRuntimeId"])
+        self.assertIn("1 of 1 child references returned no object", nulls[0]["detail"])
+        self.assertFalse(any(
+            item.get("reason") == "provider_probe_error" for item in annotations
         ), annotations)
 
     def test_one_bad_node_does_not_abort_sibling_rendering(self):

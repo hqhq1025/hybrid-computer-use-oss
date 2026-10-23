@@ -106,6 +106,31 @@ FIND_WALK_LIMITS = {
 }
 
 
+# A child slot that the application answers with a null reference. MuseScore
+# 4 does so for most slots of its Qt Quick windows: its accessibility factory
+# returns an invalid stub for every item it has not registered itself.
+NULL_CHILD = object()
+
+
+def null_children_annotation(path, count, total):
+    """Report null child references on their parent.
+
+    The read is incomplete, so this stays a coverage gap; the detail tells
+    the agent that reading again does not reveal those children.
+    """
+    return {
+        "parentRuntimeId": path[:],
+        "kind": "provider_omission",
+        "count": int(count),
+        "reason": "null_reference",
+        "detail": (
+            "{} of {} child references returned no object; AX cannot read "
+            "or address that part of the window. Use GUI there.".format(
+                count, max(count, int(total or 0)))
+        ),
+    }
+
+
 def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 boxes=True, indexer=None,
                 max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, prune=True,
@@ -228,7 +253,10 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                     yield child_index, None
                     continue
                 if child is None:
-                    record_provider_errors({"child_at_none": "missing"})
+                    # The application answered the slot with a null
+                    # reference; the walk reports these per parent.
+                    yield child_index, NULL_CHILD
+                    continue
                 yield child_index, child
 
         return known_children(), True, fanout
@@ -530,6 +558,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         before_lines = len(lines)
         child_iterator = iter(children)
         child_slots_seen = 0
+        null_children = 0
         while True:
             if len(records) >= max_tree_nodes:
                 if focus_probe is not None:
@@ -547,12 +576,19 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             except StopIteration:
                 break
             child_slots_seen += 1
+            if child is NULL_CHILD:
+                null_children += 1
+                continue
             if child is None or child_index in closed_popups:
                 continue
             # This node was rendered: indent its children one level deeper and
             # pass its text down so they can detect verbatim repetition.
             visit(child, depth + 1, path + [child_index], render_depth + 1,
                   str(record.get("name") or record.get("value") or ""))
+
+        if null_children:
+            annotations.append(null_children_annotation(
+                path, null_children, planned_children or child_slots_seen))
 
         # If a menu rendered none of its children, report that on the menu
         # itself.

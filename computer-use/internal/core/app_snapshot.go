@@ -116,6 +116,11 @@ type axRelationTarget struct {
 // gap.
 const axCellSummaryAnnotation = "cell_summary"
 
+// axNullReferenceReason marks provider-omission annotations for child slots
+// that the application answered with a null reference. The renderer shows
+// their count on the parent; they remain a coverage gap.
+const axNullReferenceReason = "null_reference"
+
 type axProviderAnnotation struct {
 	ParentRuntimeID []int  `json:"parentRuntimeId,omitempty"`
 	Kind            string `json:"kind"`
