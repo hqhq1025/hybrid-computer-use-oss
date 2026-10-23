@@ -440,9 +440,8 @@ def projected_list_owner(option):
         # The opener is drawn, so subtrees that are not showing are skipped.
         if not state_contains(node, Atspi.StateType.SHOWING):
             continue
-        if node_role(node) == "toggle button":
-            if (state_contains(node, Atspi.StateType.CHECKED)
-                    and _projected_toggle(node)):
+        if _projected_toggle(node):
+            if state_contains(node, Atspi.StateType.CHECKED):
                 return node
             continue
         if should_enumerate_children(node):
