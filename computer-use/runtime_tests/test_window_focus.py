@@ -548,3 +548,57 @@ class KeyResolutionTests(unittest.TestCase):
         self.assertEqual(runtime.keysym("NoSuchKeyName"), 0)
         with self.assertRaises(RuntimeError):
             runtime.keycode("NoSuchKeyName")
+
+
+class FocusDiagnosticTests(AtspiPatchedTestCase):
+    def test_names_the_window_that_actually_holds_focus(self):
+        other = _TreeNode(role="frame", name="Terminal", w=100, h=100)
+        other.states.add(STATE.ACTIVE)
+        app = _TreeNode(role="application", name="gnome-terminal", kids=(other,))
+        original = runtime.iter_apps
+        runtime.iter_apps = lambda: [app]
+        self.addCleanup(setattr, runtime, "iter_apps", original)
+
+        target = _TreeNode(role="frame", name="Editor", w=100, h=100)
+        with self.assertRaises(RuntimeError) as caught:
+            runtime.require_window_focus(target, "press_key")
+
+        self.assertIn("Terminal", str(caught.exception))
+        self.assertIn("gnome-terminal", str(caught.exception))
+
+    def test_no_accessible_window_active_points_at_the_screenshot_channel(self):
+        """Focus held by something invisible to the accessibility tree is reported.
+
+        After settings.json changes, VS Code can show a native "A setting has
+        changed that requires a restart to take effect." dialog. It belongs to
+        the same process and locks the app, yet does not exist in AT-SPI. The
+        agent sees a normal tree while every action is rejected for no visible
+        reason; only a screenshot can explain it.
+        """
+        original = runtime.iter_apps
+        runtime.iter_apps = lambda: []
+        self.addCleanup(setattr, runtime, "iter_apps", original)
+
+        target = _TreeNode(role="frame", name="Editor", w=100, h=100)
+        with self.assertRaises(RuntimeError) as caught:
+            runtime.require_window_focus(target, "press_key")
+
+        message = str(caught.exception)
+        self.assertIn("cannot see", message)
+        self.assertIn("gui", message)
+
+    def test_diagnostic_never_turns_a_clear_error_into_a_crash(self):
+        """If the diagnostic enumeration fails, the original error is still raised."""
+
+        def boom():
+            raise RuntimeError("a11y bus went away")
+
+        original = runtime.iter_apps
+        runtime.iter_apps = boom
+        self.addCleanup(setattr, runtime, "iter_apps", original)
+
+        target = _TreeNode(role="frame", name="Editor", w=100, h=100)
+        with self.assertRaises(RuntimeError) as caught:
+            runtime.require_window_focus(target, "press_key")
+
+        self.assertIn("Refusing to synthesize", str(caught.exception))

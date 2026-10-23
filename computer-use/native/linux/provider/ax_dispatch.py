@@ -24,13 +24,13 @@ from .ax_node_properties import (
 )
 
 from .x11_windows import (
-    _x11_window_inventory_cache,
     main_window,
     select_window_by_handle,
     window_identity_set,
     window_bounds,
-    x11_root_window_state,
 )
+from .x11_window_inventory import _x11_window_inventory_cache
+from .desktop_layout import x11_root_window_state
 
 from .app_resolver import app_window_inventory, list_apps_inventory, windowless_snapshot
 from .native_windows import native_window_for_operation, perform_native_window_action

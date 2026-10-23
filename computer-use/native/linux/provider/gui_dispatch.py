@@ -34,7 +34,7 @@ from .gui_input import (
 )
 from .input_primitives import InputEmissionError
 from .snapshot import capture_gui_snapshot
-from .x11_windows import (
+from .desktop_layout import (
     desktop_bounds,
     desktop_layout_frame_id,
     desktop_layout_state,

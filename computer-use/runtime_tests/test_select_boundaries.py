@@ -400,11 +400,13 @@ class ComboOptionSelectTests(SelectBoundaryTests):
     """
 
     def _combo(self, value="Beijing", options=("Beijing", "Shanghai", "Seattle"),
-               item_action=True, selection_api=True):
-        combo = _Node(role="combo box", name="City")
+               item_action=True, selection_api=True, list_selects=True,
+               states=None, calls=None):
+        combo = _Node(role="combo box", name="City", states=states)
         menu = _Node(role="menu")
         combo.add(menu)
         items = []
+        calls = [] if calls is None else calls
         for name in options:
             item = _Node(role="menu item", name=name, states=())
             if name == value:
@@ -418,15 +420,22 @@ class ComboOptionSelectTests(SelectBoundaryTests):
             items[index].states.add(STATE.SELECTED)
             return True
 
+        def item_select(index):
+            calls.append("option action")
+            return choose(index) if item_action else True
+
+        def list_select(index):
+            calls.append("list selection")
+            return choose(index) if list_selects else False
+
         for index, item in enumerate(items):
             item.get_n_actions = lambda: 1
             item.get_action_name = lambda _i: "select"
-            item.do_action = (lambda _i, index=index: choose(index)) if item_action \
-                else (lambda _i: True)
+            item.do_action = lambda _i, index=index: item_select(index)
         if selection_api:
             menu.selection_iface = mock.Mock()
             selection = mock.Mock()
-            selection.select_child = lambda _iface, index: choose(index)
+            selection.select_child = lambda _iface, index: list_select(index)
             selection.is_child_selected = (
                 lambda _iface, index: STATE.SELECTED in items[index].states)
             patch = mock.patch.object(runtime.Atspi, "Selection", selection, create=True)
@@ -475,6 +484,45 @@ class ComboOptionSelectTests(SelectBoundaryTests):
         runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
 
         self.assertIn(STATE.SELECTED, items[2].states)
+
+    def _select_closed(self, **kwargs):
+        calls = []
+        waits = []
+
+        def wait_until(predicate, _timeout):
+            waits.append(len(calls))
+            return predicate()
+
+        combo, items = self._combo(
+            states={STATE.EXPANDABLE, STATE.SHOWING}, calls=calls, **kwargs)
+        dropdown = sys.modules[runtime.select_dropdown_option.__module__]
+        with mock.patch.object(dropdown, "_wait_until", wait_until):
+            runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
+        self.assertIn(STATE.SELECTED, items[2].states)
+        return calls, waits
+
+    def test_closed_list_that_ignores_the_option_action_commits_by_selection(self):
+        # Firefox: the option's action does nothing while the list is closed.
+        calls, _ = self._select_closed(item_action=False)
+
+        self.assertEqual(calls, ["list selection"])
+
+    def test_closed_list_that_refuses_selection_goes_on_without_waiting(self):
+        # Chrome: Selection.select_child returns False and changes nothing.
+        calls, waits = self._select_closed(list_selects=False)
+
+        self.assertEqual(calls, ["list selection", "option action"])
+        self.assertEqual(waits, [2])
+
+    def test_open_list_tries_the_option_action_first(self):
+        calls = []
+        combo, items = self._combo(
+            states={STATE.EXPANDABLE, STATE.EXPANDED, STATE.SHOWING}, calls=calls)
+
+        runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
+
+        self.assertIn(STATE.SELECTED, items[2].states)
+        self.assertEqual(calls, ["option action"])
 
     def test_unknown_option_is_rejected_before_input(self):
         combo, _ = self._combo()

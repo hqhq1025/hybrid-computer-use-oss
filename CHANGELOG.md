@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Linux: AX `select` on a closed browser `<select>` tries the option list
+  first. Firefox commits there without waiting for the option's own action,
+  which it ignores; Chrome refuses the list at once and takes the option's
+  action as before.
 - AX observations over the 12,000-character tree budget keep the controls
   inside unnamed wrappers (Chrome's toolbar and address bar, VS Code's
   menus) and cut a long run of same-role items (cards, rows, cells) from its

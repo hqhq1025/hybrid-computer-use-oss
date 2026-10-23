@@ -23,15 +23,17 @@ from .snapshot import snapshot_digest, utc_timestamp
 from .a11y_enable import invisible_window_notes, untracked_window_notes
 from .native_windows import native_app_entries, native_only_windows, record_window_coverage
 from .x11_windows import (
-    _x11_managed_windows,
     accessible_window_title,
     app_windows,
     iter_apps,
     opaque_window_instance_handle_for_id,
     strong_window_instance_handles,
     window_instance_handle,
-    correlation_root_window_state,
     unmapped_window_indices,
+)
+from .x11_window_inventory import (
+    _x11_managed_windows,
+    correlation_root_window_state,
 )
 from .window_diagnostics import is_infrastructure_window
 

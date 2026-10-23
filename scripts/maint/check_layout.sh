@@ -18,7 +18,9 @@
 #      and changelogs" in AGENTS.md).
 # Warns, without failing, for non-test source files over 800 lines, test
 # files over 1,200 lines, and SHA-like hex tokens in README.md, CHANGELOG.md
-# and docs/ that are not in HEX_ALLOW.
+# and docs/ that are not in HEX_ALLOW. Files in vendor/ and osworld-overlay/
+# have no size limit: each overlay file replaces the OSWorld-V2 file at the
+# same path, so it keeps that file's layout to stay comparable with it.
 set -euo pipefail
 
 repo=$(git rev-parse --show-toplevel)
@@ -152,7 +154,8 @@ for path in files:
 
 # Size warnings.
 for path in files:
-    if not SOURCE.search(path) or path.startswith("computer-use/vendor/"):
+    if (not SOURCE.search(path) or path.startswith("computer-use/vendor/")
+            or path.startswith("osworld-overlay/")):
         continue
     with open(path, "rb") as handle:
         count = handle.read().count(b"\n")

@@ -46,7 +46,8 @@ import time
 
 from .ax_records import StableIndexer
 from .ax_virtual_table import visible_cell_range
-from .foundation import Atspi, extents, limit_text, safe
+from .foundation import Atspi, limit_text, safe
+from .node_geometry import extents
 
 # Backstop age of a reused tree. Events, the fingerprint and the content
 # re-read decide validity; this bound only limits how long a change class

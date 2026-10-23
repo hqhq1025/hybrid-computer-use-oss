@@ -14,14 +14,14 @@ import re
 import subprocess
 
 from .foundation import (
-    node_pid, provider_bus_name, provider_object_path, raw_extents, safe,
+    node_pid, provider_bus_name, provider_object_path, safe,
 )
-from .x11_windows import (
+from .node_geometry import raw_extents
+from .x11_window_inventory import (
     _x11_window_inventory_cache,
-    normalize_x11_window_id,
-    parse_xwininfo_layout,
     x11_window_inventory_for_pid,
 )
+from .desktop_layout import normalize_x11_window_id, parse_xwininfo_layout
 
 MIN_SCALE = 1.25
 MAX_SCALE = 4.0
