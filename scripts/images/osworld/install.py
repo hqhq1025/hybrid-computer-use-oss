@@ -10,6 +10,7 @@ import pwd
 import subprocess
 
 import install_qt
+import configure_apt
 
 
 ROOT = Path(__file__).resolve().parent
@@ -101,6 +102,7 @@ def main():
         return
     if os.geteuid() != 0:
         parser.error("Run installation as root inside the guest")
+    configure_apt.configure()
     for phase in phases:
         print("Installing phase: " + phase, flush=True)
         install_phase(phase, manifest, args.manifest.resolve(), assets, user)
