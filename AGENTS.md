@@ -71,7 +71,9 @@ Register a new Linux provider module in three places:
 
 `scripts/maint/check_layout.sh` (run in CI) checks the version-marker rule,
 the Go import direction and the bundle list, and warns about non-test source
-files over 800 lines and tests over 1,200 lines.
+files over 800 lines and tests over 1,200 lines. Files in `osworld-overlay/`
+are exempt: each one replaces the OSWorld-V2 file at the same path and keeps
+its layout.
 
 ## Rules
 

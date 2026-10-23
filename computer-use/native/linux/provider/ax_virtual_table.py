@@ -10,9 +10,9 @@ from .foundation import (
     process_generation,
     provider_bus_name,
     provider_object_path,
-    raw_extents,
     safe,
 )
+from .node_geometry import raw_extents
 from .ax_node_properties import text_value_with_status
 from .ax_records import record_for
 

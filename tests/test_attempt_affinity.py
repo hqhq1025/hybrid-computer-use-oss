@@ -20,22 +20,25 @@ def test_same_second_attempts_have_independent_affinity(tmp_path, monkeypatch, e
     desktop = ModuleType("desktop_env.desktop_env")
     desktop.DesktopEnv = Mock(side_effect=AssertionError("No guest may be constructed"))
     monkeypatch.setitem(sys.modules, desktop.__name__, desktop)
-    # Isolate the import so the test double cannot remain in the real runner module.
-    spec = importlib.util.spec_from_file_location(
-        "_attempt_runner_test", Path(__file__).resolve().parents[1] / "hcu/osworld/run_task.py",
-    )
-    run_task = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, run_task)
-    spec.loader.exec_module(run_task)
+    # Load the runner modules fresh so the test double cannot remain in the real ones.
+    runner = {}
+    for name in ("staging", "guest_lifecycle", "phases", "run_task"):
+        spec = importlib.util.spec_from_file_location(
+            f"hcu.osworld.{name}", Path(__file__).resolve().parents[1] / f"hcu/osworld/{name}.py",
+        )
+        runner[name] = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, spec.name, runner[name])
+        spec.loader.exec_module(runner[name])
+    run_task, staging = runner["run_task"], runner["staging"]
 
     artifact = tmp_path / "artifact"
     artifact.touch()
     token_log = tmp_path / "tokens.jsonl"
     token_log.touch()
-    monkeypatch.setattr(run_task, "time", SimpleNamespace(strftime=lambda _: "20000101-120000"))
-    monkeypatch.setattr(run_task, "DEFAULT_RESULTS_DIR", tmp_path / "results")
-    monkeypatch.setattr(run_task, "load_task_config", lambda *a, **kw: {"instruction": "offline"})
-    monkeypatch.setattr(run_task, "resolve_guest_image", lambda *a: "/unused/image.qcow2")
+    monkeypatch.setattr(staging, "time", SimpleNamespace(strftime=lambda _: "20000101-120000"))
+    monkeypatch.setattr(staging, "DEFAULT_RESULTS_DIR", tmp_path / "results")
+    monkeypatch.setattr(staging, "load_task_config", lambda *a, **kw: {"instruction": "offline"})
+    monkeypatch.setattr(staging, "resolve_guest_image", lambda *a: "/unused/image.qcow2")
     runs = []
     for queue in ("queue-a", "queue-b"):
         argv = [
@@ -48,7 +51,7 @@ def test_same_second_attempts_have_independent_affinity(tmp_path, monkeypatch, e
         if explicit_result_dirs:
             argv += ["--result-dir", str(tmp_path / queue / "same-task")]
         monkeypatch.setattr(sys, "argv", argv)
-        runs.append(run_task.prepare_run(run_task.parse_args()))
+        runs.append(staging.prepare_run(run_task.parse_args()))
 
     first, second = runs
     assert first.result_dir != second.result_dir

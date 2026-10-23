@@ -56,16 +56,13 @@ def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch, code_mod
     # Import the real staging path without loading the VM or task assets.
     dependencies = {
         "hcu.osworld.task_loader": {"load_task_config": None},
-        "desktop_env.file_source": {"configure": None},
-        "desktop_env.cache": {"run_scoped_cache_dir": None},
-        "desktop_env.desktop_env": {"DesktopEnv": None},
     }
     for name, attributes in dependencies.items():
         dependency = ModuleType(name)
         vars(dependency).update(attributes)
         monkeypatch.setitem(sys.modules, name, dependency)
     spec = importlib.util.spec_from_file_location(
-        "agents_config_runner_test", root / "hcu/osworld/run_task.py",
+        "agents_config_runner_test", root / "hcu/osworld/staging.py",
     )
     runner = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, runner)

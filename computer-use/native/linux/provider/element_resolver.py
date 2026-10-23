@@ -7,10 +7,10 @@ from .foundation import (
     DEFAULT_TEXT_LIMIT,
     OperationFailure,
     child_at,
-    extents,
     node_role,
     safe,
 )
+from .node_geometry import extents
 from .primitives import name_fingerprint
 
 from .ax_node_properties import (

@@ -2,15 +2,14 @@
 
 from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
-    corrected_screen_frame,
     frame,
     is_interactive_role,
     limit_text,
     node_pid,
-    popped_up_menu_item,
     provider_bus_name,
-    sane_rect_frame,
 )
+from .node_geometry import corrected_screen_frame, sane_rect_frame
+from .node_visibility import popped_up_menu_item
 
 
 class NodeFacts:

@@ -14,9 +14,9 @@ from .tree_walk import iter_all
 from .x11_windows import (
     app_windows,
     iter_apps,
-    x11_root_window_state,
     x11_window_id_for_accessible,
 )
+from .desktop_layout import x11_root_window_state
 
 
 def window_is_active(window):
