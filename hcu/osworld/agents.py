@@ -135,6 +135,11 @@ def public_tools(channels: str) -> tuple[str, ...]:
     return CHANNEL_TOOLS[channels]
 
 
+def _toml_string(value: str) -> str:
+    # JSON's UTF-16 surrogate escapes are not valid TOML Unicode escapes.
+    return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
 def codex_config(
     *,
     model: str,
@@ -171,7 +176,7 @@ def codex_config(
         )
     public_tools(channels)
     mcp_env = (
-        f'\n[mcp_servers.computer_use.env]\nCOMPUTER_USE_CHANNELS = {json.dumps(channels)}\n'
+        f'\n[mcp_servers.computer_use.env]\nCOMPUTER_USE_CHANNELS = {_toml_string(channels)}\n'
         if channels
         else ""
     )
@@ -179,7 +184,7 @@ def codex_config(
         (
             "[[skills.config]]\n"
             "path = "
-            + json.dumps(f"{codex_home}/skills/.system/{name}/SKILL.md")
+            + _toml_string(f"{codex_home}/skills/.system/{name}/SKILL.md")
             + "\n"
             "enabled = false"
         )
@@ -187,7 +192,7 @@ def codex_config(
     )
     extra_instructions = (
         "developer_instructions = "
-        + json.dumps(developer_instructions, ensure_ascii=False)
+        + _toml_string(developer_instructions)
         + "\n"
         if developer_instructions is not None
         else ""
@@ -198,15 +203,15 @@ def codex_config(
     )
     code_mode_mcp = 'omit_tools_from = ["deferred"]\n' if code_mode else ""
     return f"""\
-model = {json.dumps(model)}
+model = {_toml_string(model)}
 model_provider = "{CODEX_PROVIDER_ID}"
-model_reasoning_effort = {json.dumps(effort)}
-approval_policy = {json.dumps(approval_policy)}
-sandbox_mode = {json.dumps(sandbox_mode)}
+model_reasoning_effort = {_toml_string(effort)}
+approval_policy = {_toml_string(approval_policy)}
+sandbox_mode = {_toml_string(sandbox_mode)}
 web_search = "disabled"
 model_reasoning_summary = "detailed"
 show_raw_agent_reasoning = true
-model_instructions_file = {json.dumps(base_instructions)}
+model_instructions_file = {_toml_string(base_instructions)}
 {extra_instructions}check_for_update_on_startup = false
 
 [analytics]
@@ -270,14 +275,14 @@ enabled = false
 {disabled_system_skills}
 
 [model_providers.{CODEX_PROVIDER_ID}]
-name = {json.dumps(CODEX_PROVIDER_NAME)}
-base_url = {json.dumps(base_url)}
+name = {_toml_string(CODEX_PROVIDER_NAME)}
+base_url = {_toml_string(base_url)}
 wire_api = "responses"
 # The gateway holds a rate-limited request open while it waits for capacity.
 stream_idle_timeout_ms = {CODEX_STREAM_IDLE_TIMEOUT_MS}
 
 [mcp_servers.computer_use]
-command = {json.dumps(mcp_command)}
+command = {_toml_string(mcp_command)}
 args = ["mcp"]
 required = true
 startup_timeout_sec = 60
@@ -451,7 +456,7 @@ def grok_config(
     contacts x.ai directly; the gateway URL already carries the task path.
     """
     public_tools(channels)
-    q = json.dumps
+    q = _toml_string
     mcp_env = (
         f"\n[mcp_servers.computer_use.env]\nCOMPUTER_USE_CHANNELS = {q(channels)}\n"
         if channels
