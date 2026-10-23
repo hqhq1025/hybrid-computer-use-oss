@@ -830,6 +830,51 @@ def relative_frame(node, window_bounds):
     )
 
 
+def window_bounds(app, window_index, window):
+    """Read provider geometry, or the exact strongly bound native frame.
+
+    Some accessibility bridges expose child geometry but no top-level
+    extents. Native geometry is usable only after the normal one-to-one
+    window binding succeeds; a title or an application's sole window is
+    not sufficient here. The opaque handle includes process generation.
+    """
+    if window is None:
+        return None
+    bounds = extents(window)
+    if bounds is not None:
+        return bounds
+    handle = window_instance_handle(app, window_index, window)
+    if not str(handle or "").startswith("w2:"):
+        return None
+    inventory = x11_window_inventory_for_pid(node_pid(app))
+    if not inventory_complete(inventory):
+        raise OperationFailure(
+            "observation_incomplete: the native window geometry could not "
+            "be read completely; no input was emitted.",
+            failure_code="observation_incomplete",
+            failure_phase="precondition",
+            input_events_emitted=False,
+            failure_subject="window",
+        )
+    matches = [
+        item for item in inventory
+        if opaque_window_instance_handle_for_id(app, item.get("id")) == handle
+    ]
+    if len(matches) != 1:
+        return None
+    item = matches[0]
+    if (
+        any(not isinstance(item.get(key), (int, float))
+            for key in ("x", "y", "width", "height"))
+        or not 0 < item["width"] <= MAX_SANE_EXTENT
+        or not 0 < item["height"] <= MAX_SANE_EXTENT
+        or abs(item["x"]) > MAX_SANE_EXTENT
+        or abs(item["y"]) > MAX_SANE_EXTENT
+    ):
+        return None
+    return frame(item["x"], item["y"], item["width"], item["height"])
+
+
 def iter_apps():
     try:
         root = desktop()
