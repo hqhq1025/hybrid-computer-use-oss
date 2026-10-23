@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- AX trees show a table cell's value after its name when the two differ,
+  for example `cell "A1" = "Year"` in a spreadsheet, clipped to 40
+  characters, so reading a sheet no longer needs `find`. A tree over its
+  budget now drops elements from the end of a long list or table instead
+  of replacing the whole list with one summary line.
 - Linux: AX `select` with an option name now changes the choice of GTK
   and Qt combo boxes and succeeds only when the combo box shows that
   option afterwards. For Qt, the provider moves the popup's current item

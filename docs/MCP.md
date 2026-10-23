@@ -410,10 +410,17 @@ expanded. Find and query waits accept the roles and states shown in the tree.
 A zero-result find lists at most five nearby candidates; these suggestions
 do not change the query or send input.
 
+A table cell whose value differs from its name shows the value after the
+name, for example `cell "A1" = "Year"` in a spreadsheet, where cells are
+named by address. The tree shows at most 40 Unicode code points of it, plus
+an ellipsis when clipped. When a tree exceeds its budget, a long run of
+sibling elements loses elements from its end first, so a table keeps its
+first rows; one `/omitted: "budget nodes=N ..."` line counts the rest.
+
 Find matches include a `text` excerpt when their role's value is absent from
-the rendered fields, as with paragraphs and cells. The excerpt contains at
-most 80 Unicode code points, plus an ellipsis when clipped. Clipped excerpts
-also carry `text_truncated=true`. Text already displayed in a name, property,
+the rendered fields, as with paragraphs and clipped cell values. The excerpt
+contains at most 80 Unicode code points, plus an ellipsis when clipped.
+Clipped excerpts also carry `text_truncated=true`. Text already displayed in a name, property,
 or matched-text field is not repeated. Excerpts are display-only and do not
 change canonical text, selectors, refs, or the response budget.
 
