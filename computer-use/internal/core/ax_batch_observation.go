@@ -37,17 +37,46 @@ func axBatchActionObservation(
 // element before and after), or is the last action (its notes compare the
 // trees around it). Only keys, text and scrolls without a ref qualify,
 // because only they need no element from the read before them.
+//
+// A batch whose input ends with waits for windows only is the exception: a
+// window wait reads the window list, not the tree, and the final observation
+// reads the tree after the waits. The last action's own read and the read
+// before it are then root-only, and its notes compare root facts only.
 func axBatchLightReadback(actions []axBatchAction, index, lastInput int) bool {
-	if index < 0 || index+1 >= lastInput {
+	if index < 0 || index > lastInput || lastInput >= len(actions) {
 		return false
 	}
-	for _, step := range actions[index : index+2] {
+	if index+1 >= lastInput && !axBatchEndsWithWindowWaits(actions, lastInput) {
+		return false
+	}
+	end := index + 2
+	if end > lastInput+1 {
+		end = lastInput + 1
+	}
+	for _, step := range actions[index:end] {
 		switch step.actionType {
 		case "keypress", "type", "scroll":
 		default:
 			return false
 		}
 		if step.targetRef != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// axBatchEndsWithWindowWaits reports whether at least one step follows the
+// last input and every such step waits for a window title only.
+func axBatchEndsWithWindowWaits(actions []axBatchAction, lastInput int) bool {
+	if lastInput < 0 || lastInput >= len(actions)-1 {
+		return false
+	}
+	for _, step := range actions[lastInput+1:] {
+		wait := step.wait
+		if step.actionType != "wait" || wait == nil || wait.window == "" ||
+			wait.text != "" || wait.ref != "" || wait.query != nil ||
+			wait.state != "" || wait.value != "" || wait.settle {
 			return false
 		}
 	}

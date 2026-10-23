@@ -74,6 +74,9 @@ func TestLightReadbackOnlyBetweenRefLessInputs(t *testing.T) {
 	click := axBatchAction{actionType: "click", targetRef: "r3"}
 	refKey := axBatchAction{actionType: "keypress", key: "Tab", targetRef: "r2"}
 	wait := axBatchAction{actionType: "wait", wait: &axWait{text: "x"}}
+	windowWait := axBatchAction{actionType: "wait", wait: &axWait{window: "Report"}}
+	windowGone := axBatchAction{actionType: "wait", wait: &axWait{window: "Report", gone: true}}
+	settle := axBatchAction{actionType: "wait", wait: &axWait{settle: true}}
 	for _, tc := range []struct {
 		name    string
 		actions []axBatchAction
@@ -90,6 +93,13 @@ func TestLightReadbackOnlyBetweenRefLessInputs(t *testing.T) {
 		// A wait consults the latest read.
 		{"wait next", []axBatchAction{key, wait, key, key, key}, []bool{false, false, true, false, false}},
 		{"wait before last", []axBatchAction{key, key, key, wait, key}, []bool{true, true, false, false, false}},
+		// Waits for windows only read the window list, and the final
+		// observation reads the tree after them.
+		{"keys then window wait", []axBatchAction{key, key, windowWait}, []bool{true, true, false}},
+		{"one key then window waits", []axBatchAction{key, windowWait, windowGone}, []bool{true, false, false}},
+		{"click then window wait", []axBatchAction{key, click, windowWait}, []bool{false, false, false}},
+		{"keys then window and text waits", []axBatchAction{key, key, windowWait, wait}, []bool{false, false, false, false}},
+		{"keys then settle", []axBatchAction{key, key, settle}, []bool{false, false, false}},
 	} {
 		lastInput := -1
 		for index, action := range tc.actions {
