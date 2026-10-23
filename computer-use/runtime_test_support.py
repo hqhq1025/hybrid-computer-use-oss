@@ -66,6 +66,8 @@ from native.linux.provider import (  # noqa: E402
     wire,
     wire_request,
     x11_windows,
+    desktop_layout,
+    x11_window_inventory,
 )
 
 PROVIDER_MODULES = (
@@ -78,6 +80,8 @@ PROVIDER_MODULES = (
     phase_timing,
     app_resolver,
     x11_windows,
+    desktop_layout,
+    x11_window_inventory,
     atspi_inventory,
     ax_node_properties,
     ax_records,

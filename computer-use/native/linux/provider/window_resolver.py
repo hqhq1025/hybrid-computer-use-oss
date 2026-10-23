@@ -19,16 +19,18 @@ from .node_geometry import extents
 from . import action_evidence
 from .ax_records import effective_role
 from .x11_windows import (
-    _x11_window_inventory_cache,
     app_windows,
-    refuse_activation_behind_modal,
     relative_frame,
     strong_window_instance_handle_inventory,
     titled_top_level_window_id,
-    x11_root_window_state,
     x11_window_id_for_accessible,
+)
+from .x11_window_inventory import (
+    _x11_window_inventory_cache,
+    refuse_activation_behind_modal,
     x11_window_inventory_for_pid,
 )
+from .desktop_layout import x11_root_window_state
 
 
 def perform_ax_window_action(tool, app, window, element_record):

@@ -135,7 +135,7 @@ class HiDPIGeometryTests(unittest.TestCase):
             for index, native in enumerate(natives)])
         rects = {hex(0x100 + index): native for index, native in enumerate(natives)}
         self.patches = [
-            mock.patch.object(x11_windows, "_x11_managed_windows", lambda: managed),
+            mock.patch.object(x11_window_inventory, "_x11_managed_windows", lambda: managed),
             mock.patch.object(window_scale, "native_window_rects", rects.get),
             mock.patch.object(node_geometry, "raw_extents", lambda n: n.bounds),
             mock.patch.object(window_scale, "raw_extents", lambda n: n.bounds),
@@ -143,8 +143,8 @@ class HiDPIGeometryTests(unittest.TestCase):
         for patch in self.patches:
             patch.start()
             self.addCleanup(patch.stop)
-        x11_windows._x11_window_inventory_cache.clear()
-        self.addCleanup(x11_windows._x11_window_inventory_cache.clear)
+        x11_window_inventory._x11_window_inventory_cache.clear()
+        self.addCleanup(x11_window_inventory._x11_window_inventory_cache.clear)
         return app
 
     def window(self, app, role, title, bounds):

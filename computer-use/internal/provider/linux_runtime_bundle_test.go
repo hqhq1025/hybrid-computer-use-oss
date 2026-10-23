@@ -33,6 +33,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/ax_target_notes.py",
 		"native/linux/provider/ax_transition_evidence.py",
 		"native/linux/provider/ax_virtual_table.py",
+		"native/linux/provider/desktop_layout.py",
 		"native/linux/provider/element_resolver.py",
 		"native/linux/provider/find_walk.py",
 		"native/linux/provider/foundation.py",
@@ -61,6 +62,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/window_scale.py",
 		"native/linux/provider/wire.py",
 		"native/linux/provider/wire_request.py",
+		"native/linux/provider/x11_window_inventory.py",
 		"native/linux/provider/x11_windows.py",
 		"runtime.py",
 	}

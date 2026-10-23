@@ -22,17 +22,19 @@ from .foundation import (
 )
 from . import action_evidence
 from .x11_windows import (
-    _x11_managed_windows,
-    _x11_window_inventory_cache,
     app_windows,
     iter_apps,
-    refuse_activation_behind_modal,
     strong_window_instance_handles,
     unmapped_window_indices,
     window_handle_for_pid,
-    x11_root_window_state,
+)
+from .x11_window_inventory import (
+    _x11_managed_windows,
+    _x11_window_inventory_cache,
+    refuse_activation_behind_modal,
     x11_window_type,
 )
+from .desktop_layout import x11_root_window_state
 
 # Window types of application windows. Docks, desktops, splash screens and
 # notifications are not targets of activate or close. "" means the window

@@ -16,11 +16,13 @@ from .foundation import (
 from .node_geometry import screen_transform, extents
 
 from .x11_windows import (
+    relative_frame,
+    x11_window_id_for_accessible,
+)
+from .desktop_layout import (
     desktop_bounds,
     desktop_layout_state,
     frame_intersection,
-    relative_frame,
-    x11_window_id_for_accessible,
 )
 
 from .gui_capture import (

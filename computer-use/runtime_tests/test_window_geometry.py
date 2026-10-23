@@ -1,7 +1,7 @@
 """Missing provider frames must retain exact native window ownership."""
 
 from runtime_test_support import *  # noqa: F401,F403
-from native.linux.provider import x11_windows
+from native.linux.provider import x11_window_inventory
 
 
 class MissingWindowGeometryTests(AtspiPatchedTestCase):
@@ -20,8 +20,8 @@ class MissingWindowGeometryTests(AtspiPatchedTestCase):
                                   return_value=runtime.InventoryResult([(0, self.handle)]))
         self.native_read = self.patch("x11_window_inventory_for_pid",
                                       return_value=runtime.InventoryResult([self.native]))
-        x11_windows._x11_window_inventory_cache.clear()
-        self.addCleanup(x11_windows._x11_window_inventory_cache.clear)
+        x11_window_inventory._x11_window_inventory_cache.clear()
+        self.addCleanup(x11_window_inventory._x11_window_inventory_cache.clear)
 
     def patch(self, name, **kwargs):
         patcher = mock.patch.object(runtime, name, **kwargs)
@@ -79,7 +79,7 @@ class MissingWindowGeometryTests(AtspiPatchedTestCase):
             with self.subTest(source=source):
                 original = source.return_value
                 source.return_value = runtime.InventoryResult(complete=False)
-                x11_windows._x11_window_inventory_cache.clear()
+                x11_window_inventory._x11_window_inventory_cache.clear()
                 with self.assertRaises(runtime.OperationFailure) as raised:
                     self.read()
                 self.assertEqual("observation_incomplete", raised.exception.failure_code)
