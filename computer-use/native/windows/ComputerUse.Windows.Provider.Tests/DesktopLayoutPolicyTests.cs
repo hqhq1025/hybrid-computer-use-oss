@@ -200,5 +200,49 @@ internal static class DesktopLayoutPolicyTests
             throw new InvalidDataException(
                 "Delivered-image coordinates did not map through native pixel centers.");
         }
+
+        SendInputMapping();
+        ImageBounds();
+    }
+
+    // SendInput lands absolute coordinate n on pixel floor(n * length / 65536).
+    // Every pixel of common virtual-desktop axes, including a negative
+    // origin, must map back to itself.
+    private static void SendInputMapping()
+    {
+        foreach (var (origin, length) in new[]
+        {
+            (0, 1280), (0, 1365), (0, 1920), (0, 2560), (0, 3840), (-1920, 3840), (0, 2160),
+        })
+        {
+            for (var pixel = origin; pixel < origin + length; pixel++)
+            {
+                var absolute = WindowsDesktopImageGeometry.ToSendInputAbsolute(
+                    pixel, origin, length);
+                var landed = origin + (int)((long)absolute * length / 65536);
+                if (absolute < 0 || absolute > 65535 || landed != pixel)
+                {
+                    throw new InvalidDataException(
+                        $"SendInput pixel {pixel} on axis {origin}+{length} landed on {landed}.");
+                }
+            }
+        }
+    }
+
+    private static void ImageBounds()
+    {
+        foreach (var (x, y, inside) in new[]
+        {
+            (0.0, 0.0, true), (1364.0, 767.0, true), (1364.4, 0.0, false),
+            (1365.0, 0.0, false), (-0.1, 0.0, false), (0.0, 768.0, false),
+            (double.NaN, 0.0, false), (double.PositiveInfinity, 0.0, false),
+        })
+        {
+            if (WindowsDesktopImageGeometry.ContainsPoint(x, y, 1365, 768) != inside)
+            {
+                throw new InvalidDataException(
+                    $"Image point ({x}, {y}) inside={!inside}; expected {inside}.");
+            }
+        }
     }
 }

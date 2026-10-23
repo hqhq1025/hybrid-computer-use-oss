@@ -147,6 +147,13 @@ internal sealed partial class ProviderServer
             payload["recovery_context"] =
                 failure.RecoveryContext.DeepClone();
         }
+        // Only the accessibility payload carries candidates on the wire.
+        if (failure?.Candidates is { } candidates &&
+            DomainPayload(operation) == "accessibility")
+        {
+            payload["candidates"] = candidates.DeepClone();
+            payload["candidate_count"] = candidates.Count;
+        }
         if (mutationOperation && failure?.ActionEvidence is not null)
         {
             payload["action_evidence"] = failure.ActionEvidence.DeepClone();

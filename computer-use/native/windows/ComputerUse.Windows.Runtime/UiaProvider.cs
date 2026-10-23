@@ -85,54 +85,99 @@ internal sealed partial class UiaProvider : IDisposable
 
     internal JsonObject ObserveApps()
     {
-        var lines = new JsonArray();
-        var apps = new JsonArray();
-        foreach (var process in Process.GetProcesses()
-                     .Where(value => value.MainWindowHandle != 0)
-                     .OrderBy(value => value.ProcessName, StringComparer.OrdinalIgnoreCase))
+        // One window enumeration serves the whole listing, so every app is
+        // sampled against the same foreground window.
+        var desktopWindows = NativeDesktop.ListWindows();
+        var groups = WindowsAppInventory.Group(
+            desktopWindows.Select(window => window.ToTopLevel()));
+        var nativeWindows = desktopWindows
+            .GroupBy(window => window.ProcessId)
+            .ToDictionary(group => group.Key, group => group.ToArray());
+        var entries = new List<(string Name, int Pid, string Text, JsonObject App)>();
+        foreach (var group in groups)
         {
             try
             {
-                var windows = ProjectNativeWindows(
+                using var process = Process.GetProcessById(group.OwnerProcessId);
+                var projection = ProjectNativeWindows(
                     process,
-                    NativeDesktop.ListWindows(process.Id)).LogicalWindows();
-                if (windows.Count == 0)
+                    nativeWindows.GetValueOrDefault(group.OwnerProcessId) ??
+                        Array.Empty<NativeDesktop.WindowRecord>());
+                var members = group.Windows
+                    .Select(window => (long)projection.LogicalHandle((nint)window.Handle))
+                    .ToHashSet();
+                var targets = group.Windows
+                    .Where(WindowsAppInventory.IsInputTarget)
+                    .Select(window => (long)projection.LogicalHandle((nint)window.Handle))
+                    .ToHashSet();
+                var windows = projection.LogicalWindows()
+                    .Where(window => members.Contains(window.Handle.ToInt64()))
+                    .ToArray();
+                if (windows.Length == 0)
                 {
                     continue;
                 }
+                var generation = ProcessGeneration(process);
+                var windowInventory = new JsonArray();
+                foreach (var window in windows)
+                {
+                    var handle = OpaqueWindowHandle(process, window.Handle);
+                    windowInventory.Add(new JsonObject
+                    {
+                        ["title"] = window.Title,
+                        ["role"] = "window",
+                        ["handle"] = handle,
+                        ["providerBusName"] = $"win32:pid:{process.Id}",
+                        ["providerObjectPath"] = handle,
+                        ["processGeneration"] = generation,
+                        ["active"] = window.Active,
+                        ["inputTarget"] = targets.Contains(window.Handle.ToInt64()),
+                    });
+                }
+                var host = group.AppProcessId == group.OwnerProcessId
+                    ? string.Empty
+                    : $" in {process.ProcessName} pid={process.Id}";
+                var app = AppJson(process, group.AppProcessId);
+                var name = app["name"]!.GetValue<string>();
                 var text =
-                    $"{process.ProcessName} (pid={process.Id}, windows={windows.Count})";
-                lines.Add(text);
-                var app = AppJson(process);
+                    $"{name} (pid={group.AppProcessId}{host}, windows={windows.Length})";
                 app["displayText"] = text;
-                apps.Add(app);
+                app["inputCapable"] = targets.Count > 0;
+                app["windows"] = windowInventory;
+                entries.Add((name, group.AppProcessId, text, app));
             }
             catch
             {
                 // A process can terminate between enumeration and inspection.
             }
         }
+        var ordered = entries
+            .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entry => entry.Pid)
+            .ToArray();
         return new JsonObject
         {
             ["ok"] = true,
             ["text"] = string.Join(
                 Environment.NewLine,
-                lines.Select(value => value?.GetValue<string>() ?? string.Empty)),
-            ["apps"] = apps,
+                ordered.Select(entry => entry.Text)),
+            ["apps"] = new JsonArray(
+                ordered.Select(entry => (JsonNode)entry.App).ToArray()),
         };
     }
 
     internal JsonObject Observe(JsonObject request)
     {
         var query = RequiredString(request, "app");
-        var process = ResolveProcess(request, query);
+        var (process, scope) = ResolveApp(request, query);
         try
         {
             var selected = ResolveWindow(
                 process,
                 null,
                 OptionalString(request, "window_handle", string.Empty),
-                "stale_window_ref");
+                "stale_window_ref",
+                scope);
             return new JsonObject
             {
                 ["ok"] = true,
@@ -153,7 +198,12 @@ internal sealed partial class UiaProvider : IDisposable
 
     internal JsonObject ListWindows(JsonObject request)
     {
-        var process = ResolveProcess(request, RequiredString(request, "app"));
+        var query = RequiredString(request, "app");
+        if (request["app_identity"] is null && !int.TryParse(query, out _))
+        {
+            return ListWindowsByName(query);
+        }
+        var process = ResolveProcess(request, query);
         var windows = ProjectNativeWindows(
             process,
             NativeDesktop.ListWindows(process.Id)).LogicalWindows();
@@ -311,7 +361,18 @@ internal sealed partial class UiaProvider : IDisposable
         }
     }
 
-    private static Process ResolveProcess(JsonObject request, string query)
+    // The process an app-level request runs against. A name query resolves
+    // through the visible top-level windows, so an ApplicationFrameHost
+    // window counts as the UWP app it hosts and explorer.exe's taskbar
+    // never counts as an application window.
+    private sealed record ResolvedApp(
+        Process Process,
+        IReadOnlyCollection<long>? Windows);
+
+    private Process ResolveProcess(JsonObject request, string query) =>
+        ResolveApp(request, query).Process;
+
+    private ResolvedApp ResolveApp(JsonObject request, string query)
     {
         var identity = request["app_identity"] as JsonObject;
         if (identity is not null)
@@ -350,50 +411,161 @@ internal sealed partial class UiaProvider : IDisposable
                     throw WindowsProviderFailures.StaleApp(
                         "The bound application process generation is stale.");
                 }
-                return process;
+                return new(process, null);
             }
             throw WindowsProviderFailures.StaleApp(
                 "The bound Windows application identity is malformed.");
         }
+        var names = new Dictionary<int, string?>();
+        var groups = WindowsAppInventory.Group(
+            NativeDesktop.ListWindows().Select(window => window.ToTopLevel()));
         if (int.TryParse(query, out var pid))
         {
-            return Process.GetProcessById(pid);
+            // The apps listing names a hosted UWP app by its own pid; its
+            // windows belong to the host process.
+            var hosted = groups.FirstOrDefault(group =>
+                group.AppProcessId == pid && group.OwnerProcessId != pid);
+            return hosted is null
+                ? new(Process.GetProcessById(pid), null)
+                : new(
+                    Process.GetProcessById(hosted.OwnerProcessId),
+                    hosted.Windows.Select(window => window.Handle).ToArray());
         }
-        var normalized = Normalize(query);
-        var matches = Process.GetProcesses()
-            .Where(value =>
-            {
-                try
-                {
-                    return value.MainWindowHandle != 0 &&
-                        string.Equals(
-                            Normalize(value.ProcessName),
-                            normalized,
-                            StringComparison.Ordinal);
-                }
-                catch
-                {
-                    return false;
-                }
-            })
-            .ToArray();
-        if (matches.Length == 0)
+        var matches = WindowsAppInventory.MatchName(
+            groups,
+            id => ProcessName(id, names),
+            query);
+        if (matches.Count == 0)
         {
             throw new ProviderFailureException(
                 "app_not_found",
                 "precondition",
-                $"Application {query} was not found.");
+                WindowsAppInventory.MatchesOnlyInfrastructure(
+                    groups,
+                    id => ProcessName(id, names),
+                    query)
+                    ? $"Application {query} shows only desktop shell windows " +
+                        "(taskbar, desktop), which take no application input. " +
+                        "List windows with AX {\"mode\":\"apps\"}."
+                    : $"Application {query} was not found.");
         }
-        if (matches.Length > 1)
+        if (matches.Count > 1)
         {
-            var active = matches.FirstOrDefault(
-                value => NativeDesktop.ListWindows(value.Id).Any(window => window.Active));
-            if (active is not null)
+            // An exact window reference names one of the processes.
+            var bound = _windowHandles.TryGetValue(
+                    OptionalString(request, "window_handle", string.Empty),
+                    out var binding)
+                ? matches.Where(match => match.OwnerProcessId == binding.ProcessId).ToArray()
+                : Array.Empty<AppWindowGroup>();
+            if (bound.Length != 1)
             {
-                return active;
+                throw AmbiguousApp(query, matches, names);
+            }
+            matches = bound;
+        }
+        var match = matches[0];
+        try
+        {
+            return new(
+                Process.GetProcessById(match.OwnerProcessId),
+                match.Windows.Select(window => window.Handle).ToArray());
+        }
+        catch (ArgumentException)
+        {
+            throw new ProviderFailureException(
+                "app_not_found",
+                "precondition",
+                $"Application {query} exited while it was resolved.");
+        }
+    }
+
+    // Several application processes show input windows under one name.
+    // Picking the foreground one would guess; the candidates let the core
+    // list each process's windows so the caller can pass one wN.
+    private static ProviderFailureException AmbiguousApp(
+        string query,
+        IReadOnlyList<AppWindowGroup> matches,
+        Dictionary<int, string?> names)
+    {
+        var candidates = new JsonArray();
+        var labels = new List<string>();
+        foreach (var match in matches)
+        {
+            var name = ProcessName(match.AppProcessId, names) ?? query;
+            labels.Add($"{name} ({match.Windows.Count} window{(match.Windows.Count == 1 ? "" : "s")})");
+            try
+            {
+                using var owner = Process.GetProcessById(match.OwnerProcessId);
+                candidates.Add(new JsonObject
+                {
+                    ["name"] = name,
+                    ["providerBusName"] = $"uia3:pid:{owner.Id}",
+                    ["processGeneration"] = ProcessGeneration(owner),
+                });
+            }
+            catch (ArgumentException)
+            {
+                // An exited candidate cannot be addressed; it is still named.
             }
         }
-        return matches[0];
+        return new ProviderFailureException(
+            "ax_app_ambiguous",
+            "precondition",
+            $"appTargetAmbiguous(\"{query}\"): {matches.Count} application " +
+            $"processes with input windows match this query: {string.Join(", ", labels)}. " +
+            "No action was attempted. Pass the wN of one window as window_ref; " +
+            "AX {\"mode\":\"apps\"} lists the windows.",
+            factsComplete: true,
+            subject: "app",
+            candidates: candidates);
+    }
+
+    // A title wait by application name asks whether any application of that
+    // name shows such a window, so it lists every matching process; no match
+    // is an empty listing, not a failure.
+    private static JsonObject ListWindowsByName(string query)
+    {
+        var names = new Dictionary<int, string?>();
+        var matches = WindowsAppInventory.MatchName(
+            WindowsAppInventory.Group(
+                NativeDesktop.ListWindows().Select(window => window.ToTopLevel())),
+            id => ProcessName(id, names),
+            query);
+        var appNames = matches
+            .Select(match => ProcessName(match.AppProcessId, names) ?? string.Empty)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return new JsonObject
+        {
+            ["ok"] = true,
+            ["app_name"] = appNames.Length == 1 ? appNames[0] : string.Empty,
+            ["app_pid"] = matches.Count == 1 ? matches[0].AppProcessId : 0,
+            ["window_titles"] = new JsonArray(
+                matches
+                    .SelectMany(match => match.Windows)
+                    .Select(window => window.Title)
+                    .Where(title => title.Length > 0)
+                    .Select(title => (JsonNode)JsonValue.Create(title)!)
+                    .ToArray()),
+        };
+    }
+
+    private static string? ProcessName(int processId, Dictionary<int, string?> cache)
+    {
+        if (!cache.TryGetValue(processId, out var name))
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                name = process.ProcessName;
+            }
+            catch (Exception)
+            {
+                name = null;
+            }
+            cache[processId] = name;
+        }
+        return name;
     }
 
     private JsonObject StaleWindowRecoveryContext(Process process)

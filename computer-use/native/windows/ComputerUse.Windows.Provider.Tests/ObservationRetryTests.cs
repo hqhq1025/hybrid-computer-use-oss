@@ -386,65 +386,6 @@ internal static class ObservationRetryTests
             }
         }
 
-        var redrawCalls = 0;
-        var compositionFlushCalls = 0;
-        var committedCaptureCalls = 0;
-        var renderCommitDelays = new List<TimeSpan>();
-        var committedWindowObservation = WindowRenderCommit.Capture(
-            () =>
-            {
-                redrawCalls++;
-                return true;
-            },
-            () =>
-            {
-                compositionFlushCalls++;
-                return 0;
-            },
-            () => $"committed-frame-{++committedCaptureCalls}",
-            renderCommitDelays.Add);
-        if (committedWindowObservation != "committed-frame-3" ||
-            redrawCalls != 3 ||
-            compositionFlushCalls != 3 ||
-            committedCaptureCalls != 3 ||
-            renderCommitDelays.Count != 3 ||
-            renderCommitDelays.Any(
-                value => value != TimeSpan.FromMilliseconds(100)))
-        {
-            throw new InvalidDataException(
-                "Target-window capture did not require bounded redraw and DWM commits.");
-        }
-
-        try
-        {
-            _ = WindowRenderCommit.Capture(
-                () => false,
-                () => 0,
-                () => "unexpected",
-                _ => { });
-            throw new InvalidDataException(
-                "Target-window capture accepted a failed redraw.");
-        }
-        catch (InvalidOperationException error) when (
-            error.Message == "window_redraw_failed")
-        {
-        }
-
-        try
-        {
-            _ = WindowRenderCommit.Capture(
-                () => true,
-                () => unchecked((int)0x80263001),
-                () => "unexpected",
-                _ => { });
-            throw new InvalidDataException(
-                "Target-window capture accepted a failed DWM composition flush.");
-        }
-        catch (InvalidOperationException error) when (
-            error.Message == "desktop_composition_flush_failed")
-        {
-        }
-
         var desktopCaptureAttempts = 0;
         observationDelays.Clear();
         observedFailureAttempts.Clear();

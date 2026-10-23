@@ -12,7 +12,6 @@
     <InvariantGlobalization>false</InvariantGlobalization>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>computer-use-windows-provider</AssemblyName>
     <RootNamespace>ComputerUse.Windows.Runtime</RootNamespace>

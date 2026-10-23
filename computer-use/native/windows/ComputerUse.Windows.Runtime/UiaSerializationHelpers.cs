@@ -50,12 +50,28 @@ internal sealed partial class UiaProvider
         };
     }
 
-    private static JsonObject AppJson(Process process)
+    // appProcessId names the application a window shows when another
+    // process owns the window (a UWP app inside ApplicationFrameHost). The
+    // identity stays the owner's: every operation runs against its HWNDs.
+    private static JsonObject AppJson(Process process, int appProcessId = 0)
     {
+        var name = process.ProcessName;
+        if (appProcessId != 0 && appProcessId != process.Id)
+        {
+            try
+            {
+                using var app = Process.GetProcessById(appProcessId);
+                name = app.ProcessName;
+            }
+            catch (ArgumentException)
+            {
+                // The hosted process exited; keep the host's name.
+            }
+        }
         return new JsonObject
         {
-            ["name"] = process.ProcessName,
-            ["bundleIdentifier"] = process.ProcessName,
+            ["name"] = name,
+            ["bundleIdentifier"] = name,
             ["pid"] = process.Id,
             ["providerBusName"] = $"uia3:pid:{process.Id}",
             ["processGeneration"] = ProcessGeneration(process),
