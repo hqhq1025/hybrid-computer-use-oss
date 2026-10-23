@@ -7,6 +7,9 @@
   cells that hold values (with refs) and summarizes the empty ones as
   `/empty-cells`, like Linux, and returns in about two seconds instead of
   stopping at the node budget on the first row.
+- Windows: a window that leaves the window list but still exists (hidden,
+  or resized to zero, for example by an app that cancels `close`) is no
+  longer reported as "disappeared"; the error says it still exists.
 - Windows: `type` and `set_value` send Unicode key events instead of pasting
   through the clipboard, so they no longer replace the clipboard or wait a
   fixed half second; GUI keys wait for the application instead of 500 ms.

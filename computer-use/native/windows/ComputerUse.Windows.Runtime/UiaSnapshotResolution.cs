@@ -770,6 +770,10 @@ internal sealed partial class UiaProvider
         return "runtime:" + string.Join('.', runtimeId);
     }
 
+    private string MissingWindowMessage(string opaqueWindowHandle) =>
+        WindowsWindowIdentityPolicy.MissingWindowMessage(BoundWindowLifecycle(
+            _windowHandles.TryGetValue(opaqueWindowHandle, out var binding) ? binding : null));
+
     private NativeDesktop.WindowRecord ResolveWindow(
         Process process,
         JsonObject? target,
@@ -790,8 +794,7 @@ internal sealed partial class UiaProvider
                     "windowHandle",
                     string.Empty)))
             {
-                throw WindowsProviderFailures.StaleWindow(
-                    "The exact window disappeared; no input was emitted.");
+                throw WindowsProviderFailures.StaleWindow(MissingWindowMessage(opaque));
             }
             throw new ProviderFailureException(
                 "window_not_found",
@@ -834,13 +837,11 @@ internal sealed partial class UiaProvider
                 value => value.Handle == binding.Handle);
             if (exact is null)
             {
+                var message = WindowsWindowIdentityPolicy.MissingWindowMessage(
+                    BoundWindowLifecycle(binding));
                 throw staleFailureCode == "stale_window_ref"
-                    ? WindowsProviderFailures.StaleWindow(
-                        "The exact window disappeared; no input was emitted.")
-                    : new ProviderFailureException(
-                        staleFailureCode,
-                        "precondition",
-                        "The exact window disappeared; no input was emitted.");
+                    ? WindowsProviderFailures.StaleWindow(message)
+                    : new ProviderFailureException(staleFailureCode, "precondition", message);
             }
             return exact;
         }
