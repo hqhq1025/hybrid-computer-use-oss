@@ -192,6 +192,18 @@ defaults. The installer preserves those preference files, their permissions and
 their ownership, even when installation fails. WPS remains available through
 its desktop entry and the file manager's Open With menu.
 
+The installer enables `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` in the vendor's
+`wps`, `wpp` and `et` startup scripts. Both command-line and desktop launches
+inherit the setting without a login shell. The original argument parsing and
+exit behavior remain unchanged. This enables the bundled Qt accessibility
+bridge; it does not add semantics to custom-drawn document content.
+
+For an existing installation, run `sudo python3 configure_wps_accessibility.py`
+inside the guest. Close all WPS processes before checking a fresh launch.
+Package upgrades can replace these launchers; rerun the configuration after
+upgrades through other installers. Unknown launcher formats or existing
+conflicting settings stop configuration before any launcher changes.
+
 Close WPS before installation. The script does not copy profiles, accept license
 terms or change input-method settings. Confirm the license through WPS's normal
 first-launch interface, then verify Writer, Spreadsheets and Presentation.

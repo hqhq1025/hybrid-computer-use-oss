@@ -10,6 +10,8 @@ import stat
 import subprocess
 import tempfile
 
+import configure_wps_accessibility
+
 
 def run(command, timeout=60):
     result = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
@@ -108,7 +110,9 @@ def install(package, manifest, check=False):
     observed = run(["dpkg-query", "-W", "-f=${Version}\t${Status}", metadata["Package"]]).strip()
     if observed != metadata["Version"] + "\tinstall ok installed":
         raise RuntimeError("WPS package did not reach the selected installed state: " + observed)
-    return {"package": metadata, "installation_performed": True, "dependency_plan": plan}
+    accessibility = configure_wps_accessibility.configure()
+    return {"package": metadata, "installation_performed": True, "dependency_plan": plan,
+            "accessibility": accessibility}
 
 
 if __name__ == "__main__":
