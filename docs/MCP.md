@@ -141,6 +141,16 @@ Until the restart, only GUI can read and operate that window. It also names
 windows that an application on the bus shows outside its tree, such as the
 native message boxes of Electron applications; use GUI for those.
 
+A new Firefox profile opens a Terms of Use dialog over its first tab.
+Until the dialog is accepted, Firefox exposes only the dialog, so `find`
+and `select` see no page content. Images that start Firefox with a new
+profile should set the enterprise policy `SkipTermsOfUse` in
+`distribution/policies.json` of the Firefox installation:
+
+```json
+{"policies": {"SkipTermsOfUse": true}}
+```
+
 On other desktops, applications started before the provider may also need
 a restart. A GTK 2 application without an XSETTINGS manager needs
 `GTK_MODULES=gail:atk-bridge` at launch. LibreOffice exposes a tree only
