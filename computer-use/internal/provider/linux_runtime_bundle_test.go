@@ -55,6 +55,7 @@ func TestLinuxRuntimeBundleIsComplete(t *testing.T) {
 		"native/linux/provider/semantic_scan.py",
 		"native/linux/provider/semantic_window_candidates.py",
 		"native/linux/provider/snapshot.py",
+		"native/linux/provider/snapshot_children.py",
 		"native/linux/provider/tree_reuse.py",
 		"native/linux/provider/tree_walk.py",
 		"native/linux/provider/ui_events.py",

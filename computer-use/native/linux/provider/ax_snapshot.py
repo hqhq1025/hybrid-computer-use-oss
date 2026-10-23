@@ -6,7 +6,6 @@ from .foundation import (
     Atspi,
     BUDGET_PRESSURE_RATIO,
     DEFAULT_TEXT_LIMIT,
-    HARD_CHILD_CAP,
     MAX_CHILD_FANOUT,
     FIND_WALK_DEADLINE_SECONDS,
     FIND_WALK_MAX_CHILD_FANOUT,
@@ -22,7 +21,6 @@ from .foundation import (
     provider_bus_name,
     provider_object_path,
     safe,
-    should_enumerate_children,
     state_contains,
 )
 from .node_visibility import MENU_ROLES, showing_state
@@ -35,14 +33,19 @@ from .ax_node_properties import (
     render_element_line,
 )
 from .ax_records import (
-    closed_combo_popups,
     record_for,
 )
 from .ax_virtual_table import (
     render_visible_cells,
-    visible_child_span,
 )
 from .find_walk import TEXT_ONLY_ROLES, candidate_record, repeats_parent_text
+from .snapshot_children import (
+    ChildWalk,
+    child_entries,
+    closed_popup_indices,
+    record_provider_errors,
+    strict_child_count,
+)
 
 
 FIND_WALK_LIMITS = {
@@ -51,25 +54,6 @@ FIND_WALK_LIMITS = {
     "max_child_fanout": FIND_WALK_MAX_CHILD_FANOUT,
     "deadline_seconds": FIND_WALK_DEADLINE_SECONDS,
 }
-
-
-def null_children_annotation(path, count, total):
-    """Report null child references on their parent.
-
-    The read is incomplete, so this stays a coverage gap; the detail tells
-    the agent that reading again does not reveal those children.
-    """
-    return {
-        "parentRuntimeId": path[:],
-        "kind": "provider_omission",
-        "count": int(count),
-        "reason": "null_reference",
-        "detail": (
-            "{} of {} child references returned no object; AX cannot read "
-            "or address that part of the window. Use GUI there.".format(
-                count, max(count, int(total or 0)))
-        ),
-    }
 
 
 def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
@@ -120,6 +104,14 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
     pending_ancestors = []
     deadline = time.monotonic() + deadline_seconds if deadline_seconds else None
     pressure_at = max(1, int(max_tree_nodes * BUDGET_PRESSURE_RATIO))
+    walk = ChildWalk(
+        window_bounds=window_bounds, max_child_fanout=max_child_fanout,
+        focus_probe=focus_probe, content_probe=content_probe,
+        snapshot_scope=snapshot_scope, dropped=dropped,
+        annotations=annotations, provider_probe_errors=provider_probe_errors,
+        no_child_count_hint=no_child_count_hint,
+        unknown_child_count=unknown_child_count,
+    )
 
     def kept():
         return len(records) + light["count"]
@@ -168,120 +160,6 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             emit(record, entry["path"], entry["render_depth"])
             entry["emitted"] = len(records)
 
-    def record_provider_errors(errors):
-        for field in errors:
-            provider_probe_errors[field] = (
-                provider_probe_errors.get(field, 0) + 1
-            )
-
-    def strict_child_count(node, facts=None):
-        if facts is None:
-            facts = NodeFacts(node)
-        raw, error = facts.strict("child_count")
-        if error is None:
-            try:
-                return max(0, int(raw or 0))
-            except Exception as exc:
-                error = type(exc).__name__
-        record_provider_errors({"child_count": error})
-        return unknown_child_count
-
-    def child_entries(node, path, count_hint=no_child_count_hint, facts=None):
-        """Return a lazy bounded child iterator plus enumerability metadata."""
-        count = (
-            strict_child_count(node, facts)
-            if count_hint is no_child_count_hint
-            else count_hint
-        )
-        if facts is None:
-            facts = NodeFacts(node)
-        if count is unknown_child_count:
-            if facts.has_state(Atspi.StateType.MANAGES_DESCENDANTS):
-                return iter(()), False, None
-            if focus_probe is not None:
-                # find_first() treats an unreadable count as zero children;
-                # this walk tries to enumerate them, so the orders diverge.
-                focus_probe.skipped()
-
-            def unknown_children():
-                consecutive_errors = 0
-                reached_cap = True
-                for child_index in range(max_child_fanout):
-                    try:
-                        child = node.get_child_at_index(child_index)
-                    except IndexError:
-                        reached_cap = False
-                        break
-                    except Exception as exc:
-                        record_provider_errors(
-                            {"child_at": type(exc).__name__}
-                        )
-                        consecutive_errors += 1
-                        yield child_index, None
-                        if consecutive_errors >= 8:
-                            reached_cap = False
-                            break
-                        continue
-                    consecutive_errors = 0
-                    if child is None:
-                        reached_cap = False
-                        break
-                    yield child_index, child
-                if reached_cap:
-                    record_provider_errors(
-                        {"unknown_fanout": "bounded"}
-                    )
-
-            return unknown_children(), True, None
-
-        if should_enumerate_children(node, count, facts=facts):
-            fanout = min(count, max_child_fanout)
-            if count > fanout:
-                excess = count - fanout
-                dropped["count"] += excess
-                dropped["fanout"] += excess
-            indices = range(fanout)
-        else:
-            span = None
-            if (count > HARD_CHILD_CAP
-                    and not facts.has_state(Atspi.StateType.MANAGES_DESCENDANTS)):
-                # Too many children to enumerate, but each one is a real
-                # child: read those in view and report the rest.
-                span = visible_child_span(node, count, window_bounds)
-            if span is None:
-                return iter(()), False, count
-            indices = range(span[0], span[1] + 1)
-            outside = count - len(indices)
-            dropped["count"] += outside
-            dropped["outside_view"] += outside
-
-        def known_children():
-            null_count = 0
-            null_annotation = None
-            for child_index in indices:
-                try:
-                    child = node.get_child_at_index(child_index)
-                except Exception as exc:
-                    record_provider_errors(
-                        {"child_at": type(exc).__name__}
-                    )
-                    yield child_index, None
-                    continue
-                if child is None:
-                    # Report missing objects where slots are read, so every
-                    # traversal path receives only accessibles or None.
-                    # Keep yielding the slot for budget and cursor accounting.
-                    null_count += 1
-                    updated = null_children_annotation(path, null_count, len(indices))
-                    if null_annotation is None:
-                        null_annotation = updated
-                        annotations.append(null_annotation)
-                    else:
-                        null_annotation.update(updated)
-                yield child_index, child
-
-        return known_children(), True, len(indices)
-
     def is_structural_filler(record):
         """Return whether the record is a pure layout container.
 
@@ -297,25 +175,6 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             or is_interactive_role(record["controlType"])
         )
 
-
-    def closed_popup_indices(node, facts, child_count_hint):
-        """Return the child indices of a closed combo box's popups.
-
-        The popups are skipped like a closed nested window and counted as
-        filtered; see closed_combo_popups(). They still enter the content
-        probe, so that opening one invalidates a reused tree.
-        """
-        if child_count_hint == 0:
-            return frozenset()
-        closed = closed_combo_popups(node, facts, snapshot_scope)
-        for _index, popup_facts in closed:
-            dropped["count"] += 1
-            dropped["filtered"] += 1
-            if focus_probe is not None:
-                focus_probe.skipped()
-            if content_probe is not None:
-                content_probe.add_node(popup_facts.node, popup_facts)
-        return frozenset(index for index, _facts in closed)
 
     def visit_impl(node, depth, path, render_depth=0, parent_text=""):
         """Visit one node; `depth` drives the budget, `render_depth` indents.
@@ -396,7 +255,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 node, window_bounds, text_limit, facts=facts,
                 lazy_description=find is not None,
             )
-            record_provider_errors(probe_errors)
+            record_provider_errors(walk, probe_errors)
             child_count_hint = probe["child_count"]
             if (
                 child_count_hint is None
@@ -456,9 +315,9 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 dropped["count"] += 1
                 dropped["filtered"] += 1
                 closed_popups = closed_popup_indices(
-                    node, facts, child_count_hint)
+                    walk, node, facts, child_count_hint)
                 children, _, _ = child_entries(
-                    node, path, child_count_hint, facts)
+                    walk, node, path, child_count_hint, facts)
                 for child_index, child in children:
                     if child is None or child_index in closed_popups:
                         continue
@@ -480,7 +339,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 node, None, path, window_bounds, text_limit=text_limit,
                 facts=facts,
             )
-        closed_popups = closed_popup_indices(node, facts, child_count_hint)
+        closed_popups = closed_popup_indices(walk, node, facts, child_count_hint)
 
         # Under budget pressure, keep named, actionable and valued nodes by
         # dropping structural containers first. Only the container's own line
@@ -496,7 +355,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         ):
             dropped["count"] += 1
             dropped["pressure"] += 1
-            children, _, _ = child_entries(node, path, child_count_hint, facts)
+            children, _, _ = child_entries(
+                walk, node, path, child_count_hint, facts)
             for child_index, child in children:
                 if child is None or child_index in closed_popups:
                     continue
@@ -540,7 +400,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                  else facts.showing()) is not True
         ):
             pending = (
-                strict_child_count(node, facts)
+                strict_child_count(walk, node, facts)
                 if child_count_hint is no_child_count_hint
                 else child_count_hint
             )
@@ -563,7 +423,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             return
 
         children, children_enumerable, planned_children = child_entries(
-            node, path, child_count_hint, facts
+            walk, node, path, child_count_hint, facts
         )
         if not children_enumerable:
             if entry is not None:
@@ -714,7 +574,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             children = []
             children_allowed = False
             if not deadline_expired and not collapsed_menu:
-                children, children_allowed, _ = child_entries(node, path)
+                children, children_allowed, _ = child_entries(
+                    walk, node, path, no_child_count_hint)
             if deadline_expired:
                 child_status = "subtree not traversed because the time budget expired"
             elif collapsed_menu:
