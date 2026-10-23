@@ -23,10 +23,17 @@ from .actionability import (
     screen_absolute_point,
 )
 from .input_primitives import (
+    InputEmissionError,
     best_effort_mouse_release,
     emit_keyboard_event,
     emit_mouse_event,
 )
+
+
+def _preserve_input_history(error, emitted):
+    # A nested operation only knows its own input history. Keep the original
+    # exception while adding events accepted by the enclosing operation.
+    error.events_emitted = bool(emitted or getattr(error, "events_emitted", False))
 
 
 def mouse_button_events(button):
@@ -48,20 +55,29 @@ def send_mouse_click(x, y, button, count):
     if repeat > MAX_CLICK_COUNT:
         raise RuntimeError(
             "click_count must be between 1 and {}".format(MAX_CLICK_COUNT))
-    for _ in range(repeat):
-        emitted = False
-        pressed = False
-        try:
-            emitted = emit_mouse_event(x, y, "abs", emitted)
-            emitted = emit_mouse_event(x, y, down, emitted)
-            pressed = True
-            time.sleep(0.035)
-            emitted = emit_mouse_event(x, y, up, emitted)
+    emitted = False
+    try:
+        for _ in range(repeat):
             pressed = False
-        finally:
-            if pressed:
-                best_effort_mouse_release(x, y, up)
-        time.sleep(0.05)
+            try:
+                emitted = emit_mouse_event(x, y, "abs", emitted)
+                # A transport exception can occur after the press reached X11.
+                pressed = True
+                try:
+                    emitted = emit_mouse_event(x, y, down, emitted)
+                except InputEmissionError:
+                    pressed = False
+                    raise
+                time.sleep(0.035)
+                emitted = emit_mouse_event(x, y, up, emitted)
+                pressed = False
+            finally:
+                if pressed:
+                    emitted = best_effort_mouse_release(x, y, up) or emitted
+            time.sleep(0.05)
+    except Exception as exc:
+        _preserve_input_history(exc, emitted)
+        raise
 
 
 def send_drag_path(points):
@@ -71,34 +87,47 @@ def send_drag_path(points):
     emitted = False
     pressed = False
     try:
-        emitted = emit_mouse_event(start_x, start_y, "abs", emitted)
-        emitted = emit_mouse_event(start_x, start_y, "b1p", emitted)
-        pressed = True
-        for x, y in points[1:]:
-            emitted = emit_mouse_event(x, y, "abs", emitted)
-            time.sleep(0.02)
-        end_x, end_y = points[-1]
-        emitted = emit_mouse_event(end_x, end_y, "b1r", emitted)
-        pressed = False
-    finally:
-        if pressed:
+        try:
+            emitted = emit_mouse_event(start_x, start_y, "abs", emitted)
+            pressed = True
+            try:
+                emitted = emit_mouse_event(start_x, start_y, "b1p", emitted)
+            except InputEmissionError:
+                pressed = False
+                raise
+            for x, y in points[1:]:
+                emitted = emit_mouse_event(x, y, "abs", emitted)
+                time.sleep(0.02)
             end_x, end_y = points[-1]
-            best_effort_mouse_release(end_x, end_y, "b1r")
+            emitted = emit_mouse_event(end_x, end_y, "b1r", emitted)
+            pressed = False
+        finally:
+            if pressed:
+                end_x, end_y = points[-1]
+                emitted = best_effort_mouse_release(end_x, end_y, "b1r") or emitted
+    except Exception as exc:
+        _preserve_input_history(exc, emitted)
+        raise
 
 
 def send_gui_scroll(scroll_x, scroll_y, x, y):
     dx = float(scroll_x)
     dy = float(scroll_y)
-    emitted = emit_mouse_event(x, y, "abs", False)
     # Computer scroll values are deltas, not raw X11 wheel-click counts.
     vertical_clicks = max(1, abs(round(dy / 100))) if dy else 0
     horizontal_clicks = max(1, abs(round(dx / 100))) if dx else 0
-    for _ in range(vertical_clicks):
-        emitted = emit_mouse_event(
-            x, y, "b5c" if dy > 0 else "b4c", emitted)
-    for _ in range(horizontal_clicks):
-        emitted = emit_mouse_event(
-            x, y, "b6c" if dx > 0 else "b7c", emitted)
+    emitted = False
+    try:
+        emitted = emit_mouse_event(x, y, "abs", emitted)
+        for _ in range(vertical_clicks):
+            emitted = emit_mouse_event(
+                x, y, "b5c" if dy > 0 else "b4c", emitted)
+        for _ in range(horizontal_clicks):
+            emitted = emit_mouse_event(
+                x, y, "b6c" if dx > 0 else "b7c", emitted)
+    except Exception as exc:
+        _preserve_input_history(exc, emitted)
+        raise
 
 
 def finite_gui_number(value, label):
@@ -146,10 +175,14 @@ def with_held_mouse_modifiers(keys, callback):
     primary_error = None
     try:
         for code in codes:
-            emitted = emit_keyboard_event(
-                code, None, Atspi.KeySynthType.PRESS,
-                "held mouse modifier press", emitted)
             pressed.append(code)
+            try:
+                emitted = emit_keyboard_event(
+                    code, None, Atspi.KeySynthType.PRESS,
+                    "held mouse modifier press", emitted)
+            except InputEmissionError:
+                pressed.pop()
+                raise
         callback()
     except Exception as exc:
         primary_error = exc
@@ -163,8 +196,10 @@ def with_held_mouse_modifiers(keys, callback):
             if release_error is None:
                 release_error = exc
     if primary_error is not None:
+        _preserve_input_history(primary_error, emitted)
         raise primary_error
     if release_error is not None:
+        _preserve_input_history(release_error, emitted)
         raise release_error
 
 

@@ -3,12 +3,6 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-public enum SystemPermissionKind: String, CaseIterable, Sendable {
-    case accessibility
-    case eventPosting
-    case screenRecording
-}
-
 public struct PermissionDiagnostics: Sendable {
     public let accessibilityTrusted: Bool
     public let eventPostingGranted: Bool

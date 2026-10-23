@@ -207,33 +207,6 @@ enum InputSimulation {
         Thread.sleep(forTimeInterval: 0.1)
     }
 
-    static func dragTargeted(from start: CGPoint, to end: CGPoint, pid: pid_t) throws {
-        guard let source = CGEventSource(stateID: .combinedSessionState) else {
-            throw ComputerUseError.message("Failed to create targeted event source.")
-        }
-
-        try postMouseEventToPid(type: .mouseMoved, source: source, point: start, button: .left, clickState: 1, pid: pid)
-        Thread.sleep(forTimeInterval: 0.08)
-        try postMouseEventToPid(type: .leftMouseDown, source: source, point: start, button: .left, clickState: 1, pid: pid)
-        Thread.sleep(forTimeInterval: 0.18)
-
-        for point in interpolatedDragPoints(from: start, to: end) {
-            try postMouseEventToPid(type: .leftMouseDragged, source: source, point: point, button: .left, clickState: 1, pid: pid)
-            Thread.sleep(forTimeInterval: 0.012)
-        }
-
-        Thread.sleep(forTimeInterval: 0.1)
-        try postMouseEventToPid(type: .leftMouseUp, source: source, point: end, button: .left, clickState: 1, pid: pid)
-    }
-
-    static func dragGlobally(
-        from start: CGPoint,
-        to end: CGPoint,
-        flags: CGEventFlags = []
-    ) throws {
-        try dragGlobally(path: [start, end], flags: flags)
-    }
-
     static func dragGlobally(path: [CGPoint], flags: CGEventFlags = []) throws {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw ComputerUseError.message("Failed to create HID event source.")

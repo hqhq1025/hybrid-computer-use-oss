@@ -85,32 +85,6 @@ extension ComputerUseService {
         try InputSimulation.scrollTargeted(at: eventPoint, direction: direction, pages: pages, pid: snapshot.app.pid)
     }
 
-    func performDragEvent(
-        from start: CGPoint,
-        to end: CGPoint,
-        targetDescription: String,
-        snapshot: AppSnapshot
-    ) throws {
-        let eventStart = inputEventPoint(fromScreenStatePoint: start)
-        let eventEnd = inputEventPoint(fromScreenStatePoint: end)
-
-        if globalPointerFallbacksEnabled(environment: ProcessInfo.processInfo.environment) {
-            debugInputFallback(
-                tool: "drag",
-                targetDescription: targetDescription,
-                snapshot: snapshot
-            )
-            try InputSimulation.prepareAppForGlobalPointerInput(
-                snapshot.app,
-                windowID: snapshot.targetWindowID
-            )
-            try InputSimulation.dragGlobally(from: eventStart, to: eventEnd)
-            return
-        }
-
-        try InputSimulation.dragTargeted(from: eventStart, to: eventEnd, pid: snapshot.app.pid)
-    }
-
     func performNonAXClickFallback(
         at point: CGPoint,
         button: MouseButtonKind,

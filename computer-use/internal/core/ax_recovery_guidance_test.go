@@ -92,8 +92,8 @@ func TestWindowChangeRecoveryWithNoCurrentWindowListsApps(t *testing.T) {
 	context := &AXBatchContext{AppToken: "Editor"}
 	for _, snapshot := range []*AppSnapshot{nil, {WindowAbsent: true, publicWindowRef: "w999"}} {
 		s.snapshots["Editor"] = snapshot
-		message, hint := s.axBatchContinuityRecovery(context)
-		if hint != `{"mode":"apps"}` || !strings.Contains(message, "remaining") {
+		message, hint, currentRef := s.axBatchContinuityRecovery(context)
+		if hint != `{"mode":"apps"}` || !strings.Contains(message, "remaining") || currentRef != "" {
 			t.Fatalf("missing window needs discovery, not a stale ref: %s %s", message, hint)
 		}
 	}

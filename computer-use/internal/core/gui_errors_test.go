@@ -161,6 +161,53 @@ func TestGUICapturePermissionRecoveryPreservesInputEvidence(t *testing.T) {
 	}
 }
 
+func TestGUIIncompletePointerActionPreservesEvidenceAndInvalidatesRefs(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		emitted bool
+		partial bool
+	}{
+		{"first event refused", false, false},
+		{"first click completed", true, true},
+		{"modifier pressed before pointer refusal", true, true},
+		{"first event transport unknown", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			zero := 0
+			response := guiFailedResponse(t, "", tc.emitted, 0)
+			response.GUIResult.InputActionsDispatched = &zero
+			response.GUIResult.PartialInputPossible = &tc.partial
+			response.GUIResult.MutationUnknown = &tc.partial
+			response.GUIResult.EffectUnknown = &tc.partial
+			backend := &recordingPlatformBackend{desktopResponse: &response}
+			s := NewServiceWithBackend(backend)
+			s.guiSnapshot = &AppSnapshot{FrameID: "f1"}
+			s.rememberSnapshot("Editor", expectSnapshot())
+			result := s.callTool(contract.PublicToolGUI, map[string]any{
+				"actions": []any{map[string]any{"type": "double_click", "x": 1.0, "y": 2.0}},
+			})
+			evidence := guiLine(t, result)
+			wantCode := contract.AXCodeRuntimeError
+			if tc.emitted || tc.partial {
+				wantCode = contract.AXCodeEffectUnknown
+			}
+			if evidence["code"] != wantCode || evidence["input_emitted"] != tc.emitted ||
+				evidence["completed"] != float64(0) || evidence["requested"] != float64(1) {
+				t.Fatalf("incomplete action lost delivery facts: %#v", evidence)
+			}
+			if (s.currentSnapshot("Editor") == nil) != (tc.emitted || tc.partial) {
+				t.Fatalf("snapshot invalidation disagrees with emission facts: %#v", evidence)
+			}
+			if len(backend.desktopRequests) != 1 {
+				t.Fatalf("failed pointer action was retried: %d requests", len(backend.desktopRequests))
+			}
+			if evidence["hint"] != GUIScreenshotCall {
+				t.Fatalf("failure must recover by observation, not repeat input: %#v", evidence)
+			}
+		})
+	}
+}
+
 // The error table is exactly the AX codes plus the GUI codes, and the
 // recovery list in hybrid.md names exactly the table's codes.
 func TestErrorTableEqualsDocumentedCodes(t *testing.T) {

@@ -6,7 +6,6 @@ from .foundation import (
     MAX_DEPTH,
     MAX_ELEMENTS,
     OperationFailure,
-    extents,
     node_pid,
     node_role,
     process_generation,
@@ -29,6 +28,7 @@ from .x11_windows import (
     main_window,
     select_window_by_handle,
     window_identity_set,
+    window_bounds,
     x11_root_window_state,
 )
 
@@ -288,7 +288,7 @@ def _resolve_target_operation(operation):
         )
     else:
         window_index, window = main_window(app)
-    bounds = extents(window)
+    bounds = window_bounds(app, window_index, window)
     semantic_target = operation.get("target")
     if not isinstance(semantic_target, dict):
         raise OperationFailure(
@@ -491,7 +491,8 @@ def _resolve_action_target(app, operation, operation_kind, action_input):
             )
         else:
             window_index, window = main_window(app)
-        bounds = operation.get("window_bounds") or extents(window)
+        bounds = operation.get("window_bounds") or window_bounds(
+            app, window_index, window)
     if semantic_target is not None and operation_kind != "window_action":
         (
             element,
@@ -680,7 +681,10 @@ def _observe_after_action(
     # Compare pixels only after the UI settles: right after the action the UI
     # may still be repainting, so an earlier diff would show an intermediate
     # frame rather than the effect.
-    after_bounds = safe(lambda: extents(main_window(app)[1])) or bounds
+    target_window_handle = (operation.get("window_handle")
+                            or (operation.get("target") or {}).get("windowHandle"))
+    selected_window = _post_action_window(app, target_window_handle)
+    after_bounds = safe(lambda: window_bounds(app, *selected_window[:2]))
     after_pixel_bounds = after_bounds
     pixels_after_one = safe(lambda: capture_window_pixels(after_pixel_bounds))
     lap("after_bounds_and_pixels_after_one")
@@ -696,6 +700,7 @@ def _observe_after_action(
         boxes=bool(observation.get("boxes", False)),
         known_refs=operation.get("known_refs"),
         app_identity=operation.get("app_identity"),
+        selected_window=selected_window,
     )
     lap("post_action_snapshot")
     # Modal notes matter most right after an action opens a modal dialog,
@@ -731,6 +736,10 @@ def _observe_after_action(
         })
     if element_record is not None:
         response["resolvedElement"] = element_record
+    if (target_window_handle
+            and after_snapshot.get("windowHandle") != target_window_handle):
+        # A new dialog or a surviving sibling is not the original pixel region.
+        pixels_before = None
     # Take the second post-action capture after building the snapshot. That
     # work spaces the two captures far enough apart for a 1 Hz caret blink to
     # toggle, so the blink is not reported as a persistent change.
@@ -743,3 +752,25 @@ def _observe_after_action(
     if notes:
         response["notes"] = notes
     return response
+
+
+def _post_action_window(app, target_window_handle):
+    """Keep the action's window unless it closed or a visible modal took over."""
+    if not target_window_handle:
+        index, window = main_window(app)
+        return index, window, {}
+    try:
+        bound = select_window_by_handle(app, target_window_handle)
+    except OperationFailure as exc:
+        if exc.failure_code != "stale_window_ref":
+            raise
+        # A confirmed disappearance permits a fresh observation of the app.
+        # An incomplete inventory must not be mistaken for a closed window.
+        return select_window_by_handle(app, None)
+    preferred = select_window_by_handle(app, None)
+    window = preferred[1]
+    if (state_value(window, Atspi.StateType.MODAL) is True
+            and (state_value(window, Atspi.StateType.SHOWING) is True
+                 or state_value(window, Atspi.StateType.VISIBLE) is True)):
+        return preferred
+    return bound

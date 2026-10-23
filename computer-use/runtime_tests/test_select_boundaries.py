@@ -189,6 +189,8 @@ class WrappedSelectionItemTests(AtspiPatchedTestCase):
 class SelectBoundaryTests(AtspiPatchedTestCase):
     def setUp(self):
         super().setUp()
+        action_evidence.reset()
+        self.addCleanup(action_evidence.reset)
         for name, value in (("time", _FakeClock()),
                             ("require_window_focus", lambda *args: None)):
             patch = mock.patch.object(runtime, name, value)
@@ -442,6 +444,31 @@ class ComboOptionSelectTests(SelectBoundaryTests):
         self.assertNotIn(STATE.SELECTED, items[0].states)
         self.assertTrue(any("Seattle" in note for note in notes))
 
+    def test_label_matching_option_does_not_skip_selection(self):
+        combo, items = self._combo()
+        combo.title = "Seattle"
+        runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
+        self.assertIn(STATE.SELECTED, items[2].states)
+        self.assertNotIn(STATE.SELECTED, items[0].states)
+
+    def test_label_matching_option_is_not_the_observed_value(self):
+        combo, _items = self._combo()
+        combo.title = "Seattle"
+        self.assertEqual(runtime.element_value(combo), "Beijing")
+
+    def test_matching_label_does_not_verify_a_refused_selection(self):
+        combo, _items = self._combo(item_action=False, selection_api=False)
+        combo.title = "Seattle"
+        self.assert_unknown(lambda: runtime.perform_select(
+            {"text": "Seattle"}, None, combo, {}, None, [], {}))
+
+    def test_matching_label_without_selected_option_has_no_value(self):
+        combo, items = self._combo()
+        combo.title = "Seattle"
+        for item in items:
+            item.states.discard(STATE.SELECTED)
+        self.assertEqual(runtime.element_value(combo), "")
+
     def test_selection_api_is_used_when_the_item_action_does_nothing(self):
         combo, items = self._combo(item_action=False)
 
@@ -456,6 +483,131 @@ class ComboOptionSelectTests(SelectBoundaryTests):
         self.assertEqual(caught.exception.failure_code, "invalid_argument")
         self.assertFalse(caught.exception.input_events_emitted)
         self.assertIn("Seattle", str(caught.exception))
+
+    def test_rejected_semantic_requests_do_not_claim_confirmed_input(self):
+        combo, items = self._combo(selection_api=False)
+        for item in items:
+            item.do_action = lambda _index: False
+        evidence = {"input_emitted": False}
+        self.addCleanup(action_evidence.reset)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Seattle"}, None, combo,
+                                   {}, None, [], evidence)
+        response = runtime.operation_failure_response(caught.exception)
+        self.assertFalse(response["input_events_emitted"])
+        self.assertFalse(response["partial_input_possible"])
+        self.assertFalse(response["mutation_unknown"])
+        self.assertIn(STATE.SELECTED, items[0].states)
+
+    def test_scan_limit_never_proves_uniqueness_or_absence(self):
+        for wanted in ("Seattle", "Last city", "Missing"):
+            with self.subTest(wanted=wanted):
+                names = ["Beijing", "Seattle"] + [
+                    "City" + str(i)
+                    for i in range(runtime.MAX_DROPDOWN_OPTIONS - 1)]
+                names += ["Seattle", "Last city"]
+                combo, items = self._combo(options=names)
+                evidence = {"input_emitted": False}
+                action_evidence.replace(evidence)
+                self.addCleanup(action_evidence.reset)
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.perform_select({"text": wanted}, None, combo,
+                                           {}, None, [], evidence)
+                response = runtime.operation_failure_response(caught.exception)
+                self.assertIn("select_options_incomplete", response["error"])
+                self.assertFalse(response["input_events_emitted"])
+                self.assertEqual([i for i, item in enumerate(items)
+                                  if STATE.SELECTED in item.states], [0])
+
+    def test_complete_scan_at_budget_can_choose_last_option(self):
+        # The combo and menu consume two nodes of the traversal budget.
+        names = ["City" + str(i)
+                 for i in range(runtime.MAX_DROPDOWN_OPTIONS - 2)]
+        combo, items = self._combo(value=names[0], options=names)
+        runtime.perform_select({"text": names[-1]}, None, combo, {}, None, [], {})
+        self.assertIn(STATE.SELECTED, items[-1].states)
+
+    def test_unreadable_child_cannot_hide_a_duplicate(self):
+        for failure in (None, RuntimeError("disconnected")):
+            with self.subTest(failure=failure):
+                combo, items = self._combo(options=("Beijing", "Seattle", "Seattle"))
+                menu = combo.children[0]
+
+                def child(index):
+                    if index == 2:
+                        if failure is not None:
+                            raise failure
+                        return None
+                    return items[index]
+
+                menu.get_child_at_index = child
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.perform_select({"text": "Seattle"}, None, combo,
+                                           {}, None, [], {})
+                self.assertIn("select_options_incomplete", str(caught.exception))
+                self.assertFalse(caught.exception.input_events_emitted)
+                self.assertNotIn(STATE.SELECTED, items[1].states)
+
+    def test_unreadable_count_role_or_name_cannot_prove_unique_choice(self):
+        for getter in ("get_child_count", "get_role_name", "get_name"):
+            with self.subTest(getter=getter):
+                combo, items = self._combo(options=("Beijing", "Seattle", "Seattle"))
+                node = combo.children[0] if getter == "get_child_count" else items[2]
+                setattr(node, getter, mock.Mock(side_effect=RuntimeError("disconnected")))
+                with self.assertRaises(runtime.OperationFailure) as caught:
+                    runtime.perform_select({"text": "Seattle"}, None, combo,
+                                           {}, None, [], {})
+                self.assertIn("select_options_incomplete", str(caught.exception))
+                self.assertFalse(caught.exception.input_events_emitted)
+
+    def test_name_disappearing_after_scan_cannot_hide_duplicate(self):
+        combo, items = self._combo(options=("Beijing", "Seattle", "Seattle"))
+        items[2].get_name = mock.Mock(side_effect=["Seattle", RuntimeError("lost")])
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Seattle"}, None, combo,
+                                   {}, None, [], {})
+        self.assertIn("select_options_incomplete", str(caught.exception))
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertNotIn(STATE.SELECTED, items[1].states)
+
+    def test_semantic_reply_failure_preserves_dispatch_and_stops_fallback(self):
+        combo, items = self._combo()
+        error = runtime.OperationFailure("provider lost the selection reply",
+                                        "input_failed", "emission",
+                                        failure_facts_complete=False)
+        items[2].do_action = mock.Mock(side_effect=error)
+        evidence = {"input_emitted": False}
+        action_evidence.replace(evidence)
+        self.addCleanup(action_evidence.reset)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Seattle"}, None, combo,
+                                   {}, None, [], evidence)
+        self.assertIs(caught.exception, error)
+        response = runtime.operation_failure_response(caught.exception)
+        self.assertFalse(response["input_events_emitted"])
+        self.assertTrue(response["partial_input_possible"])
+        self.assertTrue(response["mutation_unknown"])
+        self.assertEqual(response["failureCode"], "effect_unknown")
+        self.assertEqual(response["underlyingFailureCode"], "input_failed")
+        self.assertNotIn(STATE.SELECTED, items[2].states)
+
+    def test_generic_semantic_reply_failure_is_possible_not_confirmed_input(self):
+        combo, items = self._combo()
+        error = RuntimeError("D-Bus reply lost")
+        items[2].do_action = mock.Mock(side_effect=error)
+        evidence = {"input_emitted": False}
+        action_evidence.replace(evidence)
+        self.addCleanup(action_evidence.reset)
+        with self.assertRaises(RuntimeError) as caught:
+            runtime.perform_select({"text": "Seattle"}, None, combo,
+                                   {}, None, [], evidence)
+        self.assertIs(caught.exception, error)
+        response = runtime.unexpected_operation_failure_response(error)
+        self.assertFalse(response["input_events_emitted"])
+        self.assertTrue(response["partial_input_possible"])
+        self.assertTrue(response["mutation_unknown"])
+        self.assertNotIn("before input", response["error"])
+        self.assertNotIn("partial_input_possible", response["actionEvidence"])
 
     def test_option_that_does_not_take_reports_unknown_effect(self):
         combo, _ = self._combo(item_action=False, selection_api=False)
@@ -476,6 +628,8 @@ class DropdownCommitTests(SelectBoundaryTests):
     def _qt_combo(self, value="Video", options=("Never", "Video", "", "Audio"),
                   commits=True):
         combo = _Node(role="combo box", name=value)
+        combo.app.get_toolkit_name.return_value = "Qt"
+        combo.get_application = lambda: combo.app
         popup = _Node(role="list", x=0, y=0, w=0, h=0)
         combo.add(popup)
         items = [_Node(role="list item", name=name) for name in options]
@@ -541,6 +695,86 @@ class DropdownCommitTests(SelectBoundaryTests):
         self.assertEqual(state["keys"], ["Down", "Return"])
         self.assertTrue(any("Audio" in note for note in notes))
 
+    def test_open_popup_evidence_survives_keyboard_transport_failure(self):
+        for error in (RuntimeError("D-Bus transport failed"),
+                      runtime.InputEmissionError("key refused", events_emitted=False)):
+            with self.subTest(error=error):
+                combo, _items, _state = self._qt_combo()
+                evidence = {"input_emitted": False}
+                action_evidence.replace(evidence)
+                self.addCleanup(action_evidence.reset)
+                with mock.patch.object(runtime, "send_key", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        runtime.perform_select({"text": "Audio"}, None, combo,
+                                               {}, None, [], evidence)
+                response = runtime.unexpected_operation_failure_response(caught.exception)
+                self.assertEqual(combo.children[0].component.extents.width, 235)
+                self.assertTrue(response["input_events_emitted"])
+                self.assertTrue(response["mutation_unknown"])
+                self.assertEqual(response["failureCode"], "effect_unknown")
+
+    def test_existing_popup_keeps_first_key_when_return_fails(self):
+        combo, _items, state = self._qt_combo()
+        combo.do_action(0)
+        original = runtime.send_key
+
+        def send(key):
+            if key == "Return":
+                raise RuntimeError("D-Bus transport failed")
+            original(key)
+
+        evidence = {"input_emitted": False}
+        action_evidence.replace(evidence)
+        self.addCleanup(action_evidence.reset)
+        with mock.patch.object(runtime, "send_key", side_effect=send):
+            with self.assertRaises(RuntimeError) as caught:
+                runtime.perform_select({"text": "Audio"}, None, combo,
+                                       {}, None, [], evidence)
+        response = runtime.unexpected_operation_failure_response(caught.exception)
+        self.assertEqual(state["keys"], ["Down"])
+        self.assertTrue(response["input_events_emitted"])
+        self.assertEqual(response["actionEvidence"]["route"], "keyboard_synthesis")
+
+    def test_existing_popup_first_key_reply_loss_is_uncertain(self):
+        combo, _items, _state = self._qt_combo()
+        combo.do_action(0)
+        evidence = {"input_emitted": False}
+        self.addCleanup(action_evidence.reset)
+        with mock.patch.object(runtime, "send_key", side_effect=RuntimeError("lost")):
+            with self.assertRaises(RuntimeError) as caught:
+                runtime.perform_select({"text": "Audio"}, None, combo,
+                                       {}, None, [], evidence)
+        response = runtime.unexpected_operation_failure_response(caught.exception)
+        self.assertFalse(response["input_events_emitted"])
+        self.assertTrue(response["partial_input_possible"])
+        self.assertTrue(response["mutation_unknown"])
+
+    def test_popup_growth_rejects_before_navigation_and_keeps_open_evidence(self):
+        combo, _items, state = self._qt_combo()
+        original = combo.do_action
+
+        def open_and_grow(index):
+            original(index)
+            combo.children[0].add(*[
+                _Node(role="list item", name=str(i))
+                for i in range(runtime.MAX_DROPDOWN_OPTIONS)])
+            return True
+
+        combo.do_action = open_and_grow
+        evidence = {"input_emitted": False}
+        action_evidence.replace(evidence)
+        self.addCleanup(action_evidence.reset)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select({"text": "Audio"}, None, combo,
+                                   {}, None, [], evidence)
+        response = runtime.operation_failure_response(caught.exception)
+        self.assertIn("select_options_incomplete", str(caught.exception))
+        self.assertEqual(state["keys"], [])
+        # The typed failure already reports the popup input it emitted.
+        self.assertTrue(response["input_events_emitted"])
+        self.assertTrue(response["mutation_unknown"])
+        self.assertIn("select_options_incomplete", response["error"])
+
     def test_choice_above_the_current_one_moves_up(self):
         combo, _items, state = self._qt_combo()
 
@@ -562,10 +796,12 @@ class DropdownCommitTests(SelectBoundaryTests):
 
     def test_option_already_shown_needs_no_input(self):
         combo, _items, state = self._qt_combo()
-
-        runtime.perform_select({"text": "Video"}, None, combo, {}, None, [], {})
+        evidence = {}
+        runtime.perform_select({"text": "Video"}, None, combo, {}, None, [], evidence)
 
         self.assertEqual(state["keys"], [])
+        self.assertFalse(evidence["input_emitted"])
+        self.assertTrue(evidence["readback_verified"])
 
     def test_select_on_a_popup_item_commits_its_combo(self):
         combo, items, state = self._qt_combo()
@@ -580,6 +816,8 @@ class DropdownCommitTests(SelectBoundaryTests):
         # GTK: Selection.select_child on the combo box sets its active item;
         # on the popup menu it only highlights the item.
         combo = _Node(role="combo box", name="Beijing")
+        combo.app.get_toolkit_name.return_value = "gtk"
+        combo.get_application = lambda: combo.app
         menu = _Node(role="menu", x=-2147483648, y=-2147483648, w=1, h=1)
         combo.add(menu)
         items = [_Node(role="menu item", name=name)
@@ -588,6 +826,9 @@ class DropdownCommitTests(SelectBoundaryTests):
         combo.selection_iface = mock.Mock()
         menu.selection_iface = mock.Mock()
         selection = mock.Mock()
+        selection.get_n_selected_children.return_value = 1
+        selection.get_selected_child.side_effect = (
+            lambda target, index: next(item for item in items if item.title == combo.title))
 
         def select_child(target, index):
             if target is combo:
@@ -625,6 +866,67 @@ class DropdownCommitTests(SelectBoundaryTests):
 
         self.assertEqual(runtime.element_value(combo), "Seattle")
 
+    def _gtk_named_combo(self):
+        combo = _Node(role="combo box", name="Seattle")
+        combo.app.get_toolkit_name.return_value = "gtk"
+        combo.get_application = lambda: combo.app
+        combo.selection_iface = combo
+        menu = _Node(role="menu", states=(), w=0, h=0)
+        combo.add(menu)
+        items = [_Node(role="menu item", name=name) for name in ("Beijing", "Seattle")]
+        menu.add(*items)
+        # The accessible label and popup highlight both disagree with active.
+        items[1].states.add(STATE.SELECTED)
+        active = [0]
+        selection = mock.Mock()
+        selection.get_n_selected_children.return_value = 1
+        selection.get_selected_child.side_effect = lambda *_: items[active[0]]
+        selection.select_child.side_effect = lambda owner, index: active.__setitem__(0, index) or True
+        patch = mock.patch.object(runtime.Atspi, "Selection", selection, create=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return combo, active, selection
+
+    def test_gtk_label_and_popup_highlight_do_not_replace_active_value(self):
+        combo, _active, _selection = self._gtk_named_combo()
+        self.assertEqual(runtime.element_value(combo), "Beijing")
+
+    def test_gtk_label_matching_choice_still_changes_active_item(self):
+        combo, active, selection = self._gtk_named_combo()
+        runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
+        self.assertEqual(active, [1])
+        selection.select_child.assert_called_once_with(combo, 1)
+        self.assertEqual(runtime.element_value(combo), "Seattle")
+
+    def test_gtk_active_item_already_selected_needs_no_input(self):
+        combo, _active, selection = self._gtk_named_combo()
+        runtime.perform_select({"text": "Beijing"}, None, combo, {}, None, [], {})
+        selection.select_child.assert_not_called()
+
+    def test_gtk_unreadable_active_value_does_not_trust_label_or_highlight(self):
+        combo, _active, selection = self._gtk_named_combo()
+        selection.get_selected_child.side_effect = RuntimeError("disconnected")
+        selection.select_child.side_effect = None
+        self.assertEqual(runtime.element_value(combo), "")
+        self.assert_unknown(lambda: runtime.perform_select(
+            {"text": "Seattle"}, None, combo, {}, None, [], {}))
+
+    def test_gtk_missing_or_ambiguous_active_selection_has_no_value(self):
+        combo, _active, selection = self._gtk_named_combo()
+        for count in (0, 2):
+            with self.subTest(count=count):
+                selection.get_n_selected_children.return_value = count
+                self.assertEqual(runtime.element_value(combo), "")
+
+    def test_unreadable_toolkit_does_not_turn_a_matching_name_into_a_value(self):
+        combo = _Node(role="combo box", name="Seattle")
+        combo.get_application = lambda: combo.app
+        combo.app.get_toolkit_name.side_effect = RuntimeError("disconnected")
+        combo.add(_Node(role="menu").add(
+            _Node(role="menu item", name="Beijing", states=(STATE.SELECTED,)),
+            _Node(role="menu item", name="Seattle")))
+        self.assertEqual(runtime.element_value(combo), "Beijing")
+
 
 class ProjectedComboSelectTests(SelectBoundaryTests):
     """A LibreOffice gtk3 drop-down: a drawn toggle beside a hidden combo box.
@@ -638,13 +940,14 @@ class ProjectedComboSelectTests(SelectBoundaryTests):
     """
 
     def _lo_combo(self, value="10 pt", options=("8 pt", "10 pt", "12 pt"),
-                  grab_moves_cursor=True, list_only=False):
+                  grab_moves_cursor=True, list_only=False, opener_role="toggle button"):
         app = _Node(role="application", name="soffice")
         frame = _Node(role="frame", name="Untitled 1 - LibreOffice Calc")
         entry = _Node(role="text", states=(
             STATE.SHOWING, STATE.VISIBLE, STATE.EDITABLE))
         entry.text_iface = _Text("" if list_only else value)
-        toggle = _Node(role="toggle button")
+        toggle = _Node(role=opener_role,
+                       name="Font Size" if opener_role == "combo box" else "")
         frame.add(_Node(role="tool bar").add(_Node(role="filler").add(
             entry, _Node(role="combo box", states=()), toggle)))
         popup = _Node(role="window", states=())
@@ -755,11 +1058,29 @@ class ProjectedComboSelectTests(SelectBoundaryTests):
 
     def test_choice_already_shown_needs_no_input(self):
         toggle, _entry, _cells, state = self._lo_combo()
-
+        evidence = {}
         runtime.perform_select(
-            {"text": "10 pt"}, None, toggle, {}, None, [], {})
+            {"text": "10 pt"}, None, toggle, {}, None, [], evidence)
 
         self.assertEqual(state["clicks"], 0)
+        self.assertFalse(evidence["input_emitted"])
+        self.assertTrue(evidence["readback_verified"])
+
+    def test_missing_option_preserves_known_failure_and_popup_input(self):
+        toggle, entry, _cells, state = self._lo_combo()
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.perform_select(
+                {"text": "missing"}, None, toggle, {}, None, [], {})
+        response = runtime.operation_failure_response(
+            caught.exception, recovery_operation={"action": "select"})
+        self.assertEqual(response["failureCode"], "invalid_argument")
+        self.assertIn("list was closed without choosing", response["error"])
+        self.assertTrue(response["input_events_emitted"])
+        self.assertTrue(response["mutation_unknown"])
+        self.assertTrue(response["failureFactsComplete"])
+        self.assertNotIn("recoveryContext", response)
+        self.assertEqual(state["clicks"], 2)
+        self.assertEqual(entry.text_iface.text, "10 pt")
 
     def test_list_only_choice_is_read_back_from_the_reopened_list(self):
         toggle, _entry, _cells, state = self._lo_combo(list_only=True)
@@ -781,3 +1102,32 @@ class ProjectedComboSelectTests(SelectBoundaryTests):
         self.assertEqual(state["value"], "10 pt")
         self.assertIn("\"10 pt\"", str(failure))
         self.assertNotIn(STATE.CHECKED, toggle.states)
+
+
+class NativeCompositeComboSelectTests(ProjectedComboSelectTests):
+    """A named combo opener uses the same sibling editor and popup contract."""
+
+    def _lo_combo(self, *args, **kwargs):
+        return super()._lo_combo(*args, **kwargs, opener_role="combo box")
+
+    def test_two_visible_combos_do_not_form_a_composite(self):
+        opener, _entry, _cells, state = self._lo_combo()
+        opener.parent.children[1].states.add(STATE.SHOWING)
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_dropdown_option(opener, "12 pt")
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertEqual(state["clicks"], 0)
+
+    def test_combo_without_click_does_not_borrow_sibling_popup(self):
+        opener, _entry, _cells, state = self._lo_combo()
+        opener.get_action_name = lambda _index: "press"
+        with self.assertRaises(runtime.OperationFailure) as caught:
+            runtime.select_dropdown_option(opener, "12 pt")
+        self.assertFalse(caught.exception.input_events_emitted)
+        self.assertEqual(state["clicks"], 0)
+
+    def test_combo_with_children_keeps_its_own_option_path(self):
+        opener, _entry, _cells, state = self._lo_combo()
+        opener.add(_Node(role="menu"))
+        self.assertIsNone(runtime.gtk_combo_partner(opener, "combo box"))
+        self.assertEqual(state["clicks"], 0)

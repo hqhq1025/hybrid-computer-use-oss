@@ -7,7 +7,6 @@ from .foundation import (
     MAX_ELEMENTS,
     OperationFailure,
     TREE_DEADLINE_SECONDS,
-    extents,
     inventory_complete,
     node_pid,
     process_generation,
@@ -20,6 +19,7 @@ from .ax_node_properties import positive_int
 from .x11_windows import (
     app_windows,
     window_instance_handle,
+    window_bounds,
 )
 from .ref_continuity import (
     deduplicate_provider_records,
@@ -317,7 +317,7 @@ def _resolve_provider_bound_target(
         matched_bounds = (
             bounds
             if path[0] == window_index and matched_window is window
-            else extents(matched_window)
+            else window_bounds(app, path[0], matched_window)
         )
         if matched_window is None or matched_bounds is None:
             raise OperationFailure(
@@ -441,7 +441,7 @@ def _resolve_prior_provider_identity(
         matched_bounds = (
             bounds
             if resolved_path[0] == window_index and matched_window is window
-            else extents(matched_window)
+            else window_bounds(app, resolved_path[0], matched_window)
         )
         if matched_window is None or matched_bounds is None:
             raise OperationFailure(

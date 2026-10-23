@@ -40,6 +40,18 @@ class WPSInstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "selected installed state"):
                 install_wps.install(Path(package.name), self.manifest)
 
+    def test_successful_install_configures_accessibility(self):
+        with tempfile.NamedTemporaryFile(suffix=".deb") as package, \
+                mock.patch.object(install_wps, "inspect_package", return_value=self.metadata), \
+                mock.patch.object(install_wps.os, "geteuid", return_value=0), \
+                mock.patch.object(install_wps, "snapshot_mime_files", return_value={}), \
+                mock.patch.object(install_wps, "run", side_effect=[
+                    "", "dependency plan", "installed", "", "selected\tinstall ok installed"]), \
+                mock.patch.object(install_wps.configure_wps_accessibility, "configure") as configure:
+            result = install_wps.install(Path(package.name), self.manifest)
+            configure.assert_called_once_with()
+            self.assertEqual(result["accessibility"], configure.return_value)
+
     def test_restores_bytes_permissions_and_absent_files(self):
         with tempfile.TemporaryDirectory() as directory:
             existing = Path(directory) / "mimeapps.list"

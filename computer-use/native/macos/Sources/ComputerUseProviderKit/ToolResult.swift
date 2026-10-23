@@ -11,16 +11,6 @@ public struct ToolResultContentItem: @unchecked Sendable {
             ]
         )
     }
-
-    public static func pngImage(_ data: Data) -> ToolResultContentItem {
-        ToolResultContentItem(
-            dictionary: [
-                "type": "image",
-                "data": data.base64EncodedString(),
-                "mimeType": "image/png",
-            ]
-        )
-    }
 }
 
 public struct ToolCallResult: @unchecked Sendable {

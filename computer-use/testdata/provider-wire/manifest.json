@@ -28,6 +28,7 @@
     {"name": "window-success", "direction": "response", "file": "window-success.response.json"},
     {"name": "precondition-failure", "direction": "response", "file": "precondition-failure.response.json"},
     {"name": "emission-failure", "direction": "response", "file": "emission-failure.response.json"},
+    {"name": "semantic-reply-lost", "direction": "response", "file": "semantic-reply-lost.response.json"},
     {"name": "timeout-failure", "direction": "response", "file": "timeout-failure.response.json"}
   ]
 }
