@@ -122,7 +122,30 @@ letter, digit or US-layout punctuation key. Other characters, such as `!` or
 An observation reads the window tree for at most 15 seconds. A larger tree,
 such as a LibreOffice Calc window, returns the part read so far with partial
 coverage instead of an error. Controls in the unread part are not
-addressable; use `find`, a subtree root, or GUI for them.
+addressable. The result reports the provider's known gaps in `acquisition`.
+Use `find` or a subtree root to narrow the read; neither guarantees complete
+coverage. Use GUI to inspect content that remains unread.
+
+Spreadsheet reads retain a bounded probe count and deadline. Columns whose
+first visible cell has a value are read before columns whose first cell is
+blank. The blank-looking columns are still probed when budget remains;
+unprobed cells are unknown, not empty.
+
+Document text does not require a UIA Value pattern. When a document's Text
+pattern cannot return its contents, the provider reads text from that same
+document's legacy accessibility object when available and a bounded probe
+finds no existing UIA text or table content. An empty generic child does not
+count as content; an uncertain probe reports a gap. This read exposes
+content only; it does not create new action targets. Character, node, depth
+and time limits preserve partial text and report the unread remainder.
+An unavailable paragraph or local read failure marks the document partial;
+the provider still reads later siblings within those same limits. A null
+paragraph value is unknown and does not prove that the paragraph is empty.
+
+Windows provider restarts invalidate that provider's opaque window and element
+identities. A read bound to one of those identities is not replayed in a new
+provider process. Its original failure remains visible. Unknown identities
+fail before UIA sampling; discover fresh windows before using new references.
 
 LibreOffice draws its controls with its own toolkit, VCL, and loads the
 Windows accessibility bridge only when its process asks for it. Some

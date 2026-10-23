@@ -70,6 +70,10 @@ option. Follow the current tool schema for argument shapes and actions.
 
 ## Recovery And Verification
 
+- A partial tree can contain unread content. `acquisition` reports known
+  gaps and their reasons; its count is not the total size of unread branches.
+  `find` or a subtree root can narrow the read but may repeat the same gap.
+  Do not infer that unread text or controls are absent.
 - An explicit stop response overrides refresh or retry guidance. Stop desktop
   automation and report uncertainty; zero requested input does not prove an
   earlier OS focus request cannot still take effect.

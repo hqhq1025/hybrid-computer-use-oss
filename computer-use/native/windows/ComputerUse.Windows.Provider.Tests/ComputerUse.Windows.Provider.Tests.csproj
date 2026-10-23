@@ -12,6 +12,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../ComputerUse.Windows.Runtime/WindowsWindowReferenceRead.cs"
+      Link="WindowsWindowReferenceRead.cs" />
+    <Compile Include="../ComputerUse.Windows.Runtime/DocumentTextRead.cs"
+      Link="DocumentTextRead.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/UiaSelectionPolicy.cs"
       Link="UiaSelectionPolicy.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/UiaSemanticWindowPredicate.cs"

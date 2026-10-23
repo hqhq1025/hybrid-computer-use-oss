@@ -228,7 +228,10 @@ internal sealed partial class UiaProvider
                     process,
                     selectedWindow,
                     selectedHandle,
-                    treePath);
+                    treePath,
+                    Gap,
+                    visits.CheckTime,
+                    () => UiaDocumentText.ProbeContent(cache, node, visits.CheckTime));
             }
             catch
             {
@@ -286,7 +289,8 @@ internal sealed partial class UiaProvider
                     catch { return null; }
                     return cell?.Facts is { ControlType: ControlType.DataItem } facts &&
                         SpreadsheetGrid.TryParseA1(facts.Name, out var row, out var column)
-                        ? new SpreadsheetCellHit<CachedUiaNode>(cell, row, column, facts.Bounds)
+                        ? new SpreadsheetCellHit<CachedUiaNode>(cell, row, column, facts.Bounds,
+                            !string.IsNullOrEmpty(facts.ValueText))
                         : null;
                 },
                 MaxSpreadsheetProbes,
@@ -482,7 +486,10 @@ internal sealed partial class UiaProvider
         Process process,
         NativeDesktop.WindowRecord window,
         string windowHandle,
-        IReadOnlyList<int> treePath)
+        IReadOnlyList<int> treePath,
+        Action<string>? gap = null,
+        Action? checkTime = null,
+        Func<DocumentContentProbe>? probeContent = null)
     {
         var role = facts.ControlType is { } controlType
             ? UiaSnapshotNodeReads.RoleOrUnknown(() => CanonicalRole(controlType))
@@ -561,15 +568,28 @@ internal sealed partial class UiaProvider
             states.Add(facts.IsSelected == true ? "selected" : "unselected");
         }
         var value = string.Empty;
-        if (facts.Value)
+        if (facts.Text || facts.ControlType == ControlType.Document)
         {
-            var documentText = textPattern is null
-                ? null
-                : ProviderValueReads.OptionalString(
-                    () => textPattern.DocumentRange.GetText(MaxDocumentTextLength));
-            value = LiveValueReadback.CanonicalTextValue(
-                facts.ValueText ?? string.Empty,
-                documentText);
+            var textRead = DocumentTextRead.Read(limit =>
+            {
+                checkTime?.Invoke();
+                return textPattern?.DocumentRange.GetText(limit);
+            }, MaxDocumentTextLength);
+            if (textRead.Text is null && facts.ControlType == ControlType.Document)
+            {
+                textRead = textRead.WithContentFallback(
+                    probeContent ?? (() => throw new InvalidOperationException("Document content probe is unavailable.")),
+                    () => UiaDocumentText.ReadLegacy(
+                        element, MaxDocumentTextLength, checkTime ?? (() => { })));
+            }
+            if (textRead.IncompleteReason is { } reason) { gap?.Invoke(reason); }
+            value = facts.Value && facts.ControlType != ControlType.Document
+                ? LiveValueReadback.CanonicalTextValue(facts.ValueText ?? string.Empty, textRead.Text)
+                : textRead.Text ?? facts.ValueText ?? string.Empty;
+        }
+        else if (facts.Value)
+        {
+            value = facts.ValueText ?? string.Empty;
         }
         else if (facts.RangeValue && facts.RangeValueNumber is { } number)
         {

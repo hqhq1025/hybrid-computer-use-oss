@@ -645,6 +645,10 @@ internal sealed partial class UiaProvider : IDisposable
     }
 
     private JsonObject StaleWindowRecoveryContext(Process process, WindowBinding? expectedBinding)
+        => WindowsWindowReferenceRead.Recover(expectedBinding is not null,
+            () => KnownStaleWindowRecoveryContext(process, expectedBinding!));
+
+    private JsonObject KnownStaleWindowRecoveryContext(Process process, WindowBinding expectedBinding)
     {
         var windows = ProjectNativeWindows(
             process,

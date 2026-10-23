@@ -82,9 +82,10 @@ func TestFindCursorResumesAWalkThatStopped(t *testing.T) {
 	}
 	first := call(map[string]any{"app": "Editor", "query": map[string]any{"name_contains": "Save"}})
 	cursor := findCursor(first)
+	recovery, _ := findDeliveryModelEvidence(t, first)["recover"].(map[string]any)
 	if !strings.Contains(ResultText(first), "matches: 0") || cursor == "" ||
 		!strings.Contains(ResultText(first), `{"mode":"find","cursor":"`+cursor+`"}`) ||
-		!strings.Contains(ResultText(first), `"recover":{"target":"cursor|GUI"}`) {
+		recovery["target"] != "cursor|GUI" {
 		t.Fatalf("a walk that stopped needs a cursor: %s", ResultText(first))
 	}
 	second := call(map[string]any{"cursor": cursor})

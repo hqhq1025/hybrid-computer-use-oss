@@ -972,6 +972,28 @@ func TestWindowsProviderProtocolHelper(t *testing.T) {
 				OK: !resetRequired || mode == "reset-mutation",
 			},
 		}
+		if mode == "reset-bound-read" {
+			if request.Operation == core.ProviderWireObserveApps {
+				response.Accessibility.Text = "w2:0123456789abcdef0123456789abcdef"
+				if starts > 1 {
+					response.Accessibility.Text = "w2:abcdef0123456789abcdef0123456789"
+				}
+			} else if starts == 1 {
+				response.ProviderResetRequired = true
+				response.Accessibility = &core.ProviderAccessibilityResult{
+					Error:    "UIA read timed out (0x800705B4)",
+					Failure:  &core.ProviderFailure{Code: "provider_internal_error", Phase: "execution", FactsComplete: true},
+					Mutation: &core.ProviderMutationFacts{},
+				}
+			} else {
+				// A new worker has no binding for the first worker's token.
+				response.Accessibility = &core.ProviderAccessibilityResult{
+					Error:           "The exact window reference is stale; no input was emitted.",
+					Failure:         &core.ProviderFailure{Code: "stale_window_ref", Phase: "precondition", Subject: "window"},
+					RecoveryContext: &core.ProviderRecoveryContext{SourceWindowStatus: "unknown"},
+				}
+			}
+		}
 		if mode == "side-effect-timeout" {
 			effectPath := os.Getenv("WINDOWS_PROVIDER_EFFECT_STATE")
 			state, err := os.ReadFile(effectPath)

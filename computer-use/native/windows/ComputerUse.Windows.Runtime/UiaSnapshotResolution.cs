@@ -782,9 +782,12 @@ internal sealed partial class UiaProvider
         IReadOnlyCollection<long>? scope = null)
     {
         var opaque = OptionalString(target, "windowHandle", requestWindowHandle);
-        var projection = ProjectNativeWindows(
-            process,
-            NativeDesktop.ListWindows(process.Id));
+        var projection = WindowsWindowReferenceRead.Project(
+            opaque,
+            _windowHandles,
+            staleFailureCode,
+            () => ProjectNativeWindows(process, NativeDesktop.ListWindows(process.Id)),
+            out var binding);
         var windows = projection.LogicalWindows();
         if (windows.Count == 0)
         {
@@ -801,18 +804,8 @@ internal sealed partial class UiaProvider
                 "precondition",
                 "The application has no visible top-level window.");
         }
-        if (!string.IsNullOrEmpty(opaque))
+        if (binding is not null)
         {
-            if (!_windowHandles.TryGetValue(opaque, out var binding))
-            {
-                throw staleFailureCode == "stale_window_ref"
-                    ? WindowsProviderFailures.StaleWindow(
-                        "The exact window reference is stale; no input was emitted.")
-                    : new ProviderFailureException(
-                        staleFailureCode,
-                        "precondition",
-                        "The exact window reference is stale; no input was emitted.");
-            }
             if (!WindowsWindowIdentityPolicy.Matches(
                     binding.Handle,
                     binding.ProcessId,
