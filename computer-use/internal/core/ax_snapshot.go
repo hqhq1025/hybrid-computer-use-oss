@@ -121,6 +121,7 @@ type AXNode struct {
 	Synthetic                       bool           `json:"-"`
 	ForceKeep                       bool           `json:"-"`
 	FindMatch                       bool           `json:"-"`
+	ExplicitRoot                    bool           `json:"-"`
 	SemanticIdentityAmbiguous       bool           `json:"-"`
 	AddressabilityEvaluated         bool           `json:"-"`
 	AddressabilityReason            string         `json:"-"`

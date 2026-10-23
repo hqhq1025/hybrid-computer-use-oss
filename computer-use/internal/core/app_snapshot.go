@@ -204,6 +204,7 @@ type AppSnapshot struct {
 	scopeRoot               *ElementRecord
 	scopedCanonicalCount    int
 	observationRoot         *ElementRecord
+	observationRootEntry    *AXRefEntry
 	observationRootMode     string
 	rootedCanonicalCount    int
 	contentRoot             *ElementRecord

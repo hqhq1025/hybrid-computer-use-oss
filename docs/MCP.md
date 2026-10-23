@@ -141,6 +141,16 @@ Until the restart, only GUI can read and operate that window. It also names
 windows that an application on the bus shows outside its tree, such as the
 native message boxes of Electron applications; use GUI for those.
 
+A new Firefox profile opens a Terms of Use dialog over its first tab.
+Until the dialog is accepted, Firefox exposes only the dialog, so `find`
+and `select` see no page content. Images that start Firefox with a new
+profile should set the enterprise policy `SkipTermsOfUse` in
+`distribution/policies.json` of the Firefox installation:
+
+```json
+{"policies": {"SkipTermsOfUse": true}}
+```
+
 On other desktops, applications started before the provider may also need
 a restart. A GTK 2 application without an XSETTINGS manager needs
 `GTK_MODULES=gail:atk-bridge` at launch. LibreOffice exposes a tree only
@@ -685,6 +695,13 @@ the shell or the application.
 | `COMPUTER_USE_MACOS_PROVIDER`, `COMPUTER_USE_WINDOWS_PROVIDER` | path of the native provider, instead of the one beside the binary |
 
 ## Troubleshooting
+
+AX lists managed Linux application windows even when their process registers
+on the accessibility bus without exporting a tree for every window. Such
+windows have a `wN` marked `(no accessibility tree: use GUI)`. AX can activate,
+close, or wait for them; GUI reads and operates their content. If an AX root
+cannot be matched safely to a native window, the inventory reports incomplete
+coverage instead of issuing another reference for that window.
 
 AX sees no applications, or `AX apps` reports windows that are not on the
 accessibility bus: restart those applications after the server has run

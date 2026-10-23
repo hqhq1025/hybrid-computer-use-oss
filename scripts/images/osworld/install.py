@@ -10,6 +10,7 @@ import pwd
 import subprocess
 
 import install_qt
+import configure_apt
 
 
 ROOT = Path(__file__).resolve().parent
@@ -75,8 +76,10 @@ def install_phase(phase, manifest, manifest_path, assets, user):
     elif phase == "special":
         install_special(manifest, assets, user)
     elif phase == "preferences":
+        run(["python3", str(ROOT / "configure_thunderbird.py")])
         for script, arguments in (("configure_editor.py", []),
-                                  ("configure_desktop.py", ["--manifest", str(manifest_path)])):
+                                  ("configure_desktop.py", ["--manifest", str(manifest_path)]),
+                                  ("configure_updates.py", [])):
             run(["runuser", "-u", user.pw_name, "--", "python3", str(ROOT / script),
                  "--home", user.pw_dir, *arguments])
 
@@ -101,6 +104,7 @@ def main():
         return
     if os.geteuid() != 0:
         parser.error("Run installation as root inside the guest")
+    configure_apt.configure()
     for phase in phases:
         print("Installing phase: " + phase, flush=True)
         install_phase(phase, manifest, args.manifest.resolve(), assets, user)
