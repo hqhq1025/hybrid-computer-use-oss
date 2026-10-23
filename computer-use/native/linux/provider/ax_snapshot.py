@@ -42,6 +42,7 @@ from .ax_records import (
 from .ax_virtual_table import (
     render_visible_cells,
 )
+from .find_walk import TEXT_ONLY_ROLES, candidate_record, repeats_parent_text
 
 
 class FocusProbe:
@@ -137,7 +138,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 max_rendered_chars=MAX_RENDERED_CHARS,
                 deadline_seconds=TREE_DEADLINE_SECONDS,
                 max_child_fanout=MAX_CHILD_FANOUT,
-                focus_probe=None, content_probe=None):
+                focus_probe=None, content_probe=None, find=None):
     """Render one window subtree; return ``(records, lines, annotations)``.
 
     ``focus_probe``, when given, is a FocusProbe that records the first
@@ -147,6 +148,14 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
     ``content_probe``, when given, is a tree_reuse.ContentProbe that records
     the frame and state set of every kept node and the cells read from
     self-managed tables, from values this walk reads anyway.
+
+    ``find``, when given, is a find_walk.FindWalk. Pruning, budgets and
+    traversal are unchanged, but a kept node gets a record only when it can
+    match the query or is the ancestor of one that can (see
+    find_walk.FindFilter); the other kept nodes still count against the
+    node budget. The walk skips what ``find.resume_after`` says an earlier
+    walk searched, and records in ``find.stop_path`` the first node it did
+    not visit because a budget or the deadline ran out.
     """
     records = []
     lines = []
@@ -165,8 +174,59 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                "budget": 0, "filtered": 0, "pressure": 0,
                "render_error": 0, "fanout": 0}
     budget = {"chars": 0}
+    # Find walk: kept nodes without a record (`light`), and the kept
+    # ancestors of the node being visited that have no record yet.
+    light = {"count": 0}
+    pending_ancestors = []
     deadline = time.monotonic() + deadline_seconds if deadline_seconds else None
     pressure_at = max(1, int(max_tree_nodes * BUDGET_PRESSURE_RATIO))
+
+    def kept():
+        return len(records) + light["count"]
+
+    def note_stop(path):
+        if find is not None:
+            find.note_stop(path)
+
+    def emit(record, path, render_depth, node=None, facts=None):
+        """Index, store and render a kept node's record."""
+        # Indices must survive across snapshots, so they cannot be traversal
+        # ordinals such as len(records): inserting one element would shift
+        # every later index. See StableIndexer.
+        #
+        # Assign the index only once the node is known to be kept. Assigning
+        # it before pruning would consume indices for discarded nodes that
+        # never reach records or refs; pruned nodes are not in `known`, so
+        # they would take fresh indices on every snapshot and the numbers
+        # would grow steadily over a session.
+        record["index"] = (indexer.index_for(path, record["controlType"],
+                                             record["name"],
+                                             record.get("nameHash", ""))
+                           if indexer is not None else len(records))
+        records.append(record)
+        if content_probe is not None and node is not None:
+            content_probe.add_node(node, facts)
+        rendered = render_element_line(record, render_depth, boxes=boxes)
+        lines.append(rendered)
+        budget["chars"] += len(rendered) + 1
+
+    def emit_pending():
+        """Give the kept ancestors of a find candidate their records.
+
+        They are emitted in order before the candidate, which keeps the
+        records in pre-order: nothing in an ancestor's subtree was emitted
+        before its first candidate.
+        """
+        for entry in pending_ancestors:
+            if entry["emitted"]:
+                continue
+            record = entry["record"] or record_for(
+                entry["node"], None, entry["path"], window_bounds,
+                text_limit=text_limit, facts=entry["facts"],
+            )
+            light["count"] -= 1
+            emit(record, entry["path"], entry["render_depth"])
+            entry["emitted"] = len(records)
 
     def record_provider_errors(errors):
         for field in errors:
@@ -276,9 +336,6 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             or is_interactive_role(record["controlType"])
         )
 
-    # Text-only roles: not actionable; their only value is the text they
-    # carry.
-    TEXT_ONLY_ROLES = {"static", "label", "paragraph", "heading", "caption"}
 
     def closed_popup_indices(node, facts, child_count_hint):
         """Return the child indices of a closed combo box's popups.
@@ -310,10 +367,13 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         """
         if node is None:
             return
-        if len(records) >= max_tree_nodes:
+        if find is not None and find.relation(path) == "searched":
+            return
+        if kept() >= max_tree_nodes:
             if node is not None:
                 dropped["count"] += 1
                 dropped["budget"] += 1
+                note_stop(path)
             if focus_probe is not None:
                 focus_probe.skipped()
             return
@@ -328,6 +388,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         if budget["chars"] >= max_rendered_chars:
             dropped["count"] += 1
             dropped["chars"] += 1
+            note_stop(path)
             if focus_probe is not None:
                 focus_probe.skipped()
             return
@@ -337,6 +398,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         if deadline is not None and records and time.monotonic() >= deadline:
             dropped["count"] += 1
             dropped["time"] += 1
+            note_stop(path)
             if focus_probe is not None:
                 focus_probe.skipped()
             return
@@ -360,8 +422,18 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         # push a tree past the Go layer's 30 s timeout. States, actions,
         # value, placeholder and automationId are read only for kept nodes.
         if prune and depth > 0:
+            # A find walk decides a childless text leaf that repeats its
+            # parent's text from role, name and child count: the rule below
+            # drops it whatever its frame and description hold. On web
+            # pages these leaves are about half of all nodes.
+            if find is not None and repeats_parent_text(
+                    facts, parent_text, text_limit):
+                dropped["count"] += 1
+                dropped["filtered"] += 1
+                return
             probe, probe_errors = strict_prune_probe(
-                node, window_bounds, text_limit, facts=facts
+                node, window_bounds, text_limit, facts=facts,
+                lazy_description=find is not None,
             )
             record_provider_errors(probe_errors)
             child_count_hint = probe["child_count"]
@@ -435,19 +507,29 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                           path + [child_index], render_depth, parent_text)
                 return
 
-        record = record_for(
-            node, None, path, window_bounds, text_limit=text_limit,
-            facts=facts,
-        )
+        # A find walk builds the record only for a node that can match the
+        # query; see find_walk.
+        if find is not None and depth > 0:
+            record, candidate = candidate_record(
+                find, node, facts, path, window_bounds, text_limit,
+                probe_role if prune else None, probe_name if prune else "")
+        else:
+            candidate = True
+            record = record_for(
+                node, None, path, window_bounds, text_limit=text_limit,
+                facts=facts,
+            )
         closed_popups = closed_popup_indices(node, facts, child_count_hint)
 
         # Under budget pressure, keep named, actionable and valued nodes by
         # dropping structural containers first. Only the container's own line
         # is dropped and its children are still visited, because a dropped
-        # container is often the parent of valuable controls.
+        # container is often the parent of valuable controls. A node without
+        # a record here is named, so it is never such a container.
         if (
             prune
-            and len(records) >= pressure_at
+            and kept() >= pressure_at
+            and record is not None
             and is_structural_filler(record)
             and depth > 0
         ):
@@ -461,27 +543,28 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                       path + [child_index], render_depth, "")
             return
 
-        # Indices must survive across snapshots, so they cannot be traversal
-        # ordinals such as len(records): inserting one element would shift
-        # every later index. See StableIndexer.
-        #
-        # Assign the index only once the node is known to be kept. Assigning
-        # it before pruning would consume indices for discarded nodes that
-        # never reach records or refs; pruned nodes are not in `known`, so
-        # they would take fresh indices on every snapshot and the numbers
-        # would grow steadily over a session.
-        record["index"] = (indexer.index_for(path, record["controlType"],
-                                             record["name"],
-                                             record.get("nameHash", ""))
-                           if indexer is not None else len(records))
-        records.append(record)
-        if content_probe is not None:
-            content_probe.add_node(node, facts)
-
-        rendered = render_element_line(record, render_depth, boxes=boxes)
-        lines.append(rendered)
-        budget["chars"] += len(rendered) + 1
-        role = record["localizedControlType"] or record["controlType"] or "element"
+        entry = None
+        if candidate:
+            if find is not None:
+                emit_pending()
+            emit(record, path, render_depth, node, facts)
+            role = (record["localizedControlType"] or record["controlType"]
+                    or "element")
+            child_text = str(record.get("name") or record.get("value") or "")
+        else:
+            # Kept, but without a record unless a descendant matches.
+            light["count"] += 1
+            entry = {"node": node, "facts": facts, "path": path[:],
+                     "render_depth": render_depth, "record": record,
+                     "emitted": 0}
+            if record is not None:
+                role = (record["localizedControlType"]
+                        or record["controlType"] or "element")
+                child_text = str(
+                    record.get("name") or record.get("value") or "")
+            else:
+                role = probe_role or "element"
+                child_text = probe_name
 
         # Collapsed menu: keep the node itself, which is still the semantic
         # target of a plain click, but do not descend into its items. Role
@@ -492,7 +575,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         if (
             depth > 0
             and role.lower() in MENU_ROLES
-            and record.get("showing") is not True
+            and (record.get("showing") if record is not None
+                 else facts.showing()) is not True
         ):
             pending = (
                 strict_child_count(node, facts)
@@ -521,11 +605,19 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             node, child_count_hint, facts
         )
         if not children_enumerable:
+            if entry is not None:
+                # The cells below are records; their table needs one too.
+                pending_ancestors.append(entry)
+                emit_pending()
+                pending_ancestors.pop()
             # Huge or self-managing containers cannot be enumerated; address
-            # the cells in the current viewport by coordinate instead.
+            # the cells in the current viewport by coordinate instead. The
+            # renderer counts its budget in records, so kept nodes without
+            # one are taken off.
             rendered = render_visible_cells(
                 node, render_depth, path, window_bounds, records, lines,
-                text_limit=text_limit, max_tree_nodes=max_tree_nodes,
+                text_limit=text_limit,
+                max_tree_nodes=max_tree_nodes - light["count"],
                 boxes=boxes,
                 # Pass the indexer explicitly: the cell renderer is a
                 # module-level function and cannot see this local. Without
@@ -554,37 +646,46 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         # hours. Unlike should_enumerate_children(), which relies on the
         # container declaring MANAGES_DESCENDANTS, this guard relies on no
         # declaration.
-        before_records = len(records)
+        before_kept = kept()
         before_lines = len(lines)
         child_iterator = iter(children)
         child_slots_seen = 0
         null_children = 0
-        while True:
-            if len(records) >= max_tree_nodes:
-                if focus_probe is not None:
-                    focus_probe.skipped()
-                remaining = (
-                    max(1, planned_children - child_slots_seen)
-                    if planned_children is not None
-                    else 1
-                )
-                dropped["count"] += remaining
-                dropped["budget"] += remaining
-                break
-            try:
-                child_index, child = next(child_iterator)
-            except StopIteration:
-                break
-            child_slots_seen += 1
-            if child is NULL_CHILD:
-                null_children += 1
-                continue
-            if child is None or child_index in closed_popups:
-                continue
-            # This node was rendered: indent its children one level deeper and
-            # pass its text down so they can detect verbatim repetition.
-            visit(child, depth + 1, path + [child_index], render_depth + 1,
-                  str(record.get("name") or record.get("value") or ""))
+        if entry is not None:
+            pending_ancestors.append(entry)
+        try:
+            while True:
+                if kept() >= max_tree_nodes:
+                    if focus_probe is not None:
+                        focus_probe.skipped()
+                    remaining = (
+                        max(1, planned_children - child_slots_seen)
+                        if planned_children is not None
+                        else 1
+                    )
+                    dropped["count"] += remaining
+                    dropped["budget"] += remaining
+                    # Children are enumerated in index order.
+                    note_stop(path + [child_slots_seen])
+                    break
+                try:
+                    child_index, child = next(child_iterator)
+                except StopIteration:
+                    break
+                child_slots_seen += 1
+                if child is NULL_CHILD:
+                    null_children += 1
+                    continue
+                if child is None or child_index in closed_popups:
+                    continue
+                # This node was rendered: indent its children one level
+                # deeper and pass its text down so they can detect verbatim
+                # repetition.
+                visit(child, depth + 1, path + [child_index],
+                      render_depth + 1, child_text)
+        finally:
+            if entry is not None:
+                pending_ancestors.pop()
 
         if null_children:
             annotations.append(null_children_annotation(
@@ -605,7 +706,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         # This check therefore looks at the outcome instead of a state bit:
         # if the menu produced no rendered line while the provider reported
         # children, state how many items are hidden.
-        if (child_slots_seen and len(records) == before_records
+        if (child_slots_seen and kept() == before_kept
                 and len(lines) == before_lines
                 and role.lower() in MENU_ROLES):
             lines.append(
@@ -624,6 +725,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         records_before = len(records)
         lines_before = len(lines)
         chars_before = budget["chars"]
+        light_before = light["count"]
         try:
             return visit_impl(
                 node, depth, path, render_depth, parent_text
@@ -635,13 +737,17 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             del records[records_before:]
             del lines[lines_before:]
             budget["chars"] = chars_before
+            light["count"] = light_before
+            for entry in pending_ancestors:
+                if entry["emitted"] > records_before:
+                    entry["emitted"] = 0
             if focus_probe is not None:
                 focus_probe.skipped()
             if node is None:
                 return
             dropped["count"] += 1
             dropped["render_error"] += 1
-            if len(records) >= max_tree_nodes:
+            if kept() >= max_tree_nodes:
                 dropped["budget"] += 1
                 return
             role = str(safe(lambda: node_role(node), "element") or "element")
@@ -685,15 +791,18 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             if not children_allowed:
                 return
             child_iterator = iter(children)
+            child_slots_seen = 0
             while True:
-                if len(records) >= max_tree_nodes:
+                if kept() >= max_tree_nodes:
                     dropped["count"] += 1
                     dropped["budget"] += 1
+                    note_stop(path + [child_slots_seen])
                     break
                 try:
                     child_index, child = next(child_iterator)
                 except StopIteration:
                     break
+                child_slots_seen += 1
                 if child is None:
                     continue
                 visit(
@@ -705,6 +814,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 )
 
     visit(root, 0, root_path)
+    if find is not None:
+        find.records_omitted = light["count"]
     if focus_probe is not None:
         focus_probe.finish()
     if dropped["count"]:
@@ -742,7 +853,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 "(rendered {}/{}); AX mode=find searches canonical records hidden "
                 "only by the working projection, and a rooted observation can return "
                 "local context".format(
-                    dropped["filtered"], len(records), max_tree_nodes))
+                    dropped["filtered"], kept(), max_tree_nodes))
         if dropped["pressure"]:
             reasons.append(
                 "{} unnamed layout containers dropped after {:.0%} node pressure; "

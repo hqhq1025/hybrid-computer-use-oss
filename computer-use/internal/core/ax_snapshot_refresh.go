@@ -320,6 +320,43 @@ func (s *Service) commitPreparedSnapshot(
 	return snapshot, notes, ToolCallResult{}
 }
 
+// readFindWalk reads a Linux find walk for findMatches. A walk that holds
+// records only for query candidates (FindCandidatesOnly) is not remembered
+// as the app's snapshot: an action needs its target's state before it, and
+// a diff the whole range the caller observed, which the observe read that
+// preceded the walk still holds. The walk's refs are added to that read's,
+// so the next read keeps the indices of the elements the walk returned.
+func (s *Service) readFindWalk(app string, request AXServiceRequest) (*AppSnapshot, []string, ToolCallResult) {
+	previous := s.currentSnapshot(app)
+	if previous != nil {
+		applyProjection(&request, previous.projection)
+	}
+	snapshot, notes, result := s.readSnapshot(app, request)
+	if result.IsError {
+		return nil, nil, result
+	}
+	if !snapshot.FindCandidatesOnly {
+		return s.commitPreparedSnapshot(app, request, snapshot, notes)
+	}
+	snapshot.projection = projectionFromRequest(request)
+	if previous != nil && previous.WindowHandle == snapshot.WindowHandle {
+		previous.Refs = mergedElementRefs(previous.Refs, snapshot.Refs)
+	}
+	return snapshot, s.dedupeDiagnosticNotes(app, notes), ToolCallResult{}
+}
+
+// mergedElementRefs returns older with newer's entries on top.
+func mergedElementRefs(older, newer map[string]elementRef) map[string]elementRef {
+	merged := make(map[string]elementRef, len(older)+len(newer))
+	for path, ref := range older {
+		merged[path] = ref
+	}
+	for path, ref := range newer {
+		merged[path] = ref
+	}
+	return merged
+}
+
 func (s *Service) rememberSnapshot(query string, snapshot *AppSnapshot) {
 	// Replace every alias that pointed at the exact previous address space used
 	// for this query. Otherwise `soffice` can refresh while an older title alias

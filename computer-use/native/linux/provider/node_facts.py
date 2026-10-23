@@ -4,6 +4,7 @@ from .foundation import (
     Atspi,  # pyright: ignore[reportAttributeAccessIssue]
     corrected_screen_frame,
     frame,
+    is_interactive_role,
     limit_text,
     node_pid,
     popped_up_menu_item,
@@ -166,13 +167,17 @@ class NodeFacts:
         return pid
 
 
-def strict_prune_probe(node, window_bounds, text_limit, facts=None):
+def strict_prune_probe(node, window_bounds, text_limit, facts=None,
+                       lazy_description=False):
     """Read pruning inputs without converting provider errors into empty values.
 
     Child count and frame are read first. A node without a frame and without
     a read error is pruned whatever its role, name or description, so those
     three fields are read only for nodes that may be kept. Every field that
     is read stays in `facts` for the record builder.
+
+    With ``lazy_description`` the description is read only when role and
+    name do not already keep the node; the pruning decision is the same.
     """
     if facts is None:
         facts = NodeFacts(node)
@@ -219,6 +224,10 @@ def strict_prune_probe(node, window_bounds, text_limit, facts=None):
         str(read("name", "") or ""),
         text_limit=text_limit,
     )
+    if lazy_description and (
+            values["name"] or is_interactive_role(values["role"])):
+        values["description"] = ""
+        return values, errors
     values["description"] = limit_text(
         str(read("description", "") or ""),
         text_limit=text_limit,
