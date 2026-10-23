@@ -10,6 +10,8 @@ PREFERENCES = '''// Computer Use desktop image: suppress unsolicited startup pag
 pref("app.donation.eoy.version", 0);
 // Disabling data submission also prevents its first-run privacy page.
 pref("datareporting.policy.dataSubmissionEnabled", false);
+// Leave the message pane empty until a message is selected.
+pref("mailnews.start_page.enabled", false);
 '''
 
 
