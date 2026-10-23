@@ -20,7 +20,6 @@ func providerProjectionIgnoresDuplicateIndexesFromDisplayOnlyRowText() throws {
         targetWindowID: nil,
         targetWindowHandle: nil,
         targetWindowLayer: nil,
-        screenshotPNGData: nil,
         treeLines: [
             "0 window Projection Test",
             "\t1 row sample.dat",
@@ -84,7 +83,6 @@ func providerProjectionPublishesExplicitSetValueSupport() throws {
         targetWindowID: nil,
         targetWindowHandle: nil,
         targetWindowLayer: nil,
-        screenshotPNGData: nil,
         treeLines: ["0 combobox Sound"],
         focusedSummary: nil,
         focusedElement: nil,
@@ -128,7 +126,6 @@ func providerProjectionDoesNotPromoteRenderedValueIntoIdentityName() throws {
         targetWindowID: nil,
         targetWindowHandle: nil,
         targetWindowLayer: nil,
-        screenshotPNGData: nil,
         treeLines: ["0 switch Value: off"],
         focusedSummary: nil,
         focusedElement: nil,
@@ -178,7 +175,6 @@ func providerProjectionPreservesMultilineSemanticValue() throws {
         targetWindowID: nil,
         targetWindowHandle: nil,
         targetWindowLayer: nil,
-        screenshotPNGData: nil,
         treeLines: [
             "0 textbox homework_1\\nMath exercises:\\nSubmit by Friday",
         ],

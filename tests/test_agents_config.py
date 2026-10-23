@@ -49,7 +49,8 @@ def test_unknown_execution_context_is_rejected(context):
         config(execution_context=context)
 
 
-def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch):
+@pytest.mark.parametrize("code_mode", [False, True])
+def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch, code_mode):
     tomllib = pytest.importorskip("tomllib")
     root = Path(__file__).resolve().parents[1]
     # Import the real staging path without loading the VM or task assets.
@@ -72,7 +73,7 @@ def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch):
     args = argparse.Namespace(
         agent="codex", model="selected-model", effort="xhigh",
         gateway="http://gateway:8600",
-        benchmark_version="v2", channels="",
+        benchmark_version="v2", channels="", code_mode=code_mode,
     )
     run = runner.TaskRun(
         args=args, run_tag="config-test", result_dir=tmp_path,
@@ -91,4 +92,32 @@ def test_runner_stages_unrestricted_guest_config(tmp_path, monkeypatch):
     assert staged["approval_policy"] == "never"
     assert staged["sandbox_mode"] == "danger-full-access"
     assert "developer_instructions" not in staged
-    assert run.instructions_copy.read_text() == run.instructions_file.read_text()
+    assert staged["features"].get("code_mode_only", False) is code_mode
+    profile = run.instructions_file.read_text()
+    if code_mode:
+        profile += "\n\n" + (root / "instructions/hybrid-code.md").read_text()
+    assert run.instructions_copy.read_text() == profile
+    uploads, _ = runner.runtime_uploads(run)
+    assert str(run.instructions_copy) in {row["local_path"] for row in uploads}
+
+
+def test_code_mode_keeps_the_mcp_server_and_changes_only_tool_mode():
+    plain = config(execution_context="isolated-guest")
+    code = config(execution_context="isolated-guest", code_mode=True)
+    features = code.pop("features")
+    assert features.pop("code_mode") is True
+    assert features.pop("code_mode_only") is True
+    assert features.pop("code_mode_host") is True
+    assert plain["features"].pop("code_mode_host") is False
+    assert features == plain.pop("features")
+    server = code["mcp_servers"]["computer_use"]
+    # AX and GUI declarations stay in the code tool description in Codex
+    # versions that would otherwise defer MCP tools.
+    assert server.pop("omit_tools_from") == ["deferred"]
+    assert code == plain
+
+
+def test_code_mode_profile_appends_the_code_guide():
+    from hcu.osworld.agents import code_mode_profile
+    assert code_mode_profile("PROFILE", "GUIDE") == "PROFILE\n\nGUIDE"
+    assert code_mode_profile("", "GUIDE") == "GUIDE"

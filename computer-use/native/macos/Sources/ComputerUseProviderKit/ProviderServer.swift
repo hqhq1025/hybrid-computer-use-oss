@@ -252,8 +252,6 @@ public enum ProviderOperationAdapter {
             "max_tree_depth": "max_tree_depth",
             "prune": "prune",
             "boxes": "boxes",
-            "include_screenshot": "includeScreenshot",
-            "screenshot_scope": "screenshotScope",
             "capture_snapshot": "captureSnapshot",
         ]
         for (source, destination) in mapping {

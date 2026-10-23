@@ -29,6 +29,8 @@ DEFAULT_ARTIFACT_DIR = REPO_ROOT / "artifacts"
 DEFAULT_RESULTS_DIR = REPO_ROOT / "runs"
 DEFAULT_ASSET_CACHE = REPO_ROOT / "assets"
 DEFAULT_INSTRUCTIONS_FILE = REPO_ROOT / "instructions/hybrid.md"
+# Code mode appends this guide to the selected profile.
+CODE_MODE_INSTRUCTIONS_FILE = REPO_ROOT / "instructions/hybrid-code.md"
 DEFAULT_BASE_INSTRUCTIONS_FILE = REPO_ROOT / "instructions/base.md"
 
 

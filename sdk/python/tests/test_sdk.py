@@ -33,7 +33,7 @@ WAIT_SUBJECTS = ("window", "query", "ref", "text")
 
 # Published items that the SDK reaches only through its generic calls
 # (act, gui, call), not through a dedicated helper.
-SDK_GENERIC_ONLY = {"gui:click", "gui:double_click", "gui:move", "gui:drag",
+SDK_GENERIC_ONLY = {"gui:double_click", "gui:move", "gui:drag",
                     "gui:scroll", "gui:type", "gui:keypress", "gui:wait"}
 
 
@@ -79,6 +79,39 @@ def call_items(tool, args):
     return items
 
 
+# A zoom result as the core returns it: region [x0, y0, x1, y1] of the frame,
+# shown at width x height, so frame x = x0 + u/scale_x, y = y0 + v/scale_y.
+ZOOM_RECORD = {"ok": True, "op": "gui", "images": ["/tmp/zoom.png"],
+               "evidence": {"zoom": {"frame": "a04f6a8e", "region": [600, 60, 680, 100],
+                                     "width": 640, "height": 320, "scale_x": 8, "scale_y": 8}}}
+
+
+class ClickZoomTests(unittest.TestCase):
+    def test_clicks_the_frame_pixel_of_the_zoom_point(self):
+        calls = []
+        hcu.Desktop(recording_transport(calls)).click_zoom(ZOOM_RECORD, 212, 96, button="right")
+        (method, params), = calls
+        self.assertEqual(method, "call")
+        self.assertEqual(params["tool"], "GUI")
+        self.assertEqual(params["args"], {"actions": [{"type": "click", "x": 626.5, "y": 72.0, "button": "right"}]})
+        self.assertIn("request_id", params)
+
+    def test_rejects_a_record_without_a_zoom_mapping(self):
+        calls = []
+        with self.assertRaises(ValueError):
+            hcu.Desktop(recording_transport(calls)).click_zoom({"ok": True, "screen": {}}, 1, 1)
+        self.assertEqual(calls, [])
+
+    def test_async_desktop_has_the_same_helper(self):
+        calls = []
+
+        async def transport(method, params):
+            calls.append((method, params))
+            return {"ok": True, "op": "gui", "timing_ms": {}}
+        asyncio.run(hcu.AsyncDesktop(transport).click_zoom(ZOOM_RECORD, 0, 0))
+        self.assertEqual(calls[0][1]["args"]["actions"], [{"type": "click", "x": 600.0, "y": 60.0}])
+
+
 class SDKAgainstDaemon(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -117,6 +150,7 @@ class SDKAgainstDaemon(unittest.TestCase):
         builder.close_window("w9")
         builder.screenshot()
         builder.zoom([0, 0, 80, 40])
+        builder.click_zoom(ZOOM_RECORD, 40, 20)
         return calls
 
     def test_every_helper_builds_a_call_the_core_accepts(self):

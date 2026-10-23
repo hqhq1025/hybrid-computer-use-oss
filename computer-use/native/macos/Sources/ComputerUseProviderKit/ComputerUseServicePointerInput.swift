@@ -30,40 +30,6 @@ extension ComputerUseService {
         return hasWindowBounds && hasWindowID
     }
 
-    func screenshotToGlobalPoint(snapshot: AppSnapshot, x: Double, y: Double) throws -> CGPoint {
-        try windowPointToGlobalPoint(
-            snapshot: snapshot,
-            point: screenshotPixelToWindowPointInSnapshot(
-                snapshot: snapshot,
-                point: CGPoint(x: x, y: y)
-            )
-        )
-    }
-
-    func screenshotPixelToWindowPointInSnapshot(snapshot: AppSnapshot, point: CGPoint) -> CGPoint {
-        screenshotPixelToWindowPoint(
-            point,
-            screenshotPixelSize: screenshotPixelSize(snapshot: snapshot),
-            windowBounds: snapshot.windowBounds
-        )
-    }
-
-    private func screenshotPixelSize(snapshot: AppSnapshot) -> CGSize? {
-        guard
-            let screenshotPNGData = snapshot.screenshotPNGData,
-            let imageSource = CGImageSourceCreateWithData(screenshotPNGData as CFData, nil),
-            let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
-            let pixelWidth = properties[kCGImagePropertyPixelWidth] as? CGFloat,
-            let pixelHeight = properties[kCGImagePropertyPixelHeight] as? CGFloat,
-            pixelWidth > 0,
-            pixelHeight > 0
-        else {
-            return nil
-        }
-
-        return CGSize(width: pixelWidth, height: pixelHeight)
-    }
-
     func windowPointToGlobalPoint(snapshot: AppSnapshot, point: CGPoint) throws -> CGPoint {
         guard let windowBounds = snapshot.windowBounds else {
             let appReference = snapshot.app.bundleIdentifier ?? snapshot.app.name

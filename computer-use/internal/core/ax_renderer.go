@@ -214,6 +214,11 @@ func renderAXProperties(node *AXNode, options AXRenderOptions) [][2]string {
 	if node.Properties.Omitted != "" {
 		properties = append(properties, [2]string{"/omitted", node.Properties.Omitted})
 	}
+	for _, annotation := range node.Annotations {
+		if annotation.Kind == axCellSummaryAnnotation && annotation.Detail != "" {
+			properties = append(properties, [2]string{"/empty-cells", annotation.Detail})
+		}
+	}
 	if node.FindMatch {
 		properties = append(properties, [2]string{"/match", "true"})
 	}

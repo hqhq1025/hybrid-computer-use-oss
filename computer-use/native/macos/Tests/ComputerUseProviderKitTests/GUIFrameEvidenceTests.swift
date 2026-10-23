@@ -101,3 +101,20 @@ func guiBoundedCoordinatesMapByPixelCenter() {
     #expect(abs(point.x - 1279.5) < 1e-9)
     #expect(abs(point.y - 719.5) < 1e-9)
 }
+
+@Test(arguments: [
+    [-0.1, 0], [0, -1], [1279.4, 0], [0, 719.5], [1280, 10], [Double.nan, 0],
+])
+func guiPointOutsideTheLastDeliveredPixelIsRejected(_ point: [Double]) {
+    let bounds = CGRect(x: 0, y: 0, width: 1280, height: 720)
+    #expect(throws: ComputerUseError.self) {
+        try validateGUIPoint(["x": point[0], "y": point[1]], desktopBounds: bounds)
+    }
+}
+
+@Test
+func guiPointOnTheFirstAndLastDeliveredPixelIsAccepted() throws {
+    let bounds = CGRect(x: 0, y: 0, width: 1280, height: 720)
+    try validateGUIPoint(["x": 0.0, "y": 0.0], desktopBounds: bounds)
+    try validateGUIPoint(["x": 1279.0, "y": 719.0], desktopBounds: bounds)
+}

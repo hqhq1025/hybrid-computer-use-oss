@@ -305,7 +305,7 @@ private func readbackSnapshot(
         ),
         windowTitle: nil, windowBounds: nil, rootWindowElement: AXUIElementCreateSystemWide(),
         targetWindowID: nil, targetWindowHandle: window, targetWindowLayer: nil,
-        screenshotPNGData: nil, treeLines: [], focusedSummary: nil, focusedElement: nil,
+        treeLines: [], focusedSummary: nil, focusedElement: nil,
         selectedText: nil, elements: Dictionary(uniqueKeysWithValues: records.map { ($0.index, $0) }),
         providerProcessGeneration: generation, diagnosticSnapshotSerial: serial
     )
@@ -578,7 +578,7 @@ func relativeReadbackFinalBindingFollowsSuccessfulSerialization() throws {
         let capture = RelativeReadbackDiagnostic(requestID: "serialization", phase: "increment", registry: registry)
         capture.bind(snapshot: readbackSnapshot([target]), target: target)
         do {
-            _ = try snapshot.providerDictionary(includeScreenshot: false)
+            _ = try snapshot.providerDictionary()
             capture.bindFinal(snapshot: snapshot)
         } catch {
             capture.finalSnapshotStatus = "failed"

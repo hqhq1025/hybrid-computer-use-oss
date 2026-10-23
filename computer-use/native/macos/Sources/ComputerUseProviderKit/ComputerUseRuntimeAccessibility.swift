@@ -203,20 +203,16 @@ extension ComputerUseRuntimeBridge {
             }
             return result
         }
-        let includeScreenshot = bool(operation["includeScreenshot"])
         let snapshot: AppSnapshot
         let projectedSnapshot: [String: Any]
         do {
             relativeReadback?.finalSnapshotStatus = "attempted"
             snapshot = try service.refreshSnapshot(
                 for: app,
-                recoveryPolicy: .readOnly,
-                includeScreenshot: includeScreenshot
+                recoveryPolicy: .readOnly
             )
             relativeReadback?.finalSnapshotStatus = "captured"
-            projectedSnapshot = try snapshot.providerDictionary(
-                includeScreenshot: includeScreenshot
-            )
+            projectedSnapshot = try snapshot.providerDictionary()
             relativeReadback?.bindFinal(snapshot: snapshot)
             recordTiming("final_snapshot")
             if timingEnabled {

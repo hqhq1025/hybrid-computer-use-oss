@@ -36,6 +36,7 @@ VALUE_OPTIONS = {
     "run_timezone": "--timezone",
 }
 SWITCHES = {
+    "code_mode": "--code-mode",
     "offline_assets": "--offline-assets",
     "retain_containers": "--retain-container",
     "enable_vnc": "--enable-vnc",

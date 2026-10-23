@@ -215,6 +215,38 @@ The profile turns off Codex's built-in `computer_use` feature, so desktop
 input comes only from this server, the shell or the browser runtime. See
 [Agent profiles](AGENT_PROFILES.md) for every switch.
 
+### Codex code mode
+
+With `--code-mode` (`"code_mode": true` in a queue config), the model gets
+only Codex's code tool. The MCP server stays registered, and code calls it
+as `tools.mcp__computer_use__AX` and `tools.mcp__computer_use__GUI`. The
+switch turns on `code_mode`, `code_mode_only` and `code_mode_host`, adds
+`omit_tools_from = ["deferred"]` to the server entry, and appends
+`instructions/hybrid-code.md` to the selected profile:
+
+```toml
+[features]
+code_mode = true
+code_mode_only = true
+code_mode_host = true
+
+[mcp_servers.computer_use]
+command = "/path/to/computer-use"
+args = ["mcp"]
+required = true
+startup_timeout_sec = 60
+tool_timeout_sec = 180
+omit_tools_from = ["deferred"]
+```
+
+Some Codex versions defer MCP tools in code mode: the tools stay callable,
+but their declarations are left out of the code tool description.
+`omit_tools_from = ["deferred"]` keeps them in; versions that do not defer
+MCP tools ignore the key. Some model metadata selects code mode by itself;
+the switch then still keeps the declarations and the guide. The command
+line and the Python SDK remain the fallback for code runtimes without MCP.
+See [Code entry points](CODE.md#codex-code-mode).
+
 ## Claude Code
 
 Claude Code connects through `hcu/osworld/guest_files/claude_mcp_schema_adapter.py`.

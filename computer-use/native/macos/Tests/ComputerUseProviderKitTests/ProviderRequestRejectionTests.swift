@@ -360,3 +360,20 @@ func requestRejectionDoesNotResetOrStopTheServerLoop() async throws {
     let payload = responses[1]["accessibility"] as? [String: Any]
     #expect(payload?["ok"] as? Bool == true)
 }
+
+@Test(arguments: ["observe", "ordered_input"])
+func windowScreenshotRequestsAreRejectedBeforeDispatch(_ operation: String) async throws {
+    var request = rejectionTestRequest(operation)
+    let payloadName = ProviderOperationAdapter.payloadName(for: operation)
+    var payload = try #require(request[payloadName] as? [String: Any])
+    let field = operation == "observe" ? "observation" : "final_observation"
+    payload[field] = ["capture_snapshot": true, "include_screenshot": false]
+    request[payloadName] = payload
+    try ProviderRequestValidator.validate(request)
+    payload[field] = ["capture_snapshot": true, "include_screenshot": true]
+    request[payloadName] = payload
+    try await expectRequestRejection(
+        request,
+        messageContains: "include_screenshot is not supported"
+    )
+}
