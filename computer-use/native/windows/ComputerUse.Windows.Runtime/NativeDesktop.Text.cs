@@ -53,7 +53,7 @@ internal static partial class NativeDesktop
         {
             throw new ProviderFailureException(
                 "clipboard_restore_failed",
-                "postcondition",
+                inputEmitted ? "post_action_observation" : "emission",
                 $"Text input completed but the prior clipboard could not be " +
                 $"restored: {restoreError.Message}",
                 inputEmitted,
@@ -67,7 +67,7 @@ internal static partial class NativeDesktop
         {
             throw new ProviderFailureException(
                 "clipboard_type_failed",
-                inputEmitted ? "postcondition" : "emission",
+                inputEmitted ? "post_action_observation" : "emission",
                 $"Clipboard-backed text input failed: {operationError.Message}",
                 inputEmitted,
                 inputEmitted);

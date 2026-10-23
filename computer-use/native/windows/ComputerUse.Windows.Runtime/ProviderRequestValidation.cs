@@ -264,7 +264,7 @@ internal sealed partial class ProviderServer
             Fields(
                 "text_limit", "max_tree_nodes", "max_tree_depth",
                 "prune", "boxes", "include_screenshot",
-                "screenshot_scope", "capture_snapshot"),
+                "capture_snapshot"),
             path);
         ValidatePositiveTextLimit(value, path);
         ValidateNonNegativeInteger(value, "max_tree_nodes", path);
@@ -273,12 +273,12 @@ internal sealed partial class ProviderServer
         ValidateOptionalBoolean(value, "boxes", path);
         ValidateOptionalBoolean(value, "include_screenshot", path);
         ValidateOptionalBoolean(value, "capture_snapshot", path);
-        var screenshotScope = StringValue(value, "screenshot_scope");
-        if (screenshotScope is not null &&
-            screenshotScope is not "screen" and not "window")
+        if (value["include_screenshot"]?.GetValue<bool>() == true)
         {
+            // AX images are full-desktop GUI frames that the core captures
+            // with a desktop batch; this provider never captures a window.
             throw InvalidRequest(
-                $"{path}.screenshot_scope must be screen or window.");
+                $"{path}.include_screenshot is not supported; request a desktop batch screenshot.");
         }
     }
 

@@ -170,10 +170,12 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
         if let refreshByName {
             snapshot = try refreshByName(app)
         } else {
+            // Observation never unhides, activates or opens the application.
             snapshot = try service.refreshSnapshot(
                 for: app,
                 textLimit: limit,
-                treeLimits: limits
+                treeLimits: limits,
+                recoveryPolicy: .readOnly
             )
         }
         try validateRequestedWindow(operation, snapshot: snapshot)

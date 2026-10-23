@@ -711,7 +711,8 @@ internal sealed partial class UiaProvider
         Process process,
         JsonObject? target,
         string requestWindowHandle,
-        string staleFailureCode = "window_target_stale")
+        string staleFailureCode = "window_target_stale",
+        IReadOnlyCollection<long>? scope = null)
     {
         var opaque = OptionalString(target, "windowHandle", requestWindowHandle);
         var projection = ProjectNativeWindows(
@@ -780,13 +781,32 @@ internal sealed partial class UiaProvider
             }
             return exact;
         }
+        var nativeWindows = projection.NativeWindows
+            .Select(window => window.ToTopLevel())
+            .ToArray();
+        var preferred = WindowsAppInventory.DefaultWindow(
+            nativeWindows,
+            windows.Select(window => window.Handle.ToInt64()).ToArray(),
+            handle => projection.LogicalHandle((nint)handle).ToInt64(),
+            scope);
+        if (preferred is long handle)
+        {
+            return windows.First(window => window.Handle.ToInt64() == handle);
+        }
+        if (scope is not null)
+        {
+            throw new ProviderFailureException(
+                "window_not_found",
+                "precondition",
+                "The application's windows closed while it was resolved.");
+        }
+        // An identity-bound application that shows no input window (only
+        // tool or shell windows) keeps its previous default.
         var activeNative = projection.NativeWindows.FirstOrDefault(
             value => value.Active);
-        if (activeNative is not null)
-        {
-            return projection.LogicalRecord(activeNative);
-        }
-        return windows[0];
+        return activeNative is not null
+            ? projection.LogicalRecord(activeNative)
+            : windows[0];
     }
 
     private string OpaqueWindowHandle(Process process, nint handle)

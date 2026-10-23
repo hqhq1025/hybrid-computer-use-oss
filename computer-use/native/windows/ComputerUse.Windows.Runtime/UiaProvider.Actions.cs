@@ -13,14 +13,15 @@ internal sealed partial class UiaProvider
     {
         var intent = RequiredString(request, "intent");
         var query = RequiredString(request, "app");
-        var process = ResolveProcess(request, query);
+        var (process, scope) = ResolveApp(request, query);
         var target = request["target"] as JsonObject;
         var elementRecord = request["element"] as JsonObject;
         var selectedWindow = ResolveWindow(
             process,
             target,
             OptionalString(request, "window_handle", string.Empty),
-            "stale_element_ref");
+            "stale_element_ref",
+            scope);
         var requestWindowHandle = OptionalString(
             request,
             "window_handle",
@@ -73,6 +74,7 @@ internal sealed partial class UiaProvider
         bool? focusVerified = null;
         var readbackSampled = false;
         bool? readbackVerified = null;
+        bool? desktopStateMutated = null;
         var inputEmitted = false;
         var mutationAttempted = false;
         var pointerPreparationAttempted = false;
@@ -152,7 +154,6 @@ internal sealed partial class UiaProvider
                         point.Y,
                         OptionalString(input, "mouse_button", "left"),
                         OptionalInt(input, "click_count", 1));
-                    focusVerified = selectedWindow.Active;
                     inputEmitted = true;
                 }
                     break;
@@ -193,6 +194,8 @@ internal sealed partial class UiaProvider
                             "set_value is outside the UIA range target bounds.");
                     }
                     route = "uia.range_value.set";
+                    var rangeBefore = Safe<double?>(
+                        () => rangePattern!.Value.Value, null);
                     mutationAttempted = true;
                     rangePattern.SetValue(requestedRangeValue);
                     inputEmitted = true;
@@ -226,6 +229,9 @@ internal sealed partial class UiaProvider
                             "UIA RangeValue accepted the write but readback did not match.",
                             inputEventsEmitted: true);
                     }
+                    desktopStateMutated = ActionEvidencePolicy.VerifiedChange(
+                        rangeBefore is double before &&
+                            !LiveValueReadback.RangeEquals(before, requestedRangeValue));
                     break;
                 }
                 var valuePattern = element.Patterns.Value.PatternOrDefault;
@@ -237,6 +243,11 @@ internal sealed partial class UiaProvider
                         "The target does not expose a writable UIA Value pattern.");
                 }
                 var textPattern = element.Patterns.Text.PatternOrDefault;
+                var valueBefore = Safe<string?>(
+                    () => LiveValueReadback.CanonicalTextValue(
+                        valuePattern.Value.Value,
+                        textPattern?.DocumentRange.GetText(-1)),
+                    null);
                 if (UiaSetValueRouting.PrefersDocumentInput(
                         element.ControlType == ControlType.Document,
                         !valuePattern.IsReadOnly.Value,
@@ -245,7 +256,6 @@ internal sealed partial class UiaProvider
                     route = "input.send_input.document_replace";
                     EnsureExactFocus(element,
                         () => EnsureTargetLogicalWindow(element, process, selectedWindow));
-                    focusVerified = true;
                     mutationAttempted = true;
                     NativeDesktop.PressKeys(new[] { "CTRL", "A" });
                     inputEmitted = true;
@@ -257,6 +267,7 @@ internal sealed partial class UiaProvider
                     {
                         NativeDesktop.TypeText(requestedValue);
                     }
+                    focusVerified = ForegroundOwnedBy(process.Id);
                 }
                 else
                 {
@@ -313,6 +324,9 @@ internal sealed partial class UiaProvider
                         "UIA Value accepted the write but readback did not match.",
                         inputEventsEmitted: true);
                 }
+                desktopStateMutated = ActionEvidencePolicy.VerifiedChange(
+                    valueBefore is not null &&
+                        !LiveValueReadback.TextEquals(valueBefore, requestedValue));
                     break;
                 case "type":
                     route = "input.send_input.keyboard";
@@ -325,11 +339,11 @@ internal sealed partial class UiaProvider
                     {
                         NativeDesktop.ActivateWindow(selectedWindow.Handle);
                     }
-                    focusVerified = true;
                     mutationAttempted = true;
                     NativeDesktop.TypeText(
                         OptionalString(input, "text", string.Empty));
                     inputEmitted = true;
+                    focusVerified = ForegroundOwnedBy(process.Id);
                     break;
                 case "keypress":
                     route = "input.send_input.keyboard";
@@ -337,17 +351,16 @@ internal sealed partial class UiaProvider
                     {
                         EnsureExactFocus(element,
                             () => EnsureTargetLogicalWindow(element, process, selectedWindow));
-                        focusVerified = true;
                     }
                     else
                     {
                         NativeDesktop.ActivateWindow(selectedWindow.Handle);
-                        focusVerified = true;
                     }
                     mutationAttempted = true;
                     NativeDesktop.PressKeys(
                         new[] { RequiredString(input, "key") });
                     inputEmitted = true;
+                    focusVerified = ForegroundOwnedBy(process.Id);
                     break;
                 case "scroll":
                     if (TryScroll(
@@ -384,7 +397,6 @@ internal sealed partial class UiaProvider
                                 ? -1
                                 : 1) *
                             Math.Max(1, OptionalDouble(input, "pages", 1)));
-                        focusVerified = true;
                         inputEmitted = true;
                     }
                     break;
@@ -403,7 +415,8 @@ internal sealed partial class UiaProvider
                 {
                     ["ok"] = true,
                     ["observation_skipped"] = true,
-                    ["mutation"] = MutationFacts(inputEmitted, false),
+                    ["mutation"] = ActionEvidencePolicy.MutationFacts(
+                        inputEmitted, desktopStateMutated),
                     ["action_evidence"] = ActionEvidence(
                         route,
                         geometrySampled,
@@ -428,8 +441,7 @@ internal sealed partial class UiaProvider
                         return BuildSnapshot(
                             process,
                             window,
-                            observation,
-                            commitPostActionScreenshot: true);
+                            observation);
                     }
                     if (!MatchesPostActionOwner(ownerIdentity, window))
                     {
@@ -444,8 +456,7 @@ internal sealed partial class UiaProvider
                     return BuildSnapshot(
                         ownerProcess,
                         window,
-                        observation,
-                        commitPostActionScreenshot: true);
+                        observation);
                 },
                 () => new JsonObject
                 {
@@ -471,7 +482,8 @@ internal sealed partial class UiaProvider
             {
                 ["ok"] = true,
                 ["snapshot"] = snapshot,
-                ["mutation"] = MutationFacts(inputEmitted, false),
+                ["mutation"] = ActionEvidencePolicy.MutationFacts(
+                        inputEmitted, desktopStateMutated),
                 ["action_evidence"] = ActionEvidence(
                     route,
                     geometrySampled,
@@ -532,6 +544,15 @@ internal sealed partial class UiaProvider
                     inputEmitted, pointOwnerVerified));
         }
     }
+
+    private static bool ForegroundOwnedBy(int processId) =>
+        ActionEvidencePolicy.KeyboardFocusVerified(
+            processId,
+            NativeDesktop.TryGetWindowProcessId(
+                NativeDesktop.ForegroundWindow(),
+                out var foregroundProcess)
+                ? foregroundProcess
+                : null);
 
     private PostActionOwnerIdentity? CapturePostActionOwnerIdentity(
         NativeDesktop.WindowRecord selectedWindow)

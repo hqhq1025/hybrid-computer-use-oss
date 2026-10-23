@@ -30,7 +30,7 @@ internal static class FailureWireFixtures
         Add("reset", new InvalidOperationException("unexpected failure"));
         Add("window", new ProviderFailureException("window_activation_failed", "emission", "activation failed",
             actionEvidence: Evidence()), "window_action");
-        Add("recovery", new ProviderFailureException("post_action_observation_failed", "postcondition", "read failed",
+        Add("recovery", new ProviderFailureException("post_action_observation_failed", "post_action_observation", "read failed",
             inputEventsEmitted: true, recoveryContext: new JsonObject
             {
                 ["sourceAppStatus"] = "alive", ["sourceWindowStatus"] = "gone", ["inventoryComplete"] = true,
@@ -43,6 +43,11 @@ internal static class FailureWireFixtures
             {
                 ["sourceAppStatus"] = "alive", ["sourceWindowStatus"] = "gone", ["inventoryComplete"] = true,
             }), "observe");
+        Add("ambiguous_app", new ProviderFailureException("ax_app_ambiguous", "precondition", "two processes",
+            factsComplete: true, subject: "app", candidates: new JsonArray(
+                new JsonObject { ["name"] = "explorer", ["providerBusName"] = "uia3:pid:6800", ["processGeneration"] = "1" },
+                new JsonObject { ["name"] = "explorer", ["providerBusName"] = "uia3:pid:7300", ["processGeneration"] = "2" })),
+            "observe");
         File.WriteAllText(output, fixtures.ToJsonString(new() { WriteIndented = true }) + "\n");
         Console.WriteLine($"Wrote {fixtures.Count} production failure envelopes to {output}");
     }

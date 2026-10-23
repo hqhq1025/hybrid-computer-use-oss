@@ -1,6 +1,8 @@
 import Foundation
 
-let computerUseNoWindowFoundMessage = "Apple event error -10005: cgWindowNotFound"
+func computerUseNoWindowFoundMessage(appName: String) -> String {
+    "\(appName) has no window that accessibility can read. Observation does not unhide, activate or open applications; show one of its windows with a GUI action, then observe again."
+}
 
 public enum ComputerUseError: Error, LocalizedError {
     case message(String)
@@ -26,7 +28,7 @@ public enum ComputerUseError: Error, LocalizedError {
         case .capabilityUnsupported(let message):
             return message
         case .appNotFound(let app):
-            return "appNotFound(\"\(app)\")"
+            return "appNotFound(\"\(app)\"): no running application matched this query. The provider does not launch applications; start it first, for example from the Dock, Finder or Spotlight, then observe again."
         case .permissionDenied(let message):
             return message
         case .staleAppRef(let message), .staleWindowRef(let message):

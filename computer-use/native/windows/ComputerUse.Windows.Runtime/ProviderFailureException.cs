@@ -17,7 +17,8 @@ internal sealed class ProviderFailureException : Exception
         string subject = "",
         JsonObject? recoveryContext = null,
         FocusPreparationState? focusPreparation = null,
-        PointerPreparationState? pointerPreparation = null)
+        PointerPreparationState? pointerPreparation = null,
+        JsonArray? candidates = null)
         : base(message)
     {
         Code = code;
@@ -32,6 +33,7 @@ internal sealed class ProviderFailureException : Exception
         RecoveryContext = recoveryContext;
         FocusPreparation = focusPreparation;
         PointerPreparation = pointerPreparation;
+        Candidates = candidates;
     }
 
     internal string Code { get; }
@@ -46,4 +48,6 @@ internal sealed class ProviderFailureException : Exception
     internal JsonObject? RecoveryContext { get; }
     internal FocusPreparationState? FocusPreparation { get; }
     internal PointerPreparationState? PointerPreparation { get; }
+    // Application processes an ambiguous app query matched.
+    internal JsonArray? Candidates { get; }
 }

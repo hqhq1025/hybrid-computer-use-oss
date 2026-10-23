@@ -497,15 +497,9 @@ public final class ComputerUseService {
                 throw ComputerUseError.stateUnavailable("element \(elementIndex) has no clickable frame")
             }
             let targetPoint = try windowPointToGlobalPoint(snapshot: snapshot, point: windowPoint)
-            if semanticAXClickRequiresBoundWindowPreparation(
-                method: clickMethod,
-                hasWindowBounds: snapshot.windowBounds != nil,
-                hasWindowID: snapshot.targetWindowID != nil
-            ) {
-                try InputSimulation.prepareBoundWindowForSemanticPointerInput(
-                    snapshot
-                )
-            }
+            // AXPress needs no window preparation; every pointer fallback
+            // prepares the window itself, so a semantic click does not
+            // raise the window or steal focus.
             switch clickMethod {
             case .auto:
                 if !(try performAXClickSequence(
@@ -554,15 +548,6 @@ public final class ComputerUseService {
             let targetPoint = try windowPointToGlobalPoint(snapshot: snapshot, point: point)
             switch clickMethod {
             case .auto:
-                if semanticAXClickRequiresBoundWindowPreparation(
-                    method: clickMethod,
-                    hasWindowBounds: snapshot.windowBounds != nil,
-                    hasWindowID: snapshot.targetWindowID != nil
-                ) {
-                    try InputSimulation.prepareBoundWindowForSemanticPointerInput(
-                        snapshot
-                    )
-                }
                 let candidates = try clickCandidates(at: point, in: snapshot)
                 var handled = false
                 for record in candidates {
@@ -581,6 +566,16 @@ public final class ComputerUseService {
                 }
 
                 if !handled {
+                    // Only a pointer event needs the bound window in front.
+                    if semanticAXClickRequiresBoundWindowPreparation(
+                        method: clickMethod,
+                        hasWindowBounds: snapshot.windowBounds != nil,
+                        hasWindowID: snapshot.targetWindowID != nil
+                    ) {
+                        try InputSimulation.prepareBoundWindowForSemanticPointerInput(
+                            snapshot
+                        )
+                    }
                     try performNonAXClickFallback(
                         at: targetPoint,
                         button: button,
