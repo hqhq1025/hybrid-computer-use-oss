@@ -95,97 +95,93 @@ extension ComputerUseRuntimeBridge {
         var readbackVerified: Bool?
         var mutationUnknown = false
 
-        do {
-            switch tool {
-            case "click":
-                try service.performClick(
+        switch tool {
+        case "click":
+            try service.performClick(
+                app: app,
+                elementIndex: elementIndex,
+                x: double(operation["x"]),
+                y: double(operation["y"]),
+                clickCount: int(operation["click_count"]) ?? 1,
+                mouseButton: string(operation["mouse_button"], fallback: "left"),
+                clickMethod: try parseClickMethod(string(operation["click_method"]))
+            )
+            executedRoute = "macos.click.dispatch"
+            geometrySampled = true
+        case "scroll":
+            let direction = string(operation["direction"], fallback: "down")
+            let pages = double(operation["pages"]) ?? 1
+            if let elementIndex {
+                _ = try service.scroll(
                     app: app,
+                    direction: direction,
                     elementIndex: elementIndex,
-                    x: double(operation["x"]),
-                    y: double(operation["y"]),
-                    clickCount: int(operation["click_count"]) ?? 1,
-                    mouseButton: string(operation["mouse_button"], fallback: "left"),
-                    clickMethod: try parseClickMethod(string(operation["click_method"]))
+                    pages: pages
                 )
-                executedRoute = "macos.click.dispatch"
-                geometrySampled = true
-            case "scroll":
-                let direction = string(operation["direction"], fallback: "down")
-                let pages = double(operation["pages"]) ?? 1
-                if let elementIndex {
-                    _ = try service.scroll(
-                        app: app,
-                        direction: direction,
-                        elementIndex: elementIndex,
-                        pages: pages
-                    )
-                } else {
-                    let snapshot = try service.currentSnapshot(for: app)
-                    guard let bounds = snapshot.windowBounds else {
-                        throw ComputerUseError.staleElementRef(
-                            "The selected window has no scrollable bounds"
-                        )
-                    }
-                    try InputSimulation.scrollTargeted(
-                        at: CGPoint(x: bounds.midX, y: bounds.midY),
-                        direction: direction,
-                        pages: pages,
-                        pid: snapshot.app.pid
+            } else {
+                let snapshot = try service.currentSnapshot(for: app)
+                guard let bounds = snapshot.windowBounds else {
+                    throw ComputerUseError.staleElementRef(
+                        "The selected window has no scrollable bounds"
                     )
                 }
-                executedRoute = "input.cg_event.scroll"
-                geometrySampled = true
-            case "type":
-                try focusRuntimeElement(elementIndex, app: app)
-                let dispatch = try service.typeTextWithRoute(
-                    app: app,
-                    text: string(operation["text"]),
-                    elementIndex: elementIndex
+                try InputSimulation.scrollTargeted(
+                    at: CGPoint(x: bounds.midX, y: bounds.midY),
+                    direction: direction,
+                    pages: pages,
+                    pid: snapshot.app.pid
                 )
-                executedRoute = dispatch.route
-                readbackSampled = dispatch.readbackVerified != nil
-                readbackVerified = dispatch.readbackVerified
-            case "keypress":
-                try focusRuntimeElement(elementIndex, app: app)
-                try service.pressKey(
-                    app: app,
-                    key: string(operation["key"])
-                )
-                executedRoute = "input.cg_event.keyboard"
-            case "set_value":
-                let dispatch = try service.setValueWithRoute(
-                    app: app,
-                    elementIndex: try requiredElementIndex(elementIndex),
-                    value: string(operation["value"])
-                )
-                executedRoute = dispatch.route
-                readbackSampled = true
-                readbackVerified = true
-            case "select":
-                try service.selectText(
-                    app: app,
-                    elementIndex: try requiredElementIndex(elementIndex),
-                    text: string(operation["text"])
-                )
-                executedRoute = "ax.attribute.selected_text_range.set"
-                readbackSampled = true
-                readbackVerified = true
-            case "increment", "decrement":
-                let dispatch = try service.performRelativeAdjustment(
-                    app: app,
-                    elementIndex: try requiredElementIndex(elementIndex),
-                    direction: tool,
-                    diagnostic: relativeReadback
-                )
-                executedRoute = "ax.action.\(tool)"
-                readbackSampled = dispatch.readbackSampled
-                readbackVerified = dispatch.readbackVerified
-                mutationUnknown = dispatch.readbackVerified != true
-            default:
-                throw ComputerUseError.unsupportedTool(tool)
             }
-        } catch let error as PostInputObservationError {
-            return postInputObservationFailureResult(error)
+            executedRoute = "input.cg_event.scroll"
+            geometrySampled = true
+        case "type":
+            try focusRuntimeElement(elementIndex, app: app)
+            let dispatch = try service.typeTextWithRoute(
+                app: app,
+                text: string(operation["text"]),
+                elementIndex: elementIndex
+            )
+            executedRoute = dispatch.route
+            readbackSampled = dispatch.readbackVerified != nil
+            readbackVerified = dispatch.readbackVerified
+        case "keypress":
+            try focusRuntimeElement(elementIndex, app: app)
+            try service.pressKey(
+                app: app,
+                key: string(operation["key"])
+            )
+            executedRoute = "input.cg_event.keyboard"
+        case "set_value":
+            let dispatch = try service.setValueWithRoute(
+                app: app,
+                elementIndex: try requiredElementIndex(elementIndex),
+                value: string(operation["value"])
+            )
+            executedRoute = dispatch.route
+            readbackSampled = true
+            readbackVerified = true
+        case "select":
+            try service.selectText(
+                app: app,
+                elementIndex: try requiredElementIndex(elementIndex),
+                text: string(operation["text"])
+            )
+            executedRoute = "ax.attribute.selected_text_range.set"
+            readbackSampled = true
+            readbackVerified = true
+        case "increment", "decrement":
+            let dispatch = try service.performRelativeAdjustment(
+                app: app,
+                elementIndex: try requiredElementIndex(elementIndex),
+                direction: tool,
+                diagnostic: relativeReadback
+            )
+            executedRoute = "ax.action.\(tool)"
+            readbackSampled = dispatch.readbackSampled
+            readbackVerified = dispatch.readbackVerified
+            mutationUnknown = dispatch.readbackVerified != true
+        default:
+            throw ComputerUseError.unsupportedTool(tool)
         }
         recordTiming("action_dispatch")
 

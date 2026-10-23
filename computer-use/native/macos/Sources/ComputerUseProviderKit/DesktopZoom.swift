@@ -139,13 +139,6 @@ final class DesktopPublishedLayouts: @unchecked Sendable {
         defer { lock.unlock() }
         return layouts[frameID]
     }
-
-    func clear() {
-        lock.lock()
-        defer { lock.unlock() }
-        layouts.removeAll()
-        order.removeAll()
-    }
 }
 
 /// Whether the zoom may read the region now. It may when the current frame

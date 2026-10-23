@@ -794,3 +794,43 @@ func darwinTestOrderedInputSuccess(request core.ProviderOrderedInputRequest) cor
 	}
 	return result
 }
+
+func TestDarwinTransportRejectsSharedInvalidRequestsBeforeLaunch(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "provider-wire", "invalid-requests.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus []struct {
+		Name    string          `json:"name"`
+		Request json.RawMessage `json:"request"`
+	}
+	if err := json.Unmarshal(data, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	shutdownDarwinProviderProcess()
+	lookup := darwinProviderArtifactLookup
+	t.Cleanup(func() {
+		shutdownDarwinProviderProcess()
+		darwinProviderArtifactLookup = lookup
+	})
+	lookups := 0
+	darwinProviderArtifactLookup = func() (darwinProviderArtifact, error) {
+		lookups++
+		return darwinProviderArtifact{}, errors.New("the provider must not start")
+	}
+	typed := 0
+	for _, fixture := range corpus {
+		var request core.ProviderWireRequest
+		if core.DecodeProviderWireJSON(fixture.Request, &request) != nil {
+			// A typed request cannot carry this shape, so the core cannot send it.
+			continue
+		}
+		typed++
+		if response, err := runDarwinProvider(request); response != nil || err == nil {
+			t.Errorf("%s crossed transport preflight: response=%v err=%v", fixture.Name, response, err)
+		}
+	}
+	if typed == 0 || lookups != 0 {
+		t.Fatalf("typed invalid requests=%d, provider lookups=%d", typed, lookups)
+	}
+}
