@@ -29,6 +29,13 @@ internal sealed partial class UiaProvider
             ProviderTargetResolutionPolicy.AllowsSemanticProviderRebind(
                 target);
         if (requestedProviderObjectPath.StartsWith(
+                SpreadsheetCellScope + ":",
+                StringComparison.Ordinal))
+        {
+            return ResolveSpreadsheetCell(
+                process, selectedWindow, requestedProviderObjectPath, target, record);
+        }
+        if (requestedProviderObjectPath.StartsWith(
                 "runtime:",
                 StringComparison.Ordinal))
         {
@@ -538,6 +545,62 @@ internal sealed partial class UiaProvider
             }
             return true;
         }
+    }
+
+    // A spreadsheet cell is found again by a hit test at its rectangle in
+    // the latest observation of the window. If the sheet scrolled or a
+    // window covers the cell, the hit returns another element and the
+    // reference is stale.
+    private AutomationElement ResolveSpreadsheetCell(
+        Process process,
+        NativeDesktop.WindowRecord selectedWindow,
+        string providerObjectPath,
+        JsonObject? target,
+        JsonObject? record)
+    {
+        var logicalWindow = ProjectNativeWindows(
+            process,
+            NativeDesktop.ListWindows(process.Id))
+            .LogicalRecord(selectedWindow);
+        if (!_observedElementLeases.TryGet(
+                process.Id,
+                ProcessGeneration(process),
+                logicalWindow.Handle.ToInt64(),
+                providerObjectPath,
+                out var lease) ||
+            lease?.CanonicalRecord["frame"] is not JsonObject frame ||
+            !SpreadsheetGrid.TryParseA1(
+                lease.CanonicalRecord["name"]?.GetValue<string>(), out var row, out var column))
+        {
+            throw new ProviderFailureException(
+                "stale_element_ref",
+                "precondition",
+                "The cell is not in the latest observation of this window; no input was emitted.");
+        }
+        var center = new System.Drawing.Point(
+            Safe(() => frame["x"]!.GetValue<int>() + frame["width"]!.GetValue<int>() / 2, int.MinValue),
+            Safe(() => frame["y"]!.GetValue<int>() + frame["height"]!.GetValue<int>() / 2, int.MinValue));
+        AutomationElement? hit = null;
+        if (center.X != int.MinValue && center.Y != int.MinValue &&
+            SpreadsheetGrid.PointShowsWindow(center, logicalWindow.Handle))
+        {
+            using (FlaUI.Core.CacheRequest.ForceNoCache())
+            {
+                hit = Safe<AutomationElement?>(() => _automation.FromPoint(center), null);
+            }
+        }
+        if (hit is null ||
+            !SpreadsheetGrid.TryParseA1(Safe(() => hit.Name, string.Empty), out var hitRow, out var hitColumn) ||
+            hitRow != row ||
+            hitColumn != column)
+        {
+            throw new ProviderFailureException(
+                "stale_element_ref",
+                "precondition",
+                "The cell is no longer at its observed position; no input was emitted.");
+        }
+        EnsureTargetStillMatches(hit, target, record);
+        return hit;
     }
 
     private AutomationElement ResolveSnapshotPath(

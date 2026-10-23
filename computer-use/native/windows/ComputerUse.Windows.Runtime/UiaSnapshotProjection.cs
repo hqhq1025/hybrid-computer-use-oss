@@ -163,6 +163,11 @@ internal sealed partial class UiaProvider
                 observedElementLeases[providerPath] =
                     new ObservedElementLease<AutomationElement>(sample.Node.Element, sample.Record);
             }
+            else if (providerPath.StartsWith(SpreadsheetCellScope + ":", StringComparison.Ordinal))
+            {
+                observedElementLeases[providerPath] =
+                    new ObservedElementLease<AutomationElement>(sample.Node.Element, sample.Record);
+            }
             index++;
         }
         _observedElementLeases.Replace(
@@ -249,7 +254,132 @@ internal sealed partial class UiaProvider
             }
             sampled.Add((node, record, treePath, depth));
             index++;
+            if (node.Facts.ControlType is ControlType.Table or ControlType.DataGrid)
+            {
+                ReadSpreadsheetCells(node, treePath, depth);
+            }
             return true;
+        }
+
+        // A table whose first child is a cell named by A1 reference is a
+        // spreadsheet grid: its children run row-major over the whole sheet,
+        // so the visible cells are read by hit tests instead (see
+        // SpreadsheetGrid). Cells with a value, and the cell holding the
+        // cursor, become records; the other visible cells are summarized.
+        void ReadSpreadsheetCells(CachedUiaNode table, int[] tablePath, int depth)
+        {
+            var first = ReadLink(() => cache.ReadFirstChild(table));
+            if (first?.Facts is not { ControlType: ControlType.DataItem } firstFacts ||
+                !SpreadsheetGrid.TryParseA1(firstFacts.Name, out _, out _))
+            {
+                return;
+            }
+            table.CellsRead = true;
+            var started = elapsed();
+            var viewport = SpreadsheetGrid.ReadViewport(
+                Rectangle.Intersect(table.Facts!.Bounds, selectedWindow.Bounds),
+                point =>
+                {
+                    if (!SpreadsheetGrid.PointShowsWindow(point, selectedWindow.Handle)) { return null; }
+                    CachedUiaNode? cell;
+                    try { cell = cache.ReadAtPoint(point, table); }
+                    catch { return null; }
+                    return cell?.Facts is { ControlType: ControlType.DataItem } facts &&
+                        SpreadsheetGrid.TryParseA1(facts.Name, out var row, out var column)
+                        ? new SpreadsheetCellHit<CachedUiaNode>(cell, row, column, facts.Bounds)
+                        : null;
+                },
+                MaxSpreadsheetProbes,
+                () => elapsed() - started < SpreadsheetReadTime && elapsed() < SnapshotSampleTimeout);
+            if (viewport is null)
+            {
+                Omit(tablePath, "visible_cell_range_unavailable", 1);
+                return;
+            }
+            var listed = 0;
+            var empty = 0;
+            var overBudget = 0;
+            foreach (var cell in viewport.Cells)
+            {
+                var facts = cell.Cell.Facts!;
+                int[] cellPath = [.. tablePath, cell.Row, cell.Column];
+                JsonObject record;
+                try
+                {
+                    record = ElementJson(
+                        cell.Cell.Element, facts, index, processGeneration,
+                        process, selectedWindow, selectedHandle, cellPath);
+                }
+                catch
+                {
+                    Gap("node_read_failed");
+                    continue;
+                }
+                if (string.IsNullOrEmpty(record["value"]?.GetValue<string>()) && !facts.HasKeyboardFocus)
+                {
+                    empty++;
+                    continue;
+                }
+                if (visits.Remaining == 0)
+                {
+                    overBudget++;
+                    continue;
+                }
+                visits.Take();
+                // The cell has no UIA runtime id, and its position among the
+                // table's children is too far to walk: an action finds it
+                // again by hit test at its observed rectangle. The identity
+                // names the table and sheet, so a ref to C2 of one sheet never
+                // resolves to C2 of another.
+                record["providerIdentityScope"] = SpreadsheetCellScope;
+                record["providerObjectPath"] = SpreadsheetCellObjectPath(
+                    table.Facts.Name, cell.Row, cell.Column);
+                sampled.Add((cell.Cell, record, cellPath, depth + 1));
+                index++;
+                listed++;
+            }
+            if (empty > 0)
+            {
+                // Same annotation as the Linux provider: the core renders it
+                // on the table as /empty-cells.
+                annotations.Add(new JsonObject
+                {
+                    ["parentRuntimeId"] = PathJson(tablePath),
+                    ["kind"] = "cell_summary",
+                    ["count"] = empty,
+                    ["reason"] = "empty_cells",
+                    ["detail"] =
+                        $"{empty} empty cells in view " +
+                        $"{SpreadsheetGrid.A1(viewport.Row0, viewport.Column0)}:" +
+                        $"{SpreadsheetGrid.A1(viewport.Row1, viewport.Column1)} omitted " +
+                        $"({listed} listed); they have no ref: move the cell cursor there " +
+                        "with keypress, then type without a ref",
+                });
+            }
+            if (viewport.Missing > 0)
+            {
+                Omit(tablePath, "visible_cell_lookup_unavailable", viewport.Missing);
+            }
+            if (viewport.Unprobed > 0 || !viewport.ExtentComplete)
+            {
+                Omit(tablePath, "visible_cell_budget", Math.Max(1, viewport.Unprobed));
+            }
+            if (overBudget > 0)
+            {
+                Omit(tablePath, "node_budget", overBudget);
+            }
+        }
+
+        void Omit(int[] parentPath, string reason, int count)
+        {
+            annotations.Add(new JsonObject
+            {
+                ["parentRuntimeId"] = PathJson(parentPath),
+                ["kind"] = "omitted",
+                ["count"] = count,
+                ["reason"] = reason,
+                ["detail"] = "Visible spreadsheet cells were not all read.",
+            });
         }
 
         void Visit(IReadOnlyList<CachedUiaNode> selectedRoots, int rootIndexOffset = 0)
@@ -258,7 +388,7 @@ internal sealed partial class UiaProvider
                 selectedRoots, visits, maxDepth,
                 Owned,
                 Emit,
-                node => ReadLink(() => cache.ReadFirstChild(node)),
+                node => node.CellsRead ? null : ReadLink(() => cache.ReadFirstChild(node)),
                 node => ReadLink(() => cache.ReadNextSibling(node)),
                 Gap,
                 rootIndexOffset);
@@ -325,6 +455,22 @@ internal sealed partial class UiaProvider
             });
         }
     }
+
+    // Identity scope of a spreadsheet cell record (see ResolveSpreadsheetCell).
+    private const string SpreadsheetCellScope = "table_cell";
+    // Each probe is one cross-process hit test; together the two limits keep
+    // a large window's grid within about two seconds.
+    private const int MaxSpreadsheetProbes = 1200;
+    private static readonly TimeSpan SpreadsheetReadTime = TimeSpan.FromSeconds(2);
+
+    // The window is part of every ref identity, so the sheet name and the
+    // cell coordinate identify a cell. The table's tree path is left out:
+    // it shifts when toolbar controls before it appear or disappear.
+    private static string SpreadsheetCellObjectPath(string tableName, int row, int column) =>
+        $"{SpreadsheetCellScope}:{SpreadsheetGrid.A1(row, column)}:{tableName}";
+
+    private static JsonArray PathJson(IEnumerable<int> path) =>
+        new(path.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
 
     // Builds one record from facts read through the snapshot cache. Only a
     // text control's selection support and document text need a live call.

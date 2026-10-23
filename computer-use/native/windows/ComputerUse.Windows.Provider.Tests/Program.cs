@@ -11,6 +11,7 @@ ExactFocusSettlementTests.Run();
 FocusPreparationTests.Run();
 LogicalWindowBoundaryTests.Run();
 BoundedTreeDiscoveryTests.Run();
+SpreadsheetGridTests.Run();
 CanonicalNodeIdentitySetTests.Run();
 ProjectedRootSlotTests.Run();
 WindowsFactTests.Run();

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Windows: a LibreOffice Calc observation reads the sheet's visible cells
+  by hit test instead of walking the sheet row by row, so it lists the
+  cells that hold values (with refs) and summarizes the empty ones as
+  `/empty-cells`, like Linux, and returns in about two seconds instead of
+  stopping at the node budget on the first row.
 - Windows: `type` and `set_value` send Unicode key events instead of pasting
   through the clipboard, so they no longer replace the clipboard or wait a
   fixed half second; GUI keys wait for the application instead of 500 ms.
