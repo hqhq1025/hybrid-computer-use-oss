@@ -29,7 +29,10 @@ def operation_failure_response(exc, recovery_operation=None):
     failure_phase = exc.failure_phase
     error_text = str(exc)
     underlying_failure_code = ""
-    if emitted or partial:
+    # A known operation failure already describes its emitted input. Only
+    # override a no-input claim contradicted by operation-scoped evidence or
+    # by possible partial input.
+    if (emitted or partial) and not exc.input_events_emitted:
         underlying_failure_code = failure_code
         failure_code = "effect_unknown"
         failure_phase = "post_action_observation"
@@ -62,7 +65,11 @@ def operation_failure_response(exc, recovery_operation=None):
         and failure_phase == "precondition"
         and facts_complete
     )
-    if recovery_operation is not None and (emitted or read_only_stale_window):
+    observation_failure = bool(
+        emitted and failure_code == "effect_unknown"
+        and failure_phase == "post_action_observation"
+    )
+    if recovery_operation is not None and (observation_failure or read_only_stale_window):
         response["recoveryContext"] = _bounded_recovery_response(
             recovery_operation
         )

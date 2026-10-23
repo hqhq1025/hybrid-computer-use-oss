@@ -190,7 +190,7 @@ def content_name(node, role=None):
 
 
 def gtk_combo_partner(node, role):
-    """Return the hidden combo box that a visible toggle button opens, or None.
+    """Return the hidden combo box paired with a visible popup opener.
 
     LibreOffice's gtk3 backend (7.3) draws a drop-down as three siblings: an
     editable ``text``, a ``combo box`` and a ``toggle button``. Only the
@@ -203,8 +203,19 @@ def gtk_combo_partner(node, role):
     The toggle button is what a user clicks, so record_for() projects it as
     the combo box; clicking it opens the list. Toolbar combos (font name,
     size) keep their visible text sibling, which carries the current value.
+    Some GTK backends expose that opener as a named, childless combo box
+    with a click action. Its hidden sibling still owns the label and the
+    visible text sibling still owns the committed value.
     """
-    if role != "toggle button" or str(node_name(node) or "").strip():
+    native_combo = role == "combo box"
+    if native_combo:
+        if (not state_contains(node, Atspi.StateType.SHOWING)
+                or int(safe(node.get_child_count, 0) or 0) != 0
+                or not any(str(safe(lambda i=i: node.get_action_name(i), "")
+                                   or "").lower() == "click"
+                           for i in range(int(safe(node.get_n_actions, 0) or 0)))):
+            return None
+    elif role != "toggle button" or str(node_name(node) or "").strip():
         return None
     parent = safe(lambda: node.get_parent())
     if parent is None:
@@ -222,6 +233,9 @@ def gtk_combo_partner(node, role):
             combo = sibling
         elif sibling_role != "text":
             return None
+    if native_combo and combo is not None and state_contains(
+            combo, Atspi.StateType.SHOWING):
+        return None
     return combo
 
 
