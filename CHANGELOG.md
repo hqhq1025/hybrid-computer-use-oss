@@ -23,6 +23,11 @@
   `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`; WPS Office bundles a renamed Qt
   5.12), for Java applications (the Java ATK wrapper), and for processes
   that are on the bus only through another toolkit.
+- Windows: LibreOffice 25.2 Calc sheets list their cells in view too.
+  25.2 reports no children for a sheet (24.8 lists every cell of the
+  sheet), so the provider did not recognize the sheet as a grid and showed
+  no cells. A table without children is now a sheet when the element at its
+  top-left corner is a cell named by A1 reference.
 - Windows: a LibreOffice Calc observation reads the sheet's visible cells
   by hit test instead of walking the sheet row by row, so it lists the
   cells that hold values (with refs) and summarizes the empty ones as

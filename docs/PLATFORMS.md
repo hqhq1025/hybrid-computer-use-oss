@@ -138,6 +138,11 @@ it. To enable the bridge:
    notification area, because a running instance keeps its environment.
 3. Start LibreOffice again from the Start menu or from a new shell.
 
+In LibreOffice Calc, a sheet lists its cells over the whole sheet row by
+row (24.8) or not at all (25.2), so the provider reads the cells in view by
+hit test, one per cell. Cells that hold a value and the cell under the
+cursor get refs; the other cells in view are summarized as `/empty-cells`.
+
 An uncertain focus or pointer preparation failure is different from a stale
 target. The requested input may be known not to have been emitted while a
 queued focus request can still change the desktop later. Honor an explicit
