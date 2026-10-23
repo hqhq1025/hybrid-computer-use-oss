@@ -34,10 +34,13 @@ internal sealed partial class UiaProvider
         NativeDesktop.WindowRecord selectedWindow,
         JsonObject? observation)
     {
+        // One clock covers ownership, traversal and the single ownership
+        // retry, so a retry cannot restart the sampling deadline.
+        var elapsed = Stopwatch.StartNew();
         try
         {
             return WindowOwnershipObservation.Read(() => BuildSnapshotSample(
-                process, selectedWindow, observation));
+                process, selectedWindow, observation, () => elapsed.Elapsed));
         }
         catch (WindowOwnershipUnavailableException error)
         {
@@ -50,8 +53,10 @@ internal sealed partial class UiaProvider
     private JsonObject BuildSnapshotSample(
         Process process,
         NativeDesktop.WindowRecord selectedWindow,
-        JsonObject? observation)
+        JsonObject? observation,
+        Func<TimeSpan> elapsed)
     {
+        var annotations = new JsonArray();
         var projection = ProjectNativeWindows(
             process,
             NativeDesktop.ListWindows(process.Id));
@@ -59,19 +64,28 @@ internal sealed partial class UiaProvider
         var roots = LogicalAutomationRoots(
             process,
             projection,
-            selectedWindow);
+            selectedWindow,
+            discoverTransients: false,
+            annotation: Gap,
+            elapsed: elapsed);
+        var initialRootIdentities = roots.Select(RuntimeObjectPath).ToArray();
         var maxNodes = OptionalInt(observation, "max_tree_nodes", DefaultNodeLimit);
         var maxDepth = OptionalInt(observation, "max_tree_depth", DefaultDepthLimit);
-        var visits = new OwnershipProbeBudget(maxNodes, TimeSpan.FromSeconds(15));
+        var visits = new OwnershipProbeBudget(
+            maxNodes, SnapshotSampleTimeout, elapsed);
         var ownershipBudget = new OwnershipProbeBudget(
-            checked(maxNodes * 4 + 256), TimeSpan.FromSeconds(15));
+            checked(maxNodes * 4 + 256), SnapshotSampleTimeout, elapsed);
         var boundary = CreateLogicalBoundary(process, projection, ownershipBudget);
-        var annotations = new JsonArray();
         var records = new JsonArray();
         var lines = new JsonArray();
         var index = 0;
         var selectedHandle = OpaqueWindowHandle(process, selectedWindow.Handle);
-        var seenProviderObjectPaths = new HashSet<string>(StringComparer.Ordinal);
+        var sampled = new List<(AutomationElement Element, JsonObject Record, int[] Path, int Depth)>();
+        var identities = new CanonicalNodeIdentitySet<AutomationElement>((left, right) =>
+        {
+            visits.CheckTime();
+            return _automation.Compare(left, right);
+        });
         var observedElementLeases =
             new Dictionary<string, ObservedElementLease<AutomationElement>>(
                 StringComparer.Ordinal);
@@ -80,13 +94,62 @@ internal sealed partial class UiaProvider
 
         using (CacheRequest.ForceNoCache())
         {
-            LogicalWindowTraversal.Visit(
-                roots, visits, maxDepth,
-                element => boundary.Owner(element) == selectedWindow.Handle.ToInt64(),
-                Emit,
-                element => ReadChild(() => controlWalker.GetFirstChild(element)),
-                element => ReadChild(() => controlWalker.GetNextSibling(element)),
-                Gap);
+            try
+            {
+                Visit(roots);
+                // Known window roots provide the main canonical tree. Searching
+                // the desktop again for raw-only popups must not delay it.
+                if (visits.Remaining > 0 && elapsed() < SnapshotSampleTimeout)
+                {
+                    var additionalRoots = LogicalAutomationRoots(
+                        process, projection, selectedWindow,
+                        transientsOnly: true,
+                        annotation: Gap, elapsed: elapsed,
+                        precedingRuntimeIdentities: initialRootIdentities);
+                    // Keep the first root table frozen. New roots append to it;
+                    // duplicate records skip emission, not their index slots.
+                    Visit(additionalRoots, roots.Count);
+                }
+                else
+                {
+                    Gap("transient_discovery_incomplete");
+                }
+            }
+            catch (ObservationDeadlineExceededException)
+            {
+                // Keep the sampled canonical records. An exhausted read budget
+                // is not evidence that the window was replaced and cannot retry.
+                Gap("time_budget");
+                Gap("transient_discovery_incomplete");
+            }
+        }
+
+        // Traversal alternates parent branches, so records arrive breadth
+        // first. Publish them in tree-path order with dense indices.
+        var pathOrder = Comparer<int[]>.Create((left, right) =>
+        {
+            for (var offset = 0; offset < Math.Min(left.Length, right.Length); offset++)
+            {
+                var order = left[offset].CompareTo(right[offset]);
+                if (order != 0) { return order; }
+            }
+            return left.Length.CompareTo(right.Length);
+        });
+        index = 0;
+        foreach (var sample in sampled.OrderBy(sample => sample.Path, pathOrder))
+        {
+            sample.Record["index"] = index;
+            records.Add(sample.Record);
+            lines.Add(new string(' ', sample.Depth * 2) +
+                $"{index} {sample.Record["controlType"]?.GetValue<string>() ?? "unknown"} " +
+                $"{sample.Record["name"]?.GetValue<string>() ?? string.Empty}");
+            var providerPath = sample.Record["providerObjectPath"]?.GetValue<string>() ?? string.Empty;
+            if (providerPath.StartsWith("runtime:", StringComparison.Ordinal))
+            {
+                observedElementLeases[providerPath] =
+                    new ObservedElementLease<AutomationElement>(sample.Element, sample.Record);
+            }
+            index++;
         }
         _observedElementLeases.Replace(
             process.Id,
@@ -148,29 +211,36 @@ internal sealed partial class UiaProvider
             }
             var providerObjectPath =
                 record["providerObjectPath"]?.GetValue<string>() ?? string.Empty;
-            if (providerObjectPath.StartsWith(
-                    "runtime:",
-                    StringComparison.Ordinal) &&
-                !seenProviderObjectPaths.Add(providerObjectPath))
+            try
             {
+                var propertyKey = string.Join('\u001f',
+                    record["controlType"]?.GetValue<string>() ?? string.Empty,
+                    record["name"]?.GetValue<string>() ?? string.Empty,
+                    record["className"]?.GetValue<string>() ?? string.Empty,
+                    record["frame"]?.ToJsonString() ?? string.Empty);
+                if (!identities.TryAdd(element, providerObjectPath, propertyKey, treePath[0])) { return false; }
+            }
+            catch (ObservationDeadlineExceededException) { throw; }
+            catch
+            {
+                Gap("node_identity_unavailable");
                 return false;
             }
-            records.Add(record);
-            if (providerObjectPath.StartsWith(
-                    "runtime:",
-                    StringComparison.Ordinal))
-            {
-                observedElementLeases[providerObjectPath] =
-                    new ObservedElementLease<AutomationElement>(
-                        element,
-                        record);
-            }
-            lines.Add(
-                new string(' ', depth * 2) +
-                $"{index} {record["controlType"]?.GetValue<string>() ?? "unknown"} " +
-                $"{record["name"]?.GetValue<string>() ?? string.Empty}");
+            sampled.Add((element, record, treePath, depth));
             index++;
             return true;
+        }
+
+        void Visit(IReadOnlyList<AutomationElement> selectedRoots, int rootIndexOffset = 0)
+        {
+            LogicalWindowTraversal.Visit(
+                selectedRoots, visits, maxDepth,
+                element => boundary.Owner(element) == selectedWindow.Handle.ToInt64(),
+                Emit,
+                element => ReadChild(() => controlWalker.GetFirstChild(element)),
+                element => ReadChild(() => controlWalker.GetNextSibling(element)),
+                Gap,
+                rootIndexOffset);
         }
 
         AutomationElement? ReadChild(Func<AutomationElement?> read)

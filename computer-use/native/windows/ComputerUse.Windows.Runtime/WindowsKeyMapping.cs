@@ -59,7 +59,10 @@ internal static class WindowsKeyMapping
             "\\" or "BACKSLASH" => 0xDC,
             "]" or "RIGHT_BRACKET" or "BRACKET_RIGHT" => 0xDD,
             "'" or "QUOTE" or "APOSTROPHE" => 0xDE,
-            _ when normalized.Length == 1 =>
+            // Only ASCII letters and digits share their virtual-key code.
+            // Casting any other character would press an unrelated key.
+            _ when trimmed.Length == 1 &&
+                trimmed[0] is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' =>
                 unchecked((ushort)char.ToUpperInvariant(normalized[0])),
             _ when normalized.StartsWith('F') &&
                 int.TryParse(normalized[1..], out var number) &&

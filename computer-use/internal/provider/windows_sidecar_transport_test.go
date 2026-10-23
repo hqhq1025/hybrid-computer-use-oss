@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -164,12 +165,13 @@ func TestWindowsProviderStartupDeadlineAndLateCleanup(t *testing.T) {
 	_, err := manager.startWorkerWithin(
 		"provider.exe",
 		nil,
+		core.ProviderWireObserveApps,
 		time.Now().Add(20*time.Millisecond),
 		20*time.Millisecond,
 	)
 	var timeoutErr *core.RuntimeTimeoutError
 	if !errors.As(err, &timeoutErr) ||
-		timeoutErr.Phase != "start_provider" {
+		timeoutErr.Phase != "start_provider" || !timeoutErr.PreDispatch {
 		t.Fatalf("startup error = %#v, want start_provider timeout", err)
 	}
 	if elapsed := time.Since(firstStartedAt); elapsed > time.Second {
@@ -184,6 +186,7 @@ func TestWindowsProviderStartupDeadlineAndLateCleanup(t *testing.T) {
 	_, err = manager.startWorkerWithin(
 		"provider.exe",
 		nil,
+		core.ProviderWireObserveApps,
 		time.Now().Add(20*time.Millisecond),
 		20*time.Millisecond,
 	)
@@ -200,6 +203,117 @@ func TestWindowsProviderStartupDeadlineAndLateCleanup(t *testing.T) {
 	case <-closed:
 	case <-time.After(time.Second):
 		t.Fatal("late provider worker was not closed")
+	}
+}
+
+func TestWindowsProviderLateStartupBlocksReplacementUntilExit(t *testing.T) {
+	path := currentWindowsTestExecutable(t)
+	t.Setenv("COMPUTER_USE_WINDOWS_PROVIDER", path)
+	t.Setenv("GO_WANT_WINDOWS_PROVIDER_HELPER", "reuse")
+	useWindowsProviderTestCommand(t)
+	originalStarter := windowsProviderWorkerStarter
+	t.Cleanup(func() { windowsProviderWorkerStarter = originalStarter })
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	exited := make(chan struct{})
+	var releaseOnce, exitOnce sync.Once
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		exitOnce.Do(func() { close(exited) })
+	})
+	late := &windowsProviderWorker{done: exited}
+	// Teardown has used its bounded grace period, but exit remains unconfirmed.
+	late.stopOnce.Do(func() {})
+	var starts atomic.Int32
+	windowsProviderWorkerStarter = func(path string, environment []string) (*windowsProviderWorker, error) {
+		if starts.Add(1) == 1 {
+			close(started)
+			<-release
+			return late, nil
+		}
+		return originalStarter(path, environment)
+	}
+	manager := &windowsProviderProcessManager{}
+	t.Cleanup(manager.stopLocked)
+	_, err := manager.startWorkerWithin(path, nil, core.ProviderWireObserveApps, time.Now().Add(100*time.Millisecond), 100*time.Millisecond)
+	var timeoutErr *core.RuntimeTimeoutError
+	if !errors.As(err, &timeoutErr) || !timeoutErr.PreDispatch {
+		t.Fatalf("startup error = %v, want pre-dispatch timeout", err)
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("startup was not attempted")
+	}
+	releaseOnce.Do(func() { close(release) })
+	// Synchronize with late cleanup, rather than waiting an assumed duration.
+	select {
+	case token := <-manager.startGate:
+		manager.startGate <- token
+	case <-time.After(time.Second):
+		t.Fatal("late startup did not finish bounded cleanup")
+	}
+
+	request := validWindowsObserveAppsRequest("late-start-blocked")
+	for attempt := 0; attempt < 2; attempt++ {
+		_, err = manager.run(request)
+		var transport *core.RuntimeTransportError
+		if !errors.As(err, &transport) || transport.Phase != "stop_provider" || transport.RequestSent {
+			t.Fatalf("unconfirmed late-worker exit = %v, want pre-dispatch retirement error", err)
+		}
+		if starts.Load() != 1 || manager.worker != nil {
+			t.Fatal("replacement started before late worker exited")
+		}
+	}
+	exitOnce.Do(func() { close(exited) })
+	request.RequestID = "late-start-exited"
+	if _, err := manager.run(request); err != nil {
+		t.Fatalf("confirmed late-worker exit did not permit replacement: %v", err)
+	}
+	if starts.Load() != 2 {
+		t.Fatalf("provider starts = %d, want 2", starts.Load())
+	}
+}
+
+func TestWindowsProviderExpiredStartupResultRetainsUnconfirmedExit(t *testing.T) {
+	t.Setenv("COMPUTER_USE_WINDOWS_PROVIDER", currentWindowsTestExecutable(t))
+	t.Setenv("GO_WANT_WINDOWS_PROVIDER_HELPER", "reuse")
+	useWindowsProviderTestCommand(t)
+	exited := make(chan struct{})
+	var exitOnce sync.Once
+	t.Cleanup(func() { exitOnce.Do(func() { close(exited) }) })
+	late := &windowsProviderWorker{done: exited}
+	late.stopOnce.Do(func() {})
+	manager := &windowsProviderProcessManager{}
+	t.Cleanup(manager.stopLocked)
+
+	// A ready result and an expired timer can race in select. Check the
+	// result-acceptance path directly, without relying on scheduler timing.
+	worker, err := manager.acceptStartedWorker(
+		windowsProviderStartResult{worker: late},
+		time.Now().Add(-time.Second),
+		time.Second,
+	)
+	var timeoutErr *core.RuntimeTimeoutError
+	if worker != nil || !errors.As(err, &timeoutErr) ||
+		timeoutErr.Phase != "start_provider" || !timeoutErr.PreDispatch {
+		t.Fatalf("expired startup result = %v, %v", worker, err)
+	}
+	request := validWindowsObserveAppsRequest("expired-start-blocked")
+	_, err = manager.run(request)
+	var transport *core.RuntimeTransportError
+	if !errors.As(err, &transport) || transport.Phase != "stop_provider" ||
+		transport.Operation != request.Operation || transport.RequestSent {
+		t.Fatalf("expired worker retirement result = %v", err)
+	}
+	if manager.worker != nil || manager.retiringWorker != late {
+		t.Fatal("expired startup worker was discarded before confirmed exit")
+	}
+	exitOnce.Do(func() { close(exited) })
+	request.RequestID = "expired-start-exited"
+	if _, err := manager.run(request); err != nil {
+		t.Fatalf("confirmed expired-worker exit did not permit replacement: %v", err)
 	}
 }
 
@@ -525,9 +639,9 @@ func TestWindowsProviderResponseIsBounded(t *testing.T) {
 }
 
 func TestWindowsProviderStderrIsForwardedForOperatorDiagnostics(t *testing.T) {
-	var operator bytes.Buffer
+	operator := &notifyingWindowsProviderDiagnosticWriter{wrote: make(chan struct{}, 1)}
 	previousWriter := windowsProviderDiagnosticWriter
-	windowsProviderDiagnosticWriter = &operator
+	windowsProviderDiagnosticWriter = operator
 	defer func() {
 		windowsProviderDiagnosticWriter = previousWriter
 	}()
@@ -539,6 +653,11 @@ func TestWindowsProviderStderrIsForwardedForOperatorDiagnostics(t *testing.T) {
 	worker.forwardStderr(strings.NewReader(
 		"{\"event\":\"semantic-resolution\"}\n",
 	))
+	select {
+	case <-operator.wrote:
+	case <-time.After(time.Second):
+		t.Fatal("provider diagnostic was not forwarded")
+	}
 	if !strings.Contains(operator.String(), `"event":"windows_provider_stderr"`) ||
 		!strings.Contains(operator.String(), `semantic-resolution`) {
 		t.Fatalf("operator diagnostic was not forwarded: %q", operator.String())
@@ -551,6 +670,111 @@ func TestWindowsProviderStderrIsForwardedForOperatorDiagnostics(t *testing.T) {
 			buffered,
 			truncated,
 		)
+	}
+}
+
+type notifyingWindowsProviderDiagnosticWriter struct {
+	bytes.Buffer
+	wrote chan struct{}
+}
+
+func (writer *notifyingWindowsProviderDiagnosticWriter) Write(data []byte) (int, error) {
+	n, err := writer.Buffer.Write(data)
+	select {
+	case writer.wrote <- struct{}{}:
+	default:
+	}
+	return n, err
+}
+
+func TestWindowsProviderBlockedDiagnosticsDoNotBlockTeardown(t *testing.T) {
+	previousWriter := windowsProviderDiagnosticWriter
+	previousSink := windowsProviderDiagnostics
+	sink := newWindowsProviderDiagnosticQueue()
+	blocked := &blockingWindowsDiagnosticWriter{
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	windowsProviderDiagnosticWriter = blocked
+	windowsProviderDiagnostics = sink
+	t.Cleanup(func() {
+		windowsProviderDiagnosticWriter = previousWriter
+		windowsProviderDiagnostics = previousSink
+		close(blocked.release)
+		close(sink.queue)
+	})
+	writeWindowsProviderLifecycleDiagnostic("test", time.Second, "blocked consumer")
+	select {
+	case <-blocked.started:
+	case <-time.After(time.Second):
+		t.Fatal("diagnostic consumer did not block")
+	}
+	done := make(chan struct{})
+	close(done)
+	manager := &windowsProviderProcessManager{worker: &windowsProviderWorker{
+		stdin:      windowsNopWriteCloser{Writer: io.Discard},
+		stderr:     &boundedProviderBuffer{limit: 1024},
+		done:       done,
+		stderrDone: make(chan struct{}),
+	}}
+	_, _ = manager.worker.stderr.Write([]byte("provider diagnostic"))
+	completed := make(chan struct{})
+	go func() {
+		manager.worker.forwardStderr(strings.NewReader(strings.Repeat("provider diagnostic\n", 100)))
+		for index := 0; index < 20; index++ {
+			manager.recordStderrLocked(validWindowsObserveAppsRequest("blocked-stderr"), io.EOF)
+		}
+		manager.stopLocked()
+		close(completed)
+	}()
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("stderr backpressure prevented provider teardown")
+	}
+	if manager.worker != nil || len(sink.queue) != cap(sink.queue) || sink.dropped.Load() == 0 {
+		t.Fatal("diagnostic queue was not bounded while teardown completed")
+	}
+}
+
+type blockingWindowsDiagnosticWriter struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (writer *blockingWindowsDiagnosticWriter) Write(data []byte) (int, error) {
+	writer.once.Do(func() { close(writer.started) })
+	<-writer.release
+	return len(data), nil
+}
+
+func TestWindowsProviderDoesNotReplaceWorkerBeforeConfirmedExit(t *testing.T) {
+	t.Setenv("COMPUTER_USE_WINDOWS_PROVIDER", currentWindowsTestExecutable(t))
+	t.Setenv("GO_WANT_WINDOWS_PROVIDER_HELPER", "reuse")
+	useWindowsProviderTestCommand(t)
+	retired := &windowsProviderWorker{done: make(chan struct{})}
+	// Model a completed bounded teardown whose process has not yet exited.
+	retired.stopOnce.Do(func() {})
+	manager := &windowsProviderProcessManager{worker: retired}
+	t.Cleanup(manager.stopLocked)
+	manager.stopLocked()
+	if manager.retiringWorker != retired {
+		t.Fatal("unconfirmed process exit was discarded")
+	}
+	_, err := manager.run(validWindowsObserveAppsRequest("blocked-replacement"))
+	var transport *core.RuntimeTransportError
+	if !errors.As(err, &transport) || transport.Phase != "stop_provider" || transport.RequestSent {
+		t.Fatalf("unconfirmed retirement result = %#v", err)
+	}
+	if manager.worker != nil {
+		t.Fatal("replacement started before previous worker exited")
+	}
+	close(retired.done)
+	if _, err := manager.run(validWindowsObserveAppsRequest("after-exit")); err != nil {
+		t.Fatalf("confirmed exit did not permit replacement: %v", err)
+	}
+	if manager.retiringWorker != nil || manager.worker == nil {
+		t.Fatal("retirement was not cleared after confirmed exit")
 	}
 }
 

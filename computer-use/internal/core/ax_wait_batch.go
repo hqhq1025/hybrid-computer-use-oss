@@ -180,11 +180,9 @@ func (s *Service) stopAXBatchAtWait(
 	}
 	stopped.Content = append(stopped.Content, current.Content...)
 	stopped.StructuredContent["final_observation_returned"] = true
-	for _, key := range []string{"final_observation_kind", "tree_complete_for_model",
-		"coverage_incomplete_nodes", "structural_budget_omitted_nodes"} {
-		if value, present := current.StructuredContent[key]; present {
-			stopped.StructuredContent[key] = value
-		}
+	replaceAXObservationCoverage(stopped.StructuredContent, current.StructuredContent)
+	if kind, present := current.StructuredContent["final_observation_kind"]; present {
+		stopped.StructuredContent["final_observation_kind"] = kind
 	}
 	return stopped
 }

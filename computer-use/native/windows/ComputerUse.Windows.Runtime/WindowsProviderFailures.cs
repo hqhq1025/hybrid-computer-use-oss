@@ -16,13 +16,14 @@ internal static class WindowsProviderFailures
 
     internal static ProviderFailureException StaleWindow(
         string message,
-        JsonObject? recoveryContext = null)
+        JsonObject? recoveryContext = null,
+        bool factsComplete = true)
     {
         return new ProviderFailureException(
             "stale_window_ref",
             "precondition",
             message,
-            factsComplete: true,
+            factsComplete: factsComplete,
             subject: "window",
             recoveryContext: recoveryContext);
     }

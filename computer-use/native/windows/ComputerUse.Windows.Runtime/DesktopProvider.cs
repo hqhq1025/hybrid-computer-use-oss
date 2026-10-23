@@ -6,6 +6,7 @@ namespace ComputerUse.Windows.Runtime;
 internal static class DesktopProvider
 {
     private const int KeyboardActionIntervalMilliseconds = 500;
+    private const double MaximumScrollDelta = 2000;
 
     internal static JsonObject ExecuteBatch(JsonObject request)
     {
@@ -166,6 +167,19 @@ internal static class DesktopProvider
                     "Every desktop action must be an object.");
             var type = UiaProvider.RequiredString(action, "type");
             ValidateFields(action, type);
+            // Resolve every key before the first action, so a bad key in a
+            // later action cannot follow input that was already sent.
+            try
+            {
+                _ = WindowsKeyMapping.ResolveChord(MouseKeys(action));
+            }
+            catch (InvalidOperationException error)
+            {
+                throw new ProviderFailureException(
+                    "unsupported_key",
+                    "precondition",
+                    error.Message);
+            }
             switch (type)
             {
                 case "screenshot":
@@ -199,6 +213,15 @@ internal static class DesktopProvider
                         action["scroll_x"]?.GetValue<double>() ?? 0;
                     var scrollY =
                         action["scroll_y"]?.GetValue<double>() ?? 0;
+                    if (!double.IsFinite(scrollX) || !double.IsFinite(scrollY) ||
+                        Math.Abs(scrollX) > MaximumScrollDelta ||
+                        Math.Abs(scrollY) > MaximumScrollDelta)
+                    {
+                        throw new ProviderFailureException(
+                            "invalid_scroll_delta",
+                            "precondition",
+                            "Scroll deltas must be finite and between -2000 and 2000.");
+                    }
                     if (scrollX == 0 && scrollY == 0)
                     {
                         throw new ProviderFailureException(
@@ -288,8 +311,8 @@ internal static class DesktopProvider
                     () => NativeDesktop.Scroll(
                         x,
                         y,
-                        action["scroll_x"]?.GetValue<double>() ?? 0,
-                        action["scroll_y"]?.GetValue<double>() ?? 0));
+                        ComputerScrollToWheel(action["scroll_x"]?.GetValue<double>() ?? 0),
+                        ComputerScrollToWheel(action["scroll_y"]?.GetValue<double>() ?? 0)));
                 return;
             case "type":
                 NativeDesktop.TypeText(
@@ -341,6 +364,14 @@ internal static class DesktopProvider
         return (action["keys"] as JsonArray ?? new JsonArray())
             .Select(node => node?.GetValue<string>() ?? string.Empty)
             .ToArray();
+    }
+
+    // GUI scroll uses Computer deltas (100 per wheel notch, as on Linux);
+    // NativeDesktop.Scroll takes wheel notches, which AX page scrolling uses.
+    private static double ComputerScrollToWheel(double delta)
+    {
+        return delta == 0 ? 0 :
+            Math.CopySign(Math.Max(1, Math.Abs(Math.Round(delta / 100))), delta);
     }
 
     private static bool IsKeyboardAction(string type)

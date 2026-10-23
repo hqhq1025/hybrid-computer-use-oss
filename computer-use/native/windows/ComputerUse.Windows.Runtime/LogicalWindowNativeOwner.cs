@@ -96,6 +96,7 @@ internal sealed class SemanticWindowRoots<T> where T : class
             }
             return owner;
         }
+        catch (ObservationDeadlineExceededException) { throw; }
         catch (WindowOwnershipUnavailableException) { throw; }
         catch (Exception error)
         {

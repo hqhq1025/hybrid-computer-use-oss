@@ -18,6 +18,9 @@ internal sealed partial class UiaProvider : IDisposable
 
     private const int DefaultNodeLimit = 5000;
     private const int DefaultDepthLimit = 96;
+    // One observation's shared sampling deadline: root discovery, ownership
+    // probes and traversal all draw from it, and none of them restarts it.
+    private static readonly TimeSpan SnapshotSampleTimeout = TimeSpan.FromSeconds(15);
     private readonly UIA3Automation _automation =
         WindowsUiaAutomationFactory.Create();
     private readonly WindowLifecycleTracker _windowLifecycle = new();
@@ -94,6 +97,7 @@ internal sealed partial class UiaProvider : IDisposable
             .GroupBy(window => window.ProcessId)
             .ToDictionary(group => group.Key, group => group.ToArray());
         var entries = new List<(string Name, int Pid, string Text, JsonObject App)>();
+        var notes = new JsonArray();
         foreach (var group in groups)
         {
             try
@@ -117,6 +121,13 @@ internal sealed partial class UiaProvider : IDisposable
                 {
                     continue;
                 }
+                if (WindowsProcessIdentity.ReadGeneration(() => process.StartTime) is null)
+                {
+                    notes.Add(
+                        $"Process identity is unavailable for {process.ProcessName} " +
+                        $"(pid {process.Id}); its windows get no references. Use GUI for them.");
+                    continue;
+                }
                 var generation = ProcessGeneration(process);
                 var windowInventory = new JsonArray();
                 foreach (var window in windows)
@@ -133,6 +144,10 @@ internal sealed partial class UiaProvider : IDisposable
                         ["active"] = window.Active,
                         ["inputTarget"] = targets.Contains(window.Handle.ToInt64()),
                     });
+                    if (AccessibilityBridgeNote(process, window) is { } note)
+                    {
+                        notes.Add(note);
+                    }
                 }
                 var host = group.AppProcessId == group.OwnerProcessId
                     ? string.Empty
@@ -163,22 +178,61 @@ internal sealed partial class UiaProvider : IDisposable
                 ordered.Select(entry => entry.Text)),
             ["apps"] = new JsonArray(
                 ordered.Select(entry => (JsonNode)entry.App).ToArray()),
+            ["notes"] = notes,
         };
+    }
+
+    // Names a window whose toolkit has not loaded its accessibility bridge;
+    // see WindowsAccessibilityBridgeNote. Only VCL frame windows pay for the
+    // module and root-children reads.
+    private string? AccessibilityBridgeNote(Process process, NativeDesktop.WindowRecord window)
+    {
+        if (!string.Equals(
+                window.ClassName,
+                WindowsAccessibilityBridgeNote.VclFrameClass,
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+        var children = WindowsAccessibilityBridgeNote.RootChildrenAreTitleBars(() =>
+        {
+            var walker = _automation.TreeWalkerFactory.GetControlViewWalker();
+            var root = _automation.FromHandle(window.Handle);
+            return Read();
+
+            IEnumerable<bool> Read()
+            {
+                for (var child = walker.GetFirstChild(root);
+                     child is not null;
+                     child = walker.GetNextSibling(child))
+                {
+                    yield return child.ControlType == ControlType.TitleBar;
+                }
+            }
+        });
+        return WindowsAccessibilityBridgeNote.Note(
+            window.ClassName,
+            window.Title,
+            process.Id,
+            WindowsAccessibilityBridgeNote.ModuleNames(process),
+            children);
     }
 
     internal JsonObject Observe(JsonObject request)
     {
         var query = RequiredString(request, "app");
         var (process, scope) = ResolveApp(request, query);
+        var requestedHandle = OptionalString(request, "window_handle", string.Empty);
+        _windowHandles.TryGetValue(requestedHandle, out var expectedBinding);
         try
         {
             var selected = ResolveWindow(
                 process,
                 null,
-                OptionalString(request, "window_handle", string.Empty),
+                requestedHandle,
                 "stale_window_ref",
                 scope);
-            return new JsonObject
+            var response = new JsonObject
             {
                 ["ok"] = true,
                 ["snapshot"] = BuildSnapshot(
@@ -186,13 +240,20 @@ internal sealed partial class UiaProvider : IDisposable
                     selected,
                     request["observation"] as JsonObject),
             };
+            if (AccessibilityBridgeNote(process, selected) is { } note)
+            {
+                response["notes"] = new JsonArray(note);
+            }
+            return response;
         }
         catch (ProviderFailureException error) when (
             error.Code == "stale_window_ref")
         {
+            var recovery = StaleWindowRecoveryContext(process, expectedBinding);
             throw WindowsProviderFailures.StaleWindow(
                 error.Message,
-                StaleWindowRecoveryContext(process));
+                recovery,
+                factsComplete: recovery["sourceWindowStatus"]?.GetValue<string>() != "unknown");
         }
     }
 
@@ -282,19 +343,23 @@ internal sealed partial class UiaProvider : IDisposable
             }
             commandEmitted = true;
             var remaining = action == "close"
-                ? WaitForWindowToDisappear(appPid, binding.Handle)
+                ? WaitForWindowToDisappear(appPid, binding)
                 : ProjectNativeWindows(
                     process,
                     NativeDesktop.ListWindows(appPid)).LogicalWindows();
             if (action == "close")
             {
-                _windowHandles.Remove(opaqueWindowHandle);
-                if (remaining.Any(value => value.Handle == binding.Handle))
+                // Canceled closes, save prompts, hidden and zero-size windows
+                // keep the native instance; only its retirement proves close.
+                var lifecycle = BoundWindowLifecycle(binding);
+                if (lifecycle != WindowLifecycleStatus.Gone)
                 {
                     throw new ProviderFailureException(
                         "window_close_not_observed",
                         "postcondition",
-                        "The close request was emitted, but the exact window remained visible.");
+                        lifecycle == WindowLifecycleStatus.Alive
+                            ? "The close request was emitted, but the exact window remains alive."
+                            : "The close request was emitted, but the exact window's retirement could not be verified.");
                 }
             }
             var result = new JsonObject
@@ -324,6 +389,12 @@ internal sealed partial class UiaProvider : IDisposable
                 result["snapshot"] = BuildWindowlessSnapshot(
                     app,
                     opaqueWindowHandle);
+            }
+            if (action == "close")
+            {
+                // Keep the identity until readback succeeds, so that a failed
+                // readback leaves recovery able to prove retirement.
+                _windowHandles.Remove(opaqueWindowHandle);
             }
             return result;
         }
@@ -568,7 +639,7 @@ internal sealed partial class UiaProvider : IDisposable
         return name;
     }
 
-    private JsonObject StaleWindowRecoveryContext(Process process)
+    private JsonObject StaleWindowRecoveryContext(Process process, WindowBinding? expectedBinding)
     {
         var windows = ProjectNativeWindows(
             process,
@@ -576,7 +647,10 @@ internal sealed partial class UiaProvider : IDisposable
         var recovery = new JsonObject
         {
             ["sourceAppStatus"] = "alive",
-            ["sourceWindowStatus"] = "gone",
+            // A stale token or a window missing from the visible inventory
+            // is not retirement; the bound native instance decides.
+            ["sourceWindowStatus"] = WindowsWindowIdentityPolicy.RecoveryStatus(
+                BoundWindowLifecycle(expectedBinding)),
             ["inventoryComplete"] = true,
         };
         if (windows.Count == 0)
@@ -595,6 +669,29 @@ internal sealed partial class UiaProvider : IDisposable
             ["processGeneration"] = ProcessGeneration(process),
         };
         return recovery;
+    }
+
+    private WindowLifecycleStatus BoundWindowLifecycle(WindowBinding? binding)
+    {
+        return WindowsWindowIdentityPolicy.ReadLifecycle(
+            binding is not null,
+            () => NativeDesktop.WindowExists(binding!.Handle),
+            () =>
+            {
+                if (!NativeDesktop.TryGetWindowProcessId(binding!.Handle, out var currentPid))
+                {
+                    // The HWND may have retired between samples. A second native
+                    // existence check distinguishes that from an unreadable owner.
+                    if (!NativeDesktop.WindowExists(binding.Handle)) { return WindowLifecycleStatus.Gone; }
+                    throw new InvalidOperationException("The native window owner could not be sampled.");
+                }
+                if (currentPid != binding.ProcessId) { return WindowLifecycleStatus.Gone; }
+                using var currentProcess = Process.GetProcessById(currentPid);
+                return WindowsWindowIdentityPolicy.ReadExistingInstance(
+                    binding.ProcessId, binding.ProcessGeneration,
+                    binding.LifecycleGeneration, currentPid,
+                    ProcessGeneration(currentProcess), _windowLifecycle.Generation(binding.Handle));
+            });
     }
 
     private NativeWindowProjection ProjectNativeWindows(
@@ -650,8 +747,16 @@ internal sealed partial class UiaProvider : IDisposable
     private IReadOnlyList<AutomationElement> LogicalAutomationRoots(
         Process process,
         NativeWindowProjection projection,
-        NativeDesktop.WindowRecord logical)
+        NativeDesktop.WindowRecord logical,
+        bool discoverTransients = true,
+        bool transientsOnly = false,
+        Action<string>? annotation = null,
+        Func<TimeSpan>? elapsed = null,
+        IReadOnlyCollection<string>? precedingRuntimeIdentities = null)
     {
+        var watch = Stopwatch.StartNew();
+        elapsed ??= () => watch.Elapsed;
+        var timeout = SnapshotSampleTimeout;
         var projectedMembers = projection.Members(logical.Handle);
         var projectedHandles = projectedMembers
             .Select(member => member.Handle.ToInt64())
@@ -659,7 +764,9 @@ internal sealed partial class UiaProvider : IDisposable
         var elements = new List<AutomationElement>();
         var candidates = new List<ProjectedUiaRootCandidate>();
 
-        foreach (var member in projection.Members(logical.Handle))
+        foreach (var member in transientsOnly
+                     ? Array.Empty<NativeDesktop.WindowRecord>()
+                     : projection.Members(logical.Handle))
         {
             try
             {
@@ -675,21 +782,28 @@ internal sealed partial class UiaProvider : IDisposable
         }
 
         var desktop = _automation.GetDesktop();
-        AddDesktopRoots(
-            _automation.TreeWalkerFactory.GetControlViewWalker());
-        AddDesktopRoots(
-            _automation.TreeWalkerFactory.GetRawViewWalker());
-        AddDesktopTransientRoots(
-            _automation.TreeWalkerFactory.GetControlViewWalker());
-        AddDesktopTransientRoots(
-            _automation.TreeWalkerFactory.GetRawViewWalker());
+        if (!transientsOnly)
+        {
+            AddDesktopRoots(
+                _automation.TreeWalkerFactory.GetControlViewWalker());
+            AddDesktopRoots(
+                _automation.TreeWalkerFactory.GetRawViewWalker());
+        }
+        if (discoverTransients)
+        {
+            AddDesktopTransientRoots(
+                _automation.TreeWalkerFactory.GetControlViewWalker());
+            AddDesktopTransientRoots(
+                _automation.TreeWalkerFactory.GetRawViewWalker());
+        }
 
         var selected = ProjectedUiaRootSelection.SelectIndices(
             candidates,
             process.Id,
             projectedHandles,
-            logical.Bounds);
-        if (selected.Count == 0)
+            logical.Bounds,
+            precedingRuntimeIdentities);
+        if (selected.Count == 0 && !transientsOnly)
         {
             throw new InvalidOperationException(
                 "No UIA root matched the selected logical window.");
@@ -698,82 +812,83 @@ internal sealed partial class UiaProvider : IDisposable
 
         void AddDesktopRoots(ITreeWalker walker)
         {
-            foreach (var desktopRoot in ReadControlChildren(
-                         desktop,
-                         walker,
-                         MaxDesktopRootCandidates))
-            {
-                var rootProcessId = Safe(
-                    () => desktopRoot.Properties.ProcessId.ValueOrDefault,
-                    0);
-                var nativeWindowHandle = Safe(
-                    () => desktopRoot.Properties.NativeWindowHandle.ValueOrDefault,
-                    0);
-                AddCandidate(
-                    desktopRoot,
-                    rootProcessId,
-                    nativeWindowHandle);
-            }
+            var result = BoundedTreeDiscovery.Visit(
+                () => walker.GetFirstChild(desktop),
+                element => walker.GetFirstChild(element),
+                element => walker.GetNextSibling(element),
+                (desktopRoot, _) =>
+                {
+                    var rootProcessId = Safe(
+                        () => desktopRoot.Properties.ProcessId.ValueOrDefault,
+                        0);
+                    var nativeWindowHandle = Safe(
+                        () => desktopRoot.Properties.NativeWindowHandle.ValueOrDefault,
+                        0);
+                    AddCandidate(
+                        desktopRoot,
+                        rootProcessId,
+                        nativeWindowHandle);
+                    return false;
+                },
+                MaxDesktopRootCandidates, 1, timeout, elapsed);
+            RecordDiscoveryLimit(result, "desktop_root");
         }
 
         void AddDesktopTransientRoots(ITreeWalker walker)
         {
-            var pending = new Stack<(AutomationElement Element, int Depth)>();
-            var initial = ReadControlChildren(
-                desktop,
-                walker,
-                MaxDesktopRootCandidates);
-            for (var index = initial.Length - 1; index >= 0; index--)
+            var result = BoundedTreeDiscovery.Visit(
+                () => walker.GetFirstChild(desktop),
+                element => walker.GetFirstChild(element),
+                element => walker.GetNextSibling(element),
+                (element, _) =>
+                {
+                    var rootProcessId = Safe(
+                        () => element.Properties.ProcessId.ValueOrDefault,
+                        0);
+                    if (rootProcessId != 0 && rootProcessId != process.Id)
+                    {
+                        return false;
+                    }
+                    var controlType = Safe(
+                        () => element.ControlType,
+                        ControlType.Unknown);
+                    if (controlType == ControlType.Menu ||
+                        controlType == ControlType.ToolTip)
+                    {
+                        AddCandidate(
+                            element,
+                            rootProcessId,
+                            Safe(
+                                () => element.Properties
+                                    .NativeWindowHandle.ValueOrDefault,
+                                0),
+                            spatialOwnershipEligible: true);
+                    }
+                    return true;
+                },
+                MaxDesktopTransientCandidates, MaxDesktopTransientDepth,
+                timeout, elapsed);
+            RecordDiscoveryLimit(result, "transient_discovery");
+        }
+
+        void RecordDiscoveryLimit(BoundedTreeDiscoveryResult result, string scope)
+        {
+            if (result.StopReason == TreeDiscoveryStopReason.TimeBudget)
             {
-                pending.Push((initial[index], 1));
+                if (annotation is null)
+                {
+                    throw new ObservationDeadlineExceededException();
+                }
+                annotation(scope + "_time_budget");
             }
-            var visited = 0;
-            while (pending.Count > 0 &&
-                   visited < MaxDesktopTransientCandidates)
+            else if (result.StopReason == TreeDiscoveryStopReason.NodeBudget)
             {
-                var current = pending.Pop();
-                visited++;
-                var rootProcessId = Safe(
-                    () => current.Element.Properties.ProcessId.ValueOrDefault,
-                    0);
-                if (rootProcessId != 0 && rootProcessId != process.Id)
-                {
-                    continue;
-                }
-                var controlType = Safe(
-                    () => current.Element.ControlType,
-                    ControlType.Unknown);
-                if (controlType == ControlType.Menu ||
-                    controlType == ControlType.ToolTip)
-                {
-                    AddCandidate(
-                        current.Element,
-                        rootProcessId,
-                        Safe(
-                            () => current.Element.Properties
-                                .NativeWindowHandle.ValueOrDefault,
-                            0),
-                        spatialOwnershipEligible: true);
-                }
-                if (current.Depth >= MaxDesktopTransientDepth)
-                {
-                    continue;
-                }
-                var remaining =
-                    MaxDesktopTransientCandidates - visited;
-                if (remaining <= 0)
-                {
-                    continue;
-                }
-                var children = ReadControlChildren(
-                    current.Element,
-                    walker,
-                    remaining);
-                for (var index = children.Length - 1; index >= 0; index--)
-                {
-                    pending.Push((children[index], current.Depth + 1));
-                }
+                annotation?.Invoke(scope + "_node_budget");
             }
+            // The depth bound is not a gap. Popup hosts sit just below the
+            // desktop; the bound cuts window content, which the window
+            // traversal covers. Counting it marked ordinary windows such as
+            // Notepad partial and made their controls unaddressable.
         }
 
         void AddCandidate(

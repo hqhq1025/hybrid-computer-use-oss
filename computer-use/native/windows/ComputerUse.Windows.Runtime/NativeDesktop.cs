@@ -21,8 +21,6 @@ internal static partial class NativeDesktop
     private const int ClipboardPasteSettleMilliseconds = 500;
     private const int ClipboardRetryCount = 10;
     private const int ClipboardRetryMilliseconds = 20;
-    private const int CaptureLayoutRetryCount = 3;
-    private const int CaptureLayoutRetryMilliseconds = 25;
     private const int PublishedLayoutHistoryLimit = 32;
     private const int WindowActivationDirectTimeoutMilliseconds = 250;
     private const int WindowActivationPollMilliseconds = 25;
@@ -86,6 +84,14 @@ internal static partial class NativeDesktop
         internal int X;
         internal int Y;
     }
+
+    // Declared here, not beside the input code, so a portable test can
+    // supply the native boundary and run the production input methods.
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(
+        uint inputCount,
+        [In] Input[] inputs,
+        int inputSize);
 
     [DllImport("user32.dll")]
     private static extern nint WindowFromPoint(NativePoint point);
@@ -174,6 +180,9 @@ internal static partial class NativeDesktop
         _ = GetWindowThreadProcessId(core, out var processId);
         return processId is > 0 and <= int.MaxValue ? (int)processId : 0;
     }
+
+    // IsWindow sees hidden and zero-size windows that ListWindows leaves out.
+    internal static bool WindowExists(nint handle) => handle != 0 && IsWindow(handle);
 
     internal static bool TryGetWindowProcessId(
         nint handle,

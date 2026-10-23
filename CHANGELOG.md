@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Windows: observation reads stop at a shared 15-second budget and return
+  partial coverage instead of timing out (LibreOffice Calc), `apps` and observe
+  name LibreOffice windows whose accessibility bridge is not loaded, `close`
+  succeeds only when the window instance is gone. On every platform, an `act`
+  batch whose input ends with window waits reads only the window root between
+  its keys and reads the tree once at the end.
 - AX trees show a table cell's value after its name when the two differ,
   for example `cell "A1" = "Year"` in a spreadsheet, clipped to 40
   characters, so reading a sheet no longer needs `find`. A tree over its
