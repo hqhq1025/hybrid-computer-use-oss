@@ -661,7 +661,7 @@ def _perform_gui(actions, settle_ms=800, frame_id=None):
                 time.sleep(GUI_KEYBOARD_ACTION_INTERVAL_SECONDS)
         except Exception as exc:
             explicit_partial = (
-                isinstance(exc, InputEmissionError) and exc.events_emitted
+                getattr(exc, "events_emitted", False)
                 or isinstance(exc, OperationFailure) and exc.input_events_emitted
             )
             input_events_emitted = bool(
