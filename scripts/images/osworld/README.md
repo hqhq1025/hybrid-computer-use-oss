@@ -195,8 +195,11 @@ first-launch interface, then verify Writer, Spreadsheets and Presentation.
 | Support | Installs NSS certificate tools and IBus bindings. Certificate import and the active desktop input source remain the deployment's responsibility. |
 
 FreeCAD's private package prefix avoids global library replacement. Its launcher
-sets library paths only for FreeCAD. The scripts neither force conflicting
-packages into dpkg nor copy benchmark solutions into the guest.
+sets library paths only for FreeCAD. The installer links `/usr/share/freecad`
+to the private package's resources because the Ubuntu binary requires that
+absolute path for its Start page and workbench icons. It rejects an occupied
+resource path instead of replacing another installation. The scripts neither
+force conflicting packages into dpkg nor copy benchmark solutions into the guest.
 
 The package sources remain Ubuntu repositories and upstream release archives.
 Apt dependency versions and Snap revisions are not frozen by this manifest.
