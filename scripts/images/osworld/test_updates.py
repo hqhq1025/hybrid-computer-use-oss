@@ -62,9 +62,13 @@ class UpdateNotificationTests(unittest.TestCase):
             install.install_phase("preferences", {}, self.root / "manifest.json",
                                   self.root, user)
         commands = [call.args[0] for call in run.call_args_list]
-        command = next(command for command in commands
-                       if Path(command[5]).name == "configure_updates.py")
-        self.assertEqual(command[:5], ["runuser", "-u", user.pw_name, "--", "python3"])
+        updates_script = str(install.ROOT / "configure_updates.py")
+        updates_commands = [command for command in commands if updates_script in command]
+        self.assertEqual(updates_commands, [[
+            "runuser", "-u", user.pw_name, "--", "python3", updates_script,
+            "--home", str(desktop_home),
+        ]])
+        command = updates_commands[0]
         with patch.object(configure_updates.os, "getuid", return_value=1000), \
                 patch.object(configure_updates, "configure", return_value={}) as configure:
             configure_updates.main(command[6:])

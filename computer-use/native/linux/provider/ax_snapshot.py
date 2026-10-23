@@ -109,12 +109,6 @@ FIND_WALK_LIMITS = {
 }
 
 
-# A child slot that the application answers with a null reference. MuseScore
-# 4 does so for most slots of its Qt Quick windows: its accessibility factory
-# returns an invalid stub for every item it has not registered itself.
-NULL_CHILD = object()
-
-
 def null_children_annotation(path, count, total):
     """Report null child references on their parent.
 
@@ -248,7 +242,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         record_provider_errors({"child_count": error})
         return unknown_child_count
 
-    def child_entries(node, count_hint=no_child_count_hint, facts=None):
+    def child_entries(node, path, count_hint=no_child_count_hint, facts=None):
         """Return a lazy bounded child iterator plus enumerability metadata."""
         count = (
             strict_child_count(node, facts)
@@ -318,6 +312,8 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             dropped["outside_view"] += outside
 
         def known_children():
+            null_count = 0
+            null_annotation = None
             for child_index in indices:
                 try:
                     child = node.get_child_at_index(child_index)
@@ -328,10 +324,16 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                     yield child_index, None
                     continue
                 if child is None:
-                    # The application answered the slot with a null
-                    # reference; the walk reports these per parent.
-                    yield child_index, NULL_CHILD
-                    continue
+                    # Report missing objects where slots are read, so every
+                    # traversal path receives only accessibles or None.
+                    # Keep yielding the slot for budget and cursor accounting.
+                    null_count += 1
+                    updated = null_children_annotation(path, null_count, len(indices))
+                    if null_annotation is None:
+                        null_annotation = updated
+                        annotations.append(null_annotation)
+                    else:
+                        null_annotation.update(updated)
                 yield child_index, child
 
         return known_children(), True, len(indices)
@@ -512,7 +514,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 closed_popups = closed_popup_indices(
                     node, facts, child_count_hint)
                 children, _, _ = child_entries(
-                    node, child_count_hint, facts)
+                    node, path, child_count_hint, facts)
                 for child_index, child in children:
                     if child is None or child_index in closed_popups:
                         continue
@@ -550,7 +552,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         ):
             dropped["count"] += 1
             dropped["pressure"] += 1
-            children, _, _ = child_entries(node, child_count_hint, facts)
+            children, _, _ = child_entries(node, path, child_count_hint, facts)
             for child_index, child in children:
                 if child is None or child_index in closed_popups:
                     continue
@@ -617,7 +619,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             return
 
         children, children_enumerable, planned_children = child_entries(
-            node, child_count_hint, facts
+            node, path, child_count_hint, facts
         )
         if not children_enumerable:
             if entry is not None:
@@ -665,7 +667,6 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         before_lines = len(lines)
         child_iterator = iter(children)
         child_slots_seen = 0
-        null_children = 0
         if entry is not None:
             pending_ancestors.append(entry)
         try:
@@ -688,9 +689,6 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
                 except StopIteration:
                     break
                 child_slots_seen += 1
-                if child is NULL_CHILD:
-                    null_children += 1
-                    continue
                 if child is None or child_index in closed_popups:
                     continue
                 # This node was rendered: indent its children one level
@@ -701,10 +699,6 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
         finally:
             if entry is not None:
                 pending_ancestors.pop()
-
-        if null_children:
-            annotations.append(null_children_annotation(
-                path, null_children, planned_children or child_slots_seen))
 
         # If a menu rendered none of its children, report that on the menu
         # itself.
@@ -776,7 +770,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT,
             children = []
             children_allowed = False
             if not deadline_expired and not collapsed_menu:
-                children, children_allowed, _ = child_entries(node)
+                children, children_allowed, _ = child_entries(node, path)
             if deadline_expired:
                 child_status = "subtree not traversed because the time budget expired"
             elif collapsed_menu:
