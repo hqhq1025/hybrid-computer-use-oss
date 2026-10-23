@@ -8,6 +8,8 @@ struct RenderContext {
     let focusedAncestry: [AXUIElement]
     let textLimit: SnapshotTextLimit
     let treeLimits: AccessibilityTreeLimits
+    /// System uptime after which no further node is visited.
+    var traversalDeadline: TimeInterval? = nil
 }
 
 struct SemanticPresentationOverride {
@@ -27,6 +29,9 @@ struct TreeRenderer {
     var records: [Int: ElementRecord] = [:]
     var identifierIndex: [String: String] = [:]
     var focusedSummary: String?
+    /// Nodes skipped because the traversal deadline passed. Their
+    /// descendants were not visited either, so this is a lower bound.
+    var deadlineOmittedCount = 0
 
     init(
         context: RenderContext,
@@ -88,6 +93,13 @@ struct TreeRenderer {
         }
 
         guard !ancestors.contains(where: { CFEqual($0, root) }) else {
+            return
+        }
+        // The first node is exempt, so a late snapshot still names the
+        // window it observed.
+        if nextIndex > 0, let deadline = context.traversalDeadline,
+           ProcessInfo.processInfo.systemUptime >= deadline {
+            deadlineOmittedCount += 1
             return
         }
         let nextAncestors = ancestors + [root]
