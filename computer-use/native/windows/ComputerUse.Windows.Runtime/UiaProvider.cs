@@ -237,17 +237,30 @@ internal sealed partial class UiaProvider : IDisposable
                 requestedHandle,
                 "stale_window_ref",
                 scope);
+            var observation = request["observation"] as JsonObject;
+            // The core's second read after an action whose first read showed
+            // no change: after a cell action it reads the sheet in part again.
+            var readBack = observation?["recheck_after_action"]?.GetValue<bool>() == true
+                ? TryReadSpreadsheetBack(
+                    _spreadsheetRead, process, selected, observation, target: null, recheck: true)
+                : null;
             var response = new JsonObject
             {
                 ["ok"] = true,
-                ["snapshot"] = BuildSnapshot(
-                    process,
-                    selected,
-                    request["observation"] as JsonObject),
+                ["snapshot"] = readBack ?? BuildSnapshot(process, selected, observation),
             };
+            var notes = new JsonArray();
+            if (readBack is not null)
+            {
+                notes.Add(SpreadsheetReadbackNote);
+            }
             if (AccessibilityBridgeNote(process, selected) is { } note)
             {
-                response["notes"] = new JsonArray(note);
+                notes.Add(note);
+            }
+            if (notes.Count > 0)
+            {
+                response["notes"] = notes;
             }
             return response;
         }
@@ -285,6 +298,7 @@ internal sealed partial class UiaProvider : IDisposable
 
     internal JsonObject ActOnWindow(JsonObject request)
     {
+        ForgetSpreadsheetRead();
         var process = ResolveProcess(request, RequiredString(request, "app"));
         var target = request["target"] as JsonObject;
         var requestWindowHandle = OptionalString(

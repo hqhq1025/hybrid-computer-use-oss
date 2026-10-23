@@ -36,6 +36,10 @@ type AXServiceRequest struct {
 	Scope           string                `json:"-"`
 	ObservationRoot map[string]any        `json:"-"`
 	KnownRefs       map[string]elementRef `json:"knownRefs,omitempty"`
+
+	// RecheckAfterAction is request-local, like FindWalk; see
+	// ProviderObservationOptions.RecheckAfterAction.
+	RecheckAfterAction bool `json:"-"`
 }
 
 type axServiceOperation string
