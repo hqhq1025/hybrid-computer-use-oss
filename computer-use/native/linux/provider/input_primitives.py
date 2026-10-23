@@ -239,6 +239,6 @@ def emit_keyboard_event(
 
 def best_effort_mouse_release(x, y, event):
     try:
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), event)
+        return Atspi.generate_mouse_event(int(round(x)), int(round(y)), event) is not False
     except Exception:
-        pass
+        return False
