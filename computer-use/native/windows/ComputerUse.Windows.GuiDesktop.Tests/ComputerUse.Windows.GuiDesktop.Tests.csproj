@@ -11,6 +11,9 @@
     <Compile Include="../ComputerUse.Windows.Runtime/WindowsKeyMapping.cs" Link="WindowsKeyMapping.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/WindowsDesktopImageGeometry.cs" Link="WindowsDesktopImageGeometry.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/DesktopProvider.cs" Link="DesktopProvider.cs" />
+    <Compile Include="../ComputerUse.Windows.Runtime/ProviderFailureException.cs" Link="ProviderFailureException.cs" />
+    <Compile Include="../ComputerUse.Windows.Runtime/PointerPreparationState.cs" Link="PointerPreparationState.cs" />
+    <Compile Include="../ComputerUse.Windows.Runtime/ExactFocusSettlement.cs" Link="ExactFocusSettlement.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/DesktopStillness.cs" Link="DesktopStillness.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/DesktopObservationRetry.cs" Link="DesktopObservationRetry.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/BoundedObservationRetry.cs" Link="BoundedObservationRetry.cs" />

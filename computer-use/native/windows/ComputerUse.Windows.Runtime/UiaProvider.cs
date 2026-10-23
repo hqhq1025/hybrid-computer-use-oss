@@ -18,6 +18,9 @@ internal sealed partial class UiaProvider : IDisposable
 
     private const int DefaultNodeLimit = 5000;
     private const int DefaultDepthLimit = 96;
+    // One observation's shared sampling deadline: root discovery, ownership
+    // probes and traversal all draw from it, and none of them restarts it.
+    private static readonly TimeSpan SnapshotSampleTimeout = TimeSpan.FromSeconds(15);
     private readonly UIA3Automation _automation =
         WindowsUiaAutomationFactory.Create();
     private readonly WindowLifecycleTracker _windowLifecycle = new();
@@ -650,8 +653,16 @@ internal sealed partial class UiaProvider : IDisposable
     private IReadOnlyList<AutomationElement> LogicalAutomationRoots(
         Process process,
         NativeWindowProjection projection,
-        NativeDesktop.WindowRecord logical)
+        NativeDesktop.WindowRecord logical,
+        bool discoverTransients = true,
+        bool transientsOnly = false,
+        Action<string>? annotation = null,
+        Func<TimeSpan>? elapsed = null,
+        IReadOnlyCollection<string>? precedingRuntimeIdentities = null)
     {
+        var watch = Stopwatch.StartNew();
+        elapsed ??= () => watch.Elapsed;
+        var timeout = SnapshotSampleTimeout;
         var projectedMembers = projection.Members(logical.Handle);
         var projectedHandles = projectedMembers
             .Select(member => member.Handle.ToInt64())
@@ -659,7 +670,9 @@ internal sealed partial class UiaProvider : IDisposable
         var elements = new List<AutomationElement>();
         var candidates = new List<ProjectedUiaRootCandidate>();
 
-        foreach (var member in projection.Members(logical.Handle))
+        foreach (var member in transientsOnly
+                     ? Array.Empty<NativeDesktop.WindowRecord>()
+                     : projection.Members(logical.Handle))
         {
             try
             {
@@ -675,21 +688,28 @@ internal sealed partial class UiaProvider : IDisposable
         }
 
         var desktop = _automation.GetDesktop();
-        AddDesktopRoots(
-            _automation.TreeWalkerFactory.GetControlViewWalker());
-        AddDesktopRoots(
-            _automation.TreeWalkerFactory.GetRawViewWalker());
-        AddDesktopTransientRoots(
-            _automation.TreeWalkerFactory.GetControlViewWalker());
-        AddDesktopTransientRoots(
-            _automation.TreeWalkerFactory.GetRawViewWalker());
+        if (!transientsOnly)
+        {
+            AddDesktopRoots(
+                _automation.TreeWalkerFactory.GetControlViewWalker());
+            AddDesktopRoots(
+                _automation.TreeWalkerFactory.GetRawViewWalker());
+        }
+        if (discoverTransients)
+        {
+            AddDesktopTransientRoots(
+                _automation.TreeWalkerFactory.GetControlViewWalker());
+            AddDesktopTransientRoots(
+                _automation.TreeWalkerFactory.GetRawViewWalker());
+        }
 
         var selected = ProjectedUiaRootSelection.SelectIndices(
             candidates,
             process.Id,
             projectedHandles,
-            logical.Bounds);
-        if (selected.Count == 0)
+            logical.Bounds,
+            precedingRuntimeIdentities);
+        if (selected.Count == 0 && !transientsOnly)
         {
             throw new InvalidOperationException(
                 "No UIA root matched the selected logical window.");
@@ -698,82 +718,80 @@ internal sealed partial class UiaProvider : IDisposable
 
         void AddDesktopRoots(ITreeWalker walker)
         {
-            foreach (var desktopRoot in ReadControlChildren(
-                         desktop,
-                         walker,
-                         MaxDesktopRootCandidates))
-            {
-                var rootProcessId = Safe(
-                    () => desktopRoot.Properties.ProcessId.ValueOrDefault,
-                    0);
-                var nativeWindowHandle = Safe(
-                    () => desktopRoot.Properties.NativeWindowHandle.ValueOrDefault,
-                    0);
-                AddCandidate(
-                    desktopRoot,
-                    rootProcessId,
-                    nativeWindowHandle);
-            }
+            var result = BoundedTreeDiscovery.Visit(
+                () => walker.GetFirstChild(desktop),
+                element => walker.GetFirstChild(element),
+                element => walker.GetNextSibling(element),
+                (desktopRoot, _) =>
+                {
+                    var rootProcessId = Safe(
+                        () => desktopRoot.Properties.ProcessId.ValueOrDefault,
+                        0);
+                    var nativeWindowHandle = Safe(
+                        () => desktopRoot.Properties.NativeWindowHandle.ValueOrDefault,
+                        0);
+                    AddCandidate(
+                        desktopRoot,
+                        rootProcessId,
+                        nativeWindowHandle);
+                    return false;
+                },
+                MaxDesktopRootCandidates, 1, timeout, elapsed);
+            RecordDiscoveryLimit(result, "desktop_root");
         }
 
         void AddDesktopTransientRoots(ITreeWalker walker)
         {
-            var pending = new Stack<(AutomationElement Element, int Depth)>();
-            var initial = ReadControlChildren(
-                desktop,
-                walker,
-                MaxDesktopRootCandidates);
-            for (var index = initial.Length - 1; index >= 0; index--)
+            var result = BoundedTreeDiscovery.Visit(
+                () => walker.GetFirstChild(desktop),
+                element => walker.GetFirstChild(element),
+                element => walker.GetNextSibling(element),
+                (element, _) =>
+                {
+                    var rootProcessId = Safe(
+                        () => element.Properties.ProcessId.ValueOrDefault,
+                        0);
+                    if (rootProcessId != 0 && rootProcessId != process.Id)
+                    {
+                        return false;
+                    }
+                    var controlType = Safe(
+                        () => element.ControlType,
+                        ControlType.Unknown);
+                    if (controlType == ControlType.Menu ||
+                        controlType == ControlType.ToolTip)
+                    {
+                        AddCandidate(
+                            element,
+                            rootProcessId,
+                            Safe(
+                                () => element.Properties
+                                    .NativeWindowHandle.ValueOrDefault,
+                                0),
+                            spatialOwnershipEligible: true);
+                    }
+                    return true;
+                },
+                MaxDesktopTransientCandidates, MaxDesktopTransientDepth,
+                timeout, elapsed);
+            RecordDiscoveryLimit(result, "transient_discovery");
+        }
+
+        void RecordDiscoveryLimit(BoundedTreeDiscoveryResult result, string scope)
+        {
+            if (result.StopReason == TreeDiscoveryStopReason.TimeBudget)
             {
-                pending.Push((initial[index], 1));
+                if (annotation is null)
+                {
+                    throw new ObservationDeadlineExceededException();
+                }
+                annotation(scope + "_time_budget");
             }
-            var visited = 0;
-            while (pending.Count > 0 &&
-                   visited < MaxDesktopTransientCandidates)
+            else if (result.StopReason == TreeDiscoveryStopReason.NodeBudget)
             {
-                var current = pending.Pop();
-                visited++;
-                var rootProcessId = Safe(
-                    () => current.Element.Properties.ProcessId.ValueOrDefault,
-                    0);
-                if (rootProcessId != 0 && rootProcessId != process.Id)
-                {
-                    continue;
-                }
-                var controlType = Safe(
-                    () => current.Element.ControlType,
-                    ControlType.Unknown);
-                if (controlType == ControlType.Menu ||
-                    controlType == ControlType.ToolTip)
-                {
-                    AddCandidate(
-                        current.Element,
-                        rootProcessId,
-                        Safe(
-                            () => current.Element.Properties
-                                .NativeWindowHandle.ValueOrDefault,
-                            0),
-                        spatialOwnershipEligible: true);
-                }
-                if (current.Depth >= MaxDesktopTransientDepth)
-                {
-                    continue;
-                }
-                var remaining =
-                    MaxDesktopTransientCandidates - visited;
-                if (remaining <= 0)
-                {
-                    continue;
-                }
-                var children = ReadControlChildren(
-                    current.Element,
-                    walker,
-                    remaining);
-                for (var index = children.Length - 1; index >= 0; index--)
-                {
-                    pending.Push((children[index], current.Depth + 1));
-                }
+                annotation?.Invoke(scope + "_node_budget");
             }
+            if (result.DepthLimited) { annotation?.Invoke(scope + "_depth_budget"); }
         }
 
         void AddCandidate(

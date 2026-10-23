@@ -190,8 +190,13 @@ internal static class HandlelessSemanticWindowTests
             budget: new OwnershipProbeBudget(1, TimeSpan.FromSeconds(3))).Owner(Semantic("modal", a)));
         var elapsed = TimeSpan.Zero;
         var budget = new OwnershipProbeBudget(100, TimeSpan.FromSeconds(1), () => elapsed);
-        Throws(() => Boundary(candidates, _ => { elapsed = TimeSpan.FromSeconds(2); return a; },
-            budget: budget).Owner(Semantic("modal", a)));
+        try
+        {
+            Boundary(candidates, _ => { elapsed = TimeSpan.FromSeconds(2); return a; },
+                budget: budget).Owner(Semantic("modal", a));
+            throw new InvalidDataException("Expected observation deadline exhaustion.");
+        }
+        catch (ObservationDeadlineExceededException) { }
     }
 
     private static void CheckProbeCost()

@@ -10,6 +10,9 @@ if (args is ["--selection-contract"])
 ExactFocusSettlementTests.Run();
 FocusPreparationTests.Run();
 LogicalWindowBoundaryTests.Run();
+BoundedTreeDiscoveryTests.Run();
+CanonicalNodeIdentitySetTests.Run();
+ProjectedRootSlotTests.Run();
 HandlelessSemanticWindowTests.Run();
 if (OptionalRoleRegression.Run() != 0)
 {

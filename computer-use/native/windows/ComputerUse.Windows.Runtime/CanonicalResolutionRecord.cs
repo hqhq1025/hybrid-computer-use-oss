@@ -151,7 +151,8 @@ internal static class CanonicalResolutionRecord
             }
             path[index] = childIndex;
         }
-        return path[0] == 0;
+        // The caller bounds the root index against the current logical roots.
+        return true;
     }
 
     internal static bool ProviderIdentityMatches(
@@ -162,6 +163,11 @@ internal static class CanonicalResolutionRecord
             candidate,
             "providerObjectPath",
             string.Empty);
+        if (string.IsNullOrEmpty(observedProviderObjectPath))
+        {
+            return OptionalString(candidate, "providerIdentityScope", string.Empty) ==
+                "snapshot_only" && string.IsNullOrEmpty(liveProviderObjectPath);
+        }
         return observedProviderObjectPath.StartsWith(
                 "runtime:",
                 StringComparison.Ordinal) &&
