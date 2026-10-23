@@ -258,6 +258,47 @@ func focusedAXAncestry(from element: AXUIElement?) -> [AXUIElement] {
     )
 }
 
+/// Per-call AX messaging timeout while a snapshot is built. The macOS
+/// default is about 6 s per call, so one unresponsive application could hold
+/// the provider for minutes.
+let snapshotAXMessagingTimeout: Float = 0.8
+/// Wall-clock budget for one tree walk, as on Linux; the core times out a
+/// provider request after 30 s.
+let snapshotTraversalDeadlineSeconds: TimeInterval = 20
+
+/// A part of the window tree that a snapshot could not include.
+struct SnapshotOmission: Equatable {
+    let count: Int
+    let reason: String
+    let detail: String
+}
+
+func snapshotOmissions(
+    deadlineOmitted: Int,
+    unresponsiveNodes: Int,
+    deadlineSeconds: TimeInterval = snapshotTraversalDeadlineSeconds
+) -> [SnapshotOmission] {
+    var omissions: [SnapshotOmission] = []
+    if deadlineOmitted > 0 {
+        omissions.append(SnapshotOmission(
+            count: deadlineOmitted,
+            reason: "time",
+            detail: String(
+                format: "%d not visited: time budget exhausted (%.0fs); tree is partial; raising node limits does not fix this",
+                deadlineOmitted, deadlineSeconds
+            )
+        ))
+    }
+    if unresponsiveNodes > 0 {
+        omissions.append(SnapshotOmission(
+            count: unresponsiveNodes,
+            reason: "provider_probe_error",
+            detail: "accessibility provider reads were incomplete; missing descendants are unknown"
+        ))
+    }
+    return omissions
+}
+
 public struct AccessibilityTreeLimits: Equatable, Sendable {
     public static let defaultMaxNodeCount = 1200
     public static let defaultMaxDepth = 64
@@ -325,6 +366,7 @@ public struct AppSnapshot {
     let elements: [Int: ElementRecord]
     var providerProcessGeneration: String? = nil
     var diagnosticSnapshotSerial: Int = 0
+    var omissions: [SnapshotOmission] = []
 
     public var renderedText: String {
         renderedText(style: .fullState)
@@ -441,8 +483,19 @@ enum SnapshotBuilder {
         }
 
         let appElement = AXUIElementCreateApplication(app.pid)
-        enableBestEffortAccessibilityModes(appElement)
         let systemWide = AXUIElementCreateSystemWide()
+        // Setting the timeout on the system-wide element sets it for every
+        // element of this process; 0 restores the system default.
+        AXUIElementSetMessagingTimeout(systemWide, snapshotAXMessagingTimeout)
+        defer { AXUIElementSetMessagingTimeout(systemWide, 0) }
+        // One probe before the window reads: each later read of a hung
+        // application would otherwise wait for its own timeout.
+        guard singleAttributeRead(appElement, kAXRoleAttribute).status != .cannotComplete else {
+            throw ComputerUseError.stateUnavailable(
+                "\(app.name) did not answer accessibility requests within \(snapshotAXMessagingTimeout) s; it may be busy or not responding. Retry the observation, or use GUI screenshots."
+            )
+        }
+        enableBestEffortAccessibilityModes(appElement)
         var focusedApplication = copyElement(systemWide, attribute: kAXFocusedApplicationAttribute)
         let hasRequestedWindow = !(expectedWindowHandle ?? "").isEmpty
         var focusedWindow = try selectSnapshotWindow(
@@ -610,6 +663,32 @@ enum SnapshotBuilder {
         treeLimits: AccessibilityTreeLimits
     ) throws -> AppSnapshot {
         let generation = macProcessGeneration(pid: app.pid)
+        return try AXNodeFactsCache.withSnapshotScope {
+            try renderAccessibilitySnapshot(
+                app: app,
+                appElement: appElement,
+                rootElement: rootElement,
+                windowCapture: windowCapture,
+                focusedApplication: focusedApplication,
+                systemWide: systemWide,
+                textLimit: textLimit,
+                treeLimits: treeLimits,
+                generation: generation
+            )
+        }
+    }
+
+    private static func renderAccessibilitySnapshot(
+        app: RunningAppDescriptor,
+        appElement: AXUIElement,
+        rootElement: AXUIElement,
+        windowCapture: WindowCapture?,
+        focusedApplication: AXUIElement?,
+        systemWide: AXUIElement,
+        textLimit: SnapshotTextLimit,
+        treeLimits: AccessibilityTreeLimits,
+        generation: String
+    ) throws -> AppSnapshot {
         let windowBounds = windowCapture?.bounds ??
             resolveLocalFrame(of: rootElement, windowBounds: nil)
         let focusedElement = focusedElementInSnapshotWindow(
@@ -627,7 +706,9 @@ enum SnapshotBuilder {
             focusedElement: focusedElement,
             focusedAncestry: focusedAXAncestry(from: focusedElement),
             textLimit: textLimit,
-            treeLimits: treeLimits
+            treeLimits: treeLimits,
+            traversalDeadline: ProcessInfo.processInfo.systemUptime
+                + snapshotTraversalDeadlineSeconds
         )
 
         var renderer = TreeRenderer(context: context, selectedRoot: rootElement)
@@ -636,6 +717,14 @@ enum SnapshotBuilder {
            !CFEqual(menuBar, rootElement)
         {
             try renderer.render(menuBar, relativeRuntimeID: [1])
+        }
+        let omissions = snapshotOmissions(
+            deadlineOmitted: renderer.deadlineOmittedCount,
+            unresponsiveNodes: AXNodeFactsCache.current?.unresponsiveNodeCount ?? 0
+        )
+        var treeLines = renderer.lines
+        if let timeOmission = omissions.first(where: { $0.reason == "time" }) {
+            treeLines.append("(\(timeOmission.count) node(s) omitted — \(timeOmission.detail))")
         }
 
         try bindMacProviderObjectIdentities(
@@ -658,7 +747,7 @@ enum SnapshotBuilder {
                 window: rootElement
             ),
             targetWindowLayer: windowCapture?.layer,
-            treeLines: renderer.lines,
+            treeLines: treeLines,
             focusedSummary: renderer.focusedSummary,
             focusedElement: focusedElement,
             selectedText: selectedText,
@@ -666,7 +755,8 @@ enum SnapshotBuilder {
             providerProcessGeneration: generation,
             diagnosticSnapshotSerial: Thread.current.threadDictionary[
                 "computer-use.failure.snapshot"
-            ] as? Int ?? 0
+            ] as? Int ?? 0,
+            omissions: omissions
         )
     }
 

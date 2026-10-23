@@ -2,18 +2,26 @@ import ApplicationServices
 import Foundation
 
 func readAXExpansion(of element: AXUIElement) throws -> Bool? {
-    try readAXExpansion(
+    let cache = AXNodeFactsCache.current
+    // A batched read reports an unsupported attribute directly. Such an
+    // element does not advertise AXExpanded, so the names read is skipped.
+    if let cache,
+       cache.attribute(element, kAXExpandedAttribute).status == .attributeUnsupported {
+        return nil
+    }
+    return try readAXExpansion(
         readNames: {
+            if let cache {
+                let read = cache.attributeNames(element)
+                return (read.status, read.value)
+            }
             var names: CFArray?
             let status = AXUIElementCopyAttributeNames(element, &names)
             return (status, names)
         },
         readValue: {
-            var value: CFTypeRef?
-            let status = AXUIElementCopyAttributeValue(
-                element, kAXExpandedAttribute as CFString, &value
-            )
-            return (status, value)
+            let read = readAttribute(element, kAXExpandedAttribute)
+            return (read.status, read.value)
         },
         reportFailure: { facts in
             providerFailureDiagnostic("expansion_read_failure") {
@@ -264,9 +272,8 @@ func exactStringReadbackMatches(
 }
 
 func copyElement(_ element: AXUIElement, attribute: String) -> AXUIElement? {
-    var value: CFTypeRef?
-    let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-    guard error == .success, let value else {
+    let read = readAttribute(element, attribute)
+    guard read.status == .success, let value = read.value else {
         return nil
     }
 
@@ -274,9 +281,8 @@ func copyElement(_ element: AXUIElement, attribute: String) -> AXUIElement? {
 }
 
 func copyArray(_ element: AXUIElement, attribute: String) -> [AXUIElement]? {
-    var value: CFTypeRef?
-    let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-    guard error == .success, let value else {
+    let read = readAttribute(element, attribute)
+    guard read.status == .success, let value = read.value else {
         return nil
     }
 
@@ -284,6 +290,10 @@ func copyArray(_ element: AXUIElement, attribute: String) -> [AXUIElement]? {
 }
 
 func copyActions(_ element: AXUIElement) -> [String]? {
+    if let cache = AXNodeFactsCache.current {
+        let read = cache.actionNames(element)
+        return read.status == .success ? read.value as? [String] : nil
+    }
     var actions: CFArray?
     let error = AXUIElementCopyActionNames(element, &actions)
     guard error == .success else {
@@ -294,19 +304,25 @@ func copyActions(_ element: AXUIElement) -> [String]? {
 }
 
 func attributeValue(of element: AXUIElement, attribute: String) -> CFTypeRef? {
-    var value: CFTypeRef?
-    let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-    guard error == .success else {
-        return nil
-    }
-
-    return value
+    let read = readAttribute(element, attribute)
+    return read.status == .success ? read.value : nil
 }
 
 func copyAttributeValues(
     _ element: AXUIElement,
     attributes: [String]
 ) -> [String: Any] {
+    if let cache = AXNodeFactsCache.current {
+        var result: [String: Any] = [:]
+        for attribute in attributes {
+            let read = cache.attribute(element, attribute)
+            if read.status == .success, let value = read.value,
+               CFGetTypeID(value) != AXValueGetTypeID() {
+                result[attribute] = value
+            }
+        }
+        return result
+    }
     var values: CFArray?
     let error = AXUIElementCopyMultipleAttributeValues(
         element,
@@ -422,6 +438,9 @@ func pid(of element: AXUIElement) -> pid_t {
 }
 
 private func isSettable(of element: AXUIElement, attribute: String) -> Bool {
+    if let cache = AXNodeFactsCache.current {
+        return cache.isSettable(element, attribute)
+    }
     var settable = DarwinBoolean(false)
     let error = AXUIElementIsAttributeSettable(element, attribute as CFString, &settable)
     return error == .success && settable.boolValue

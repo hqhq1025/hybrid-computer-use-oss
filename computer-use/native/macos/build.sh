@@ -70,6 +70,7 @@ elif [[ "${build_driver}" == "swiftc" ]]; then
     "${runtime_root}/Sources/ComputerUseProviderKit/AXChangeWake.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/AXTextSelection.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/AccessibilityAXReading.swift"
+    "${runtime_root}/Sources/ComputerUseProviderKit/AccessibilityNodeFacts.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/AccessibilitySnapshot.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/AccessibilityTraversalPath.swift"
     "${runtime_root}/Sources/ComputerUseProviderKit/AccessibilityTreeRenderer.swift"
