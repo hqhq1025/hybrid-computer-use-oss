@@ -28,7 +28,9 @@ def operation_failure_response(exc, recovery_operation=None):
     failure_phase = exc.failure_phase
     error_text = str(exc)
     underlying_failure_code = ""
-    if emitted:
+    # A known operation failure already describes its emitted input. Only
+    # override a no-input claim contradicted by operation-scoped evidence.
+    if emitted and not exc.input_events_emitted:
         underlying_failure_code = failure_code
         failure_code = "effect_unknown"
         failure_phase = "post_action_observation"
