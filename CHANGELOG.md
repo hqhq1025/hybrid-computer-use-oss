@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Linux: when AX `find` walks past the observe budget, it reads the full
+  record only of elements whose name or text can match the query, so a
+  3000-row web table is searched to the end within the walk's time limit.
+  A match carries the same ref, role, name and value as in an observation;
+  its context lists its ancestors only.
+- Linux: an AX `find` walk that stops at its node, size or time limit
+  returns `next_cursor`, also with zero matches. Continuing it searches the
+  same window from the element where the walk stopped, without repeating
+  earlier matches.
+- macOS: the provider keeps at most 65,536 element identities and drops
+  the least recently used ones, so a long session no longer ends in a
+  provider restart. Identities used by the last four reads are kept; a ref
+  to a dropped element fails as stale and never acts on another element.
 - Linux: AX `select` chooses options of LibreOffice drop-downs (toolbar
   boxes such as font size, and dialog lists such as Line Spacing), both
   with an option name on the combo box and on a cell of its open list. It

@@ -84,7 +84,9 @@ func (registry *FindCursorRegistry) Create(
 	offset int,
 	query string,
 ) string {
-	if registry == nil || snapshot == nil || offset < 0 || offset >= len(matches) {
+	// A cursor past the last match continues a walk that stopped early.
+	if registry == nil || snapshot == nil || offset < 0 || offset > len(matches) ||
+		offset == len(matches) && snapshot.findResume == nil {
 		return ""
 	}
 	now := time.Now()

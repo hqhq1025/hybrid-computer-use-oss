@@ -101,7 +101,8 @@ func newAXSnapshotHeader(snapshot *AppSnapshot) *AXSnapshot {
 	coverage := providerCoverageSummary(snapshot.Annotations)
 	identityCoverageIncomplete :=
 		coverage.AcquisitionIncomplete > 0 ||
-			coverage.ExpandableHidden > 0
+			coverage.ExpandableHidden > 0 ||
+			snapshot.FindCandidatesOnly
 	return &AXSnapshot{
 		SchemaVersion:              "AXSnapshot",
 		AppRef:                     snapshot.publicAppRef,

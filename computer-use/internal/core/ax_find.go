@@ -139,7 +139,10 @@ func describeQuery(
 // findMatch is the read step of find: the refreshed snapshot and the
 // records that match the query, in canonical order.
 type findMatch struct {
-	snapshot            *AppSnapshot
+	snapshot *AppSnapshot
+	// nearSnapshot lists the closest elements when nothing matched. A find
+	// walk holds records only for candidates, so it keeps the observe read.
+	nearSnapshot        *AppSnapshot
 	matched             []ElementRecord
 	query               string
 	notes               []string
@@ -177,18 +180,27 @@ func (s *Service) findMatches(
 	// stopped early, the Linux provider walks again with the find caps; see
 	// ProviderObservationOptions.FindWalk. A match in the budgeted read
 	// returns at once: the caller sees partial coverage and can narrow.
+	nearSnapshot := snapshot
 	if len(matched) == 0 &&
 		s.platformBackend().HostInfo().Platform == "linux" &&
 		providerCoverageSummary(snapshot.Annotations).AcquisitionIncomplete > 0 {
 		request.FindWalk = true
-		walked, walkNotes, walkResult := s.refreshProjectedSnapshot(app, request)
+		request.FindQuery = &ProviderFindQuery{
+			Name: name, NameExact: nameExact, Text: text, TextExact: textExact,
+		}
+		walked, walkNotes, walkResult := s.readFindWalk(app, request)
 		if walkResult.IsError {
 			return nil, walkResult
 		}
 		snapshot, notes = walked, walkNotes
 		matched = findQueryMatches(snapshot, role, name, text, state, nameExact, textExact)
+		noteFindResume(snapshot, axFindResume{
+			app: app, scope: request.Scope,
+			role: role, name: name, text: text, state: state,
+			nameExact: nameExact, textExact: textExact,
+		})
 	}
-	found := &findMatch{snapshot: snapshot, matched: matched}
+	found := &findMatch{snapshot: snapshot, nearSnapshot: nearSnapshot, matched: matched}
 	if note := s.consumeFailedObservation(app, snapshot); note != "" {
 		notes = append([]string{note}, notes...)
 		found.followsFailedAction = true
@@ -244,26 +256,38 @@ func (s *Service) find(
 	if found == nil {
 		return failure
 	}
+	return s.renderFindMatches(found, limit, newAXNearQuery(role, name, text, state))
+}
+
+// renderFindMatches renders the first page of found, or its zero-match
+// answer with the closest elements.
+func (s *Service) renderFindMatches(found *findMatch, limit int, near axNearQuery) ToolCallResult {
 	snapshot, matched, query := found.snapshot, found.matched, found.query
+	nearSnapshot := found.nearSnapshot
 	notes, followsFailedAction := found.notes, found.followsFailedAction
 	var out strings.Builder
 	if len(matched) == 0 {
+		cursor, continuation := s.findZeroMatchCursor(snapshot, query)
 		fmt.Fprintf(
 			&out,
-			"window: %q\nmatches: 0 query=%s\n",
+			"window: %q\nmatches: 0 query=%s%s\n",
 			snapshot.WindowTitle,
 			strconv.Quote(query),
+			continuation,
 		)
 		if line := snapshot.scopeFallbackLine(); line != "" {
 			out.WriteString(line + "\n")
 		}
-		out.WriteString(s.findZeroMatchText(snapshot, newAXNearQuery(role, name, text, state)))
+		out.WriteString(s.findZeroMatchText(nearSnapshot, near))
 		response := withFailedActionContinuity(
 			snapshot.textWithNotes(out.String(), notes),
 			followsFailedAction,
 		)
 		addTreeProjectionMetadata(&response, snapshot)
 		response.StructuredContent["find_match_count"] = 0
+		if cursor != "" {
+			response.StructuredContent["next_cursor"] = cursor
+		}
 		return response
 	}
 	return s.RenderFindPage(
@@ -277,6 +301,8 @@ func (s *Service) find(
 	)
 }
 
+// continueFind returns the page a cursor points to. A cursor past the last
+// match of a walk that stopped early continues the walk.
 func (s *Service) continueFind(cursor string, limit int) ToolCallResult {
 	resolution, err := s.FindCursorRegistry.Resolve(cursor)
 	if err != nil {
@@ -292,6 +318,14 @@ func (s *Service) continueFind(cursor string, limit int) ToolCallResult {
 			"limit must be at most %d", contract.MaxAXFindPageSize,
 		), true).withEvidenceScope("error_only")
 	}
+	if resume := findResumeOf(resolution); resume != nil {
+		found, failure := s.resumedFindMatches(resume)
+		if found == nil {
+			return failure
+		}
+		return s.renderFindMatches(found, limit, resume.nearQuery()).
+			withEvidenceScope("independent_ui_read")
+	}
 	entry := resolution.Cursor
 	resultSet := resolution.ResultSet
 	return s.RenderFindPage(
@@ -303,7 +337,7 @@ func (s *Service) continueFind(cursor string, limit int) ToolCallResult {
 		nil,
 		false,
 		entry.ResultSetID,
-	)
+	).withEvidenceScope("cached_observation_page")
 }
 
 func (s *Service) RenderFindPage(

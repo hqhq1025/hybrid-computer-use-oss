@@ -15,6 +15,7 @@ var linuxProviderPaths = []string{
 	"native/linux/provider/ax_records.py",
 	"native/linux/provider/ax_snapshot.py",
 	"native/linux/provider/ax_virtual_table.py",
+	"native/linux/provider/find_walk.py",
 	"native/linux/provider/action_evidence.py",
 	"native/linux/provider/phase_timing.py",
 	"native/linux/provider/app_resolver.py",

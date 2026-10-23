@@ -242,3 +242,92 @@ func identityCapacityAfterInputPreservesEmissionAndReset() {
         #expect(result["failurePhase"] as? String == "observation")
     }
 }
+
+@Test
+func longSessionEvictsOldIdentitiesInsteadOfRequiringARestart() throws {
+    let registry = ProviderObjectIdentityRegistry<Int>(
+        capacity: 64, hash: { UInt($0) }, equal: ==
+    )
+    var seen = Set<String>()
+    for snapshot in 0..<100 {
+        let tokens = try registry.bind(Array(snapshot * 10..<snapshot * 10 + 10), scope: "app")
+        #expect(seen.isDisjoint(with: tokens))
+        seen.formUnion(tokens)
+        #expect(registry.identityCount <= 64)
+    }
+}
+
+@Test
+func evictionTakesTheLeastRecentlyUsedIdentity() throws {
+    let registry = ProviderObjectIdentityRegistry<Int>(
+        capacity: 3, protectedBinds: 1, hash: { UInt($0) }, equal: ==
+    )
+    let one = try registry.bind([1], scope: "app")[0]
+    let two = try registry.bind([2], scope: "app")[0]
+    let three = try registry.bind([3], scope: "app")[0]
+    // A ref that resolves counts as a use, like a bind.
+    #expect(registry.matchesRetained(1, token: one, scope: "app"))
+    _ = try registry.bind([4], scope: "app")
+    #expect(!registry.matchesRetained(2, token: two, scope: "app"))
+    #expect(registry.matchesRetained(1, token: one, scope: "app"))
+    #expect(registry.matchesRetained(3, token: three, scope: "app"))
+    // An evicted object seen again gets a new token, never its old one.
+    let again = try registry.bind([2], scope: "app")[0]
+    #expect(again != two && again != one && again != three)
+}
+
+@Test
+func identitiesOfRecentBindsAreNeverEvicted() throws {
+    let registry = ProviderObjectIdentityRegistry<Int>(
+        capacity: 2, protectedBinds: 2, hash: { UInt($0) }, equal: ==
+    )
+    let one = try registry.bind([1], scope: "app")[0]
+    let two = try registry.bind([2], scope: "app")[0]
+    do {
+        _ = try registry.bind([3, 4], scope: "app")
+        Issue.record("Expected a rejection: the previous bind is protected")
+    } catch {
+        #expect(requiresProviderReset(error))
+    }
+    #expect(registry.identityCount == 2)
+    // One bind later, the first identity is outside the protected binds.
+    _ = try registry.bind([3], scope: "app")
+    #expect(!registry.matchesRetained(1, token: one, scope: "app"))
+    #expect(registry.matchesRetained(2, token: two, scope: "app"))
+}
+
+@Test
+func evictedRefFailsAsStaleInsteadOfBindingAnotherElement() throws {
+    let registry = ProviderObjectIdentityRegistry<AXUIElement>(
+        capacity: 1, protectedBinds: 1, hash: { _ in 7 }, equal: { CFEqual($0, $1) }
+    )
+    let original = identityRecord(1, AXUIElementCreateApplication(getpid()))
+    try bindMacProviderObjectIdentities([original], scope: "app", registry: registry)
+    let oldToken = macProviderObjectPath(original)
+    let other = identityRecord(2, AXUIElementCreateSystemWide())
+    try bindMacProviderObjectIdentities([other], scope: "app", registry: registry)
+    let returned = identityRecord(1, AXUIElementCreateApplication(getpid()))
+    try bindMacProviderObjectIdentities([returned], scope: "app", registry: registry)
+    #expect(macProviderObjectPath(returned) != oldToken)
+    let target: [String: Any] = [
+        "providerObjectPath": oldToken, "providerIdentityScope": "process_instance",
+        "allowProviderRebind": true, "locatorKind": "semantic",
+        "role": "button", "name": "Same", "hasName": true,
+        "automationId": "same-id", "runtimeId": [0, 1],
+    ]
+    let current = try identitySnapshot([returned]).providerElementDictionaries
+    do {
+        _ = try resolveProviderElementIndex(elements: current, target: target, targetLabel: "target")
+        Issue.record("An evicted identity resolved to an element")
+    } catch {
+        let result = runtimeFailureResult(error)
+        #expect(result["failureCode"] as? String == "stale_element_ref")
+        #expect(result["input_events_emitted"] as? Bool == false)
+    }
+    var candidate = current[0]
+    candidate["providerObjectPath"] = oldToken
+    #expect(equivalentProviderProjectionIndex(
+        [candidate], target: target, snapshot: identitySnapshot([returned]),
+        requireRetainedIdentity: true, identityRegistry: registry
+    ) == nil)
+}

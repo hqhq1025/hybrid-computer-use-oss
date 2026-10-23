@@ -111,3 +111,91 @@ func TestFindWithMatchesReportsPartialCoverageWhenTheWalkStopped(t *testing.T) {
 		}
 	}
 }
+
+func findWalkService(responses ...ProviderAccessibilityResult) (*Service, *recordingPlatformBackend) {
+	recording := &recordingPlatformBackend{accessibilityResponses: responses}
+	return NewServiceWithBackend(linuxRecordingBackend{recording}), recording
+}
+
+func TestFindWalkSendsTheNameAndTextQuery(t *testing.T) {
+	for _, tc := range []struct {
+		query map[string]any
+		want  ProviderFindQuery
+	}{
+		{map[string]any{"name_equals": "Save"}, ProviderFindQuery{Name: "Save", NameExact: true}},
+		{map[string]any{"text_contains": "draft", "role": "button"}, ProviderFindQuery{Text: "draft"}},
+		{map[string]any{"role": "checkbox"}, ProviderFindQuery{}},
+	} {
+		s, recording := findWalkService(findWalkSnapshot("Open", true), findWalkSnapshot("Open", false))
+		s.CallForModel(contract.PublicToolAX, map[string]any{
+			"mode": contract.AXModeFind, "app": "Editor", "query": tc.query,
+		}, false)
+		if len(recording.observeRequests) != 2 {
+			t.Fatalf("%v: %d reads, want the observe read and the walk", tc.query, len(recording.observeRequests))
+		}
+		if recording.observeRequests[0].Observation.FindQuery != nil {
+			t.Fatalf("%v: the observe read carried a find query", tc.query)
+		}
+		got := recording.observeRequests[1].Observation.FindQuery
+		if got == nil || *got != tc.want {
+			t.Fatalf("%v: walk query %+v, want %+v", tc.query, got, tc.want)
+		}
+	}
+}
+
+func TestCandidateWalkKeepsTheObserveReadAndAddsItsRefs(t *testing.T) {
+	observed := findWalkSnapshot("Open", true)
+	observed.Snapshot.Refs = map[string]elementRef{
+		"0":   {Index: 0, Role: "frame", Name: "Editor"},
+		"0.0": {Index: 1, Role: "push button", Name: "Open"},
+	}
+	walked := findWalkSnapshot("Save", false)
+	walked.Snapshot.Elements[1].RuntimeID = []int{0, 9}
+	walked.Snapshot.Elements[1].Index = 2
+	walked.Snapshot.Refs = map[string]elementRef{
+		"0":   {Index: 0, Role: "frame", Name: "Editor"},
+		"0.9": {Index: 2, Role: "push button", Name: "Save"},
+	}
+	walked.Snapshot.FindCandidatesOnly = true
+	s, _ := findWalkService(observed, walked)
+	result := s.CallForModel(contract.PublicToolAX, map[string]any{
+		"mode": contract.AXModeFind, "app": "Editor",
+		"query": map[string]any{"name_equals": "Save"},
+	}, false)
+	if !strings.Contains(ResultText(result), "matches: 1") {
+		t.Fatalf("find failed: %s", ResultText(result))
+	}
+	current := s.currentSnapshot("Editor")
+	if len(current.Elements) != 2 || current.Elements[1].Name != "Open" {
+		t.Fatalf("current snapshot after the walk = %+v, want the observe read", current.Elements)
+	}
+	if refs := current.Refs; refs["0.0"].Index != 1 || refs["0.9"].Index != 2 {
+		t.Fatalf("refs after the walk = %v, want the observed Open and the walked Save", refs)
+	}
+}
+
+func TestFindWalkWithoutMatchListsClosestElementsFromTheObserveRead(t *testing.T) {
+	walked := findWalkSnapshot("unused", false)
+	walked.Snapshot.Elements = walked.Snapshot.Elements[:1]
+	s, _ := findWalkService(findWalkSnapshot("Save", true), walked)
+	result := s.CallForModel(contract.PublicToolAX, map[string]any{
+		"mode": contract.AXModeFind, "app": "Editor",
+		"query": map[string]any{"name_equals": "Save As"},
+	}, false)
+	text := ResultText(result)
+	if !strings.Contains(text, "matches: 0") || !strings.Contains(text, `button "Save"`) {
+		t.Fatalf("want zero matches and the observed Save button as closest: %s", text)
+	}
+}
+
+func TestFindCandidateSnapshotIsNotACompleteIdentityInventory(t *testing.T) {
+	for _, candidatesOnly := range []bool{false, true} {
+		snapshot := findWalkSnapshot("Save", false).Snapshot
+		snapshot.FindCandidatesOnly = candidatesOnly
+		header := newAXSnapshotHeader(snapshot)
+		if header.IdentityCoverageIncomplete != candidatesOnly || header.AcquisitionIncomplete {
+			t.Fatalf("candidatesOnly=%v: identity incomplete=%v acquisition incomplete=%v",
+				candidatesOnly, header.IdentityCoverageIncomplete, header.AcquisitionIncomplete)
+		}
+	}
+}

@@ -528,6 +528,17 @@ func (s *Service) findRecords(args map[string]any) (Record, bool) {
 		matched = resolution.ResultSet.Matches
 		offset = resolution.Cursor.Offset
 		setID = resolution.Cursor.ResultSetID
+		if resume := findResumeOf(resolution); resume != nil {
+			found, failure := s.resumedFindMatches(resume)
+			if found == nil {
+				return errorRecord(contract.PublicToolAX, failure.withEvidenceScope("error_only")), true
+			}
+			snapshot, matched, notes = found.snapshot, found.matched, found.notes
+			offset, setID = 0, ""
+			if len(matched) > 0 {
+				snapshot = s.freezeFindRefs(snapshot, matched)
+			}
+		}
 	} else {
 		readContext, identityErr := s.resolveAXReadIdentity(request.app, request.windowRef, "")
 		if identityErr != nil {
@@ -581,7 +592,7 @@ func (s *Service) findRecords(args map[string]any) (Record, bool) {
 		record.Matches = append(record.Matches, element)
 	}
 	record.Page = &RecordPage{Returned: end - offset, Total: len(matched), Offset: offset}
-	if end < len(matched) {
+	if end < len(matched) || snapshot.findResume != nil {
 		if setID == "" {
 			record.Page.NextCursor = s.FindCursorRegistry.Create(snapshot, matched, end, "")
 		} else {
