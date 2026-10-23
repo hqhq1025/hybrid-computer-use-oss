@@ -74,6 +74,8 @@ jobs:
         run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.PointerEnvelope.Tests
       - name: Native desktop stillness tests
         run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.DesktopStillness.Tests
+      - name: Native GUI input and capture tests
+        run: dotnet run --project computer-use/native/windows/ComputerUse.Windows.GuiDesktop.Tests
       - name: Go platform selection (no desktop input)
         working-directory: computer-use
         run: go test -run TestDefaultServiceUsesWindowsBackend ./...

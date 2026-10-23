@@ -18,8 +18,6 @@ internal static partial class NativeDesktop
     private const int ClipboardPasteSettleMilliseconds = 500;
     private const int ClipboardRetryCount = 10;
     private const int ClipboardRetryMilliseconds = 20;
-    private const int CaptureLayoutRetryCount = 3;
-    private const int CaptureLayoutRetryMilliseconds = 25;
     private const uint RdwInvalidate = 0x0001;
     private const uint RdwErase = 0x0004;
     private const uint RdwAllChildren = 0x0080;
@@ -80,6 +78,14 @@ internal static partial class NativeDesktop
         internal int X;
         internal int Y;
     }
+
+    // Declared here, not beside the input code, so a portable test can
+    // supply the native boundary and run the production input methods.
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(
+        uint inputCount,
+        [In] Input[] inputs,
+        int inputSize);
 
     [DllImport("user32.dll")]
     private static extern nint WindowFromPoint(NativePoint point);

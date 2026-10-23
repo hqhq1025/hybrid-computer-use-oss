@@ -50,3 +50,20 @@ func TestNativeResolveTimeoutDoesNotInventMutation(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeTimeoutBeforeDispatchDoesNotInventMutation(t *testing.T) {
+	for _, preDispatch := range []bool{true, false} {
+		failure := &RuntimeTimeoutError{
+			Duration: time.Second, Platform: "Windows", Phase: "start_provider", PreDispatch: preDispatch,
+		}
+		s := NewServiceWithBackend(&recordingPlatformBackend{err: failure})
+		ax := s.RuntimeFailureResult(AXServiceRequest{Action: AXClickCommand{}}, nil, failure)
+		if !ax.IsError || ax.StructuredContent["mutation_unknown"] != !preDispatch {
+			t.Fatalf("AX preDispatch=%v lost timeout evidence: %#v", preDispatch, ax)
+		}
+		gui := s.gui([]any{map[string]any{"type": "type", "text": "hello"}}, 0)
+		if !gui.IsError || gui.StructuredContent["mutation_unknown"] != !preDispatch {
+			t.Fatalf("GUI preDispatch=%v lost timeout evidence: %#v", preDispatch, gui)
+		}
+	}
+}

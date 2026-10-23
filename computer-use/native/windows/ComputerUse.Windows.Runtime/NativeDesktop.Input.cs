@@ -7,6 +7,7 @@ internal static partial class NativeDesktop
 {
     private const uint InputMouse = 0;
     private const uint InputKeyboard = 1;
+    private const uint KeyEventExtendedKey = 0x0001;
     private const uint KeyEventKeyUp = 0x0002;
     private const uint MouseMove = 0x0001;
     private const uint MouseLeftDown = 0x0002;
@@ -73,6 +74,25 @@ internal static partial class NativeDesktop
         }
         catch (ProviderFailureException error)
         {
+            if (error.InputEventsEmitted)
+            {
+                // A partial send can leave the button down. Release it and
+                // keep the original failure as the primary evidence.
+                try
+                {
+                    SendMouseFlag(up, data);
+                }
+                catch (ProviderFailureException releaseError)
+                {
+                    throw new ProviderFailureException(
+                        error.Code,
+                        error.Phase,
+                        $"{error.Message} Mouse-button release also failed: " +
+                            releaseError.Message,
+                        true,
+                        true);
+                }
+            }
             throw WithPriorInput(error);
         }
     }
@@ -104,6 +124,17 @@ internal static partial class NativeDesktop
             operationFailure = WithPriorInput(
                 error,
                 mutationUnknown: buttonDown || error.MutationUnknown);
+        }
+        catch (Exception error)
+        {
+            // A later point can fail validation after the button went down.
+            // Earlier input stays visible; the finally block releases it.
+            operationFailure = new ProviderFailureException(
+                "desktop_input_failed",
+                "execution",
+                error.Message,
+                true,
+                true);
         }
         finally
         {
@@ -292,7 +323,12 @@ internal static partial class NativeDesktop
                 Keyboard = new KeyboardInput
                 {
                     VirtualKey = key,
-                    Flags = keyUp ? KeyEventKeyUp : 0,
+                    // Navigation, Delete, Insert and Windows keys need the
+                    // extended flag on both edges; without it NumLock state
+                    // can turn them into keypad digits.
+                    Flags = (keyUp ? KeyEventKeyUp : 0) |
+                        (key is >= 0x21 and <= 0x28 or 0x2D or 0x2E or 0x5B or 0x5C
+                            ? KeyEventExtendedKey : 0),
                 },
             },
         };
@@ -405,10 +441,4 @@ internal static partial class NativeDesktop
         internal uint Time;
         internal nuint ExtraInfo;
     }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint SendInput(
-        uint inputCount,
-        [In] Input[] inputs,
-        int inputSize);
 }

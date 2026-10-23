@@ -111,6 +111,11 @@ level. It does not bypass UAC, secure desktops, or session isolation. UIA
 visibility reported by the application can differ from visible pixels;
 reobserve instead of forcing a stale or offscreen semantic target.
 
+GUI scroll deltas send one wheel notch per 100 units, and at least one notch
+for any non-zero delta, as on Linux. A single-character key must be an ASCII
+letter, digit or US-layout punctuation key. Other characters, such as `!` or
+`é`, are rejected before any input in the batch; enter them with `type`.
+
 An uncertain focus or pointer preparation failure is different from a stale
 target. The requested input may be known not to have been emitted while a
 queued focus request can still change the desktop later. Honor an explicit
