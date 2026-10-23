@@ -17,6 +17,7 @@
     <Compile Include="../ComputerUse.Windows.Runtime/PointerPreparationFailureAttribution.cs" Link="PointerPreparationFailureAttribution.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/ExactFocusSettlement.cs" Link="ExactFocusSettlement.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/WindowsProviderFailures.cs" Link="WindowsProviderFailures.cs" />
+    <Compile Include="../ComputerUse.Windows.Runtime/WindowsWindowIdentityPolicy.cs" Link="WindowsWindowIdentityPolicy.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/ProviderFailureException.cs" Link="ProviderFailureException.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/UiaMutationFailureAttribution.cs" Link="UiaMutationFailureAttribution.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/DesktopObservationRetry.cs" Link="DesktopObservationRetry.cs" />

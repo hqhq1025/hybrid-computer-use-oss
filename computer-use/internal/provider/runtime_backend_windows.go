@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"time"
 
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/core"
@@ -117,26 +116,7 @@ func (windowsRuntimeBackend) ActOnWindow(
 }
 
 func (windowsRuntimeBackend) WindowForPID(pid int) (known, alive bool) {
-	if pid <= 0 {
-		return true, false
-	}
-	switch (windowsRuntimeBackend{}).ProcessState(pid) {
-	case "missing":
-		return true, false
-	case "running":
-	default:
-		return false, false
-	}
-	result, err := (windowsRuntimeBackend{}).ListWindows(
-		core.ProviderWindowListRequest{
-			ProtocolVersion: core.ProviderProtocolVersion,
-			App:             strconv.Itoa(pid),
-		},
-	)
-	if err != nil || !result.OK {
-		return false, false
-	}
-	return true, len(result.WindowTitles) > 0
+	return windowsNativeWindowForPID(pid)
 }
 
 func (windowsRuntimeBackend) HostInfo() core.HostBackendInfo {

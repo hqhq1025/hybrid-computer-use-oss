@@ -37,17 +37,46 @@ func axBatchActionObservation(
 // element before and after), or is the last action (its notes compare the
 // trees around it). Only keys, text and scrolls without a ref qualify,
 // because only they need no element from the read before them.
+//
+// A batch whose input ends with waits for windows only is the exception: a
+// window wait reads the window list, not the tree, and the final observation
+// reads the tree after the waits. The last action's own read and the read
+// before it are then root-only, and its notes compare root facts only.
 func axBatchLightReadback(actions []axBatchAction, index, lastInput int) bool {
-	if index < 0 || index+1 >= lastInput {
+	if index < 0 || index > lastInput || lastInput >= len(actions) {
 		return false
 	}
-	for _, step := range actions[index : index+2] {
+	if index+1 >= lastInput && !axBatchEndsWithWindowWaits(actions, lastInput) {
+		return false
+	}
+	end := index + 2
+	if end > lastInput+1 {
+		end = lastInput + 1
+	}
+	for _, step := range actions[index:end] {
 		switch step.actionType {
 		case "keypress", "type", "scroll":
 		default:
 			return false
 		}
 		if step.targetRef != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// axBatchEndsWithWindowWaits reports whether at least one step follows the
+// last input and every such step waits for a window title only.
+func axBatchEndsWithWindowWaits(actions []axBatchAction, lastInput int) bool {
+	if lastInput < 0 || lastInput >= len(actions)-1 {
+		return false
+	}
+	for _, step := range actions[lastInput+1:] {
+		wait := step.wait
+		if step.actionType != "wait" || wait == nil || wait.window == "" ||
+			wait.text != "" || wait.ref != "" || wait.query != nil ||
+			wait.state != "" || wait.value != "" || wait.settle {
 			return false
 		}
 	}
@@ -269,9 +298,12 @@ func (s *Service) finalObservationContinuation(
 	inventoryComplete, _ :=
 		result.StructuredContent["recovery_inventory_complete"].(bool)
 	currentRef, _ := result.StructuredContent["current_window_ref"].(string)
+	// Following a replacement window needs complete lifecycle facts.
+	factsComplete, _ := result.StructuredContent["failure_facts_complete"].(bool)
 	if code != "stale_window_ref" ||
 		sourceStatus != "gone" ||
 		!inventoryComplete ||
+		!factsComplete ||
 		!isShortAXWindowRef(currentRef) ||
 		currentRef == context.WindowRef {
 		return nil, false
@@ -500,6 +532,9 @@ func mergeAXBatchFinalObservation(
 	if inputEmitted {
 		actionResult.StructuredContent["input_events_emitted"] = true
 	}
+	if _, present := observationResult.StructuredContent["final_observation_returned"]; present {
+		replaceAXObservationCoverage(actionResult.StructuredContent, observationResult.StructuredContent)
+	}
 	for key, value := range observationResult.StructuredContent {
 		switch key {
 		case "failure_code", "failure_phase":
@@ -567,4 +602,19 @@ func mergeAXBatchFinalObservation(
 		}
 	}
 	return actionResult
+}
+
+// replaceAXObservationCoverage makes the coverage facts describe the final
+// observation, not the action's earlier read. A key the final observation
+// does not set is removed, so a complete read cannot inherit an earlier gap.
+func replaceAXObservationCoverage(destination, current map[string]any) {
+	for _, key := range []string{
+		"tree_complete_for_model", "coverage_incomplete_nodes", "coverage_incomplete_reasons",
+		"structural_budget_applied", "structural_budget_omitted_nodes", "structural_budget_omitted_targets",
+	} {
+		delete(destination, key)
+		if value, present := current[key]; present {
+			destination[key] = value
+		}
+	}
 }

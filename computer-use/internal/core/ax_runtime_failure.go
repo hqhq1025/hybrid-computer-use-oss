@@ -589,7 +589,7 @@ func (s *Service) RuntimeFailureResult(
 		return result
 	}
 	mutationUnknown := accessibilityOperationCanMutate(request) &&
-		(timeout != nil || (transport != nil && transport.RequestSent))
+		((timeout != nil && !timeout.PreDispatch) || (transport != nil && transport.RequestSent))
 	failureCode := "runtime_timeout"
 	failureMarker := "runtime_timeout=true "
 	if transport != nil {

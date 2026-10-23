@@ -63,7 +63,9 @@ func closedWindowLifecycleProven(
 			result.StructuredContent["source_window_status"].(string)
 		inventoryComplete, _ :=
 			result.StructuredContent["recovery_inventory_complete"].(bool)
-		return sourceStatus == "gone" && inventoryComplete
+		factsComplete, _ :=
+			result.StructuredContent["failure_facts_complete"].(bool)
+		return sourceStatus == "gone" && inventoryComplete && factsComplete
 	case "stale_app_ref":
 		subject, _ := result.StructuredContent["failure_subject"].(string)
 		factsComplete, _ :=

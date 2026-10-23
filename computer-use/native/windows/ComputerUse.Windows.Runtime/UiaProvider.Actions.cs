@@ -207,6 +207,7 @@ internal sealed partial class UiaProvider
                             var readbackRoot =
                                 _automation.FromHandle(selectedWindow.Handle);
                             var readbackElement = ResolveSetValueReadbackElement(
+                                element,
                                 readbackRoot,
                                 target,
                                 elementRecord,
@@ -284,6 +285,7 @@ internal sealed partial class UiaProvider
                         var readbackRoot =
                             _automation.FromHandle(selectedWindow.Handle);
                         var readbackElement = ResolveSetValueReadbackElement(
+                            element,
                             readbackRoot,
                             target,
                             elementRecord,
@@ -303,6 +305,7 @@ internal sealed partial class UiaProvider
                         var readbackRoot =
                             _automation.FromHandle(selectedWindow.Handle);
                         var readbackElement = ResolveSetValueReadbackElement(
+                            element,
                             readbackRoot,
                             target,
                             elementRecord,
@@ -611,13 +614,34 @@ internal sealed partial class UiaProvider
     }
 
     private AutomationElement ResolveSetValueReadbackElement(
+        AutomationElement? written,
         AutomationElement root,
         JsonObject? target,
         JsonObject? record,
         Process process,
         NativeDesktop.WindowRecord selectedWindow)
     {
-        var resolved = ResolveSetValueReadbackElementCore(
+        // Read back the element that was written when it still has the
+        // target's provider identity; resolving the target again walks the
+        // window's roots for every sample.
+        var providerObjectPath = OptionalString(
+            target,
+            "providerObjectPath",
+            OptionalString(record, "providerObjectPath", string.Empty));
+        AutomationElement? resolved = null;
+        if (written is not null &&
+            providerObjectPath.StartsWith("runtime:", StringComparison.Ordinal))
+        {
+            try
+            {
+                if (RuntimeObjectPath(written) == providerObjectPath) { resolved = written; }
+            }
+            catch
+            {
+                // A retired element falls back to resolution.
+            }
+        }
+        resolved ??= ResolveSetValueReadbackElementCore(
             root, target, record, process, selectedWindow);
         try
         {

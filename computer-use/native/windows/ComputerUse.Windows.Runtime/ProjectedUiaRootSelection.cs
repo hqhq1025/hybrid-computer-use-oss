@@ -16,11 +16,19 @@ internal static class ProjectedUiaRootSelection
         IReadOnlyList<ProjectedUiaRootCandidate> candidates,
         int processId,
         IReadOnlyCollection<long> projectedHandles,
-        Rectangle logicalBounds = default)
+        Rectangle logicalBounds = default,
+        IReadOnlyCollection<string>? precedingRuntimeIdentities = null)
     {
         var allowedHandles = projectedHandles.ToHashSet();
         var seenRuntimeIdentities = new HashSet<string>(
             StringComparer.Ordinal);
+        if (precedingRuntimeIdentities is not null)
+        {
+            foreach (var identity in precedingRuntimeIdentities)
+            {
+                if (identity.Length > 0) { seenRuntimeIdentities.Add(identity); }
+            }
+        }
         var selected = new List<int>();
         for (var index = 0; index < candidates.Count; index++)
         {

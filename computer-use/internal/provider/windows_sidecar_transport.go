@@ -42,13 +42,17 @@ var (
 	}
 	windowsProviderWorkerStarter              = startWindowsProviderWorker
 	windowsProviderDiagnosticWriter io.Writer = os.Stderr
+	windowsProviderDiagnostics                = newWindowsProviderDiagnosticQueue()
 )
 
 type windowsProviderProcessManager struct {
 	mu             sync.Mutex
 	worker         *windowsProviderWorker
+	retiringWorker *windowsProviderWorker
 	environmentKey string
-	startGate      chan struct{}
+	// A non-nil token retains a timed-out startup's worker until the caller
+	// can check its exit under mu. Bounded stop alone does not confirm exit.
+	startGate chan *windowsProviderWorker
 }
 
 type windowsProviderWorker struct {
@@ -153,6 +157,9 @@ func (manager *windowsProviderProcessManager) run(
 ) (*core.ProviderWireResponse, error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	if err := manager.retirementError(request.Operation); err != nil {
+		return nil, err
+	}
 
 	timeout := windowsProviderRuntimeTimeout(request)
 	deadline := time.Now().Add(timeout)
@@ -165,9 +172,13 @@ func (manager *windowsProviderProcessManager) run(
 		strings.Join(environment, "\x00")
 	if manager.worker == nil || manager.environmentKey != environmentKey {
 		manager.stopLocked()
+		if err := manager.retirementError(request.Operation); err != nil {
+			return nil, err
+		}
 		worker, startErr := manager.startWorkerWithin(
 			providerPath,
 			environment,
+			request.Operation,
 			deadline,
 			timeout,
 		)
@@ -194,9 +205,13 @@ func (manager *windowsProviderProcessManager) run(
 	if response.ProviderResetRequired {
 		manager.stopLocked()
 		if windowsProviderRequestCanRetryAfterReset(request, response) {
+			if err := manager.retirementError(request.Operation); err != nil {
+				return nil, err
+			}
 			worker, startErr := manager.startWorkerWithin(
 				providerPath,
 				environment,
+				request.Operation,
 				deadline,
 				timeout,
 			)
@@ -237,17 +252,25 @@ func windowsProviderRemainingTimeout(deadline time.Time) time.Duration {
 func (manager *windowsProviderProcessManager) startWorkerWithin(
 	path string,
 	environment []string,
+	operation core.ProviderWireOperation,
 	deadline time.Time,
 	timeout time.Duration,
 ) (*windowsProviderWorker, error) {
 	if manager.startGate == nil {
-		manager.startGate = make(chan struct{}, 1)
-		manager.startGate <- struct{}{}
+		manager.startGate = make(chan *windowsProviderWorker, 1)
+		manager.startGate <- nil
 	}
 	gateTimer := time.NewTimer(windowsProviderRemainingTimeout(deadline))
 	defer gateTimer.Stop()
 	select {
-	case <-manager.startGate:
+	case lateWorker := <-manager.startGate:
+		if lateWorker != nil {
+			manager.retiringWorker = lateWorker
+			if err := manager.retirementError(operation); err != nil {
+				manager.startGate <- nil
+				return nil, err
+			}
+		}
 	case <-gateTimer.C:
 		writeWindowsProviderLifecycleDiagnostic(
 			"start_provider",
@@ -255,17 +278,19 @@ func (manager *windowsProviderProcessManager) startWorkerWithin(
 			"startup gate deadline exceeded",
 		)
 		return nil, &core.RuntimeTimeoutError{
-			Duration: timeout,
-			Platform: "Windows",
-			Phase:    "start_provider",
+			Duration:    timeout,
+			Platform:    "Windows",
+			Phase:       "start_provider",
+			PreDispatch: true,
 		}
 	}
 
 	resultChannel := make(chan windowsProviderStartResult)
 	cancel := make(chan struct{})
 	go func() {
+		var abandonedWorker *windowsProviderWorker
 		defer func() {
-			manager.startGate <- struct{}{}
+			manager.startGate <- abandonedWorker
 		}()
 		worker, err := windowsProviderWorkerStarter(
 			path,
@@ -277,6 +302,7 @@ func (manager *windowsProviderProcessManager) startWorkerWithin(
 		case <-cancel:
 			if worker != nil {
 				worker.stop()
+				abandonedWorker = worker
 			}
 		}
 	}()
@@ -285,23 +311,7 @@ func (manager *windowsProviderProcessManager) startWorkerWithin(
 	defer startTimer.Stop()
 	select {
 	case result := <-resultChannel:
-		if !time.Now().Before(deadline) {
-			close(cancel)
-			if result.worker != nil {
-				result.worker.stop()
-			}
-			writeWindowsProviderLifecycleDiagnostic(
-				"start_provider",
-				timeout,
-				"provider startup completed after its deadline",
-			)
-			return nil, &core.RuntimeTimeoutError{
-				Duration: timeout,
-				Platform: "Windows",
-				Phase:    "start_provider",
-			}
-		}
-		return result.worker, result.err
+		return manager.acceptStartedWorker(result, deadline, timeout)
 	case <-startTimer.C:
 		close(cancel)
 		writeWindowsProviderLifecycleDiagnostic(
@@ -310,11 +320,34 @@ func (manager *windowsProviderProcessManager) startWorkerWithin(
 			"provider startup deadline exceeded",
 		)
 		return nil, &core.RuntimeTimeoutError{
-			Duration: timeout,
-			Platform: "Windows",
-			Phase:    "start_provider",
+			Duration:    timeout,
+			Platform:    "Windows",
+			Phase:       "start_provider",
+			PreDispatch: true,
 		}
 	}
+}
+
+func (manager *windowsProviderProcessManager) acceptStartedWorker(
+	result windowsProviderStartResult,
+	deadline time.Time,
+	timeout time.Duration,
+) (*windowsProviderWorker, error) {
+	if !time.Now().Before(deadline) {
+		manager.retireWorker(result.worker)
+		writeWindowsProviderLifecycleDiagnostic(
+			"start_provider",
+			timeout,
+			"provider startup completed after its deadline",
+		)
+		return nil, &core.RuntimeTimeoutError{
+			Duration:    timeout,
+			Platform:    "Windows",
+			Phase:       "start_provider",
+			PreDispatch: true,
+		}
+	}
+	return result.worker, result.err
 }
 
 func windowsProviderRequestCanRetryAfterReset(
@@ -365,8 +398,7 @@ func (manager *windowsProviderProcessManager) recordStderrLocked(
 	if len(data) == 0 {
 		return
 	}
-	fmt.Fprintf(
-		os.Stderr,
+	diagnostic := fmt.Sprintf(
 		"[computer-use windows-provider request=%s operation=%s "+
 			"stderr_bytes=%d stderr_truncated=%t "+
 			"transport_error=%q]\n%s\n",
@@ -377,14 +409,47 @@ func (manager *windowsProviderProcessManager) recordStderrLocked(
 		callErr.Error(),
 		data,
 	)
+	windowsProviderDiagnostics.write([]byte(diagnostic))
+}
+
+// Bounded teardown does not prove termination. Keep the old worker until its
+// wait channel confirms exit so a replacement cannot emit input concurrently.
+func (manager *windowsProviderProcessManager) retirementError(
+	operation core.ProviderWireOperation,
+) error {
+	if manager.retiringWorker == nil {
+		return nil
+	}
+	select {
+	case <-manager.retiringWorker.done:
+		manager.retiringWorker = nil
+		return nil
+	default:
+		return &core.RuntimeTransportError{
+			Platform:    "Windows",
+			Operation:   operation,
+			Phase:       "stop_provider",
+			RequestSent: false,
+			Cause:       errors.New("previous provider exit is unconfirmed; no new request was dispatched; stop automation until it exits"),
+		}
+	}
 }
 
 func (manager *windowsProviderProcessManager) stopLocked() {
-	if manager.worker != nil {
-		manager.worker.stop()
-	}
+	manager.retireWorker(manager.worker)
 	manager.worker = nil
 	manager.environmentKey = ""
+}
+
+func (manager *windowsProviderProcessManager) retireWorker(worker *windowsProviderWorker) {
+	if worker != nil {
+		worker.stop()
+		select {
+		case <-worker.done:
+		default:
+			manager.retiringWorker = worker
+		}
+	}
 }
 
 func shutdownWindowsProviderProcess() {
@@ -485,7 +550,7 @@ func writeWindowsProviderProcessDiagnostic(
 	if err != nil {
 		return
 	}
-	fmt.Fprintln(windowsProviderDiagnosticWriter, string(payload))
+	windowsProviderDiagnostics.write(append(payload, '\n'))
 }
 
 func writeWindowsProviderLifecycleDiagnostic(
@@ -503,7 +568,43 @@ func writeWindowsProviderLifecycleDiagnostic(
 	if err != nil {
 		return
 	}
-	fmt.Fprintln(windowsProviderDiagnosticWriter, string(payload))
+	windowsProviderDiagnostics.write(append(payload, '\n'))
+}
+
+type windowsProviderDiagnostic struct {
+	writer io.Writer
+	data   []byte
+}
+
+type windowsProviderDiagnosticQueue struct {
+	queue   chan windowsProviderDiagnostic
+	dropped atomic.Uint64
+}
+
+func newWindowsProviderDiagnosticQueue() *windowsProviderDiagnosticQueue {
+	sink := &windowsProviderDiagnosticQueue{
+		queue: make(chan windowsProviderDiagnostic, 8),
+	}
+	go func() {
+		for diagnostic := range sink.queue {
+			_, _ = diagnostic.writer.Write(diagnostic.data)
+			if dropped := sink.dropped.Swap(0); dropped > 0 {
+				_, _ = fmt.Fprintf(diagnostic.writer,
+					"{\"event\":\"windows_provider_diagnostics_dropped\",\"count\":%d}\n", dropped)
+			}
+		}
+	}()
+	return sink
+}
+
+func (sink *windowsProviderDiagnosticQueue) write(data []byte) {
+	// A client may stop consuming stderr. Diagnostic backpressure must not
+	// prevent request deadlines, provider pipe draining, or process teardown.
+	select {
+	case sink.queue <- windowsProviderDiagnostic{windowsProviderDiagnosticWriter, data}:
+	default:
+		sink.dropped.Add(1)
+	}
 }
 
 func (worker *windowsProviderWorker) wait() {

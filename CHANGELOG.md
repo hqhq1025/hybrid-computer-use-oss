@@ -10,6 +10,19 @@
   about 7 s for Qt dialogs. The provider asks the window manager to
   activate the window first and checks that the X11 active window is that
   window, not just a window of the same application.
+- Windows: `type` and `set_value` send Unicode key events instead of pasting
+  through the clipboard, so they no longer replace the clipboard or wait a
+  fixed half second; GUI keys wait for the application instead of 500 ms.
+- Windows: an observation reads each tree node and its facts in one UI
+  Automation call and reads the desktop's top-level windows once, so
+  Notepad, File Explorer, Settings and Edge observe three to five times
+  faster with the same tree.
+- Windows: observation reads stop at a shared 15-second budget and return
+  partial coverage instead of timing out (LibreOffice Calc), `apps` and observe
+  name LibreOffice windows whose accessibility bridge is not loaded, `close`
+  succeeds only when the window instance is gone. On every platform, an `act`
+  batch whose input ends with window waits reads only the window root between
+  its keys and reads the tree once at the end.
 - AX trees show a table cell's value after its name when the two differ,
   for example `cell "A1" = "Year"` in a spreadsheet, clipped to 40
   characters, so reading a sheet no longer needs `find`. A tree over its

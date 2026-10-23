@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 )
 
 // Match WindowsKeyMapping before a batch can emit its first input event.
@@ -24,13 +23,19 @@ var windowsKeyNames = func() map[string]bool {
 
 func validateWindowsKeypress(specification string) error {
 	for _, token := range strings.Split(specification, "+") {
-		normalized := strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(token)), "-", "_")
+		trimmed := strings.TrimSpace(token)
+		normalized := strings.ReplaceAll(strings.ToUpper(trimmed), "-", "_")
 		if windowsKeyNames[normalized] {
 			continue
 		}
-		// .NET char is one UTF-16 code unit, not a supplementary scalar.
-		if key, size := utf8.DecodeRuneInString(normalized); size == len(normalized) && size > 0 && key <= 0xffff {
-			continue
+		// One character maps to a virtual key only for ASCII letters,
+		// digits and the OEM punctuation keys the native mapping names.
+		if len(trimmed) == 1 {
+			key := trimmed[0]
+			if key >= 'a' && key <= 'z' || key >= 'A' && key <= 'Z' || key >= '0' && key <= '9' ||
+				strings.ContainsRune(";=,-./`[\\]'", rune(key)) {
+				continue
+			}
 		}
 		if strings.HasPrefix(normalized, "F") {
 			number, err := strconv.Atoi(strings.TrimSpace(normalized[1:]))

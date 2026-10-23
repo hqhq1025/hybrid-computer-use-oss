@@ -25,6 +25,18 @@
 
   <ItemGroup>
     <Compile
+      Include="../ComputerUse.Windows.Runtime/WindowsAccessibilityBridgeNote.cs"
+      Link="WindowsAccessibilityBridgeNote.cs" />
+    <Compile
+      Include="../ComputerUse.Windows.Runtime/WindowsProcessIdentity.cs"
+      Link="WindowsProcessIdentity.cs" />
+    <Compile
+      Include="../ComputerUse.Windows.Runtime/BoundedTreeDiscovery.cs"
+      Link="BoundedTreeDiscovery.cs" />
+    <Compile
+      Include="../ComputerUse.Windows.Runtime/CanonicalNodeIdentitySet.cs"
+      Link="CanonicalNodeIdentitySet.cs" />
+    <Compile
       Include="../ComputerUse.Windows.Runtime/ExactFocusSettlement.cs"
       Link="ExactFocusSettlement.cs" />
     <Compile

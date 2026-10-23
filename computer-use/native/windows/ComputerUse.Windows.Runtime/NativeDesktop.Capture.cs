@@ -7,30 +7,6 @@ namespace ComputerUse.Windows.Runtime;
 
 internal static partial class NativeDesktop
 {
-    internal static ScreenFrame Capture()
-    {
-        return Capture(DesktopBounds());
-    }
-
-    internal static ScreenFrame Capture(Rectangle requestedBounds)
-    {
-        if (!TryCapture(requestedBounds, out var frame) || frame is null)
-        {
-            throw new InvalidOperationException(
-                "requested_capture_bounds_unavailable");
-        }
-        return frame;
-    }
-
-    internal static ScreenFrame CaptureForSettling()
-    {
-        if (!TryCapture(DesktopBounds(), out var frame, includePixels: true) || frame is null)
-        {
-            throw new InvalidOperationException("requested_capture_bounds_unavailable");
-        }
-        return frame;
-    }
-
     internal static bool PixelsIdentical(ScreenFrame first, ScreenFrame second)
     {
         return first.OriginX == second.OriginX &&
@@ -40,44 +16,6 @@ internal static partial class NativeDesktop
             first.FrameId == second.FrameId &&
             first.Pixels.Length > 0 &&
             first.Pixels.AsSpan().SequenceEqual(second.Pixels);
-    }
-
-    internal static bool TryCapture(
-        Rectangle requestedBounds,
-        out ScreenFrame? frame,
-        bool includePixels = false)
-    {
-        if (!WindowsCaptureBounds.TryResolve(
-                DesktopBounds(),
-                requestedBounds,
-                out var bounds))
-        {
-            frame = null;
-            return false;
-        }
-        for (var attempt = 1; attempt <= CaptureLayoutRetryCount; attempt++)
-        {
-            var layoutBefore = CurrentLayout();
-            var candidate = CaptureFrame(bounds, layoutBefore.FrameId, includePixels);
-            var layoutAfter = CurrentLayout();
-            if (string.Equals(
-                    layoutBefore.FrameId,
-                    layoutAfter.FrameId,
-                    StringComparison.Ordinal))
-            {
-                RememberPublishedLayout(layoutBefore);
-                frame = candidate;
-                return true;
-            }
-            if (attempt < CaptureLayoutRetryCount)
-            {
-                Thread.Sleep(CaptureLayoutRetryMilliseconds);
-            }
-        }
-        throw new ProviderFailureException(
-            "desktop_layout_unstable",
-            "observation",
-            "Desktop layout changed during every bounded screenshot capture attempt.");
     }
 
     private static ScreenFrame CaptureFrame(

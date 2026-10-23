@@ -7,6 +7,7 @@ internal static partial class NativeDesktop
 {
     private const uint InputMouse = 0;
     private const uint InputKeyboard = 1;
+    private const uint KeyEventExtendedKey = 0x0001;
     private const uint KeyEventKeyUp = 0x0002;
     private const uint MouseMove = 0x0001;
     private const uint MouseLeftDown = 0x0002;
@@ -70,6 +71,25 @@ internal static partial class NativeDesktop
         }
         catch (ProviderFailureException error)
         {
+            if (error.InputEventsEmitted)
+            {
+                // A partial send can leave the button down. Release it and
+                // keep the original failure as the primary evidence.
+                try
+                {
+                    SendMouseFlag(up, data);
+                }
+                catch (ProviderFailureException releaseError)
+                {
+                    throw new ProviderFailureException(
+                        error.Code,
+                        error.Phase,
+                        $"{error.Message} Mouse-button release also failed: " +
+                            releaseError.Message,
+                        true,
+                        true);
+                }
+            }
             throw WithPriorInput(error);
         }
     }
@@ -107,6 +127,17 @@ internal static partial class NativeDesktop
             operationFailure = WithPriorInput(
                 error,
                 mutationUnknown: buttonDown || error.MutationUnknown);
+        }
+        catch (Exception error)
+        {
+            // A later point can fail validation after the button went down.
+            // Earlier input stays visible; the finally block releases it.
+            operationFailure = new ProviderFailureException(
+                "desktop_input_failed",
+                "execution",
+                error.Message,
+                true,
+                true);
         }
         finally
         {
@@ -295,6 +326,89 @@ internal static partial class NativeDesktop
         }
     }
 
+    private const uint KeyEventUnicode = 0x0004;
+    // Key events per SendInput call. A call is atomic for its events, and a
+    // chunk ends between two keys, never between a key's down and up event.
+    private const int MaxTextKeysPerSend = 64;
+    private const int TypedTextInputIdleTimeoutMilliseconds = 1000;
+
+    // Types text as Unicode key events. The clipboard is not used, so the
+    // text cannot be lost to a paste that runs after the clipboard is
+    // restored, and no settle delay is needed.
+    internal static void TypeText(string text)
+    {
+        var keys = TextKeys(text);
+        var sentAny = false;
+        for (var offset = 0; offset < keys.Count; offset += MaxTextKeysPerSend)
+        {
+            var chunk = new List<Input>(MaxTextKeysPerSend * 2);
+            foreach (var key in keys.Skip(offset).Take(MaxTextKeysPerSend))
+            {
+                chunk.Add(TextKeyInput(key, false));
+                chunk.Add(TextKeyInput(key, true));
+            }
+            try
+            {
+                SendChecked(chunk);
+                sentAny = true;
+            }
+            catch (ProviderFailureException error) when (sentAny)
+            {
+                throw WithPriorInput(error, mutationUnknown: true);
+            }
+        }
+        // A UI Automation call that reaches the application while typed keys
+        // are still queued can reorder them: Notepad turned "replaced text"
+        // into "replaced tttt" when value readback started at once. Return
+        // after the application has consumed the keys, within a bound.
+        WaitForForegroundInputIdle(TypedTextInputIdleTimeoutMilliseconds);
+    }
+
+    internal readonly record struct TextKey(ushort VirtualKey, char Unit);
+
+    // One key per UTF-16 unit. A line break or tab becomes the real Enter or
+    // Tab key, because edit controls ignore a Unicode CR, LF or tab; CRLF is
+    // one Enter.
+    internal static IReadOnlyList<TextKey> TextKeys(string text)
+    {
+        var keys = new List<TextKey>(text.Length);
+        for (var index = 0; index < text.Length; index++)
+        {
+            var unit = text[index];
+            if (unit == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+            {
+                continue;
+            }
+            keys.Add(unit switch
+            {
+                '\r' or '\n' => new TextKey(0x0D, '\0'),
+                '\t' => new TextKey(0x09, '\0'),
+                _ => new TextKey(0, unit),
+            });
+        }
+        return keys;
+    }
+
+    private static Input TextKeyInput(TextKey key, bool keyUp)
+    {
+        if (key.VirtualKey != 0)
+        {
+            return VirtualKeyInput(key.VirtualKey, keyUp);
+        }
+        return new Input
+        {
+            Type = InputKeyboard,
+            Union = new InputUnion
+            {
+                Keyboard = new KeyboardInput
+                {
+                    Scan = key.Unit,
+                    Flags = KeyEventUnicode | (keyUp ? KeyEventKeyUp : 0),
+                },
+            },
+        };
+    }
+
     private static Input VirtualKeyInput(ushort key, bool keyUp)
     {
         return new Input
@@ -305,7 +419,12 @@ internal static partial class NativeDesktop
                 Keyboard = new KeyboardInput
                 {
                     VirtualKey = key,
-                    Flags = keyUp ? KeyEventKeyUp : 0,
+                    // Navigation, Delete, Insert and Windows keys need the
+                    // extended flag on both edges; without it NumLock state
+                    // can turn them into keypad digits.
+                    Flags = (keyUp ? KeyEventKeyUp : 0) |
+                        (key is >= 0x21 and <= 0x28 or 0x2D or 0x2E or 0x5B or 0x5C
+                            ? KeyEventExtendedKey : 0),
                 },
             },
         };
@@ -418,10 +537,4 @@ internal static partial class NativeDesktop
         internal uint Time;
         internal nuint ExtraInfo;
     }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint SendInput(
-        uint inputCount,
-        [In] Input[] inputs,
-        int inputSize);
 }

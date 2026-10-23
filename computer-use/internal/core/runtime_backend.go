@@ -10,6 +10,9 @@ type RuntimeTimeoutError struct {
 	Duration time.Duration `json:"-"`
 	Phase    string        `json:"-"`
 	Platform string        `json:"-"`
+	// PreDispatch reports that the deadline passed before the request was
+	// written to a provider, so the timeout cannot have emitted input.
+	PreDispatch bool `json:"-"`
 }
 
 func (e *RuntimeTimeoutError) Error() string {

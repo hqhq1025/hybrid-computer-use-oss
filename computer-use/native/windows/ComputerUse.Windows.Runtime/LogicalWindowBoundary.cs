@@ -8,6 +8,12 @@ internal sealed class WindowOwnershipUnavailableException : Exception
         : base(message, inner) { }
 }
 
+internal sealed class ObservationDeadlineExceededException : Exception
+{
+    internal ObservationDeadlineExceededException()
+        : base("Observation sample deadline exceeded.") { }
+}
+
 internal readonly record struct NativeHandleRead(bool Supported, long Value)
 {
     internal static NativeHandleRead Read(Func<NativeHandleRead> read)
@@ -37,8 +43,13 @@ internal sealed class OwnershipProbeBudget
         if (limit < 1) { throw new ArgumentOutOfRangeException(nameof(limit)); }
         _limit = limit;
         _timeout = timeout;
-        var watch = Stopwatch.StartNew();
-        _elapsed = elapsed ?? (() => watch.Elapsed);
+        // A caller can share one clock across ownership, traversal and retries.
+        if (elapsed is null)
+        {
+            var watch = Stopwatch.StartNew();
+            elapsed = () => watch.Elapsed;
+        }
+        _elapsed = elapsed;
     }
 
     internal void Take()
@@ -53,9 +64,9 @@ internal sealed class OwnershipProbeBudget
 
     internal void CheckTime()
     {
-        if (_elapsed() > _timeout)
+        if (_elapsed() >= _timeout)
         {
-            throw new WindowOwnershipUnavailableException("Ownership sample deadline exceeded.");
+            throw new ObservationDeadlineExceededException();
         }
     }
 }
@@ -229,6 +240,7 @@ internal sealed class LogicalWindowBoundary<T> where T : class
             }
             return owner.Value;
         }
+        catch (ObservationDeadlineExceededException) { throw; }
         catch (WindowOwnershipUnavailableException) { throw; }
         catch (Exception error)
         {
@@ -236,6 +248,19 @@ internal sealed class LogicalWindowBoundary<T> where T : class
                 "UIA ownership could not be read.", error);
         }
     }
+}
+
+internal static class InheritedWindowOwnership
+{
+    // A node without its own native window that is not a window itself
+    // belongs to its parent's logical window; LogicalWindowBoundary.Owner
+    // would walk to the parent and return the same answer. Roots, nodes with
+    // a native handle and semantic windows need the ownership probe.
+    internal static bool? FromParent(
+        bool? parentOwned, long nativeWindowHandle, bool semanticWindow) =>
+        parentOwned is bool owned && nativeWindowHandle == 0 && !semanticWindow
+            ? owned
+            : null;
 }
 
 internal static class WindowOwnershipObservation
@@ -262,15 +287,50 @@ internal static class LogicalWindowTraversal
         Func<T, int[], int, bool> emit,
         Func<T, T?> firstChild,
         Func<T, T?> nextSibling,
-        Action<string> gap) where T : class
+        Action<string> gap,
+        int rootIndexOffset = 0) where T : class
     {
+        var level = new List<(T Node, int[] Path)>();
         for (var index = 0; index < roots.Count; index++)
         {
-            if (visits.Remaining == 0) { gap("node_budget"); break; }
-            Walk(roots[index], new[] { index }, 0);
+            if (!CanRead()) { return; }
+            var path = new[] { checked(rootIndexOffset + index) };
+            if (Emit(roots[index], path, 0)) { level.Add((roots[index], path)); }
+        }
+        for (var depth = 0; level.Count > 0; depth++)
+        {
+            if (depth >= maxDepth) { gap("depth_budget"); return; }
+            var nextLevel = new List<(T Node, int[] Path)>();
+            var cursors = new Queue<(T Parent, int[] Path, T? Previous, int Index)>(
+                level.Select(parent => (parent.Node, parent.Path, (T?)null, 0)));
+            // Alternate parent branches so a wide child chain cannot consume
+            // this layer's entire budget before another branch gets one child.
+            while (cursors.TryDequeue(out var cursor))
+            {
+                if (!CanRead()) { return; }
+                var child = cursor.Previous is null
+                    ? firstChild(cursor.Parent)
+                    : nextSibling(cursor.Previous);
+                visits.CheckTime();
+                if (child is null) { continue; }
+                var path = new int[cursor.Path.Length + 1];
+                cursor.Path.CopyTo(path, 0);
+                path[^1] = cursor.Index;
+                if (Emit(child, path, depth + 1)) { nextLevel.Add((child, path)); }
+                cursors.Enqueue((cursor.Parent, cursor.Path, child, cursor.Index + 1));
+            }
+            level = nextLevel;
         }
 
-        void Walk(T node, int[] path, int depth)
+        bool CanRead()
+        {
+            visits.CheckTime();
+            if (visits.Remaining > 0) { return true; }
+            gap("node_budget");
+            return false;
+        }
+
+        bool Emit(T node, int[] path, int depth)
         {
             visits.Take();
             bool owned;
@@ -280,24 +340,14 @@ internal static class LogicalWindowTraversal
                 // An ambiguous candidate must not erase independently verified
                 // controls. The incomplete sample cannot prove uniqueness.
                 gap("ownership_unavailable");
-                return;
-            }
-            if (!owned || !emit(node, path, depth)) { return; }
-            // Stream siblings rather than prefetching the remaining budget at
-            // every depth. Rejected branches also consume the global budget.
-            var child = firstChild(node);
-            visits.CheckTime();
-            for (var index = 0; child is not null; index++)
-            {
-                if (visits.Remaining == 0) { gap("node_budget"); return; }
-                if (depth >= maxDepth) { gap("depth_budget"); return; }
-                var childPath = new int[path.Length + 1];
-                path.CopyTo(childPath, 0);
-                childPath[^1] = index;
-                Walk(child, childPath, depth + 1);
-                child = nextSibling(child);
                 visits.CheckTime();
+                return false;
             }
+            visits.CheckTime();
+            if (!owned) { return false; }
+            var emitted = emit(node, path, depth);
+            visits.CheckTime();
+            return emitted;
         }
     }
 }

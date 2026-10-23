@@ -92,14 +92,12 @@ internal sealed partial class UiaProvider
 
     private static string ProcessGeneration(Process process)
     {
-        try
-        {
-            return process.StartTime.ToUniversalTime().Ticks.ToString();
-        }
-        catch
-        {
-            return $"pid-{process.Id}";
-        }
+        return WindowsProcessIdentity.ReadGeneration(() => process.StartTime) ??
+            throw new ProviderFailureException(
+                "app_identity_unavailable", "precondition",
+                "The application process generation could not be read; no reliable reference can be issued.",
+                factsComplete: false,
+                subject: "app");
     }
 
     private static void AddAction(JsonArray actions, bool available, string name)
