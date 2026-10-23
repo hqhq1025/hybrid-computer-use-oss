@@ -8,18 +8,18 @@ func permissionDiagnosticsPreserveEachRuntimeResult(
     let accessibility = grantedMask & 1 != 0
     let eventPosting = grantedMask & 2 != 0
     let screenCapture = grantedMask & 4 != 0
-    var probes: [SystemPermissionKind] = []
+    var probes: [String] = []
     let diagnostics = PermissionDiagnostics.current(
         accessibility: {
-            probes.append(.accessibility)
+            probes.append("accessibility")
             return accessibility
         },
         eventPosting: {
-            probes.append(.eventPosting)
+            probes.append("eventPosting")
             return eventPosting
         },
         screenCapture: {
-            probes.append(.screenRecording)
+            probes.append("screenCapture")
             return screenCapture
         }
     )
@@ -27,7 +27,7 @@ func permissionDiagnosticsPreserveEachRuntimeResult(
     #expect(diagnostics.accessibilityTrusted == accessibility)
     #expect(diagnostics.eventPostingGranted == eventPosting)
     #expect(diagnostics.screenCaptureGranted == screenCapture)
-    #expect(probes == SystemPermissionKind.allCases)
+    #expect(probes == ["accessibility", "eventPosting", "screenCapture"])
 }
 
 @Test

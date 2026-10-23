@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 extension ComputerUseRuntimeBridge {
-    func executeGUI(_ operation: [String: Any]) async throws -> [String: Any] {
+    func executeGUI(_ operation: [String: Any]) throws -> [String: Any] {
         let actions = operation["actions"] as? [[String: Any]] ?? []
         if actions.count == 1, string(actions[0]["type"]).lowercased() == "zoom" {
             return executeDesktopZoom(actions[0], frameID: string(operation["frame_id"]))
@@ -55,7 +55,7 @@ extension ComputerUseRuntimeBridge {
                 continue
             }
             if type == "wait" {
-                try await Task.sleep(for: .seconds(1))
+                Thread.sleep(forTimeInterval: 1)
                 previousActionType = type
                 continue
             }
@@ -63,7 +63,7 @@ extension ComputerUseRuntimeBridge {
                 previousActionType: previousActionType,
                 currentActionType: type
             ) {
-                try await Task.sleep(for: .milliseconds(120))
+                Thread.sleep(forTimeInterval: 0.12)
             }
             if guiActionUsesCoordinates(type) {
                 let live = desktopLayout()

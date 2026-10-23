@@ -46,19 +46,6 @@ extension ComputerUseService {
         return route
     }
 
-    public func drag(app query: String, fromX: Double, fromY: Double, toX: Double, toY: Double) throws -> ToolCallResult {
-        let snapshot = try currentSnapshot(for: query)
-        let start = try windowPointToGlobalPoint(snapshot: snapshot, point: CGPoint(x: fromX, y: fromY))
-        let end = try windowPointToGlobalPoint(snapshot: snapshot, point: CGPoint(x: toX, y: toY))
-        try performDragEvent(
-            from: start,
-            to: end,
-            targetDescription: "from=(\(Int(fromX)), \(Int(fromY))) to=(\(Int(toX)), \(Int(toY)))",
-            snapshot: snapshot
-        )
-        return snapshotResult(for: try refreshSnapshot(for: query), style: .actionResult)
-    }
-
     public struct TextInputDispatchResult: Sendable {
         public let route: String
         public let fallbackUsed: Bool

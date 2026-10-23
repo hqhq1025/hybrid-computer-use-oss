@@ -19,32 +19,17 @@ public final class ComputerUseRuntimeBridge: @unchecked Sendable {
 
     public func execute(_ operation: [String: Any]) async -> [String: Any] {
         let tool = string(operation["tool"])
-        if tool == "gui" {
-            do {
-                return try await executeGUI(operation)
-            } catch {
-                return runtimeFailureResult(error)
+        do {
+            return try await AccessibilityThread.shared.run(
+                timeout: providerReadOnlyToolNeedsRuntimeBound(tool)
+                    ? accessibilityReadTimeout : nil
+            ) {
+                tool == "gui"
+                    ? try self.executeGUI(operation)
+                    : try self.executeSynchronousThrowing(operation)
             }
-        }
-        if providerReadOnlyToolNeedsRuntimeBound(tool) {
-            do {
-                return try BlockingSynchronousBridge.run(
-                    timeout: accessibilityReadTimeout
-                ) {
-                    try autoreleasepool {
-                        try self.executeSynchronousThrowing(operation)
-                    }
-                }
-            } catch {
-                return runtimeFailureResult(error)
-            }
-        }
-        return autoreleasepool {
-            do {
-                return try executeSynchronousThrowing(operation)
-            } catch {
-                return runtimeFailureResult(error)
-            }
+        } catch {
+            return runtimeFailureResult(error)
         }
     }
 
@@ -290,41 +275,6 @@ func providerReadOnlyToolNeedsRuntimeBound(_ tool: String) -> Bool {
         .contains(tool)
 }
 
-private final class SynchronousOperationBox<T>: @unchecked Sendable {
-    let operation: () throws -> T
-    var result: Result<T, Error>?
-
-    init(operation: @escaping () throws -> T) {
-        self.operation = operation
-    }
-}
-
-enum BlockingSynchronousBridge {
-    static func run<T>(
-        timeout: TimeInterval,
-        _ operation: @escaping () throws -> T
-    ) throws -> T {
-        let semaphore = DispatchSemaphore(value: 0)
-        let box = SynchronousOperationBox(operation: operation)
-        DispatchQueue.global(qos: .userInitiated).async {
-            box.result = Result {
-                try box.operation()
-            }
-            semaphore.signal()
-        }
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            throw ComputerUseError.providerResetRequired(
-                "macOS accessibility read timed out after \(timeout) seconds. The native provider must restart before another request."
-            )
-        }
-        return try box.result?.get() ?? {
-            throw ComputerUseError.message(
-                "macOS accessibility read finished without producing a result."
-            )
-        }()
-    }
-}
-
 func runtimeFailureResult(_ error: Error) -> [String: Any] {
     let error = normalizedScreenCaptureError(error)
     let message = (error as? LocalizedError)?.errorDescription
@@ -400,35 +350,6 @@ func runtimeFailureResult(_ error: Error) -> [String: Any] {
     }
     return result
 }
-
-func validateMacProviderObjectAliases(
-    _ records: [ElementRecord],
-    objectHash: (AXUIElement) -> CFHashCode = { CFHash($0) },
-    objectsEqual: (AXUIElement, AXUIElement) -> Bool = { CFEqual($0, $1) }
-) throws {
-    var objectsByHash: [CFHashCode: ElementRecord] = [:]
-    for record in records {
-        guard !record.isSyntheticText, let element = record.element else {
-            continue
-        }
-        let hash = objectHash(element)
-        if let previous = objectsByHash[hash], let previousElement = previous.element {
-            guard objectsEqual(previousElement, element) else {
-                macProviderAliasConflictDiagnostic(previous, record)
-                throw ComputerUseError.stateUnavailable(
-                    "provider_identity_conflict: distinct AX objects share one provider hash; snapshot rejected."
-                )
-            }
-        } else {
-            objectsByHash[hash] = record
-        }
-    }
-}
-
-private let providerAliasLogger = Logger(
-    subsystem: "org.computer-use.provider",
-    category: "provider-alias"
-)
 
 private let providerFailureLogger = Logger(
     subsystem: "org.computer-use.provider",
@@ -572,57 +493,6 @@ func providerAmbiguityFacts(
     ]
 }
 
-func macProviderAliasConflictFacts(
-    _ left: ElementRecord,
-    _ right: ElementRecord
-) -> [String: Any] {
-    func facts(_ record: ElementRecord) -> [String: Any] {
-        var result: [String: Any] = [
-            "index": record.index,
-            "runtime_path": Array(record.runtimeID.prefix(64)),
-            "synthetic": record.isSyntheticText,
-        ]
-        guard let element = record.element else {
-            result["missing"] = true
-            return result
-        }
-        var owner: pid_t = 0
-        result["pid_status"] = Int(AXUIElementGetPid(element, &owner).rawValue)
-        result["pid"] = Int(owner)
-        result["hash"] = String(CFHash(element))
-        result["cf_type"] = String(CFGetTypeID(element))
-        var role: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-        result["role_status"] = Int(status.rawValue)
-        if let name = role as? String {
-            // Role is a protocol token, never a title, value or description.
-            result["role"] = String(name.prefix(96))
-        }
-        return result
-    }
-    var result: [String: Any] = ["left": facts(left), "right": facts(right)]
-    if let lhs = left.element, let rhs = right.element {
-        result["equal_forward"] = CFEqual(lhs, rhs)
-        result["equal_reverse"] = CFEqual(rhs, lhs)
-        result["same_wrapper"] = lhs === rhs
-    }
-    return result
-}
-
-private func macProviderAliasConflictDiagnostic(_ left: ElementRecord, _ right: ElementRecord) {
-    let context = Thread.current.threadDictionary
-    guard let request = context["computer-use.liveness.request"] as? String,
-          !request.isEmpty else { return }
-    var facts = macProviderAliasConflictFacts(left, right)
-    facts["request_id"] = String(request.prefix(128))
-    facts["phase"] = String((context["computer-use.liveness.phase"] as? String ?? "").prefix(64))
-    facts["provider_pid"] = Int(getpid())
-    guard let data = try? JSONSerialization.data(withJSONObject: facts, options: [.sortedKeys]),
-          data.count <= 4096,
-          let json = String(data: data, encoding: .utf8) else { return }
-    providerAliasLogger.notice("\(json, privacy: .public)")
-}
-
 func macProviderObjectPath(_ record: ElementRecord) -> String {
     guard let element = record.element else {
         return "missing:\(record.index)"
@@ -631,31 +501,6 @@ func macProviderObjectPath(_ record: ElementRecord) -> String {
         return "synthetic:\(record.index):\(CFHash(element))"
     }
     return record.boundProviderObjectPath ?? ""
-}
-
-struct ParsedTreeLine {
-    let index: Int
-    let role: String
-    let name: String
-}
-
-func parseTreeLine(_ line: String) -> ParsedTreeLine? {
-    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-    let parts = trimmed.split(maxSplits: 2, whereSeparator: \.isWhitespace)
-    guard parts.count >= 2, let index = Int(parts[0]) else {
-        return nil
-    }
-    let remainder = parts.count > 2 ? String(parts[2]) : ""
-    let name: String
-    if let first = remainder.firstIndex(of: "\""),
-       let last = remainder.lastIndex(of: "\""),
-       first < last
-    {
-        name = String(remainder[remainder.index(after: first)..<last])
-    } else {
-        name = remainder
-    }
-    return ParsedTreeLine(index: index, role: String(parts[1]), name: name)
 }
 
 func imageDimensions(_ data: Data) -> (width: Int, height: Int)? {

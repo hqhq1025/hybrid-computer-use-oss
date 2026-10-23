@@ -7,13 +7,12 @@ from .foundation import (
     MAX_DEPTH,
     MAX_ELEMENTS,
     TREE_DEADLINE_SECONDS,
-    extents,
     safe,
 )
 from .ax_snapshot import render_tree
 from .ax_node_properties import positive_int
 from .ax_records import StableIndexer
-from .x11_windows import window_instance_handle
+from .x11_windows import window_bounds, window_instance_handle
 from .ref_continuity import (
     ambiguity_candidate,
     deduplicate_provider_records,
@@ -50,7 +49,7 @@ def _lightweight_semantic_scan(
         candidate_bounds = (
             bounds
             if candidate_index == window_index and candidate_window is window
-            else extents(candidate_window)
+            else window_bounds(app, candidate_index, candidate_window)
         )
         if candidate_bounds is None:
             scan_incomplete = True
@@ -182,7 +181,7 @@ def _render_semantic_scan(
         candidate_bounds = (
             bounds
             if candidate_index == window_index and candidate_window is window
-            else extents(candidate_window)
+            else window_bounds(app, candidate_index, candidate_window)
         )
         if candidate_bounds is None:
             scan_incomplete = True

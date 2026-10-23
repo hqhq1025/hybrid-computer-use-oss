@@ -2,8 +2,7 @@
 
 A drop-down is a combo box or list box whose options are its descendants.
 Choosing an option succeeds only when the drop-down reads back the choice:
-the option's SELECTED state, or for a combo box that names itself after its
-choice (GTK, Qt), that name.
+the option's SELECTED state, or the toolkit's committed value (GTK, Qt).
 """
 
 from collections import deque
@@ -13,7 +12,6 @@ from .foundation import (
     Atspi,
     FIND_FIRST_BUDGET,
     MAX_CHILD_FANOUT,
-    OBJECT_REPLACEMENT,
     OperationFailure,
     node_name,
     node_role,
@@ -24,6 +22,7 @@ from .foundation import (
     state_contains,
 )
 from .ax_records import gtk_combo_partner
+from .ax_node_properties import committed_dropdown_value
 from .ax_actions import send_key
 from .ax_select import (
     _failure,
@@ -142,19 +141,6 @@ def option_name(option):
     return str(name).strip()
 
 
-def _shown_choice(node):
-    """Return the text a drop-down shows for its current choice, or "".
-
-    GTK and Qt combo boxes name themselves after the current choice. A
-    browser <select> is named by its label and its own text is U+FFFC, so
-    there this returns the label; callers compare it with the option names.
-    """
-    name = option_name(node)
-    if name:
-        return name
-    return text_between(node, 0, -1).replace(OBJECT_REPLACEMENT, "").strip()
-
-
 def _popup_open(combo, option):
     """Return True while the popup list holding ``option`` is on screen."""
     if state_contains(combo, Atspi.StateType.EXPANDABLE):
@@ -229,8 +215,8 @@ def select_dropdown_option(node, text, window=None):
     own Selection.select_child (GTK sets the active item through it), then
     the option container's Selection.select_child (Firefox accepts it).
 
-    A combo box that shows its choice (GTK and Qt name themselves after it)
-    succeeds only when it shows the option afterwards; otherwise the
+    A combo box with committed-value readback (GTK and Qt) succeeds only
+    when that value matches the option afterwards; otherwise the
     option's SELECTED state is the evidence. When neither route changes the
     shown choice, the popup's own commit path is used: open it, move its
     current item to the option and press Return (Qt). A LibreOffice
@@ -252,12 +238,11 @@ def select_dropdown_option(node, text, window=None):
                 ", ".join(_quote(name) for name in names[:30]) or "none readable"),
             code="invalid_argument")
     option = matches[0]
-    shows_choice = (node_role(node) == "combo box" and _shown_choice(node)
-                    in {option_name(candidate) for candidate in options})
+    shows_choice = committed_dropdown_value(node) is not None
 
     def committed():
         if shows_choice:
-            return _shown_choice(node) == wanted
+            return committed_dropdown_value(node) == wanted
         return _option_selected(option)
 
     if committed():
@@ -291,7 +276,7 @@ def select_dropdown_option(node, text, window=None):
             "select_unverified: the drop-down shows {} after choosing {}; "
             "its choice may have changed. Open it, then press Return on the "
             "option or click it with the GUI.".format(
-                _quote(_shown_choice(node)), _quote(text)),
+                _quote(committed_dropdown_value(node)), _quote(text)),
             code="effect_unknown", emitted=_dropdown_input_emitted(), phase="readback")
     if not _dropdown_input_emitted():
         raise _failure(

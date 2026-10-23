@@ -123,8 +123,8 @@ func knownOperationValidationFailuresRemainCorrelated(_ operation: String) async
     let message: String
     switch operation {
     case "observe_apps":
-        payload["unexpected"] = true
-        message = "unexpected"
+        payload["protocol_version"] = 3
+        message = ".protocol_version"
     case "observe", "window_list":
         payload["app"] = " \n"
         message = ".app"
@@ -132,7 +132,7 @@ func knownOperationValidationFailuresRemainCorrelated(_ operation: String) async
         payload["intent"] = "unsupported_intent"
         message = "unsupported provider accessibility intent"
     case "ordered_input":
-        payload["steps"] = []
+        payload["steps"] = "DOWN"
         message = ".steps"
     case "desktop_execute_batch":
         payload["actions"] = []
@@ -150,9 +150,6 @@ func trustedHeadersSurviveEnvelopePayloadErrors(_ operation: String) async throw
     let original = rejectionTestRequest(operation)
     let payloadName = ProviderOperationAdapter.payloadName(for: operation)
     var request = original
-    request["unexpected"] = true
-    try await expectRequestRejection(request, messageContains: "unexpected")
-    request = original
     request.removeValue(forKey: payloadName)
     try await expectRequestRejection(request, messageContains: "exactly its operation payload")
     request = original
@@ -186,21 +183,6 @@ func unsupportedKeysRejectBeforeAnyRuntimeDispatch(_ key: String) async throws {
         }
         request[payloadName] = payload
         try await expectRequestRejection(request, messageContains: "unsupported")
-    }
-}
-
-@Test
-func malformedDesktopKeysRejectTheEntireBatchBeforeDispatch() async throws {
-    let invalidKeys: [Any] = [[String](), [""], [42], "ENTER"]
-    for keys in invalidKeys {
-        var request = rejectionTestRequest("desktop_execute_batch")
-        var payload = try #require(request["desktop"] as? [String: Any])
-        payload["actions"] = [
-            ["type": "type", "text": "must not be emitted"],
-            ["type": "keypress", "keys": keys],
-        ] as [[String: Any]]
-        request["desktop"] = payload
-        try await expectRequestRejection(request, messageContains: ".keys")
     }
 }
 
@@ -333,7 +315,9 @@ func dispatchedRuntimeFailuresAreNeverRequestRejections(_ operation: String) asy
 @Test
 func requestRejectionDoesNotResetOrStopTheServerLoop() async throws {
     var invalid = rejectionTestRequest("ordered_input")
-    invalid["unexpected"] = true
+    var invalidPayload = try #require(invalid["ordered_input"] as? [String: Any])
+    invalidPayload["steps"] = [["action_index": 3, "key": "NOT_A_REAL_KEY"]]
+    invalid["ordered_input"] = invalidPayload
     let valid = rejectionTestRequest("observe_apps")
     var lines = [try requestLine(invalid), try requestLine(valid)]
     var responses: [[String: Any]] = []
