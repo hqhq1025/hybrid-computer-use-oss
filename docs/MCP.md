@@ -53,19 +53,61 @@ DISPLAY
 XAUTHORITY
 XDG_RUNTIME_DIR
 DBUS_SESSION_BUS_ADDRESS
+GTK_IM_MODULE
+QT_IM_MODULE
+XMODIFIERS
 ```
 
 The provider needs Python 3 with PyGObject and the AT-SPI, GTK and GdkPixbuf
-typelibs, plus `xdotool`, `wmctrl` and `x11-utils`. On Debian or Ubuntu:
+typelibs, plus `xdotool`, `wmctrl` and `x11-utils`. The IBus typelib and
+packages are optional; they enable input-method keyboard typing. On Debian or
+Ubuntu:
 
 ```bash
 sudo apt-get install python3 python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 \
-  gir1.2-gdkpixbuf-2.0 xdotool wmctrl x11-utils
+  gir1.2-gdkpixbuf-2.0 gir1.2-ibus-1.0 ibus ibus-gtk ibus-gtk3 \
+  xdotool wmctrl x11-utils
 ```
 
 When `DISPLAY`, `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` is missing,
 for example under `docker exec`, the server finds the same user's session
 from `/run/user/<uid>` and the desktop processes.
+
+AX editable-text writes use the application's accessibility interface when
+it is available. Keyboard text is typed in one of two ways:
+
+| Desktop state | Non-ASCII characters | Line feed and tab |
+| --- | --- | --- |
+| IBus Simple input context active, normally the desktop's `xkb` input source | Composed through the input method | Composed as text characters |
+| No IBus Simple input context | Typed as key events, one character at a time | Typed as Enter and Tab keys |
+
+ASCII text without line feeds or tabs is typed as key events on both
+desktops. When AX falls back to keyboard typing, its note says which way the
+text was typed. GUI results do not include notes.
+
+To use the input method, applications must inherit the desktop's
+input-method environment. Existing application processes may need a restart
+after that environment is corrected.
+
+Input-method keyboard typing waits for the input method to acknowledge composition,
+each hex digit and each committed character. It does not change the clipboard or input
+source. If the input context cannot compose text, the operation stops. Failure
+after the initial `Ctrl+Shift+U` prefix reports partial input and can leave a
+visible preedit. Inspect the field before retrying; the provider does not
+send an automatic Escape that could cancel unrelated application state.
+The provider does not retry partial input-method text with key events.
+Commit acknowledgements prove input-method delivery, not the resulting field
+contents. Applications can filter literal control characters such as line feeds
+and tabs. The input method composes these characters as text; it does not replace
+them with Enter or Tab keys. Use `keypress` when the intended operation is an Enter or Tab key,
+and inspect the resulting application state.
+
+Without the input method, each non-ASCII character uses a temporary X keymap
+binding, and the provider waits 35 ms after each one so that the application
+reads the binding before the next character reuses it. A call accepts at most
+500 non-ASCII characters. An Enter or Tab key keeps its normal effect in the
+focused control, for example submitting a form or moving focus. Text that
+contains NUL or an unpaired surrogate fails before any input on this path.
 
 ### Accessibility on Linux
 
@@ -411,6 +453,31 @@ waiting only, not total call duration. The forms are:
 | `query` | An element in any visible window of the batch's application, including dialogs and popups, matches as `find` matches. |
 | `ref` with `value`, `state` or `text` | That one element has the value, state or text. |
 | `text` alone | The text appears anywhere in the batch window. |
+| `settle:true` | The UI changed after the input step before the wait and then stayed the same for 0.4 s. |
+
+`settle` needs no prediction of the next state. Use it after an action that
+changes the UI when you do not know what the UI becomes, for example the
+title of the dialog it opens. A change is a window that opens, closes or
+changes its title, focus that moves to another window, a change in the tree
+of the batch window (of the window that took focus, once focus moved), or a
+pixel change that the action's own readback reports. Keyboard focus that
+moves inside one window, and a press or hover on an element, do not count: a
+click sets them even when the application ignores it. Each poll reads the
+window list and one window tree. On Linux the provider reuses an unchanged
+tree when the application sent no accessibility event, so the polls are
+cheap while the UI is quiet. The step's line names what changed: opened and
+closed windows, the focus move, and the number of tree nodes that appeared,
+disappeared or changed. If nothing changed by the timeout, the step fails
+with `wait_timeout` and says "no change", because the steps after it assume
+a change. A UI that keeps changing, such as a clock or a progress bar,
+passes at the timeout with a note. An action whose result looks the same as
+the state before it, such as reloading an unchanged page, reports no change.
+The wait returns at the first quiet period, so content that arrives later
+than 0.4 s after the first change, such as a page that fills in a list after
+it loads, can still be missing; wait for it with `text` or `query`. A slow
+operation, such as opening a large file, can take longer than the default
+5000 ms; give it a longer `timeout_ms`. `settle` must follow an input step
+of the same `act` and takes no `gone`.
 
 `gone:true` waits for absence; an exited application has no window. On
 timeout the step fails with `wait_timeout`, the message says what was seen or
@@ -418,7 +485,8 @@ why the state could not be read, and the current window refs and nearby
 elements follow before diagnostic detail. A read that is incomplete keeps
 polling until the timeout, and a failed window read never proves that a
 window closed. After a `window` wait, keys and text without `ref` go to that
-window. An `act` with only `wait` steps waits without input.
+window. After a `settle` wait that saw focus move to another window, they go
+to that window. An `act` with only `wait` steps waits without input.
 
 ### `select` steps
 

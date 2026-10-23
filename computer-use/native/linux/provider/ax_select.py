@@ -24,14 +24,18 @@ import time
 
 from .foundation import (
     Atspi,
+    OBJECT_REPLACEMENT,
     OperationFailure,
     node_name,
     node_role,
+    provider_bus_name,
+    provider_identity_path,
     provider_object_path,
     safe,
     state_contains,
 )
 from .ax_actions import send_key
+from .ax_node_properties import embedded_editor_nodes
 from .input_primitives import require_window_focus
 
 # Each ctrl+shift+Down extends a Writer selection by one paragraph; the
@@ -125,6 +129,55 @@ def _selection_container(node):
     return parent
 
 
+def _same_selection_item(first, second):
+    if first is second:
+        return first is not None
+    if first is None or second is None:
+        return False
+    identity = provider_identity_path(first)
+    return bool(identity and provider_bus_name(first) == provider_bus_name(second)
+                and identity == provider_identity_path(second))
+
+
+def _selection_item_owner(node):
+    """Resolve selectable cell renderers to their owning Selection child.
+
+    A table cell can contain separate icon and text cell renderers. Those
+    renderers belong to one anonymous selectable cell; its index, rather
+    than the text renderer's index, is owned by the table's Selection API.
+    """
+    current, chain = node, []
+    for _ in range(8):
+        parent = safe(current.get_parent)
+        index = safe(current.get_index_in_parent)
+        if parent is None or index is None or index < 0:
+            break
+        indexed = safe(lambda: parent.get_child_at_index(index))
+        if not _same_selection_item(current, indexed):
+            break
+        chain.append((current, parent, index))
+        if safe(parent.get_selection_iface) is not None:
+            return parent, current, index, chain
+        if (node_role(current) not in ("table cell", "cell")
+                or node_role(parent) not in ("table cell", "cell")
+                or node_name(parent)
+                or not state_contains(current, Atspi.StateType.SELECTABLE)
+                or not state_contains(parent, Atspi.StateType.SELECTABLE)):
+            break
+        current = parent
+    return None
+
+
+def _selection_chain_current(chain):
+    return all(
+        _same_selection_item(safe(child.get_parent), parent)
+        and safe(child.get_index_in_parent) == index
+        and _same_selection_item(
+            safe(lambda: parent.get_child_at_index(index)), child)
+        for child, parent, index in chain
+    )
+
+
 # ---------------------------------------------------------------------------
 # Text inside one element
 
@@ -174,6 +227,30 @@ def select_text_range(node, start, end):
             "may have changed.".format(start, end, spans[0]),
             code="effect_unknown", emitted=True, phase="readback")
     return spans[0]
+
+
+def _selection_text_owners(element, content):
+    """Map displayed editor text to the native objects owning its offsets."""
+    if not content or content.strip(OBJECT_REPLACEMENT):
+        return content, [(element, 0, len(content))]
+    nodes = embedded_editor_nodes(element)
+    if not nodes or len(nodes) != len(content):
+        raise _failure(
+            "select_unavailable: the embedded editor text could not be read "
+            "completely; no input was emitted.")
+    lines, owners = [], []
+    offset = 0
+    for node in nodes:
+        iface = _text_iface(node)
+        line = safe(lambda: Atspi.Text.get_text(iface, 0, -1))
+        if not isinstance(line, str) or OBJECT_REPLACEMENT in line:
+            raise _failure(
+                "select_unavailable: an embedded text object is unreadable "
+                "or contains nested objects; no input was emitted.")
+        lines.append(line)
+        owners.append((node, offset, offset + len(line)))
+        offset += len(line) + 1
+    return "\n".join(lines), owners
 
 
 # ---------------------------------------------------------------------------
@@ -410,23 +487,31 @@ def _selected_cell_indices(container):
 
 def select_item(node):
     """Select one child of a Selection container; return True when read back."""
-    container = _selection_container(node)
-    if container is None:
+    owner = _selection_item_owner(node)
+    if owner is None:
         raise _failure(
             "select_unavailable: the element's container does not support "
             "selection; no input was emitted.")
-    index = safe(lambda: node.get_index_in_parent())
-    if index is None or index < 0:
-        raise _failure("select_unavailable: item index could not be read; "
+    container, selected_item, index, chain = owner
+    if not _selection_chain_current(chain):
+        raise _failure("select_unavailable: item ownership changed; "
                        "no input was emitted.")
     if not safe(lambda: Atspi.Selection.select_child(container, int(index)), False):
         raise _failure(
             "select_unavailable: the container refused to select the item; "
             "the selection may have changed.", code="effect_unknown",
             emitted=True, phase="emission")
-    if not _wait_until(lambda: state_contains(node, Atspi.StateType.SELECTED)
-                       or bool(safe(lambda: Atspi.Selection.is_child_selected(
-                           container, int(index)), False)), 0.6):
+    def selected():
+        if not _selection_chain_current(chain):
+            return False
+        target_selected = state_contains(node, Atspi.StateType.SELECTED)
+        owner_selected = bool(safe(lambda: Atspi.Selection.is_child_selected(
+            container, int(index)), False))
+        if selected_item is not node:
+            return target_selected and owner_selected
+        return target_selected or owner_selected
+
+    if not _wait_until(selected, 0.6):
         raise _failure(
             "select_unverified: the item did not report itself selected.",
             code="effect_unknown", emitted=True, phase="readback")
@@ -546,7 +631,8 @@ def perform_select(action_input, window, element, element_record, to_element,
         action_evidence["route"] = "semantic_action"
     elif text is not None or _text_iface(element) is not None and role not in (
             "list item", "table cell", "cell", "tree item", "icon"):
-        content = text_between(element, 0, -1)
+        content, owners = _selection_text_owners(
+            element, text_between(element, 0, -1))
         if text is None:
             start, end = 0, len(content)
             if not content:
@@ -566,10 +652,25 @@ def perform_select(action_input, window, element, element_record, to_element,
                     "element; no input was emitted.".format(_quote(text)),
                     code="invalid_argument")
             end = start + len(text)
-        spans = select_text_range(element, start, end)
+        owner = next(((node, offset) for node, offset, limit in owners
+                      if offset <= start and end <= limit), None)
+        if owner is None:
+            raise _failure(
+                "select_unavailable: the requested text crosses embedded "
+                "text objects; select text within one object or use GUI "
+                "keyboard selection. No input was emitted.")
+        node, offset = owner
+        spans = select_text_range(node, start - offset, end - offset)
         got_start, got_end = spans[0]
+        selected_text = text_between(node, got_start, got_end)
+        if selected_text != content[start:end]:
+            raise _failure(
+                "select_unverified: the selected text changed during the "
+                "operation; the selection may have changed.",
+                code="effect_unknown", emitted=True, phase="readback")
         summary = "selected {}..{} {}".format(
-            got_start, got_end, _quote(text_between(element, got_start, got_end)))
+            got_start + offset, got_end + offset,
+            _quote(selected_text))
         action_evidence["route"] = "semantic_action"
     else:
         select_item(element)

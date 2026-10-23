@@ -4,9 +4,14 @@ import math
 import time
 
 from .foundation import (
+    Atspi,
     OperationFailure,
+    has_editable_text_iface,
+    has_text_iface,
     node_name,
     node_role,
+    safe,
+    state_contains,
 )
 from .ax_actions import (
     WHEEL_CLICKS_PER_PAGE,
@@ -187,15 +192,50 @@ def _auto_click(
     action_evidence,
 ):
     """Prefer the element's AT-SPI action; fall back to a coordinate click."""
-    handled = False
-    state_only_note = ""
-    if (
+    semantic_click = (
         element is not None
         and action_input.get("mouse_button", "left") == "left"
         and click_count == 1
         and not is_dropdown_item(element, window)
+    )
+    action_index = preferred_action_index(element) if semantic_click else None
+    if (
+        action_index is not None
+        and node_role(element) in {"entry", "text", "password text"}
+        and state_contains(element, Atspi.StateType.EDITABLE)
+        and has_editable_text_iface(element)
+        and has_text_iface(element)
+        and str(safe(lambda: element.get_action_name(action_index), "")
+                or "").strip().lower() == "activate"
     ):
-        action_index = preferred_action_index(element)
+        # Entry.activate means submit/Enter, not editor focus. In a freshly
+        # opened dialog it can leave focus on an outer row, consuming the
+        # start of a following untargeted type action outside the editor.
+        try:
+            focus_target_element(
+                window, element, element_record, "editable text click")
+        except Exception as error:
+            raise OperationFailure(
+                "The editor focus request may have changed focus, but target "
+                "focus could not be confirmed. No keyboard or pointer input "
+                "was emitted. Observe before sending more input. "
+                + str(error),
+                failure_code="effect_unknown",
+                failure_phase="readback",
+                input_events_emitted=True,
+                failure_subject="element",
+            ) from error
+        action_evidence["route"] = "semantic_focus"
+        action_evidence["input_emitted"] = True
+        action_evidence["window_focus_verified"] = True
+        action_evidence["target_focus_verified"] = True
+        notes.append("Focused the editable text through AT-SPI and verified "
+                     "that exact target owns focus; no keyboard or pointer "
+                     "events were synthesized.")
+        return element_record
+    handled = False
+    state_only_note = ""
+    if semantic_click:
         if action_only_sets_state(element, action_index):
             pointer_record, refused = _pointer_click_for_state_only_action(
                 window, bounds, element, element_record, notes,
@@ -502,7 +542,7 @@ def _perform_type(
                 "targeted type_text keyboard fallback")
             action_evidence["window_focus_verified"] = True
             action_evidence["target_focus_verified"] = True
-        send_text(action_input.get("text", ""))
+        text_route = send_text(action_input.get("text", ""))
         action_evidence["route"] = "keyboard_synthesis"
         action_evidence["focus_verified"] = True
         action_evidence["editable_verified"] = None
@@ -517,6 +557,7 @@ def _perform_type(
                 else "bringing the window to the foreground",
                 UNVERIFIED_SYNTHESIS,
             )
+            + (" " + text_route if text_route else "")
         )
 
 
@@ -591,7 +632,7 @@ def _perform_set_value(
         )
         send_key("ctrl+a")
         time.sleep(0.05)
-        send_text(value)
+        text_route = send_text(value)
         action_evidence["route"] = "keyboard_synthesis"
         action_evidence["window_focus_verified"] = True
         action_evidence["target_focus_verified"] = True
@@ -607,6 +648,7 @@ def _perform_set_value(
             "confirmation on this path, and keyboard synthesis is global — verify "
             "from the tree that the control now holds what you wanted. {}".format(
                 UNVERIFIED_SYNTHESIS)
+            + (" " + text_route if text_route else "")
         )
     else:
         action_evidence["route"] = "value_api"

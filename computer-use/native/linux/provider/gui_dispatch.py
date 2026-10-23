@@ -15,6 +15,7 @@ from .foundation import (
     GUI_SETTLE_POLL_SECONDS,
     PIXEL_DIFF_STRIDE,
     PIXEL_DIFF_THRESHOLD,
+    OperationFailure,
     frame,
 )
 
@@ -661,6 +662,7 @@ def _perform_gui(actions, settle_ms=800, frame_id=None):
         except Exception as exc:
             explicit_partial = (
                 isinstance(exc, InputEmissionError) and exc.events_emitted
+                or isinstance(exc, OperationFailure) and exc.input_events_emitted
             )
             input_events_emitted = bool(
                 input_actions_dispatched or explicit_partial)
@@ -668,7 +670,7 @@ def _perform_gui(actions, settle_ms=800, frame_id=None):
                 explicit_partial
                 or (
                     action_type in GUI_INPUT_ACTION_TYPES
-                    and not isinstance(exc, InputEmissionError)
+                    and not isinstance(exc, (InputEmissionError, OperationFailure))
                 )
             )
             error_snapshot, evidence_note = failure_evidence()

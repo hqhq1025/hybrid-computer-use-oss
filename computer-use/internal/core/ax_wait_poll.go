@@ -13,6 +13,8 @@ import (
 // when the state could not be read.
 func (s *Service) runAXWait(context *AXBatchContext, wait *axWait) ToolCallResult {
 	switch {
+	case wait.settle:
+		return s.waitForSettle(context, wait)
 	case wait.window != "":
 		return s.waitForDesktopWindow(context, wait)
 	case wait.query != nil:

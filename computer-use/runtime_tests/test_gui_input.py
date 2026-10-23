@@ -80,33 +80,22 @@ class InputEmissionResultTests(unittest.TestCase):
 
         self.assertIn("input emission failed", str(caught.exception))
 
-    def test_non_ascii_text_is_sent_one_character_at_a_time(self):
-        # libatspi rebinds a spare keycode for every non-ASCII character, and
-        # a burst reuses it before the application reads the previous
-        # mapping ("Grüße 你好" -> "Gr好好e 好好"). ASCII runs still go in one
-        # event.
-        events = []
-        sleeps = []
-
-        def generate(keyval, keystring, synth_type):
-            events.append((keyval, keystring, synth_type))
-            return True
-
-        with mock.patch.object(
-                runtime.Atspi, "generate_keyboard_event",
-                side_effect=generate, create=True), \
-                mock.patch.object(runtime.time, "sleep", side_effect=sleeps.append):
+    def test_mixed_text_uses_one_input_method_stream(self):
+        # Mixing native X events with input-method commits can reorder text.
+        with mock.patch.object(runtime, "InputMethodText") as composer, \
+                mock.patch.object(runtime, "emit_keyboard_event") as keyboard:
             runtime.send_text("ab Grüße 你好!")
 
-        self.assertEqual(
-            [keystring for _keyval, keystring, _type in events],
-            ["ab Gr", "ü", "ß", "e ", "你", "好", "!"],
-        )
-        self.assertTrue(all(
-            synth_type == runtime.Atspi.KeySynthType.STRING
-            for _keyval, _keystring, synth_type in events))
-        self.assertEqual(len(sleeps), 4)
-        self.assertTrue(all(0 < delay <= 0.05 for delay in sleeps))
+        self.assertEqual(composer.return_value.send.call_args.args[0],
+                         "ab Grüße 你好!")
+        keyboard.assert_not_called()
+
+    def test_literal_unicode_key_uses_acknowledged_input(self):
+        with mock.patch.object(runtime, "InputMethodText") as composer, \
+                mock.patch.object(runtime, "emit_keyboard_event") as keyboard:
+            runtime.send_key("中")
+        self.assertEqual(composer.return_value.send.call_args.args[0], "中")
+        keyboard.assert_not_called()
 
     def test_long_non_ascii_text_is_rejected_before_input(self):
         events = []

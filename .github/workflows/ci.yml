@@ -93,7 +93,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0
+            python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 \
+            gir1.2-ibus-1.0 ibus ibus-gtk ibus-gtk3
+      - name: Verify IBus bindings (no desktop input)
+        run: /usr/bin/python3 -c 'import gi; gi.require_version("IBus", "1.0"); from gi.repository import IBus'
       - name: Provider tests
         working-directory: computer-use
         run: /usr/bin/python3 runtime_test.py

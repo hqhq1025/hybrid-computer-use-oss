@@ -59,6 +59,9 @@ var axBadCalls = []string{
 	`{"mode":"act","actions":[` + strings.TrimSuffix(strings.Repeat(`{"type":"keypress","keys":["TAB"]},`, contract.AXBatchMaxActions+1), ",") + `]}`,
 	`{"mode":"act","actions":[{"type":"wait","window":"A","timeout_ms":40000},{"type":"wait","window":"B","timeout_ms":30000}]}`,
 	`{"mode":"act","actions":["click r1"]}`,
+	`{"mode":"act","window_ref":"w1","actions":[{"type":"wait","settle":true},{"type":"keypress","keys":["TAB"]}]}`,
+	`{"mode":"act","actions":[{"type":"click","ref":"r1"},{"type":"wait","settle":"yes"}]}`,
+	`{"mode":"act","actions":[{"type":"click","ref":"r1"},{"type":"wait","settle":true,"gone":true}]}`,
 	`{"mode":"act","actions":[{"type":"close","ref":"w3"},{"type":"close","ref":"w2"}]}`,
 	`{"mode":"act","actions":[{"type":"type","text":"` + strings.Repeat("a", 8000) + `"},{"type":"type","text":"` +
 		strings.Repeat("b", 8000) + `"},{"type":"type","text":"` + strings.Repeat("c", 8000) + `"}]}`,

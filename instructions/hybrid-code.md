@@ -126,7 +126,9 @@ shapes are:
   same `request_id`; the answer is then the first result, with
   `replayed: true`.
 - Never script blind input: after each step that should change state, add a
-  `wait` step or read the state before the next step.
+  `wait` step or read the state before the next step. When you do not know
+  what the next state is, `{type: "wait", settle: true}` waits until the UI
+  changes and stops changing; it fails with "no change" when nothing changed.
 - Do not send desktop input through other shell utilities or scripted
   accessibility calls. After two attempts on one hypothesis, change the
   mechanism or the channel.

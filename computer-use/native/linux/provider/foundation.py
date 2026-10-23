@@ -794,9 +794,101 @@ def sane_rect_frame(rect):
     return frame(rect.x, rect.y, rect.width, rect.height)
 
 
-def extents(node):
+def raw_extents(node):
     component = safe(node.get_component_iface)
     if component is None:
         return None
     rect = safe(lambda: Atspi.Component.get_extents(component, Atspi.CoordType.SCREEN))
     return sane_rect_frame(rect)
+
+
+def embedded_host_panels(node, parent):
+    """Find an embedding edge omitted by the embedded root's Parent reply."""
+    if parent is None:
+        return None, None
+    if node_role(parent) == "panel":
+        return parent, safe(getattr(parent, "get_parent", None))
+    if node_role(parent) not in AX_WINDOW_ROLES:
+        return None, None
+    target = (provider_bus_name(node), provider_object_path(node))
+    if not target[1]:
+        return None, None
+    pending = [(parent, [])]
+    matches = []
+    visited = 0
+    while pending and visited < 64:
+        current, ancestors = pending.pop()
+        visited += 1
+        count = safe(current.get_child_count)
+        if count is None or count > 32:
+            return None, None
+        for index in range(count):
+            child = safe(lambda: current.get_child_at_index(index))
+            if child is None:
+                return None, None
+            if (provider_bus_name(child), provider_object_path(child)) == target:
+                if ancestors:
+                    matches.append((current, ancestors[-1]))
+            elif len(ancestors) < 3 and node_role(child) == "panel":
+                pending.append((child, ancestors + [current]))
+    return matches[0] if len(matches) == 1 and not pending else (None, None)
+
+
+def embedded_origin_offset(node, cache=None, remaining=32, role=None):
+    """Correct an embedded tree anchored to its host's outer container.
+
+    Some bridges put a root pane at the outer GTK panel's origin although
+    its equally sized host panel starts below a menu strip. The host and
+    its outer panel describe the same rectangle except for that strip.
+    Derive the translation from those three rectangles, never an app name
+    or a fixed decoration size. Cache only within one snapshot or hit test.
+    """
+    if node is None or remaining <= 0:
+        return (0, 0)
+    cache = {} if cache is None else cache
+    key = (provider_bus_name(node), provider_object_path(node))
+    if not key[1]:
+        key = id(node)
+    if key in cache:
+        return cache[key]
+    cache[key] = (0, 0)  # Bound malformed parent cycles.
+    role = node_role(node) if role is None else role
+    if role in AX_WINDOW_ROLES or role == "application":
+        return cache[key]
+    parent = safe(getattr(node, "get_parent", None))
+    inherited = embedded_origin_offset(parent, cache, remaining - 1)
+    offset = inherited
+    if role == "root pane":
+        host_node, outer = embedded_host_panels(node, parent)
+        if (host_node is not None and node_role(host_node) == "panel"
+                and outer is not None and node_role(outer) == "panel"):
+            child_frame, host, container = (
+                raw_extents(node), raw_extents(host_node), raw_extents(outer))
+            if child_frame and host and container:
+                dx = host["x"] - container["x"]
+                dy = host["y"] - container["y"]
+                same_size = all(child_frame[k] == host[k]
+                                for k in ("width", "height"))
+                outer_origin = all(child_frame[k] == container[k]
+                                   for k in ("x", "y"))
+                inset = (dx >= 0 and dy >= 0 and (dx > 0 or dy > 0)
+                         and host["x"] + host["width"] ==
+                         container["x"] + container["width"]
+                         and host["y"] + host["height"] ==
+                         container["y"] + container["height"])
+                if same_size and outer_origin and inset:
+                    offset = (inherited[0] + dx, inherited[1] + dy)
+    cache[key] = offset
+    return offset
+
+
+def corrected_screen_frame(node, bounds, cache=None, role=None):
+    if bounds is None:
+        return None
+    dx, dy = embedded_origin_offset(node, cache, role=role)
+    return frame(bounds["x"] + dx, bounds["y"] + dy,
+                 bounds["width"], bounds["height"])
+
+
+def extents(node):
+    return corrected_screen_frame(node, raw_extents(node))

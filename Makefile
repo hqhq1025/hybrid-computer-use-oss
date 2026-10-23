@@ -22,6 +22,7 @@ test:
 	cd computer-use && test -z "$$(gofmt -l .)" && go vet ./... && go test ./...
 	cd computer-use && python3 runtime_test.py
 	python3 -m pytest -q tests
+	python3 -m unittest discover -s scripts/images/osworld -p 'test_*.py'
 
 smoke:
 	python3 scripts/smoke-mcp.py artifacts/computer-use

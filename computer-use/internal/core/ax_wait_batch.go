@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+func axBatchHasInputBefore(actions []axBatchAction) bool {
+	for _, action := range actions {
+		if action.actionType != "wait" {
+			return true
+		}
+	}
+	return false
+}
+
 func axBatchOnlyWaits(actions []axBatchAction) bool {
 	for _, action := range actions {
 		if action.actionType != "wait" {
@@ -44,14 +53,15 @@ func axWaitEvidenceEntry(index int, result ToolCallResult) map[string]any {
 
 // rebindAfterWindowWait moves the rest of the batch into the window a wait
 // found: after {"type":"wait","window":"Export"}, keys and ref-less text go
-// to that window, as when the call had named it. Element refs from the
-// earlier window still fail on window identity.
+// to that window, as when the call had named it. A settle wait that saw
+// focus move to another window moves the batch there in the same way.
+// Element refs from the earlier window still fail on window identity.
 func (s *Service) rebindAfterWindowWait(
 	context *AXBatchContext,
 	wait *axWait,
 	result ToolCallResult,
 ) {
-	if wait == nil || wait.window == "" || wait.gone {
+	if wait == nil || (wait.window == "" && !wait.settle) || wait.gone {
 		return
 	}
 	ref, _ := result.StructuredContent["wait_window_ref"].(string)
