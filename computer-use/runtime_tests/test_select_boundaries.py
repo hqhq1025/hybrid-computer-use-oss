@@ -442,6 +442,31 @@ class ComboOptionSelectTests(SelectBoundaryTests):
         self.assertNotIn(STATE.SELECTED, items[0].states)
         self.assertTrue(any("Seattle" in note for note in notes))
 
+    def test_label_matching_option_does_not_skip_selection(self):
+        combo, items = self._combo()
+        combo.title = "Seattle"
+        runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
+        self.assertIn(STATE.SELECTED, items[2].states)
+        self.assertNotIn(STATE.SELECTED, items[0].states)
+
+    def test_label_matching_option_is_not_the_observed_value(self):
+        combo, _items = self._combo()
+        combo.title = "Seattle"
+        self.assertEqual(runtime.element_value(combo), "Beijing")
+
+    def test_matching_label_does_not_verify_a_refused_selection(self):
+        combo, _items = self._combo(item_action=False, selection_api=False)
+        combo.title = "Seattle"
+        self.assert_unknown(lambda: runtime.perform_select(
+            {"text": "Seattle"}, None, combo, {}, None, [], {}))
+
+    def test_matching_label_without_selected_option_has_no_value(self):
+        combo, items = self._combo()
+        combo.title = "Seattle"
+        for item in items:
+            item.states.discard(STATE.SELECTED)
+        self.assertEqual(runtime.element_value(combo), "")
+
     def test_selection_api_is_used_when_the_item_action_does_nothing(self):
         combo, items = self._combo(item_action=False)
 
@@ -476,6 +501,8 @@ class DropdownCommitTests(SelectBoundaryTests):
     def _qt_combo(self, value="Video", options=("Never", "Video", "", "Audio"),
                   commits=True):
         combo = _Node(role="combo box", name=value)
+        combo.app.get_toolkit_name.return_value = "Qt"
+        combo.get_application = lambda: combo.app
         popup = _Node(role="list", x=0, y=0, w=0, h=0)
         combo.add(popup)
         items = [_Node(role="list item", name=name) for name in options]
@@ -580,6 +607,8 @@ class DropdownCommitTests(SelectBoundaryTests):
         # GTK: Selection.select_child on the combo box sets its active item;
         # on the popup menu it only highlights the item.
         combo = _Node(role="combo box", name="Beijing")
+        combo.app.get_toolkit_name.return_value = "gtk"
+        combo.get_application = lambda: combo.app
         menu = _Node(role="menu", x=-2147483648, y=-2147483648, w=1, h=1)
         combo.add(menu)
         items = [_Node(role="menu item", name=name)
@@ -588,6 +617,9 @@ class DropdownCommitTests(SelectBoundaryTests):
         combo.selection_iface = mock.Mock()
         menu.selection_iface = mock.Mock()
         selection = mock.Mock()
+        selection.get_n_selected_children.return_value = 1
+        selection.get_selected_child.side_effect = (
+            lambda target, index: next(item for item in items if item.title == combo.title))
 
         def select_child(target, index):
             if target is combo:
@@ -624,6 +656,67 @@ class DropdownCommitTests(SelectBoundaryTests):
                        states=(STATE.SELECTED,)))
 
         self.assertEqual(runtime.element_value(combo), "Seattle")
+
+    def _gtk_named_combo(self):
+        combo = _Node(role="combo box", name="Seattle")
+        combo.app.get_toolkit_name.return_value = "gtk"
+        combo.get_application = lambda: combo.app
+        combo.selection_iface = combo
+        menu = _Node(role="menu", states=(), w=0, h=0)
+        combo.add(menu)
+        items = [_Node(role="menu item", name=name) for name in ("Beijing", "Seattle")]
+        menu.add(*items)
+        # The accessible label and popup highlight both disagree with active.
+        items[1].states.add(STATE.SELECTED)
+        active = [0]
+        selection = mock.Mock()
+        selection.get_n_selected_children.return_value = 1
+        selection.get_selected_child.side_effect = lambda *_: items[active[0]]
+        selection.select_child.side_effect = lambda owner, index: active.__setitem__(0, index) or True
+        patch = mock.patch.object(runtime.Atspi, "Selection", selection, create=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return combo, active, selection
+
+    def test_gtk_label_and_popup_highlight_do_not_replace_active_value(self):
+        combo, _active, _selection = self._gtk_named_combo()
+        self.assertEqual(runtime.element_value(combo), "Beijing")
+
+    def test_gtk_label_matching_choice_still_changes_active_item(self):
+        combo, active, selection = self._gtk_named_combo()
+        runtime.perform_select({"text": "Seattle"}, None, combo, {}, None, [], {})
+        self.assertEqual(active, [1])
+        selection.select_child.assert_called_once_with(combo, 1)
+        self.assertEqual(runtime.element_value(combo), "Seattle")
+
+    def test_gtk_active_item_already_selected_needs_no_input(self):
+        combo, _active, selection = self._gtk_named_combo()
+        runtime.perform_select({"text": "Beijing"}, None, combo, {}, None, [], {})
+        selection.select_child.assert_not_called()
+
+    def test_gtk_unreadable_active_value_does_not_trust_label_or_highlight(self):
+        combo, _active, selection = self._gtk_named_combo()
+        selection.get_selected_child.side_effect = RuntimeError("disconnected")
+        selection.select_child.side_effect = None
+        self.assertEqual(runtime.element_value(combo), "")
+        self.assert_unknown(lambda: runtime.perform_select(
+            {"text": "Seattle"}, None, combo, {}, None, [], {}))
+
+    def test_gtk_missing_or_ambiguous_active_selection_has_no_value(self):
+        combo, _active, selection = self._gtk_named_combo()
+        for count in (0, 2):
+            with self.subTest(count=count):
+                selection.get_n_selected_children.return_value = count
+                self.assertEqual(runtime.element_value(combo), "")
+
+    def test_unreadable_toolkit_does_not_turn_a_matching_name_into_a_value(self):
+        combo = _Node(role="combo box", name="Seattle")
+        combo.get_application = lambda: combo.app
+        combo.app.get_toolkit_name.side_effect = RuntimeError("disconnected")
+        combo.add(_Node(role="menu").add(
+            _Node(role="menu item", name="Beijing", states=(STATE.SELECTED,)),
+            _Node(role="menu item", name="Seattle")))
+        self.assertEqual(runtime.element_value(combo), "Beijing")
 
 
 class ProjectedComboSelectTests(SelectBoundaryTests):

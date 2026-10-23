@@ -124,7 +124,34 @@ def numeric_value(node):
 SELECTION_SCAN_BUDGET = 200
 
 
-def selected_option_name(node, shown=""):
+def committed_dropdown_value(node):
+    """Read a toolkit's committed combo value, or None for option readback.
+
+    GTK's combo Selection reports the active item; its popup Selection can
+    instead report a highlighted item. Qt's AT-SPI bridge exposes the combo's
+    Value text as its accessible name, including when an accessible label
+    was set. Other providers' names can be labels, even when they match an
+    option. An unreadable committed value must not fall back to popup state.
+    """
+    from .actionability import application_toolkit
+
+    if node_role(node) != "combo box":
+        return None
+    toolkit = application_toolkit(node)
+    if toolkit == "qt":
+        return str(node_name(node) or "").strip()
+    if toolkit == "gtk":
+        selection = safe(node.get_selection_iface)
+        count = safe(lambda: Atspi.Selection.get_n_selected_children(selection))
+        if count == 1:
+            selected = safe(lambda: Atspi.Selection.get_selected_child(selection, 0))
+            if selected is not None:
+                return str(node_name(selected) or "").strip()
+        return ""
+    return None
+
+
+def selected_option_name(node):
     """Return the name of the dropdown's selected option, or "".
 
     Without it, dropdown values are invisible in the tree: Chrome's print
@@ -142,34 +169,30 @@ def selected_option_name(node, shown=""):
     example). In that case return an empty string rather than guess: a
     missing value is better than an invented one.
 
-    ``shown`` is the text the dropdown shows itself: GTK and Qt combo boxes
-    name themselves after their current choice. An option with that name
-    is the choice. Their SELECTED states are not: GTK keeps it on the popup
-    item highlighted first, Qt on an item toggled without being committed.
+    GTK and Qt need committed-value readback because their popup's SELECTED
+    state can describe a highlighted or toggled item without committing it.
     """
     if node is None:
         return ""
+    committed = committed_dropdown_value(node)
+    if committed is not None:
+        return committed
     stack = [node]
     seen = 0
-    selected = ""
     while stack and seen < SELECTION_SCAN_BUDGET:
         current = stack.pop()
         seen += 1
         if current is not node:
             is_selected = state_contains(current, Atspi.StateType.SELECTED)
-            name = (str(node_name(current) or "").strip()
-                    if shown or is_selected else "")
-            if shown and name == shown:
-                return shown
-            if is_selected and name and not selected:
-                if not shown:
+            if is_selected:
+                name = str(node_name(current) or "").strip()
+                if name:
                     return name
-                selected = name
         for index in range(min(child_count(current), 100)):
             child = safe(lambda: current.get_child_at_index(index))
             if child is not None:
                 stack.append(child)
-    return selected
+    return ""
 
 
 # Maximum embedded objects read to build an editor's value.
@@ -235,8 +258,7 @@ def element_value(node, text_limit=DEFAULT_TEXT_LIMIT, role=None):
         role = node_role(node)
     role = str(role or "")
     if role in ("combo box", "list box"):
-        shown = str(node_name(node) or "").strip() if role == "combo box" else ""
-        return limit_text(selected_option_name(node, shown), text_limit=text_limit)
+        return limit_text(selected_option_name(node), text_limit=text_limit)
     return direct
 
 
