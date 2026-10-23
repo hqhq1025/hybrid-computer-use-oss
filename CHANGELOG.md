@@ -11,6 +11,10 @@
   returns `next_cursor`, also with zero matches. Continuing it searches the
   same window from the element where the walk stopped, without repeating
   earlier matches.
+- macOS: the provider keeps at most 65,536 element identities and drops
+  the least recently used ones, so a long session no longer ends in a
+  provider restart. Identities used by the last four reads are kept; a ref
+  to a dropped element fails as stale and never acts on another element.
 - Windows: `type` and `set_value` send Unicode key events instead of pasting
   through the clipboard, so they no longer replace the clipboard or wait a
   fixed half second; GUI keys wait for the application instead of 500 ms.
