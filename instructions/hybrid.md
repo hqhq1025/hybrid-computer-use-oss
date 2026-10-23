@@ -56,6 +56,12 @@ windows: opened w5 "Insert Sheet" (dialog, focused)
   arrive after the action returns: a slow dialog, a menu item, a value
   computed later. A checkbox that shows `checked=false→true`, or a dialog
   listed as `opened`, needs no wait.
+- Wait for a known state with `window`, `query`, `ref`, or `text`. When you
+  know the UI will change but not what it becomes, such as the exact title of
+  the next dialog, use `{"type":"wait","settle":true}`. It waits until the UI
+  changes and then stops changing, names what changed, and fails with "no
+  change" only when nothing changed. Keys after it go to the window that took
+  focus. Give a slow operation a longer `timeout_ms`.
 
 ```json
 {"mode":"act","actions":[{"type":"click","ref":"r12"},{"type":"wait","window":"Export"},{"type":"type","text":"q3.csv"},{"type":"keypress","keys":["ENTER"]},{"type":"wait","window":"Export","gone":true}]}

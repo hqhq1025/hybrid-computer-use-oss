@@ -453,6 +453,31 @@ waiting only, not total call duration. The forms are:
 | `query` | An element in any visible window of the batch's application, including dialogs and popups, matches as `find` matches. |
 | `ref` with `value`, `state` or `text` | That one element has the value, state or text. |
 | `text` alone | The text appears anywhere in the batch window. |
+| `settle:true` | The UI changed after the input step before the wait and then stayed the same for 0.4 s. |
+
+`settle` needs no prediction of the next state. Use it after an action that
+changes the UI when you do not know what the UI becomes, for example the
+title of the dialog it opens. A change is a window that opens, closes or
+changes its title, focus that moves to another window, a change in the tree
+of the batch window (of the window that took focus, once focus moved), or a
+pixel change that the action's own readback reports. Keyboard focus that
+moves inside one window, and a press or hover on an element, do not count: a
+click sets them even when the application ignores it. Each poll reads the
+window list and one window tree. On Linux the provider reuses an unchanged
+tree when the application sent no accessibility event, so the polls are
+cheap while the UI is quiet. The step's line names what changed: opened and
+closed windows, the focus move, and the number of tree nodes that appeared,
+disappeared or changed. If nothing changed by the timeout, the step fails
+with `wait_timeout` and says "no change", because the steps after it assume
+a change. A UI that keeps changing, such as a clock or a progress bar,
+passes at the timeout with a note. An action whose result looks the same as
+the state before it, such as reloading an unchanged page, reports no change.
+The wait returns at the first quiet period, so content that arrives later
+than 0.4 s after the first change, such as a page that fills in a list after
+it loads, can still be missing; wait for it with `text` or `query`. A slow
+operation, such as opening a large file, can take longer than the default
+5000 ms; give it a longer `timeout_ms`. `settle` must follow an input step
+of the same `act` and takes no `gone`.
 
 `gone:true` waits for absence; an exited application has no window. On
 timeout the step fails with `wait_timeout`, the message says what was seen or
@@ -460,7 +485,8 @@ why the state could not be read, and the current window refs and nearby
 elements follow before diagnostic detail. A read that is incomplete keeps
 polling until the timeout, and a failed window read never proves that a
 window closed. After a `window` wait, keys and text without `ref` go to that
-window. An `act` with only `wait` steps waits without input.
+window. After a `settle` wait that saw focus move to another window, they go
+to that window. An `act` with only `wait` steps waits without input.
 
 ### `select` steps
 
