@@ -21,6 +21,7 @@ from .ax_records import effective_role
 from .x11_windows import (
     _x11_window_inventory_cache,
     app_windows,
+    refuse_activation_behind_modal,
     relative_frame,
     strong_window_instance_handle_inventory,
     titled_top_level_window_id,
@@ -158,6 +159,8 @@ def _window_action_preflight(tool, app, window, element_record):
             input_events_emitted=False,
             failure_subject="window",
         )
+    if tool == "activate":
+        refuse_activation_behind_modal(window_id, node_pid(app), node_name(window))
     return handle, window_id
 
 
