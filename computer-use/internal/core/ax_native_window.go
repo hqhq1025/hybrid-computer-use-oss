@@ -9,9 +9,8 @@ import (
 	"github.com/hqhq1025/hybrid-computer-use-oss/computer-use/internal/contract"
 )
 
-// A window without an accessibility tree belongs to a process that exports
-// none (an application that draws its own interface, or one started before
-// accessibility was switched on). The apps listing gives it a wN so that
+// A window can lack an accessibility tree even when another window of its
+// process exports one. The apps listing gives it a wN so that
 // activate, close and window waits find it by title; reads and element
 // actions say that it has no tree and point to GUI.
 
@@ -23,8 +22,8 @@ type axNoTreeWindowError struct {
 }
 
 func (err *axNoTreeWindowError) Error() string {
-	return err.ref + " has no accessibility tree: its application does not " +
-		"export one. Read and operate it with GUI; AX can only activate, " +
+	return err.ref + " has no accessibility tree. " +
+		"Read and operate it with GUI; AX can only activate, " +
 		"close or wait for this window."
 }
 

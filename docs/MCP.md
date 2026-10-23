@@ -630,6 +630,13 @@ the shell or the application.
 
 ## Troubleshooting
 
+AX lists managed Linux application windows even when their process registers
+on the accessibility bus without exporting a tree for every window. Such
+windows have a `wN` marked `(no accessibility tree: use GUI)`. AX can activate,
+close, or wait for them; GUI reads and operates their content. If an AX root
+cannot be matched safely to a native window, the inventory reports incomplete
+coverage instead of issuing another reference for that window.
+
 AX sees no applications, or `AX apps` reports windows that are not on the
 accessibility bus: restart those applications after the server has run
 once (see [Accessibility on Linux](#accessibility-on-linux)). Then check the
