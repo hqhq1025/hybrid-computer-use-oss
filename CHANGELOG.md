@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Windows: observation reads stop at a shared 15-second budget and return
+  partial coverage instead of timing out (LibreOffice Calc), `apps` and observe
+  name LibreOffice windows whose accessibility bridge is not loaded, `close`
+  succeeds only when the window instance is gone. On every platform, an `act`
+  batch whose input ends with window waits reads only the window root between
+  its keys and reads the tree once at the end.
 - AX `act` takes a wait step `{"type":"wait","settle":true}` that needs no
   predicted state: after an input step it waits until the UI changes (windows,
   focus, or the window's tree) and stops changing, names what
