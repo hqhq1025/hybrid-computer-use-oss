@@ -363,6 +363,23 @@ func TestProviderStrictDecodeRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestProviderTargetAutomationIdentitySurvivesWire(t *testing.T) {
+	target := providerTargetFromOperation(&semanticTarget{
+		Selector: `entry "Name"`, AutomationID: "name-entry", HasName: true,
+	})
+	encoded, err := json.Marshal(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ProviderSemanticTarget
+	if err := DecodeProviderWireJSON(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.AutomationID != "name-entry" {
+		t.Fatalf("target identity lost: %s", encoded)
+	}
+}
+
 func TestProviderSharedInvalidRequestCorpus(t *testing.T) {
 	data, err := providerFixtureFS.ReadFile(
 		"testdata/provider-wire/invalid-requests.json",

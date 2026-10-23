@@ -164,8 +164,8 @@ def selected_option_name(node):
 EMBEDDED_EDITOR_LINE_LIMIT = 200
 
 
-def embedded_editor_text(node, text_limit=DEFAULT_TEXT_LIMIT):
-    """Return the text of an editor whose own text is only embedded objects.
+def embedded_editor_nodes(node):
+    """Return the text owners of an editor made of embedded objects.
 
     Chromium exposes a contenteditable editor (CodeMirror in Electron apps
     such as Joplin) as an EDITABLE entry whose Text is one U+FFFC per line;
@@ -175,27 +175,34 @@ def embedded_editor_text(node, text_limit=DEFAULT_TEXT_LIMIT):
     """
     text_iface = safe(node.get_text_iface)
     if text_iface is None:
-        return ""
+        return []
     count = int(safe(lambda: Atspi.Text.get_character_count(text_iface), 0) or 0)
     if count <= 0 or count > EMBEDDED_EDITOR_LINE_LIMIT:
-        return ""
+        return []
     own = str(safe(lambda: Atspi.Text.get_text(text_iface, 0, count), "") or "")
     # The state read comes last: only nodes whose text is all embedded
     # objects pay for it, so ordinary records keep one read per field.
     if not own or own.strip(OBJECT_REPLACEMENT):
-        return ""
+        return []
     if not state_contains(node, Atspi.StateType.EDITABLE):
-        return ""
+        return []
     hypertext = safe(node.get_hypertext_iface)
     if hypertext is None:
-        return ""
-    lines = []
+        return []
+    nodes = []
     links = int(safe(lambda: Atspi.Hypertext.get_n_links(hypertext), 0) or 0)
     for index in range(min(links, EMBEDDED_EDITOR_LINE_LIMIT)):
         link = safe(lambda index=index: Atspi.Hypertext.get_link(hypertext, index))
         embedded = safe(lambda: Atspi.Hyperlink.get_object(link, 0)) if link else None
         if embedded is not None:
-            lines.append(text_value(embedded, text_limit=None))
+            nodes.append(embedded)
+    return nodes
+
+
+def embedded_editor_text(node, text_limit=DEFAULT_TEXT_LIMIT):
+    """Render the same embedded text owners used for text selection."""
+    lines = [text_value(child, text_limit=None)
+             for child in embedded_editor_nodes(node)]
     return limit_text("\n".join(lines), text_limit=text_limit)
 
 

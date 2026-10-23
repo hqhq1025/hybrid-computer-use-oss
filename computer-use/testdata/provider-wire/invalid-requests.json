@@ -1,5 +1,37 @@
 [
   {
+    "name": "target rejects non-string automation id",
+    "request": {
+      "protocol": "computer-use-provider",
+      "schema_version": 2,
+      "request_id": "invalid-target-automation-id",
+      "operation": "resolve_and_act",
+      "action": {
+        "protocol_version": 2,
+        "intent": "click",
+        "app": "Editor",
+        "target": {"selector": "button", "hasName": false, "automationId": 123},
+        "input": {}
+      }
+    }
+  },
+  {
+    "name": "target rejects misspelled identity field",
+    "request": {
+      "protocol": "computer-use-provider",
+      "schema_version": 2,
+      "request_id": "invalid-target-identity-field",
+      "operation": "resolve_and_act",
+      "action": {
+        "protocol_version": 2,
+        "intent": "click",
+        "app": "Editor",
+        "target": {"selector": "button", "hasName": false, "automation_id": "open-button"},
+        "input": {}
+      }
+    }
+  },
+  {
     "name": "observe rejects zero text limit",
     "request": {
       "protocol": "computer-use-provider",

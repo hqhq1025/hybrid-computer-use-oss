@@ -10,6 +10,7 @@
     "target": {
       "selector": "entry \"Name\"",
       "windowHandle": "w2:fixture",
+      "automationId": "name-entry",
       "role": "textbox",
       "name": "Name",
       "hasName": true

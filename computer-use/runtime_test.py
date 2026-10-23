@@ -5,6 +5,7 @@ import unittest
 
 from runtime_tests.test_core import *  # noqa: F401,F403
 from runtime_tests.test_text_input import *  # noqa: F401,F403
+from runtime_tests.test_input_method import *  # noqa: F401,F403
 from runtime_tests.test_window_focus import *  # noqa: F401,F403
 from runtime_tests.test_action_notes import *  # noqa: F401,F403
 from runtime_tests.test_gui import *  # noqa: F401,F403
@@ -19,6 +20,7 @@ from runtime_tests.test_snapshot_identity import *  # noqa: F401,F403
 from runtime_tests.test_events import *  # noqa: F401,F403
 from runtime_tests.test_capabilities import *  # noqa: F401,F403
 from runtime_tests.test_combo_edit import *  # noqa: F401,F403
+from runtime_tests.test_editable_click import *  # noqa: F401,F403
 from runtime_tests.test_select_boundaries import *  # noqa: F401,F403
 from runtime_tests.test_chromium_windows import *  # noqa: F401,F403
 from runtime_tests.test_a11y_enable import *  # noqa: F401,F403

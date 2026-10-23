@@ -85,6 +85,7 @@ TARGET_FIELDS = {
     "providerWindowName",
     "providerRoleAliases",
     "providerIdentityScope",
+    "automationId",
     "runtimeId",
     "runtimeAliases",
     "role",
@@ -368,6 +369,7 @@ def _validate_target(value, path):
         "providerWindowRole",
         "providerWindowName",
         "providerIdentityScope",
+        "automationId",
         "role",
         "name",
     ):

@@ -353,6 +353,23 @@ class GUICapturePipelineTests(unittest.TestCase):
         self.encoder.assert_called_once_with(mock.sentinel.after)
         self.assertIn("fresh", response["text"])
 
+    def test_operation_failure_preserves_known_keyboard_emission(self):
+        self.execute.side_effect = runtime.OperationFailure(
+            "input method acknowledgement failed", "input_emission_failed",
+            "emission", input_events_emitted=True)
+        response = runtime.perform_gui([{"type": "type", "text": "中"}])
+        self.assertFalse(response["ok"])
+        self.assertTrue(response["input_events_emitted"])
+        self.assertTrue(response["partial_input_possible"])
+
+    def test_input_method_precondition_failure_does_not_claim_partial_input(self):
+        self.execute.side_effect = runtime.OperationFailure(
+            "input method unavailable", "unsupported_action", "precondition")
+        response = runtime.perform_gui([{"type": "type", "text": "中"}])
+        self.assertFalse(response["ok"])
+        self.assertFalse(response["input_events_emitted"])
+        self.assertFalse(response["partial_input_possible"])
+
     def test_partial_emission_with_absent_capture_labels_fallback(self):
         self.capture.side_effect = [mock.sentinel.before, None]
         self.execute.side_effect = runtime.InputEmissionError("release failed", True)

@@ -161,6 +161,14 @@ func axLocatorForRecord(
 	role CanonicalRole,
 	semanticTarget, providerIdentity string,
 ) (AXLocatorKind, string) {
+	if providerIdentity != "" && normalizedTreeText(record.Name) == "" {
+		switch role {
+		case "slider", "spinbutton", "scrollbar":
+			// Numeric controls may describe their current value. Keep that
+			// observation out of the identity used after changing the value.
+			return AXLocatorProviderBound, string(role)
+		}
+	}
 	locatorKind := AXLocatorKind("")
 	if semanticTarget != "" {
 		locatorKind = AXLocatorSemantic
