@@ -23,6 +23,14 @@
   `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`; WPS Office bundles a renamed Qt
   5.12), for Java applications (the Java ATK wrapper), and for processes
   that are on the bus only through another toolkit.
+- Windows: a LibreOffice Calc observation reads the sheet's visible cells
+  by hit test instead of walking the sheet row by row, so it lists the
+  cells that hold values (with refs) and summarizes the empty ones as
+  `/empty-cells`, like Linux, and returns in about two seconds instead of
+  stopping at the node budget on the first row.
+- Windows: a window that leaves the window list but still exists (hidden,
+  or resized to zero, for example by an app that cancels `close`) is no
+  longer reported as "disappeared"; the error says it still exists.
 - Linux: when AX `find` walks past the observe budget, it reads the full
   record only of elements whose name or text can match the query, so a
   3000-row web table is searched to the end within the walk's time limit.
