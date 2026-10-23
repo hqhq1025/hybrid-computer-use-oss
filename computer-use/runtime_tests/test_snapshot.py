@@ -424,6 +424,111 @@ class NodeRenderIsolationTests(AtspiPatchedTestCase):
             item.get("reason") == "provider_probe_error" for item in annotations
         ), annotations)
 
+    def test_null_child_slots_survive_every_parent_traversal_path(self):
+        for branch in ("retained", "pruned", "pressure", "recovery"):
+            with self.subTest(branch=branch):
+                healthy = _TreeNode(role="push button", name="Healthy child")
+                children = (None, healthy, None)
+                if branch == "pressure":
+                    # A failed name read keeps the node through the early
+                    # probe, but its empty record is still layout filler.
+                    parent = _ProbeFailureNode(
+                        "name", role="panel", name="", kids=children)
+                else:
+                    parent = _TreeNode(
+                        role="panel",
+                        name="" if branch == "pruned" else "Container",
+                        kids=children)
+                sibling = _TreeNode(role="push button", name="Healthy sibling")
+                root = _TreeNode(
+                    role="frame", name="Window", w=100, h=100,
+                    kids=(parent, sibling))
+                original = runtime.record_for
+
+                def record(node, *args, **kwargs):
+                    if branch == "recovery" and node is parent:
+                        raise RuntimeError("broken parent record")
+                    return original(node, *args, **kwargs)
+
+                with mock.patch.object(runtime, "record_for", side_effect=record), \
+                        mock.patch.object(runtime, "BUDGET_PRESSURE_RATIO", 0.1):
+                    records, _lines, annotations = runtime.render_tree(
+                        root, None, [0], prune=branch != "retained",
+                        max_tree_nodes=10, indexer=runtime.StableIndexer({}))
+
+                names = [item["name"] for item in records]
+                self.assertIn("Healthy child", names)
+                self.assertIn("Healthy sibling", names)
+                child_record = next(item for item in records
+                                    if item["name"] == "Healthy child")
+                self.assertEqual([0, 0, 1], child_record["runtimeId"])
+                self.assertFalse(any(item["runtimeId"] in ([0, 0, 0], [0, 0, 2])
+                                     for item in records))
+                nulls = [item for item in annotations
+                         if item.get("reason") == "null_reference"]
+                self.assertEqual(1, len(nulls), annotations)
+                self.assertEqual([0, 0], nulls[0]["parentRuntimeId"])
+                self.assertEqual("provider_omission", nulls[0]["kind"])
+                self.assertEqual(2, nulls[0]["count"])
+                self.assertIn("2 of 3 child references", nulls[0]["detail"])
+                reasons = ",".join(item.get("reason", "") for item in annotations)
+                if branch == "pressure":
+                    self.assertIn("pressure", reasons)
+                if branch == "recovery":
+                    self.assertIn("render_error", reasons)
+                else:
+                    self.assertNotIn("render_error", reasons)
+
+    def test_null_child_annotation_counts_only_slots_read_before_budget(self):
+        healthy = _TreeNode(role="push button", name="Last affordable child")
+        parent = _TreeNode(role="panel", name="Container",
+                           kids=(None, healthy, None))
+        reads = []
+        original = parent.get_child_at_index
+
+        def child_at(index):
+            reads.append(index)
+            return original(index)
+
+        parent.get_child_at_index = child_at
+        root = _TreeNode(role="frame", name="Window", kids=(parent,))
+        records, _lines, annotations = runtime.render_tree(
+            root, None, [0], prune=False, max_tree_nodes=3)
+
+        self.assertEqual([0, 1], reads)
+        self.assertIn("Last affordable child", [item["name"] for item in records])
+        nulls = [item for item in annotations
+                 if item.get("reason") == "null_reference"]
+        self.assertEqual(1, len(nulls), annotations)
+        self.assertEqual(1, nulls[0]["count"])
+        self.assertIn("1 of 3 child references", nulls[0]["detail"])
+
+    def test_null_child_reference_is_distinct_from_failed_child_read(self):
+        healthy = _TreeNode(role="push button", name="Healthy child")
+        parent = _TreeNode(role="panel", name="Container",
+                           kids=(None, None, healthy, None))
+        original = parent.get_child_at_index
+
+        def child_at(index):
+            if index == 1:
+                raise RuntimeError("child read failed")
+            return original(index)
+
+        parent.get_child_at_index = child_at
+        root = _TreeNode(role="frame", name="Window", kids=(parent,))
+        records, _lines, annotations = runtime.render_tree(
+            root, None, [0], prune=False)
+
+        self.assertIn("Healthy child", [item["name"] for item in records])
+        nulls = [item for item in annotations
+                 if item.get("reason") == "null_reference"]
+        failures = [item for item in annotations
+                    if item.get("reason") == "provider_probe_error"]
+        self.assertEqual(1, len(nulls), annotations)
+        self.assertEqual(2, nulls[0]["count"])
+        self.assertEqual(1, len(failures), annotations)
+        self.assertEqual(1, failures[0]["count"])
+
     def test_one_bad_node_does_not_abort_sibling_rendering(self):
         first = _TreeNode(role="push button", name="First")
         child = _TreeNode(role="push button", name="Healthy child")
