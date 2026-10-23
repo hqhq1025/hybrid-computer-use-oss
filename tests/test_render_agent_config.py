@@ -10,6 +10,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 from hcu.osworld import agents
 
 
@@ -43,7 +48,6 @@ def render(tmp_path, agent, *, extra=(), env=None, python=sys.executable):
 
 
 def read_toml(path):
-    tomllib = pytest.importorskip("tomllib")
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
@@ -116,7 +120,6 @@ def test_standalone_expands_user_paths(tmp_path, agent):
 
 
 def test_codex_config_quotes_native_paths_and_instruction_text():
-    tomllib = pytest.importorskip("tomllib")
     home = 'C:\\Users\\Local User\\.codex'
     instructions = 'Use "AX".\nLiteral backslash: \\ and non-BMP: \U0001f642'
     config = tomllib.loads(agents.codex_config(
@@ -126,6 +129,39 @@ def test_codex_config_quotes_native_paths_and_instruction_text():
     ))
     assert config["developer_instructions"] == instructions
     assert config["skills"]["config"][0]["path"].startswith(home + "/")
+
+
+@pytest.mark.parametrize("agent", ["codex", "grok-build"])
+def test_toml_config_preserves_non_bmp_windows_paths(agent):
+    home = 'C:\\Users\\Desktop \U0001f4bb\\.codex'
+    mcp = 'C:\\Users\\Desktop \U0001f4bb\\Computer Use\\computer-use.exe'
+    kwargs = dict(model="model", effort="high", base_url="http://gateway/v1",
+                  mcp_command=mcp)
+    if agent == "codex":
+        text = agents.codex_config(
+            **kwargs, codex_home=home, base_instructions=home + '\\base.md',
+            developer_instructions='Use "AX".\nLiteral backslash: \\; delete: \x7f; \U0001f4bb',
+        )
+    else:
+        text = agents.grok_config(**kwargs)
+    config = tomllib.loads(text)
+    assert config["mcp_servers"]["computer_use"]["command"] == mcp
+    if agent == "codex":
+        assert config["model_instructions_file"] == home + '\\base.md'
+        assert config["skills"]["config"][0]["path"].startswith(home + "/")
+        assert config["developer_instructions"] == (
+            'Use "AX".\nLiteral backslash: \\; delete: \x7f; \U0001f4bb'
+        )
+
+
+@pytest.mark.parametrize("agent", ["codex", "grok-build"])
+def test_standalone_toml_config_from_unicode_directory(tmp_path, agent):
+    directory = tmp_path / 'Computer Use \U0001f4bb'
+    directory.mkdir()
+    executable = directory / "computer-use.exe"
+    output, _, _ = render(directory, agent, extra=["--mcp", str(executable)])
+    config = read_toml(output)
+    assert config["mcp_servers"]["computer_use"]["command"] == str(executable)
 
 
 @pytest.mark.parametrize("missing_flag", ["--instructions-file", "--base-instructions"])
