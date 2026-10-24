@@ -202,7 +202,9 @@ internal sealed partial class UiaProvider
             CanonicalRole(element.ControlType),
             invoke is not null,
             selection is not null,
-            toggle is not null))
+            toggle is not null,
+            selection is not null &&
+                element.Patterns.LegacyIAccessible.PatternOrDefault is not null))
         {
             case UiaClickRoute.Invoke:
                 beforeInvoke("uia.pattern.invoke", "provider_semantic");

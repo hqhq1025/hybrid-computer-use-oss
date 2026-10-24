@@ -194,5 +194,29 @@ internal static class ValueReadbackRoutingTests
             throw new InvalidDataException(
                 "UIA click routing lost its role-specific pattern boundary.");
         }
+
+        // Native UIA selection remains semantic. MSAA selection is not a
+        // substitute for a click, including when it reports Selected=true.
+        // A list item's Invoke can open it, so only a radio may prefer Invoke.
+        foreach (var invoke in new[] { false, true })
+        {
+            if (UiaClickRouting.Select("listitem", invoke, true, false, true) is not null ||
+                UiaClickRouting.Select("listitem", invoke, true, false, false) !=
+                    UiaClickRoute.SelectionItem ||
+                UiaClickRouting.Select("radio", invoke, true, false, true) !=
+                    (invoke ? UiaClickRoute.Invoke : null) ||
+                UiaClickRouting.Select("radio", invoke, true, true, true) is not null)
+            {
+                throw new InvalidDataException(
+                    "Bridged selection clicked through a non-equivalent semantic action.");
+            }
+        }
+        if (UiaClickRouting.Select("generic", false, true, false, true) is not null ||
+            UiaClickRouting.Select("checkbox", false, true, false, true) is not null ||
+            UiaClickRouting.Select("button", true, false, false, true) != UiaClickRoute.Invoke ||
+            UiaClickRouting.Select("checkbox", true, true, true, true) != UiaClickRoute.Toggle)
+        {
+            throw new InvalidDataException("Bridged selection changed unrelated click patterns.");
+        }
     }
 }
