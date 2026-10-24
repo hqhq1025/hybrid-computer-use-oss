@@ -184,11 +184,8 @@ func compactAXModelEvidence(
 			}
 		}
 	}
-	coverageIncomplete := false
-	if count, ok := IntEvidence(full["coverage_incomplete_nodes"]); ok &&
-		count > 0 {
-		coverageIncomplete = true
-	}
+	incompleteNodes, _ := IntEvidence(full["coverage_incomplete_nodes"])
+	coverageIncomplete := incompleteNodes > 0
 
 	treeComplete, hasTreeComplete := full["tree_complete_for_model"].(bool)
 	if hasTreeComplete && !treeComplete && !coverageIncomplete {
@@ -205,13 +202,21 @@ func compactAXModelEvidence(
 	// A find page lists only matches the walk reached: when the walk
 	// stopped at a cap, later matches may be missing.
 	findPage := mode == contract.AXModeFind && full["find_delivery_complete"] == true
+	recover := map[string]any{}
 	if coverageIncomplete &&
 		(mode == contract.AXModeObserve || axFinalObservationHasTree(full) ||
 			targetedCoverageFailure || findPage) {
 		compact["coverage"] = "partial"
 		compact["tree_complete"] = false
+		// Annotation counts report known gaps, not the total number of
+		// descendants in unread branches. Keep them separate from output cuts.
+		acquisition := map[string]any{"reported_missing_nodes": incompleteNodes}
+		if reasons, present := full["coverage_incomplete_reasons"]; present {
+			acquisition["reasons"] = reasons
+		}
+		compact["acquisition"] = acquisition
+		recover["acquisition"] = "GUI; find/root may narrow the read but do not guarantee complete acquisition"
 	}
-	recover := map[string]any{}
 	if structuralOmitted {
 		recover["structural_budget"] = "find|root"
 	}

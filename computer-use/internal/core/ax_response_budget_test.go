@@ -126,7 +126,7 @@ func TestProviderOmissionRecoveryDistinguishesProjectionFromAcquisition(t *testi
 		},
 	})
 	recover, ok := result.StructuredContent["recover"].(map[string]any)
-	if ok && len(recover) > 0 {
+	if !ok || recover["acquisition"] == nil || recover["structural_budget"] != nil {
 		t.Fatalf("dishonest omission recovery: %#v", result.StructuredContent)
 	}
 	if result.StructuredContent["coverage"] != "partial" ||

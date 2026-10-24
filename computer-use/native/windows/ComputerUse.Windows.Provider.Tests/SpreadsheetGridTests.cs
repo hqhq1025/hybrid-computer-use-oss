@@ -9,6 +9,7 @@ internal static class SpreadsheetGridTests
         CheckScrolledViewport();
         CheckMergedAndHiddenColumns();
         CheckProbeBudget();
+        CheckValueColumnsWithinBudget();
         CheckOccludedOrigin();
         CheckEmptyViewport();
     }
@@ -100,6 +101,29 @@ internal static class SpreadsheetGridTests
             $"Occluded cells are counted as missing ({viewport.Missing}, {viewport.Cells.Count}).");
     }
 
+    private static void CheckValueColumnsWithinBudget()
+    {
+        var grid = new FakeGrid(firstRow: 0, firstColumn: 0,
+            columnWidths: Enumerable.Repeat(40, 10).ToArray(), rowHeight: 20, origin: new Point(0, 0));
+        for (var column = 0; column < 4; column++) { grid.SetValue(0, column); }
+        grid.SetValue(9, 9);
+        var area = new Rectangle(0, 0, 400, 200);
+        var bounded = SpreadsheetGrid.ReadViewport(area, grid.Hit, 46, () => true)
+            ?? throw new InvalidOperationException("viewport");
+        Check(grid.Probes == 46 && bounded.Unprobed == 54 && bounded.ExtentComplete,
+            "Value priority preserves the exact work cap and reports unread cells.");
+        Check(Enumerable.Range(0, 10).All(row => Enumerable.Range(0, 4).All(column =>
+                bounded.Cells.Any(cell => cell.Row == row && cell.Column == column))),
+            "Columns with observed values are read across the visible rows before blank-looking columns.");
+        Check(!bounded.Cells.Any(cell => cell.Row == 9 && cell.Column == 9),
+            "A lower value in a blank-looking column remains unread, not classified as empty.");
+        var full = SpreadsheetGrid.ReadViewport(area, grid.Hit, 100, () => true)
+            ?? throw new InvalidOperationException("viewport");
+        Check(full.Cells.Count == 100 && full.Unprobed == 0 && full.Missing == 0 &&
+            full.Cells.Any(cell => cell.Row == 9 && cell.Column == 9 && cell.HasValue),
+            "The remaining columns are still read when budget permits, including values below blank first cells.");
+    }
+
     private static void CheckEmptyViewport()
     {
         foreach (var area in new[] { Rectangle.Empty, new Rectangle(0, 0, 3, 40),
@@ -119,11 +143,13 @@ internal static class SpreadsheetGridTests
     private sealed class FakeGrid(int firstRow, int firstColumn, int[] columnWidths, int rowHeight, Point origin)
     {
         private readonly List<(int Row, int Column, int Columns)> _merged = new();
+        private readonly HashSet<(int Row, int Column)> _values = new();
         private readonly List<Rectangle> _occluded = new();
         internal int Probes { get; private set; }
         internal List<Point> Points { get; } = new();
 
         internal void Merge(int row, int column, int columns) => _merged.Add((row, column, columns));
+        internal void SetValue(int row, int column) => _values.Add((row, column));
 
         internal void Occlude(Rectangle area) => _occluded.Add(area);
 
@@ -150,7 +176,8 @@ internal static class SpreadsheetGridTests
                     }
                     var top = origin.Y + (row - firstRow) * rowHeight;
                     return new SpreadsheetCellHit<string>(
-                        SpreadsheetGrid.A1(row, column), row, column, new Rectangle(left, top, width, rowHeight));
+                        SpreadsheetGrid.A1(row, column), row, column, new Rectangle(left, top, width, rowHeight),
+                        _values.Contains((row, column)));
                 }
                 x += columnWidths[index];
             }
