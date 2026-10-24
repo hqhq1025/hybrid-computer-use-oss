@@ -29,12 +29,15 @@ internal static partial class NativeDesktop
     internal static bool TextWakeThrows { get; set; }
     internal static string TextControlClass { get; set; } = "Unknown";
     internal static bool TextControlReadOnly { get; set; }
+    internal static bool TextControlMultiline { get; set; } = true;
     internal static Func<bool>? OnReadTextControlReadOnly { get; set; }
+    internal static Func<bool>? OnReadTextControlMultiline { get; set; }
     internal static List<(nint Window, string Text, uint Timeout)> TextSelections { get; } = new();
     internal static List<string> TextEmissionOrder { get; } = new();
     internal static Func<int, bool>? OnTextSelection { get; set; }
     private static string ReadTextControlClass(nint window) => TextControlClass;
     private static bool IsTextControlReadOnly(nint window) => OnReadTextControlReadOnly?.Invoke() ?? TextControlReadOnly;
+    private static bool IsTextControlMultiline(nint window) => OnReadTextControlMultiline?.Invoke() ?? TextControlMultiline;
     private static (bool Success, int Error) SendTextSelection(nint window, nint buffer, uint timeout)
     {
         var text = Marshal.PtrToStringUni(buffer) ?? throw new InvalidOperationException("Missing text buffer");
@@ -82,7 +85,9 @@ internal static partial class NativeDesktop
         TextWakeThrows = false;
         TextControlClass = "Unknown";
         TextControlReadOnly = false;
+        TextControlMultiline = true;
         OnReadTextControlReadOnly = null;
+        OnReadTextControlMultiline = null;
         TextSelections.Clear();
         TextEmissionOrder.Clear();
         OnTextSelection = null;

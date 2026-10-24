@@ -33,8 +33,8 @@ internal static class TextControlTests
         NativeDesktop.TextControlClass = "Edit";
         NativeDesktop.TypeText("中😀\te\u0301\r\n\n日本\r한국\n");
         Check(NativeDesktop.TextEmissionOrder.SequenceEqual(new[] {
-            "text:中😀\te\u0301", "message:102:D", "message:102:D", "text:日本",
-            "message:102:D", "text:한국", "message:102:D" }),
+            "text:中😀\te\u0301", "text:\r\n", "text:\r\n", "text:日本",
+            "text:\r\n", "text:한국", "text:\r\n" }),
             "Mixed Unicode, literal tabs, CRLF, empty lines and trailing newline must preserve order.");
         Check(NativeDesktop.TextWakes.Count == 1 && NativeDesktop.Calls.Count == 0,
             "Segmented input must wake once without queued keyboard input.");
@@ -43,51 +43,61 @@ internal static class TextControlTests
         // A receiver can handle Enter keydowns and standalone CR characters.
         // Synchronous sends do not put the later character in its queue, so
         // it cannot pair those two messages as one physical keystroke.
-        foreach (var name in new[] { "Edit", "RICHEDIT50W", "Unknown" })
+        foreach (var name in new[] { "Edit", "richedit20w", "RICHEDIT50W", "RichEditD2D", "rIcHeDiTd2DpT", "Unknown" })
         {
             NativeDesktop.Reset();
             NativeDesktop.TextControlClass = name;
             var lines = new List<string> { "" };
             NativeDesktop.OnTextSelection = _ =>
             {
-                lines[^1] += NativeDesktop.TextSelections[^1].Text;
+                var inserted = NativeDesktop.TextSelections[^1].Text.Split(
+                    name == "Edit" ? "\r\n" : "\r", StringSplitOptions.None);
+                lines[^1] += inserted[0];
+                lines.AddRange(inserted.Skip(1));
                 return true;
             };
             NativeDesktop.OnTextMessage = _ =>
             {
                 var message = NativeDesktop.TextMessages[^1];
+                // RichEdit ignores standalone CR character messages.
+                if (name != "Edit" && name != "Unknown" && message.Message == 0x102 && message.Value == 0x0D)
+                    return true;
                 if ((message.Message == 0x100 || message.Message == 0x102) && message.Value == 0x0D)
                     lines.Add("");
                 else if (message.Message == 0x102)
                     lines[^1] += (char)message.Value;
                 return true;
             };
-            NativeDesktop.TypeText("A\n\nB\rC\r\nD\n");
-            Check(lines.SequenceEqual(new[] { "A", "", "B", "C", "D", "" }) &&
+            NativeDesktop.TypeText("\nA\n\nB\rC\r\nD\n");
+            Check(lines.SequenceEqual(new[] { "", "A", "", "B", "C", "D", "" }) &&
                 NativeDesktop.TextWakes.Count == 1 && NativeDesktop.Calls.Count == 0,
                 $"{name} must preserve each logical newline once, including empty and trailing lines.");
             cases++;
         }
 
-        foreach (var name in new[] { "Edit", "Unknown" })
+        foreach (var name in new[] { "Edit", "RICHEDIT50W", "Unknown" })
         foreach (var newline in new[] { "\r", "\n", "\r\n" })
+        foreach (var prefix in new[] { "", "😀" })
         {
             NativeDesktop.Reset();
             NativeDesktop.TextControlClass = name;
             NativeDesktop.OnTextMessage = _ => NativeDesktop.TextMessages[^1].Value != 0x0D;
+            NativeDesktop.OnTextSelection = _ => !NativeDesktop.TextSelections[^1].Text.Contains('\r');
             var newlineFailure = Fails(() => DesktopProvider.ExecuteBatch(new JsonObject {
                 ["actions"] = new JsonArray(
-                    new JsonObject { ["type"] = "type", ["text"] = "😀" + newline + "never" },
+                    new JsonObject { ["type"] = "type", ["text"] = prefix + newline + "never" },
                     new JsonObject { ["type"] = "click", ["x"] = 5d, ["y"] = 5d }) }));
-            var prefixMessages = name == "Edit" ? 1 : 2;
-            Check(newlineFailure.InputEventsEmitted && newlineFailure.MutationUnknown &&
-                Evidence(newlineFailure, "source_utf16_index") == 2 &&
+            var prefixMessages = prefix.Length == 0 ? 0 : name == "Unknown" ? 2 : 1;
+            Check(newlineFailure.InputEventsEmitted == (prefixMessages > 0) && newlineFailure.MutationUnknown &&
+                Evidence(newlineFailure, "source_utf16_index") == prefix.Length &&
                 Evidence(newlineFailure, "source_utf16_count") == newline.Length &&
                 Evidence(newlineFailure, "attempted_messages") == prefixMessages + 1 &&
                 Evidence(newlineFailure, "returned_messages") == prefixMessages &&
                 Evidence(newlineFailure, "unknown_message_index") == prefixMessages &&
-                newlineFailure.ActionEvidence!["sequence_phase"]!.GetValue<string>() == "enter_character" &&
-                NativeDesktop.TextMessages[^1].Value == 0x0D &&
+                newlineFailure.ActionEvidence!["sequence_phase"]!.GetValue<string>() ==
+                    (name == "Unknown" ? "enter_character" : "selection_newline") &&
+                (name == "Unknown" ? NativeDesktop.TextMessages[^1].Value == 0x0D :
+                    NativeDesktop.TextMessages.Count == 0 && NativeDesktop.TextSelections.Count == prefixMessages + 1) &&
                 NativeDesktop.TextWakes.Count == 1 && NativeDesktop.Calls.Count == 0,
                 "An unknown newline must retain its original UTF-16 span and stop the suffix and later actions.");
             cases++;
@@ -106,9 +116,78 @@ internal static class TextControlTests
             "First unknown replacement must cover its full source segment, stop the suffix and never replay.");
         cases++;
 
+        foreach (var name in new[] { "Edit", "RICHEDIT50W" })
+        {
+            NativeDesktop.Reset();
+            NativeDesktop.TextControlClass = name;
+            NativeDesktop.EnterScan = 0;
+            NativeDesktop.TypeText("\r\nA\n");
+            Check(NativeDesktop.TextSelections.Count == 3 && NativeDesktop.TextMessages.Count == 0,
+                "Selection insertion must not require a keyboard scan code for literal newlines.");
+            cases++;
+
+            NativeDesktop.Reset();
+            NativeDesktop.TextControlClass = name;
+            NativeDesktop.TextControlReadOnly = true;
+            var generation = NativeDesktop.InputGeneration;
+            var readOnlyFailure = Fails(() => NativeDesktop.TypeText("prefix\r\nsuffix"));
+            Check(!readOnlyFailure.InputEventsEmitted && !readOnlyFailure.MutationUnknown &&
+                NativeDesktop.TextSelections.Count == 0 && NativeDesktop.TextMessages.Count == 0 &&
+                NativeDesktop.TextWakes.Count == 0 && NativeDesktop.InputGeneration == generation,
+                "Read-only multiline input must reject its entire prefix before any side effect.");
+            cases++;
+
+            foreach (var newline in new[] { "\r", "\n", "\r\n" })
+            {
+                NativeDesktop.Reset();
+                NativeDesktop.TextControlClass = name;
+                NativeDesktop.TextControlMultiline = false;
+                generation = NativeDesktop.InputGeneration;
+                var singleLineFailure = Fails(() => NativeDesktop.TypeText("prefix" + newline + "suffix"));
+                Check(singleLineFailure.Phase == "preparation" &&
+                    !singleLineFailure.InputEventsEmitted && !singleLineFailure.MutationUnknown &&
+                    NativeDesktop.TextSelections.Count == 0 && NativeDesktop.TextMessages.Count == 0 &&
+                    NativeDesktop.TextWakes.Count == 0 && NativeDesktop.InputGeneration == generation,
+                    "Single-line controls must reject newlines before sending even a valid prefix.");
+                cases++;
+            }
+
+            NativeDesktop.Reset();
+            NativeDesktop.TextControlClass = name;
+            NativeDesktop.TextControlMultiline = false;
+            NativeDesktop.TypeText("ordinary 中文😀");
+            Check(NativeDesktop.TextSelections.Single().Text == "ordinary 中文😀",
+                "Single-line controls must still accept ordinary Unicode text.");
+            cases++;
+
+            NativeDesktop.Reset();
+            NativeDesktop.TextControlClass = name;
+            NativeDesktop.OnTextSelection = _ => { NativeDesktop.TextControlMultiline = false; return true; };
+            var changedStyleFailure = Fails(() => NativeDesktop.TypeText("prefix\nsuffix"));
+            Check(changedStyleFailure.InputEventsEmitted && changedStyleFailure.MutationUnknown &&
+                NativeDesktop.TextSelections.Count == 1 && NativeDesktop.TextMessages.Count == 0 &&
+                NativeDesktop.TextWakes.Count == 1,
+                "A control becoming single-line must stop before the newline and preserve the emitted prefix.");
+            cases++;
+        }
+
+        NativeDesktop.Reset();
+        NativeDesktop.TextControlClass = "RICHEDIT50W";
+        NativeDesktop.OnTextSelection = _ =>
+        {
+            NativeDesktop.OnReadTextControlMultiline = () => throw new ProviderFailureException(
+                "desktop_input_failed", "preparation", "Control style unavailable.");
+            return true;
+        };
+        var styleFailure = Fails(() => NativeDesktop.TypeText("prefix\nsuffix"));
+        Check(styleFailure.Phase == "emission" && styleFailure.InputEventsEmitted && styleFailure.MutationUnknown &&
+            NativeDesktop.TextSelections.Count == 1 && NativeDesktop.TextMessages.Count == 0,
+            "Failed multiline style inspection must preserve prefix evidence and stop subsequent input.");
+        cases++;
+
         NativeDesktop.Reset();
         NativeDesktop.TextControlClass = "Edit";
-        NativeDesktop.OnTextSelection = count => count != 2;
+        NativeDesktop.OnTextSelection = count => count != 3;
         failure = Fails(() => DesktopProvider.ExecuteBatch(new JsonObject { ["actions"] = new JsonArray(
             new JsonObject { ["type"] = "type", ["text"] = "A\r\n中😀\tB\nnever" },
             new JsonObject { ["type"] = "click", ["x"] = 5d, ["y"] = 5d }) }));
@@ -116,7 +195,7 @@ internal static class TextControlTests
             Evidence(failure, "attempted_messages") == 3 && Evidence(failure, "returned_messages") == 2 &&
             Evidence(failure, "unknown_message_index") == 2 && Evidence(failure, "source_utf16_index") == 3 &&
             Evidence(failure, "source_utf16_count") == "中😀\tB".Length &&
-            NativeDesktop.TextSelections.Count == 2 && NativeDesktop.TextMessages.Count == 1 &&
+            NativeDesktop.TextSelections.Count == 3 && NativeDesktop.TextMessages.Count == 0 &&
             NativeDesktop.Calls.Count == 0,
             "GUI must retain message counts and the whole unknown segment, without emitting the later click.");
         cases++;
