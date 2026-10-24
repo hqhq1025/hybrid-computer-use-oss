@@ -10,7 +10,6 @@ internal static class SpreadsheetGridTests
         CheckMergedAndHiddenColumns();
         CheckProbeBudget();
         CheckOccludedOrigin();
-        CheckGridDetection();
     }
 
     private static void CheckA1Names()
@@ -89,8 +88,8 @@ internal static class SpreadsheetGridTests
         var grid = new FakeGrid(firstRow: 0, firstColumn: 0, columnWidths: new[] { 50, 50 },
             rowHeight: 20, origin: new Point(0, 0));
         grid.Occlude(new Rectangle(0, 0, 30, 30));
-        Check(SpreadsheetGrid.ReadViewport(new Rectangle(0, 0, 100, 40), grid.Hit, 100, () => true) is null,
-            "An occluded origin gives no viewport.");
+        Check(SpreadsheetGrid.ReadViewport(new Rectangle(0, 0, 100, 40), grid.Hit, 100, () => true) is null &&
+            grid.Probes == 1, "An occluded origin gives no viewport and stops probing.");
         var partly = new FakeGrid(firstRow: 0, firstColumn: 0, columnWidths: new[] { 50, 50, 50 },
             rowHeight: 20, origin: new Point(0, 0));
         partly.Occlude(new Rectangle(60, 25, 100, 100));
@@ -98,27 +97,6 @@ internal static class SpreadsheetGridTests
             ?? throw new InvalidOperationException("viewport");
         Check(viewport.Missing == 4 && viewport.Cells.Count == 5,
             $"Occluded cells are counted as missing ({viewport.Missing}, {viewport.Cells.Count}).");
-    }
-
-    // LibreOffice 24.8 lists the cells as the sheet's children; 25.2 reports
-    // no children but answers a hit test with the cell. Either is a grid.
-    // Another table is not, and its corner is probed only when it has no
-    // children.
-    private static void CheckGridDetection()
-    {
-        static bool IsCell(string name) => SpreadsheetGrid.TryParseA1(name, out _, out _);
-        var probes = 0;
-        string? Corner(string? name) { probes++; return name; }
-        Check(SpreadsheetGrid.IsGrid("A1", () => Corner("A1"), IsCell) && probes == 0,
-            "A first child named A1 makes a grid without a probe.");
-        Check(SpreadsheetGrid.IsGrid(null, () => Corner("C7"), IsCell) && probes == 1,
-            "A table without children whose corner hit is a cell is a grid.");
-        Check(!SpreadsheetGrid.IsGrid(null, () => Corner("Header"), IsCell) && probes == 2,
-            "A corner hit that is not a cell is no grid.");
-        Check(!SpreadsheetGrid.IsGrid(null, () => Corner(null), IsCell) && probes == 3,
-            "No corner hit is no grid.");
-        Check(!SpreadsheetGrid.IsGrid("Name", () => Corner("A1"), IsCell) && probes == 3,
-            "A table whose first child is not a cell is no grid and is not probed.");
     }
 
     private static void Check(bool condition, string message)

@@ -142,17 +142,6 @@ internal static class SpreadsheetGrid
         }
     }
 
-    // Whether a table is a spreadsheet grid. LibreOffice 24.8 lists the
-    // cells as the table's children, so the first child is a cell.
-    // LibreOffice 25.2 reports no children for a sheet (its MSAA child count
-    // is 0) but still answers hit tests with its cells, so a table without
-    // children is a grid when the cell at its top-left corner is one.
-    internal static bool IsGrid<T>(T? firstChild, Func<T?> cornerHit, Func<T, bool> isCell)
-        where T : class =>
-        firstChild is not null
-            ? isCell(firstChild)
-            : cornerHit() is { } hit && isCell(hit);
-
     // The middle of the part of [start, end) that lies inside [low, high).
     private static int Middle(int start, int end, int low, int high)
     {
