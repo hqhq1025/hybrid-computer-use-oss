@@ -223,6 +223,7 @@ internal sealed partial class UiaProvider
         var processGeneration = ProcessGeneration(process);
         var selectedHandle = OpaqueWindowHandle(process, selected.Handle);
         var cache = new UiaSnapshotCache(_automation);
+        var readBudget = new OwnershipProbeBudget(read.MaxNodes, SnapshotSampleTimeout);
         var nodes = new List<(CachedUiaNode Node, JsonObject Record, int[] Path, int Depth)>();
         var listed = new HashSet<(int Row, int Column)>();
         var cursors = new HashSet<(int Row, int Column)>();
@@ -266,7 +267,9 @@ internal sealed partial class UiaProvider
                         nodes.Add((root, ElementJson(
                             root.Element, rootFacts,
                             node.Record["index"]?.GetValue<int>() == 0 ? 0 : 1,
-                            processGeneration, process, selected, selectedHandle, node.Path),
+                            processGeneration, process, selected, selectedHandle, node.Path,
+                            RequireCompleteRecord, readBudget.CheckTime,
+                            () => UiaDocumentText.ProbeContent(cache, root, readBudget.CheckTime)),
                             node.Path, node.Depth));
                         continue;
                     }
@@ -372,7 +375,9 @@ internal sealed partial class UiaProvider
                 return false;
             }
             nodes.Add((node, ElementJson(
-                node.Element, facts, 1, processGeneration, process, selected, selectedHandle, path),
+                node.Element, facts, 1, processGeneration, process, selected, selectedHandle, path,
+                RequireCompleteRecord, readBudget.CheckTime,
+                () => UiaDocumentText.ProbeContent(cache, node, readBudget.CheckTime)),
                 path, depth));
             if (path.SequenceEqual(sheet.TablePath))
             {
@@ -399,6 +404,13 @@ internal sealed partial class UiaProvider
             }
             return true;
         }
+
+        // Partial readback reuses a complete earlier observation. If a new
+        // record has an acquisition gap, the full read must publish that
+        // gap instead of caching the incomplete record as complete.
+        static void RequireCompleteRecord(string reason) =>
+            throw new WindowOwnershipUnavailableException(
+                "Spreadsheet read-back record is incomplete: " + reason);
 
         static SpreadsheetCellHit<CachedUiaNode>? CellAt(CachedUiaNode? cell) =>
             cell?.Facts is { ControlType: ControlType.DataItem } facts &&
