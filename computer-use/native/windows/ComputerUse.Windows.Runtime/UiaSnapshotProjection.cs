@@ -87,8 +87,6 @@ internal sealed partial class UiaProvider
         var ownershipBudget = new OwnershipProbeBudget(
             checked(maxNodes * 4 + 256), SnapshotSampleTimeout, elapsed);
         var boundary = CreateLogicalBoundary(process, projection, ownershipBudget);
-        var records = new JsonArray();
-        var lines = new JsonArray();
         var index = 0;
         var selectedHandle = OpaqueWindowHandle(process, selectedWindow.Handle);
         var sampled = new List<(CachedUiaNode Node, JsonObject Record, int[] Path, int Depth)>();
@@ -99,9 +97,8 @@ internal sealed partial class UiaProvider
         });
         var processGeneration = ProcessGeneration(process);
         var cache = new UiaSnapshotCache(_automation);
-        var observedElementLeases =
-            new Dictionary<string, ObservedElementLease<AutomationElement>>(
-                StringComparer.Ordinal);
+        var transientRoots = 0;
+        var grids = new List<SpreadsheetRead?>();
 
         // No ForceNoCache scope here: the snapshot cache activates its own
         // requests, and every other call in this block runs uncached.
@@ -122,6 +119,7 @@ internal sealed partial class UiaProvider
                         discovery: discovery);
                     // Keep the first root table frozen. New roots append to it;
                     // duplicate records skip emission, not their index slots.
+                    transientRoots = additionalRoots.Count;
                     Visit(ReadRoots(additionalRoots), roots.Count);
                 }
                 else
@@ -139,76 +137,11 @@ internal sealed partial class UiaProvider
             BindCurrentFocus();
         }
 
-        // Traversal alternates parent branches, so records arrive breadth
-        // first. Publish them in tree-path order with dense indices.
-        var pathOrder = Comparer<int[]>.Create((left, right) =>
-        {
-            for (var offset = 0; offset < Math.Min(left.Length, right.Length); offset++)
-            {
-                var order = left[offset].CompareTo(right[offset]);
-                if (order != 0) { return order; }
-            }
-            return left.Length.CompareTo(right.Length);
-        });
-        index = 0;
-        foreach (var sample in sampled.OrderBy(sample => sample.Path, pathOrder))
-        {
-            sample.Record["index"] = index;
-            records.Add(sample.Record);
-            lines.Add(new string(' ', sample.Depth * 2) +
-                $"{index} {sample.Record["controlType"]?.GetValue<string>() ?? "unknown"} " +
-                $"{sample.Record["name"]?.GetValue<string>() ?? string.Empty}");
-            var providerPath = sample.Record["providerObjectPath"]?.GetValue<string>() ?? string.Empty;
-            if (providerPath.StartsWith("runtime:", StringComparison.Ordinal))
-            {
-                observedElementLeases[providerPath] =
-                    new ObservedElementLease<AutomationElement>(sample.Node.Element, sample.Record);
-            }
-            else if (providerPath.StartsWith(SpreadsheetCellScope + ":", StringComparison.Ordinal))
-            {
-                observedElementLeases[providerPath] =
-                    new ObservedElementLease<AutomationElement>(sample.Node.Element, sample.Record);
-            }
-            index++;
-        }
-        _observedElementLeases.Replace(
-            process.Id,
-            ProcessGeneration(process),
-            selectedWindow.Handle.ToInt64(),
-            observedElementLeases);
-
-        var windows = projection.LogicalWindows();
-        var windowInventory = new JsonArray();
-        foreach (var window in windows)
-        {
-            var handle = OpaqueWindowHandle(process, window.Handle);
-            windowInventory.Add(
-                new JsonObject
-                {
-                    ["title"] = window.Title,
-                    ["role"] = "window",
-                    ["handle"] = handle,
-                    ["providerBusName"] = $"win32:pid:{process.Id}",
-                    ["providerObjectPath"] = handle,
-                    ["providerProcessGeneration"] = ProcessGeneration(process),
-                    ["selected"] = window.Handle == selectedWindow.Handle,
-                    ["active"] = window.Active,
-                    ["showing"] = true,
-                });
-        }
-        var snapshot = new JsonObject
-        {
-            ["app"] = AppJson(process, selectedWindow.HostedProcessId),
-            ["windowTitle"] = selectedWindow.Title,
-            ["windowHandle"] = selectedHandle,
-            ["windows"] = windowInventory,
-            ["snapshotId"] = Guid.NewGuid().ToString("N"),
-            ["sampledAt"] = DateTimeOffset.UtcNow.ToString("O"),
-            ["windowBounds"] = RectangleJson(selectedWindow.Bounds),
-            ["treeLines"] = lines,
-            ["elements"] = records,
-            ["annotations"] = annotations,
-        };
+        var snapshot = PublishSnapshot(process, selectedWindow, projection, sampled, annotations);
+        RememberSpreadsheetRead(
+            process, selectedWindow, projection, sampled, annotations,
+            transientRoots == 0 && grids.Count == 1 ? grids[0] : null,
+            maxNodes, maxDepth);
         return snapshot;
 
         void BindCurrentFocus()
@@ -318,62 +251,61 @@ internal sealed partial class UiaProvider
             return true;
         }
 
-        // A table whose first child is a cell named by A1 reference is a
-        // spreadsheet grid: its children run row-major over the whole sheet,
-        // so the visible cells are read by hit tests instead (see
-        // SpreadsheetGrid). Cells with a value, and the cell holding the
+        // A table whose cells are named by A1 reference is a spreadsheet
+        // grid (see SpreadsheetGrid.IsGrid): its children, if it lists any,
+        // run row-major over the whole sheet, so the visible cells are read
+        // by hit tests instead. Cells with a value, and the cell holding the
         // cursor, become records; the other visible cells are summarized.
         void ReadSpreadsheetCells(CachedUiaNode table, int[] tablePath, int depth)
         {
+            var area = Rectangle.Intersect(table.Facts!.Bounds, selectedWindow.Bounds);
             var first = ReadLink(() => cache.ReadFirstChild(table));
-            if (first?.Facts is not { ControlType: ControlType.DataItem } firstFacts ||
-                !SpreadsheetGrid.TryParseA1(firstFacts.Name, out _, out _))
+            if (!SpreadsheetGrid.IsGrid(
+                    first,
+                    () => area.Width < 4 || area.Height < 4
+                        ? null
+                        : ReadCellAt(new Point(area.X + 2, area.Y + 2), table),
+                    node => CellHit(node) is not null))
             {
                 return;
             }
             table.CellsRead = true;
             var started = elapsed();
             var viewport = SpreadsheetGrid.ReadViewport(
-                Rectangle.Intersect(table.Facts!.Bounds, selectedWindow.Bounds),
-                point =>
-                {
-                    if (!SpreadsheetGrid.PointShowsWindow(point, selectedWindow.Handle)) { return null; }
-                    CachedUiaNode? cell;
-                    try { cell = cache.ReadAtPoint(point, table); }
-                    catch { return null; }
-                    return cell?.Facts is { ControlType: ControlType.DataItem } facts &&
-                        SpreadsheetGrid.TryParseA1(facts.Name, out var row, out var column)
-                        ? new SpreadsheetCellHit<CachedUiaNode>(cell, row, column, facts.Bounds,
-                            !string.IsNullOrEmpty(facts.ValueText))
-                        : null;
-                },
+                area,
+                point => CellHit(ReadCellAt(point, table)),
                 MaxSpreadsheetProbes,
                 () => elapsed() - started < SpreadsheetReadTime && elapsed() < SnapshotSampleTimeout);
             if (viewport is null)
             {
                 Omit(tablePath, "visible_cell_range_unavailable", 1);
+                grids.Add(null);
                 return;
             }
-            var listed = 0;
+            var layout = new SpreadsheetLayout(
+                area, viewport.Row0, viewport.Row1, viewport.Column0, viewport.Column1,
+                viewport.Cells.ToDictionary(cell => (cell.Row, cell.Column), cell => cell.Bounds));
+            var listedCells = new HashSet<(int Row, int Column)>();
             var empty = 0;
             var overBudget = 0;
+            var failed = 0;
             foreach (var cell in viewport.Cells)
             {
-                var facts = cell.Cell.Facts!;
                 int[] cellPath = [.. tablePath, cell.Row, cell.Column];
-                JsonObject record;
+                JsonObject? record;
                 try
                 {
-                    record = ElementJson(
-                        cell.Cell.Element, facts, index, processGeneration,
-                        process, selectedWindow, selectedHandle, cellPath);
+                    record = SpreadsheetCellRecord(
+                        cell, table.Facts.Name, cellPath, index, processGeneration,
+                        process, selectedWindow, selectedHandle);
                 }
                 catch
                 {
                     Gap("node_read_failed");
+                    failed++;
                     continue;
                 }
-                if (string.IsNullOrEmpty(record["value"]?.GetValue<string>()) && !facts.HasKeyboardFocus)
+                if (record is null)
                 {
                     empty++;
                     continue;
@@ -384,36 +316,18 @@ internal sealed partial class UiaProvider
                     continue;
                 }
                 visits.Take();
-                // The cell has no UIA runtime id, and its position among the
-                // table's children is too far to walk: an action finds it
-                // again by hit test at its observed rectangle. The identity
-                // names the table and sheet, so a ref to C2 of one sheet never
-                // resolves to C2 of another.
-                record["providerIdentityScope"] = SpreadsheetCellScope;
-                record["providerObjectPath"] = SpreadsheetCellObjectPath(
-                    table.Facts.Name, cell.Row, cell.Column);
                 sampled.Add((cell.Cell, record, cellPath, depth + 1));
                 index++;
-                listed++;
+                listedCells.Add((cell.Row, cell.Column));
             }
             if (empty > 0)
             {
-                // Same annotation as the Linux provider: the core renders it
-                // on the table as /empty-cells.
-                annotations.Add(new JsonObject
-                {
-                    ["parentRuntimeId"] = PathJson(tablePath),
-                    ["kind"] = "cell_summary",
-                    ["count"] = empty,
-                    ["reason"] = "empty_cells",
-                    ["detail"] =
-                        $"{empty} empty cells in view " +
-                        $"{SpreadsheetGrid.A1(viewport.Row0, viewport.Column0)}:" +
-                        $"{SpreadsheetGrid.A1(viewport.Row1, viewport.Column1)} omitted " +
-                        $"({listed} listed); they have no ref: move the cell cursor there " +
-                        "with keypress, then type without a ref",
-                });
+                annotations.Add(CellSummaryAnnotation(tablePath, empty, listedCells.Count, layout));
             }
+            grids.Add(new SpreadsheetRead(
+                table, tablePath, depth, layout, listedCells,
+                Complete: failed == 0 && overBudget == 0 && viewport.Missing == 0 &&
+                    viewport.Unprobed == 0 && viewport.ExtentComplete));
             if (viewport.Missing > 0)
             {
                 Omit(tablePath, "visible_cell_lookup_unavailable", viewport.Missing);
@@ -427,6 +341,22 @@ internal sealed partial class UiaProvider
                 Omit(tablePath, "node_budget", overBudget);
             }
         }
+
+        // The cell at a point of the selected window, or null when another
+        // window covers the point or the hit test fails.
+        CachedUiaNode? ReadCellAt(Point point, CachedUiaNode table)
+        {
+            if (!SpreadsheetGrid.PointShowsWindow(point, selectedWindow.Handle)) { return null; }
+            try { return cache.ReadAtPoint(point, table); }
+            catch { return null; }
+        }
+
+        static SpreadsheetCellHit<CachedUiaNode>? CellHit(CachedUiaNode? cell) =>
+            cell?.Facts is { ControlType: ControlType.DataItem } facts &&
+                SpreadsheetGrid.TryParseA1(facts.Name, out var row, out var column)
+                ? new SpreadsheetCellHit<CachedUiaNode>(cell, row, column, facts.Bounds,
+                    !string.IsNullOrEmpty(facts.ValueText))
+                : null;
 
         void Omit(int[] parentPath, string reason, int count)
         {
@@ -513,6 +443,140 @@ internal sealed partial class UiaProvider
             });
         }
     }
+
+    // Publishes sampled records in tree-path order with dense indices,
+    // records the window's element leases and adds the window inventory.
+    private JsonObject PublishSnapshot(
+        Process process,
+        NativeDesktop.WindowRecord selectedWindow,
+        NativeWindowProjection projection,
+        IEnumerable<(CachedUiaNode Node, JsonObject Record, int[] Path, int Depth)> sampled,
+        JsonArray annotations)
+    {
+        // Traversal alternates parent branches, so records arrive breadth
+        // first. Publish them in tree-path order with dense indices.
+        var pathOrder = Comparer<int[]>.Create((left, right) =>
+        {
+            for (var offset = 0; offset < Math.Min(left.Length, right.Length); offset++)
+            {
+                var order = left[offset].CompareTo(right[offset]);
+                if (order != 0) { return order; }
+            }
+            return left.Length.CompareTo(right.Length);
+        });
+        var records = new JsonArray();
+        var lines = new JsonArray();
+        var observedElementLeases =
+            new Dictionary<string, ObservedElementLease<AutomationElement>>(
+                StringComparer.Ordinal);
+        var index = 0;
+        foreach (var sample in sampled.OrderBy(sample => sample.Path, pathOrder))
+        {
+            sample.Record["index"] = index;
+            records.Add(sample.Record);
+            lines.Add(new string(' ', sample.Depth * 2) +
+                $"{index} {sample.Record["controlType"]?.GetValue<string>() ?? "unknown"} " +
+                $"{sample.Record["name"]?.GetValue<string>() ?? string.Empty}");
+            var providerPath = sample.Record["providerObjectPath"]?.GetValue<string>() ?? string.Empty;
+            if (providerPath.StartsWith("runtime:", StringComparison.Ordinal))
+            {
+                observedElementLeases[providerPath] =
+                    new ObservedElementLease<AutomationElement>(sample.Node.Element, sample.Record);
+            }
+            else if (providerPath.StartsWith(SpreadsheetCellScope + ":", StringComparison.Ordinal))
+            {
+                observedElementLeases[providerPath] =
+                    new ObservedElementLease<AutomationElement>(sample.Node.Element, sample.Record);
+            }
+            index++;
+        }
+        _observedElementLeases.Replace(
+            process.Id,
+            ProcessGeneration(process),
+            selectedWindow.Handle.ToInt64(),
+            observedElementLeases);
+
+        var windows = projection.LogicalWindows();
+        var windowInventory = new JsonArray();
+        foreach (var window in windows)
+        {
+            var handle = OpaqueWindowHandle(process, window.Handle);
+            windowInventory.Add(
+                new JsonObject
+                {
+                    ["title"] = window.Title,
+                    ["role"] = "window",
+                    ["handle"] = handle,
+                    ["providerBusName"] = $"win32:pid:{process.Id}",
+                    ["providerObjectPath"] = handle,
+                    ["providerProcessGeneration"] = ProcessGeneration(process),
+                    ["selected"] = window.Handle == selectedWindow.Handle,
+                    ["active"] = window.Active,
+                    ["showing"] = true,
+                });
+        }
+        var snapshot = new JsonObject
+        {
+            ["app"] = AppJson(process, selectedWindow.HostedProcessId),
+            ["windowTitle"] = selectedWindow.Title,
+            ["windowHandle"] = OpaqueWindowHandle(process, selectedWindow.Handle),
+            ["windows"] = windowInventory,
+            ["snapshotId"] = Guid.NewGuid().ToString("N"),
+            ["sampledAt"] = DateTimeOffset.UtcNow.ToString("O"),
+            ["windowBounds"] = RectangleJson(selectedWindow.Bounds),
+            ["treeLines"] = lines,
+            ["elements"] = records,
+            ["annotations"] = annotations,
+        };
+        return snapshot;
+    }
+
+    // The record of a cell read by hit test, or null when the cell is empty
+    // and does not hold the cursor: such a cell is summarized, not listed.
+    // The cell has no UIA runtime id, and its position among the table's
+    // children is too far to walk: an action finds it again by hit test at
+    // its observed rectangle. The identity names the table and sheet, so a
+    // ref to C2 of one sheet never resolves to C2 of another.
+    private JsonObject? SpreadsheetCellRecord(
+        SpreadsheetCellHit<CachedUiaNode> cell,
+        string tableName,
+        int[] cellPath,
+        int index,
+        string processGeneration,
+        Process process,
+        NativeDesktop.WindowRecord window,
+        string windowHandle)
+    {
+        var facts = cell.Cell.Facts!;
+        var record = ElementJson(
+            cell.Cell.Element, facts, index, processGeneration,
+            process, window, windowHandle, cellPath);
+        if (string.IsNullOrEmpty(record["value"]?.GetValue<string>()) && !facts.HasKeyboardFocus)
+        {
+            return null;
+        }
+        record["providerIdentityScope"] = SpreadsheetCellScope;
+        record["providerObjectPath"] = SpreadsheetCellObjectPath(
+            tableName, cell.Row, cell.Column);
+        return record;
+    }
+
+    // Same annotation as the Linux provider: the core renders it on the
+    // table as /empty-cells.
+    private static JsonObject CellSummaryAnnotation(
+        int[] tablePath, int empty, int listed, SpreadsheetLayout layout) => new()
+    {
+        ["parentRuntimeId"] = PathJson(tablePath),
+        ["kind"] = "cell_summary",
+        ["count"] = empty,
+        ["reason"] = "empty_cells",
+        ["detail"] =
+            $"{empty} empty cells in view " +
+            $"{SpreadsheetGrid.A1(layout.Row0, layout.Column0)}:" +
+            $"{SpreadsheetGrid.A1(layout.Row1, layout.Column1)} omitted " +
+            $"({listed} listed); they have no ref: move the cell cursor there " +
+            "with keypress, then type without a ref",
+    };
 
     // Identity scope of a spreadsheet cell record (see ResolveSpreadsheetCell).
     private const string SpreadsheetCellScope = "table_cell";

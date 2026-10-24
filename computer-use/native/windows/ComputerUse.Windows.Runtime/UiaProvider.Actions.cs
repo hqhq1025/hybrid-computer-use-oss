@@ -68,6 +68,15 @@ internal sealed partial class UiaProvider
             };
         }
         var input = request["input"] as JsonObject ?? new JsonObject();
+        // Decided before any input: the read after the action may then read
+        // the sheet in part (see TryReadSpreadsheetBack). Any other action
+        // drops the kept read, so a later cell action reads in full.
+        var spreadsheetRead = SpreadsheetCellAction(
+                process, selectedWindow, intent, input, target, elementRecord, element,
+                out var spreadsheetCell, out var spreadsheetCursorKey)
+            ? _spreadsheetRead
+            : null;
+        ForgetSpreadsheetRead();
         var route = "unknown";
         var geometrySampled = false;
         bool? pointOwnerVerified = null;
@@ -430,6 +439,7 @@ internal sealed partial class UiaProvider
                 };
             }
             var followedExternalOwner = false;
+            var readBack = false;
             var snapshot = PostActionObservationRetry.Execute(
                 () => PostActionObservationWindows(
                     process.Id,
@@ -439,9 +449,16 @@ internal sealed partial class UiaProvider
                 selectedWindow.Handle.ToInt64(),
                 (window, _) =>
                 {
+                    readBack = false;
                     if (window.ProcessId == process.Id)
                     {
-                        return BuildSnapshot(
+                        var partial = TryReadSpreadsheetBack(
+                            spreadsheetRead, process, window, observation,
+                            spreadsheetCell, spreadsheetCursorKey);
+                        // A retry reads the whole window.
+                        spreadsheetRead = null;
+                        readBack = partial is not null;
+                        return partial ?? BuildSnapshot(
                             process,
                             window,
                             observation);
@@ -501,6 +518,10 @@ internal sealed partial class UiaProvider
                 response["notes"] = new JsonArray(
                     "The acted-on transient window retired; the final AX " +
                     "observation follows its exact pre-action native owner.");
+            }
+            else if (readBack)
+            {
+                response["notes"] = new JsonArray(SpreadsheetReadbackNote);
             }
             return response;
         }

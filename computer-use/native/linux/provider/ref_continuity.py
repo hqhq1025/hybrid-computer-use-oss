@@ -15,10 +15,10 @@ from .foundation import (
     provider_bus_name,
     provider_object_path,
     safe,
-    showing_state,
     state_contains,
     state_value,
 )
+from .node_visibility import showing_state
 
 from .ax_node_properties import (
     accessible_id,

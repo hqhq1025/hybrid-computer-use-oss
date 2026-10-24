@@ -24,7 +24,8 @@ from .foundation import (
     state_contains,
 )
 
-from .ax_snapshot import FIND_WALK_LIMITS, FocusProbe, render_tree
+from .ax_snapshot import FIND_WALK_LIMITS, render_tree
+from .focus_probe import FocusProbe
 from .find_walk import FindFilter, FindWalk
 from .tree_reuse import (
     ContentProbe,
@@ -37,9 +38,6 @@ from . import ui_events
 from .x11_windows import (
     accessible_window_title,
     app_windows,
-    desktop_bounds,
-    desktop_layout_frame_id,
-    desktop_layout_state,
     iter_apps,
     main_window,
     select_window_by_handle,
@@ -47,6 +45,11 @@ from .x11_windows import (
     unmapped_window_indices,
     window_instance_handle,
     window_bounds,
+)
+from .desktop_layout import (
+    desktop_bounds,
+    desktop_layout_frame_id,
+    desktop_layout_state,
 )
 
 from .gui_capture import (

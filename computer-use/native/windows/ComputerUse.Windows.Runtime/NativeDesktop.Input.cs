@@ -452,12 +452,19 @@ internal static partial class NativeDesktop
         SendChecked(new[] { input });
     }
 
+    // Counts SendInput calls. A read that remembers the window it saw notes
+    // the count, so a later read can tell whether any input came between.
+    private static long _inputGeneration;
+
+    internal static long InputGeneration => Interlocked.Read(ref _inputGeneration);
+
     private static void SendChecked(IReadOnlyList<Input> inputs)
     {
         if (inputs.Count == 0)
         {
             return;
         }
+        Interlocked.Increment(ref _inputGeneration);
         var values = inputs.ToArray();
         var sent = SendInput(
             unchecked((uint)values.Length),
