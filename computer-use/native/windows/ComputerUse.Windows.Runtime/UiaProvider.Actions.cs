@@ -12,6 +12,14 @@ internal sealed partial class UiaProvider
     internal JsonObject ResolveAndAct(JsonObject request)
     {
         var intent = RequiredString(request, "intent");
+        var input = request["input"] as JsonObject ?? new JsonObject();
+        // Text validation cannot follow focus preparation or document
+        // selection: malformed UTF-16 must reject before either can mutate.
+        if (intent is "type" or "set_value")
+        {
+            NativeDesktop.ValidateTypedText(OptionalString(
+                input, intent == "type" ? "text" : "value", string.Empty));
+        }
         var query = RequiredString(request, "app");
         var (process, scope) = ResolveApp(request, query);
         var target = request["target"] as JsonObject;
@@ -67,7 +75,6 @@ internal sealed partial class UiaProvider
                     selectedWindow),
             };
         }
-        var input = request["input"] as JsonObject ?? new JsonObject();
         // Decided before any input: the read after the action may then read
         // the sheet in part (see TryReadSpreadsheetBack). Any other action
         // drops the kept read, so a later cell action reads in full.
@@ -263,7 +270,9 @@ internal sealed partial class UiaProvider
                         !valuePattern.IsReadOnly.Value,
                         textPattern is not null))
                 {
-                    route = "input.send_input.document_replace";
+                    route = requestedValue.Length == 0
+                        ? "input.send_input.document_replace"
+                        : "input.send_input_and_window_messages.document_replace";
                     EnsureExactFocus(element,
                         () => EnsureTargetLogicalWindow(element, process, selectedWindow));
                     mutationAttempted = true;
@@ -275,7 +284,7 @@ internal sealed partial class UiaProvider
                     }
                     else
                     {
-                        NativeDesktop.TypeText(requestedValue);
+                        TypeInSelectedWindow(requestedValue);
                     }
                     focusVerified = ForegroundOwnedBy(process.Id);
                 }
@@ -341,7 +350,7 @@ internal sealed partial class UiaProvider
                         !LiveValueReadback.TextEquals(valueBefore, requestedValue));
                     break;
                 case "type":
-                    route = "input.send_input.keyboard";
+                    route = "input.window_messages";
                     if (element is not null)
                     {
                         EnsureExactFocus(element,
@@ -352,9 +361,8 @@ internal sealed partial class UiaProvider
                         NativeDesktop.ActivateWindow(selectedWindow.Handle);
                     }
                     mutationAttempted = true;
-                    NativeDesktop.TypeText(
-                        OptionalString(input, "text", string.Empty));
-                    inputEmitted = true;
+                    TypeInSelectedWindow(OptionalString(input, "text", string.Empty));
+                    inputEmitted = OptionalString(input, "text", string.Empty).Length > 0;
                     focusVerified = ForegroundOwnedBy(process.Id);
                     break;
                 case "keypress":
@@ -566,6 +574,18 @@ internal sealed partial class UiaProvider
                     readbackSampled,
                     readbackVerified,
                     inputEmitted, pointOwnerVerified));
+        }
+
+        void TypeInSelectedWindow(string text)
+        {
+            var expectedRoot = NativeDesktop.RootWindow(selectedWindow.Handle);
+            if (expectedRoot == 0)
+            {
+                throw new ProviderFailureException(
+                    "window_target_stale", "precondition",
+                    "The selected input window disappeared; no text was sent.");
+            }
+            NativeDesktop.TypeText(text, expectedRoot);
         }
     }
 

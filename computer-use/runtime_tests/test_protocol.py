@@ -8,6 +8,20 @@ from runtime_test_support import *  # noqa: F401,F403
 
 
 class RuntimeActionEvidenceFailureTests(unittest.TestCase):
+    def test_text_delivery_wire_keeps_null_and_zero_without_confirming_effect(self):
+        for name in ("text-first-message-unknown", "text-focus-changed"):
+            fixture = json.loads((Path(__file__).parents[1] / "testdata" /
+                                  "provider-wire" / (name + ".response.json")).read_text())
+            payload = fixture.get("desktop", fixture.get("accessibility"))
+            evidence = payload["action_evidence"]
+            for encode in (wire._desktop_result, wire._accessibility_result):
+                with self.subTest(name=name, encode=encode.__name__):
+                    result = encode({"ok": False, "actionEvidence": evidence})
+                    self.assertEqual(result["action_evidence"], evidence)
+                    self.assertFalse(result["action_evidence"]["effect_verified"])
+                    self.assertEqual(result["action_evidence"]["unknown_message_index"],
+                                     0 if name == "text-first-message-unknown" else None)
+
     def test_generic_input_exception_preserves_confirmed_events(self):
         action_evidence.replace({"input_emitted": False})
         self.addCleanup(action_evidence.reset)

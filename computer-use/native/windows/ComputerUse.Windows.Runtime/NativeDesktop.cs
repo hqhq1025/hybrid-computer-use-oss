@@ -91,6 +91,77 @@ internal static partial class NativeDesktop
         [In] Input[] inputs,
         int inputSize);
 
+    private static long TextInputTicks() => Environment.TickCount64;
+    private static uint TextVirtualKeyScan(uint key) => MapVirtualKeyW(key, 0);
+
+    private static TextFocus? ReadTextFocus()
+    {
+        var owner = GetForegroundWindow();
+        if (owner == 0) return null;
+        var ownerThread = GetWindowThreadProcessId(owner, out var ownerProcess);
+        var info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf<GuiThreadInfo>() };
+        if (ownerThread == 0 || !GetGUIThreadInfo(ownerThread, ref info) ||
+            info.Focus == 0 || !IsWindowUnicode(info.Focus)) return null;
+        var focusThread = GetWindowThreadProcessId(info.Focus, out var focusProcess);
+        if (focusThread == 0 || ownerProcess == 0 || focusProcess == 0 ||
+            GetForegroundWindow() != owner) return null;
+        return new(owner, info.Focus, ownerProcess, ownerThread, focusProcess,
+            focusThread, RootWindow(info.Focus));
+    }
+
+    private static (bool Success, int Error) SendTextMessage(
+        nint window, uint message, uint value, uint parameter, uint timeout)
+    {
+        Marshal.SetLastPInvokeError(0);
+        var success = SendMessageTimeoutW(window, message, value,
+            unchecked((nint)parameter), 0x23, timeout, out _) != 0;
+        return (success, Marshal.GetLastPInvokeError());
+    }
+
+    private static (bool Success, int Error) PostTextWake(TextFocus target)
+    {
+        // Wake the original receiver even if focus moved after partial input.
+        // Never follow the current focus to a different receiver.
+        if (GetWindowThreadProcessId(target.Foreground, out var ownerProcess) != target.OwnerThread ||
+            ownerProcess != target.OwnerProcess ||
+            GetWindowThreadProcessId(target.Focus, out var focusProcess) != target.FocusThread ||
+            focusProcess != target.FocusProcess)
+            return (false, 1400);
+        Marshal.SetLastPInvokeError(0);
+        var success = PostMessageW(target.Focus, 0, 0, 0);
+        return (success, Marshal.GetLastPInvokeError());
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GuiThreadInfo
+    {
+        internal uint Size;
+        internal uint Flags;
+        internal nint Active;
+        internal nint Focus;
+        internal nint Capture;
+        internal nint MenuOwner;
+        internal nint MoveSize;
+        internal nint Caret;
+        internal Rect CaretRect;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo info);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowUnicode(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern uint MapVirtualKeyW(uint code, uint mapType);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint SendMessageTimeoutW(nint window, uint message,
+        nuint value, nint parameter, uint flags, uint timeout, out nuint result);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessageW(nint window, uint message, nuint value, nint parameter);
+
     [DllImport("user32.dll")]
     private static extern nint WindowFromPoint(NativePoint point);
 

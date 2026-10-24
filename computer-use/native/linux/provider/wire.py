@@ -120,6 +120,8 @@ def _accessibility_result(response):
 
 def _desktop_result(response):
     result = _common_result(response)
+    if response.get("actionEvidence"):
+        result["action_evidence"] = response["actionEvidence"]
     gui_result = response.get("guiResult")
     if isinstance(gui_result, dict) and gui_result:
         result["gui_result"] = gui_result

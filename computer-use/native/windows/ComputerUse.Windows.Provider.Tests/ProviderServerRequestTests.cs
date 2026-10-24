@@ -8,6 +8,39 @@ internal static class ProviderServerRequestTests
     {
         using (var server = new ProviderServer())
         {
+            foreach (var emitted in new[] { false, true })
+            {
+                var textEvidence = new JsonObject
+                {
+                    ["route"] = "input.window_messages",
+                    ["attempted_messages"] = emitted ? 2 : 1,
+                    ["returned_messages"] = emitted ? 1 : 0,
+                    ["unknown_message_index"] = emitted ? 1 : 0,
+                    ["effect_verified"] = false,
+                };
+                DesktopProvider.FailureForTest = new ProviderFailureException(
+                    "desktop_input_failed", "emission", "unknown text completion",
+                    inputEventsEmitted: emitted, mutationUnknown: true,
+                    actionEvidence: textEvidence);
+                try
+                {
+                    var request = JsonNode.Parse("""
+                        {"protocol":"computer-use-provider","schema_version":2,
+                         "request_id":"text-unknown","operation":"desktop_execute_batch",
+                         "desktop":{"protocol_version":2,"actions":[{"type":"type","text":"abc"}]}}
+                        """)!.AsObject();
+                    var payload = server.Dispatch(request)["desktop"]!.AsObject();
+                    if (payload["mutation"]?["input_events_emitted"]?.GetValue<bool>() != emitted ||
+                        payload["mutation"]?["mutation_unknown"]?.GetValue<bool>() != true ||
+                        payload["action_evidence"]?["unknown_message_index"]?.GetValue<int>() != (emitted ? 1 : 0) ||
+                        payload["action_evidence"]?["effect_verified"]?.GetValue<bool>() != false ||
+                        !JsonNode.DeepEquals(payload["action_evidence"], textEvidence))
+                    {
+                        throw new InvalidDataException("GUI failure envelope lost native text delivery evidence.");
+                    }
+                }
+                finally { DesktopProvider.FailureForTest = null; }
+            }
             var staleDesktop = JsonNode.Parse(
                 """
                 {

@@ -136,6 +136,9 @@ func compactAXBatchResult(value any) map[string]any {
 			}
 		}
 		if callError, _ := action["call_error"].(bool); callError {
+			if delivery := publicTextDelivery(action["runtime_action_evidence"]); delivery != nil {
+				entry["text_delivery"] = delivery
+			}
 			entry["type"] = action["action_type"]
 			for _, key := range []string{"focus_preparation", "pointer_preparation"} {
 				nonDefaultStringEvidence(entry, action, key, "", "none")
@@ -233,6 +236,8 @@ func compactAXModelEvidence(
 
 	if batch := compactAXBatchResult(full["a11y_batch_result"]); len(batch) > 0 {
 		compact["batch"] = batch
+	} else if delivery := publicTextDelivery(full["runtime_action_evidence"]); delivery != nil {
+		compact["text_delivery"] = delivery
 	}
 	for _, key := range []string{
 		"failure_code",

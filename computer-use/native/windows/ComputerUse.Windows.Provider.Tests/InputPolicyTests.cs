@@ -43,6 +43,39 @@ internal static class InputPolicyTests
         {
             throw new InvalidDataException("Action failure rebuild erased emitted input evidence.");
         }
+        var nativeEvidence = new JsonObject
+        {
+            ["route"] = "input.window_messages",
+            ["attempted_messages"] = 1,
+            ["returned_messages"] = 0,
+            ["unknown_message_index"] = 0,
+            ["effect_verified"] = false,
+        };
+        var unknownText = UiaMutationFailureAttribution.Preserve(
+            new ProviderFailureException("desktop_input_failed", "emission", "unknown message",
+                inputEventsEmitted: false, mutationUnknown: true, actionEvidence: nativeEvidence),
+            false, new JsonObject { ["route"] = "input.window_messages", ["focus_verified"] = true });
+        if (unknownText.InputEventsEmitted || !unknownText.MutationUnknown ||
+            unknownText.ActionEvidence?["route"]?.GetValue<string>() != "input.window_messages" ||
+            unknownText.ActionEvidence?["unknown_message_index"]?.GetValue<int>() != 0 ||
+            unknownText.ActionEvidence?["attempted_messages"]?.GetValue<int>() != 1 ||
+            unknownText.ActionEvidence?["focus_verified"]?.GetValue<bool>() != true ||
+            nativeEvidence.ContainsKey("input_emitted"))
+        {
+            throw new InvalidDataException("AX wrapping erased native uncertainty or changed its source evidence.");
+        }
+        var selectedThenUnknown = UiaMutationFailureAttribution.Preserve(
+            new ProviderFailureException("desktop_input_failed", "emission", "unknown replacement",
+                inputEventsEmitted: false, mutationUnknown: true, actionEvidence: nativeEvidence),
+            true, new JsonObject { ["route"] = "input.send_input_and_window_messages.document_replace" });
+        if (!selectedThenUnknown.InputEventsEmitted || !selectedThenUnknown.MutationUnknown ||
+            selectedThenUnknown.ActionEvidence?["returned_messages"]?.GetValue<int>() != 0 ||
+            selectedThenUnknown.ActionEvidence?["route"]?.GetValue<string>() !=
+                "input.send_input_and_window_messages.document_replace" ||
+            selectedThenUnknown.ActionEvidence?["emission_route"]?.GetValue<string>() != "input.window_messages")
+        {
+            throw new InvalidDataException("Earlier selection input must survive a first-message replacement failure.");
+        }
         if (!PointerPreparationFailureAttribution.HasKnownZeroRequestedInput(
                 zeroPointerDispatch, true, false) ||
             !PointerPreparationFailureAttribution.HasKnownZeroRequestedInput(

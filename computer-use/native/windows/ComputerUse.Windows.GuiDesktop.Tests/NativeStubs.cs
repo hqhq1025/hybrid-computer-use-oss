@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace ComputerUse.Windows.Runtime;
 
-// Replaces only the SendInput boundary, the Win32 layout read and GDI capture.
+// Replaces the native input boundaries, the Win32 layout read and GDI capture.
 // The production input methods, key mapping, coordinate transform, batch loop
 // and screenshot retry loop run as is.
 internal static partial class NativeDesktop
@@ -18,6 +18,30 @@ internal static partial class NativeDesktop
     internal static Queue<Layout> Layouts { get; } = new();
     internal static List<ScreenFrame> Captures { get; } = new();
     internal static List<Layout> Published { get; } = new();
+    internal static TextFocus? Focus { get; set; } = new(1, 2, 10, 11, 10, 12, 1);
+    internal static List<(uint Message, uint Value, uint Parameter, uint Timeout)> TextMessages { get; } = new();
+    internal static Func<int, bool>? OnTextMessage { get; set; }
+    internal static long TextTicks { get; set; }
+    internal static uint EnterScan { get; set; } = 0x1C;
+    internal static List<TextFocus> TextWakes { get; } = new();
+    internal static bool TextWakeFails { get; set; }
+    internal static bool TextWakeThrows { get; set; }
+    private static (bool Success, int Error) PostTextWake(TextFocus target)
+    {
+        TextWakes.Add(target);
+        if (TextWakeThrows) throw new InvalidOperationException("native wake boundary failed");
+        return (!TextWakeFails, TextWakeFails ? 1400 : 0);
+    }
+    private static TextFocus? ReadTextFocus() => Focus;
+    private static long TextInputTicks() => TextTicks;
+    private static uint TextVirtualKeyScan(uint key) => EnterScan;
+    private static (bool Success, int Error) SendTextMessage(
+        nint window, uint message, uint value, uint parameter, uint timeout)
+    {
+        TextMessages.Add((message, value, parameter, timeout));
+        var success = OnTextMessage?.Invoke(TextMessages.Count) ?? true;
+        return (success, success ? 0 : 1460);
+    }
 
     internal static void Reset(params Layout[] layouts)
     {
@@ -30,6 +54,14 @@ internal static partial class NativeDesktop
         foreach (var layout in layouts) Layouts.Enqueue(layout);
         Captures.Clear();
         Published.Clear();
+        Focus = new(1, 2, 10, 11, 10, 12, 1);
+        TextMessages.Clear();
+        OnTextMessage = null;
+        TextTicks = 0;
+        EnterScan = 0x1C;
+        TextWakes.Clear();
+        TextWakeFails = false;
+        TextWakeThrows = false;
     }
 
     private static uint SendInput(uint count, Input[] inputs, int size)

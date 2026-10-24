@@ -226,29 +226,158 @@ foreach (var pixels in new[] { false, true })
         "Two keys did not wait once for input idle, or slept a fixed delay");
     cases++;
 }
-// Text is typed as Unicode key events, with real Enter and Tab keys.
+// Text retains UTF-16 ordering and literal tabs; CRLF is one line break.
 {
     NativeDesktop.Reset();
     NativeDesktop.TypeText("a\u00e9\r\n\t\U0001F600");
-    var events = NativeDesktop.Calls.SelectMany(call => call).ToArray();
-    var downs = events.Where(value => (value.Flags & 0x0002) == 0).ToArray();
-    Check(events.Length == 12 && downs.Length == 6 &&
-        downs[0].Scan == 'a' && (downs[0].Flags & 0x0004) != 0 && downs[0].Key == 0 &&
-        downs[1].Scan == 0x00e9 && downs[2].Key == 0x0D && (downs[2].Flags & 0x0004) == 0 &&
-        downs[3].Key == 0x09 && downs[4].Scan == 0xD83D && downs[5].Scan == 0xDE00,
-        "Text did not become one Unicode key per UTF-16 unit with Enter and Tab keys");
+    var chars = NativeDesktop.TextMessages.Where(value => value.Message == 0x102)
+        .Select(value => (char)value.Value).ToArray();
+    Check(new string(chars) == "a\u00e9\r\t\U0001F600" &&
+        NativeDesktop.TextMessages.Count == 8 && NativeDesktop.Calls.Count == 0,
+        "Text reordered characters, lost a literal tab, or duplicated CRLF");
     cases++;
 }
-// A long text is sent in whole-key chunks; a failure after the first chunk reports prior input.
+// An unknown delivery stops immediately, retaining both the prefix and unknown unit.
 {
     NativeDesktop.Reset();
-    NativeDesktop.SendCounts.Enqueue(128);
-    NativeDesktop.SendCounts.Enqueue(0);
-    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText(new string('x', 100)));
-    Check(NativeDesktop.Calls.Count == 2 && NativeDesktop.Calls[0].Length == 128 &&
-        failure.InputEventsEmitted && failure.MutationUnknown,
-        "A failed later text chunk lost the input of the earlier chunk");
+    NativeDesktop.OnTextMessage = count => count != 2;
+    var generation = NativeDesktop.InputGeneration;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("ABC"));
+    Check(NativeDesktop.TextMessages.Count == 2 && failure.InputEventsEmitted &&
+        failure.MutationUnknown && failure.ActionEvidence!["unknown_message_index"]!.GetValue<int>() == 1 &&
+        NativeDesktop.InputGeneration == generation + 2,
+        "Unknown text delivery was replayed, lost evidence, or retained cached state");
+    cases++;
+}
+// Even the first timed-out send may take effect later.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.OnTextMessage = _ => false;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("AB"));
+    Check(!failure.InputEventsEmitted && failure.MutationUnknown && NativeDesktop.TextMessages.Count == 1,
+        "First unknown delivery was represented as safe to retry");
+    cases++;
+}
+// A focus change stops the suffix without following the newly focused control.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.OnTextMessage = _ => { NativeDesktop.Focus = null; return true; };
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("AB"));
+    Check(NativeDesktop.TextMessages.Count == 1 && failure.InputEventsEmitted &&
+        failure.ActionEvidence!["source_utf16_index"]!.GetValue<int>() == 1,
+        "Changed focus received a text suffix");
+    cases++;
+}
+// Validate the whole string before any emission, including a bad suffix.
+{
+    NativeDesktop.Reset();
+    var generation = NativeDesktop.InputGeneration;
+    _ = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("valid\uD800"));
+    Check(NativeDesktop.TextMessages.Count == 0 && NativeDesktop.InputGeneration == generation,
+        "Malformed UTF-16 was rejected only after emitting its prefix");
+    _ = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("x", 99));
+    Check(NativeDesktop.TextMessages.Count == 0, "AX expected root was ignored");
+    cases++;
+}
+// Resolve an invalid Enter scan before sending even a valid text prefix.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.Focus = null;
+    var generation = NativeDesktop.InputGeneration;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("AB"));
+    Check(NativeDesktop.TextMessages.Count == 0 && !failure.InputEventsEmitted &&
+        !failure.MutationUnknown && NativeDesktop.InputGeneration == generation,
+        "Unavailable Unicode focus attempted input or invalidated the cache");
+    cases++;
+}
+// Resolve an invalid Enter scan before sending even a valid text prefix.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.EnterScan = 0;
+    _ = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("prefix\nsuffix"));
+    Check(NativeDesktop.TextMessages.Count == 0, "Invalid Enter scan was rejected after text emission");
+    cases++;
+}
+// A deadline expires before the next message; no delayed retry or cleanup input.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.OnTextMessage = _ => { NativeDesktop.TextTicks = 15000; return true; };
+    _ = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("AB"));
+    Check(NativeDesktop.TextMessages.Count == 1, "Text continued after its deadline");
+    cases++;
+}
+// Failure halfway through Enter or a surrogate pair must not send the suffix.
+foreach (var text in new[] { "\r\nrest", "\U0001F600rest" })
+{
+    NativeDesktop.Reset();
+    NativeDesktop.OnTextMessage = count => count != 2;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText(text));
+    Check(NativeDesktop.TextMessages.Count == 2 && failure.MutationUnknown,
+        "A partial text sequence triggered extra input");
+    cases++;
+}
+// The public maximum length is supported without truncation.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.TypeText(new string('x', 10000));
+    Check(NativeDesktop.TextMessages.Count == 10000 && NativeDesktop.TextWakes.Count == 1,
+        "Long text was truncated or failed to wake the receiver once");
     cases++;
 }
 
+// A focus change still wakes the original receiver, without input at the new focus.
+{
+    NativeDesktop.Reset();
+    var original = NativeDesktop.Focus!.Value;
+    NativeDesktop.OnTextMessage = _ => { NativeDesktop.Focus = original with { Focus = 99 }; return true; };
+    _ = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("AB"));
+    Check(NativeDesktop.TextMessages.Count == 1 && NativeDesktop.TextWakes.SequenceEqual(new[] { original }),
+        "Partial text wake followed changed focus or repeated input");
+    cases++;
+}
+// Wake failure cannot erase the unknown message or replay the text.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.TextWakeFails = true;
+    NativeDesktop.OnTextMessage = _ => false;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("AB"));
+    Check(NativeDesktop.TextMessages.Count == 1 && NativeDesktop.TextWakes.Count == 1 &&
+        failure.ActionEvidence!["unknown_message_index"]!.GetValue<int>() == 0 &&
+        !failure.InputEventsEmitted && failure.MutationUnknown,
+        "Wake failure replaced the primary unknown-delivery evidence");
+    cases++;
+}
+// Successful character sends followed by a failed wake remain unsafe to repeat.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.TextWakeThrows = true;
+    NativeDesktop.OnTextMessage = _ => false;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("AB"));
+    Check(failure.ActionEvidence!["unknown_message_index"]!.GetValue<int>() == 0 &&
+        failure.MutationUnknown && NativeDesktop.TextWakes.Count == 1,
+        "Throwing wake boundary masked the original unknown input");
+    cases++;
+}
+// Successful character sends followed by a failed wake remain unsafe to repeat.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.TextWakeFails = true;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("AB"));
+    Check(NativeDesktop.TextMessages.Count == 2 && NativeDesktop.TextWakes.Count == 1 &&
+        failure.InputEventsEmitted && failure.MutationUnknown &&
+        failure.ActionEvidence!["sequence_phase"]!.GetValue<string>() == "wake",
+        "Failed wake lost already-sent text or reported success");
+    cases++;
+}
+
+// Empty or invalid text never posts a message to an application.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.TypeText("");
+    _ = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("\uD800"));
+    Check(NativeDesktop.TextWakes.Count == 0, "Zero-input rejection posted a wake");
+    cases++;
+}
+
+GuiTextIntegrationTests.Run();
 Console.WriteLine($"PASS {cases} Windows GUI input and capture cases");

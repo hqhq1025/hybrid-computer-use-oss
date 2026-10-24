@@ -19,14 +19,33 @@ internal static class UiaMutationFailureAttribution
         JsonObject actionEvidence)
     {
         var emitted = HasEmittedInput(error, inputEmitted);
+        // Native emission evidence describes the failing message and its
+        // uncertain suffix. Keep it when adding AX preparation/readback facts.
+        if (error.ActionEvidence is { } nativeEvidence)
+        {
+            foreach (var field in nativeEvidence)
+            {
+                if (field.Key == "route" &&
+                    actionEvidence["route"]?.GetValue<string>() is { Length: > 0 } actionRoute &&
+                    actionRoute != "unknown" && actionRoute != field.Value?.GetValue<string>())
+                {
+                    actionEvidence["emission_route"] = field.Value?.DeepClone();
+                    continue;
+                }
+                actionEvidence[field.Key] = field.Value?.DeepClone();
+            }
+        }
         actionEvidence["input_emitted"] = emitted;
         return new ProviderFailureException(
             error.Code, error.Phase, error.Message,
             emitted, error.MutationUnknown,
             actionEvidence: actionEvidence,
             factsComplete: error.FactsComplete,
+            subject: error.Subject,
+            recoveryContext: error.RecoveryContext,
             focusPreparation: error.FocusPreparation,
-            pointerPreparation: error.PointerPreparation);
+            pointerPreparation: error.PointerPreparation,
+            candidates: error.Candidates);
     }
 
     internal static ProviderFailureException FromUnexpected(
