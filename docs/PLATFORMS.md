@@ -147,6 +147,15 @@ identities. A read bound to one of those identities is not replayed in a new
 provider process. Its original failure remains visible. Unknown identities
 fail before UIA sampling; discover fresh windows before using new references.
 
+Windows observations bind focus to UIA's current focused object when it
+uniquely matches a sampled node and remains current after matching.
+The provider does not substitute the foreground window for that object.
+If UIA reports focus on the window itself, the focused root remains a window;
+it does not prove editor or caret focus. `/focus-evidence` explains when this
+object binding resolves a conflicting cached focus flag. Unsupported or
+failed focus reads remain unknown; changes, ambiguous matches and unread
+focused nodes retain partial-acquisition evidence.
+
 LibreOffice draws its controls with its own toolkit, VCL, and loads the
 Windows accessibility bridge only when its process asks for it. Some
 releases, including 24.8, need `SAL_FORCE_IACCESSIBLE2=1` in the environment

@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using ComputerUse.Windows.Runtime;
 
 SelectionTests.Run();
+KeyboardFocusTests.Run();
 DocumentTextTests.Run();
 WindowReferenceReadTests.Run();
 if (args is ["--selection-contract"])

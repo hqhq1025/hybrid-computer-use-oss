@@ -38,6 +38,8 @@ fits which state, and how to combine them.
   gaps and their reasons; its count is not the total size of unread branches.
   `find` or a subtree root can narrow the read but may repeat the same gap.
   Use GUI to inspect content that AX could not read.
+- Read the focused object's role: a focused window does not prove editor or
+  caret focus inside it.
 - Plan from one read. After `observe` or `find`, put every action you can
   already determine for that window into one `act`, while later refs and
   focus remain valid. Split when the next action needs a new observation.

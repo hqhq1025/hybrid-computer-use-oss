@@ -134,6 +134,8 @@ internal sealed partial class UiaProvider
                 Gap("time_budget");
                 Gap("transient_discovery_incomplete");
             }
+            BindCurrentFocus(sampled, annotations, Gap, visits.CheckTime,
+                boundary, selectedWindow.Handle.ToInt64());
         }
 
         var snapshot = PublishSnapshot(process, selectedWindow, projection, sampled, annotations);
@@ -142,6 +144,7 @@ internal sealed partial class UiaProvider
             transientRoots == 0 && grids.Count == 1 ? grids[0] : null,
             maxNodes, maxDepth);
         return snapshot;
+
 
         bool Emit(CachedUiaNode node, int[] treePath, int depth)
         {
@@ -563,6 +566,7 @@ internal sealed partial class UiaProvider
         var name = index == 0 ? window.Title : facts.Name;
         var rectangle = facts.Bounds;
         var hasKeyboardFocus = facts.HasKeyboardFocus;
+        if (facts.KeyboardFocus.Gap is { } focusGap) { gap?.Invoke(focusGap); }
         var visibility = facts.Visibility;
         var isEffectivelyVisible = visibility.EffectiveVisibility(
             hasKeyboardFocus,

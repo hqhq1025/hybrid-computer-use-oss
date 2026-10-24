@@ -58,7 +58,7 @@ internal sealed partial class UiaProvider
         // focus. LibreOffice 24.8 focuses the cursor cell, 25.2 the sheet.
         internal bool SheetFocused => Nodes.Any(node =>
             IsUnder(node.Path, SheetParentPath) && node.Path.Length > SheetParentPath.Length &&
-            node.Node.Facts?.HasKeyboardFocus == true);
+            WindowsKeyboardFocus.IsFocused(node.Record));
     }
 
     private SpreadsheetWindowRead? _spreadsheetRead;
@@ -89,8 +89,9 @@ internal sealed partial class UiaProvider
         if (sheet is not { Complete: true } || sheet.TablePath.Length < 3) { return; }
         var tableId = PathJson(sheet.TablePath).ToJsonString();
         if (annotations.Any(annotation =>
-                annotation?["kind"]?.GetValue<string>() != "cell_summary" ||
-                annotation["parentRuntimeId"]?.ToJsonString() != tableId))
+                annotation?["kind"]?.GetValue<string>() != "focus_evidence" &&
+                (annotation?["kind"]?.GetValue<string>() != "cell_summary" ||
+                 annotation["parentRuntimeId"]?.ToJsonString() != tableId)))
         {
             return;
         }
@@ -223,7 +224,9 @@ internal sealed partial class UiaProvider
         var processGeneration = ProcessGeneration(process);
         var selectedHandle = OpaqueWindowHandle(process, selected.Handle);
         var cache = new UiaSnapshotCache(_automation);
-        var readBudget = new OwnershipProbeBudget(read.MaxNodes, SnapshotSampleTimeout);
+        var readClock = Stopwatch.StartNew();
+        var readBudget = new OwnershipProbeBudget(read.MaxNodes, SnapshotSampleTimeout, () => readClock.Elapsed);
+        var annotations = new JsonArray();
         var nodes = new List<(CachedUiaNode Node, JsonObject Record, int[] Path, int Depth)>();
         var listed = new HashSet<(int Row, int Column)>();
         var cursors = new HashSet<(int Row, int Column)>();
@@ -276,7 +279,7 @@ internal sealed partial class UiaProvider
                     // A copied control that held the focus may have lost it
                     // to the sheet: only a full read can say. The sheet's
                     // ancestors keep it while the sheet has it.
-                    if (node.Node.Facts?.HasKeyboardFocus == true &&
+                    if (WindowsKeyboardFocus.IsFocused(node.Record) &&
                         !IsUnder(sheet.TablePath, node.Path))
                     {
                         return null;
@@ -331,6 +334,13 @@ internal sealed partial class UiaProvider
                     nodes.Add((hit!.Cell, record, cellPath, sheet.TableDepth + 1));
                     listed.Add((probe.Row, probe.Column));
                 }
+                var ownershipBudget = new OwnershipProbeBudget(
+                    checked(read.MaxNodes * 4 + 256), SnapshotSampleTimeout, () => readClock.Elapsed);
+                var boundary = CreateLogicalBoundary(process, projection, ownershipBudget);
+                var focusIncomplete = false;
+                BindCurrentFocus(nodes, annotations, _ => focusIncomplete = true,
+                    readBudget.CheckTime, boundary, selected.Handle.ToInt64());
+                if (focusIncomplete) { return null; }
             }
         }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -354,7 +364,6 @@ internal sealed partial class UiaProvider
         // that was read (24.8), on the editor of a cell, or on the sheet
         // (25.2). Otherwise the cursor moved to a cell that was not read.
         if (nodes.Count > read.MaxNodes || (read.SheetFocused && !updated.SheetFocused)) { return null; }
-        var annotations = new JsonArray();
         var empty = sheet.Layout.Cells.Count - listed.Count;
         if (empty > 0)
         {
@@ -466,7 +475,7 @@ internal sealed partial class UiaProvider
         nodes
             .Where(node => node.Path.Length == tablePath.Length + 2 &&
                 IsUnder(node.Path, tablePath) &&
-                node.Node.Facts?.HasKeyboardFocus == true)
+                WindowsKeyboardFocus.IsFocused(node.Record))
             .Select(node => (node.Path[^2], node.Path[^1]))
             .ToArray();
 

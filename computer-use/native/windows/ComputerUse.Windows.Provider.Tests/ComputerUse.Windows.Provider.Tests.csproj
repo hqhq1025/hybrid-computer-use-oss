@@ -12,6 +12,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../ComputerUse.Windows.Runtime/WindowsKeyboardFocus.cs"
+      Link="WindowsKeyboardFocus.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/WindowsWindowReferenceRead.cs"
       Link="WindowsWindowReferenceRead.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/DocumentTextRead.cs"

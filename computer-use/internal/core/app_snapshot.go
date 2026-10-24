@@ -116,6 +116,9 @@ type axRelationTarget struct {
 // gap.
 const axCellSummaryAnnotation = "cell_summary"
 
+// A resolved focus-property conflict describes evidence, not missing nodes.
+const axFocusEvidenceAnnotation = "focus_evidence"
+
 // axNullReferenceReason marks provider-omission annotations for child slots
 // that the application answered with a null reference. The renderer shows
 // their count on the parent; they remain a coverage gap.
