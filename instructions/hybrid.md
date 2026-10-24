@@ -34,6 +34,10 @@ fits which state, and how to combine them.
   do not infer that they closed or that a title match is unique.
 - Once the source, target, and operation are known, act. Further checks must
   answer a concrete blocker.
+- A partial tree can contain unread content. `acquisition` reports known
+  gaps and their reasons; its count is not the total size of unread branches.
+  `find` or a subtree root can narrow the read but may repeat the same gap.
+  Use GUI to inspect content that AX could not read.
 - Plan from one read. After `observe` or `find`, put every action you can
   already determine for that window into one `act`, while later refs and
   focus remain valid. Split when the next action needs a new observation.

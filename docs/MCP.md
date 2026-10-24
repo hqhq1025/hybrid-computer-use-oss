@@ -463,6 +463,15 @@ an ellipsis when clipped. When a tree exceeds its budget, a long run of
 sibling elements loses elements from its end first, so a table keeps its
 first rows; one `/omitted: "budget nodes=N ..."` line counts the rest.
 
+Output pruning differs from content that the provider could not read.
+For an incomplete read, `coverage:"partial"` includes an `acquisition`
+object with `reported_missing_nodes` and `reasons`. The count sums reported
+gaps; an unread branch can contain more nodes than the provider could count.
+`recover.structural_budget` describes output pruning, while
+`recover.acquisition` describes unfinished reads. `find` or a subtree root
+can narrow the read but cannot guarantee that an unread region becomes
+available. GUI can show content that accessibility could not read.
+
 Find matches include a `text` excerpt when their role's value is absent from
 the rendered fields, as with paragraphs and clipped cell values. The excerpt
 contains at most 80 Unicode code points, plus an ellipsis when clipped.

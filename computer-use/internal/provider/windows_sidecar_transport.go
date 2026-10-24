@@ -357,11 +357,25 @@ func windowsProviderRequestCanRetryAfterReset(
 		return false
 	}
 	switch request.Operation {
-	case core.ProviderWireObserveApps, core.ProviderWireObserve, core.ProviderWireWindowList:
+	case core.ProviderWireObserveApps:
 		return true
+	case core.ProviderWireObserve:
+		return request.Observe != nil && request.Observe.WindowHandle == ""
+	case core.ProviderWireWindowList:
+		return request.WindowList != nil && request.WindowList.WindowHandle == ""
 	case core.ProviderWireResolveAndAct:
-		return request.Action != nil &&
-			request.Action.Intent == core.AccessibilityResolveTarget
+		action := request.Action
+		if action == nil || action.Intent != core.AccessibilityResolveTarget ||
+			action.WindowHandle != "" || action.ExpectedWindow != nil || action.Element != nil {
+			return false
+		}
+		// Window tokens and captured locators belong to the stopped worker.
+		// Replaying them would replace the original failure with stale_ref.
+		target := action.Target
+		return target != nil && target.WindowHandle == "" &&
+			target.LocatorKind != core.AXLocatorProviderBound && target.EditTarget == nil &&
+			target.ProviderObjectPath == "" && target.ProviderWindowObjectPath == "" &&
+			len(target.RuntimeID) == 0 && len(target.RuntimeIDAliases) == 0
 	default:
 		return false
 	}

@@ -5,7 +5,7 @@ namespace ComputerUse.Windows.Runtime;
 
 // A cell returned by a hit test, with the zero-based row and column that its
 // A1 name gives.
-internal sealed record SpreadsheetCellHit<T>(T Cell, int Row, int Column, Rectangle Bounds);
+internal sealed record SpreadsheetCellHit<T>(T Cell, int Row, int Column, Rectangle Bounds, bool HasValue = false);
 
 // The cells a spreadsheet grid shows. Missing counts probes that did not
 // return a cell of the grid (another window covers it); Unprobed counts
@@ -104,20 +104,31 @@ internal static class SpreadsheetGrid
             hitEdge = Math.Max(next.Bounds.Right, hitEdge + 2);
         }
 
-        // The other rows: one hit per cell.
+        // Values already read in the first row hint which columns contain
+        // data. Read those columns before spending the same bounded work on
+        // blank-looking columns. A blank first cell is not proof of an empty
+        // column: the second pass still reads it and counts any unread cells.
+        var remainingColumns = columns.Skip(1).ToArray();
+        var valuedColumns = remainingColumns.Where(column =>
+            cells.TryGetValue((origin.Row, column.Index), out var cell) && cell.HasValue).ToArray();
+        var otherColumns = remainingColumns.Where(column =>
+            !cells.TryGetValue((origin.Row, column.Index), out var cell) || !cell.HasValue).ToArray();
         var unprobed = 0;
-        foreach (var (_, y) in rows.Skip(1))
+        foreach (var group in new[] { valuedColumns, otherColumns })
         {
-            foreach (var (_, x) in columns.Skip(1))
+            foreach (var (_, y) in rows.Skip(1))
             {
-                var cell = Probe(new Point(x, y));
-                if (cell is null)
+                foreach (var (_, x) in group)
                 {
-                    if (stopped) { unprobed++; } else { missing++; }
-                    continue;
+                    var cell = Probe(new Point(x, y));
+                    if (cell is null)
+                    {
+                        if (stopped) { unprobed++; } else { missing++; }
+                        continue;
+                    }
+                    // A merged cell answers for every cell it covers: list it once.
+                    cells.TryAdd((cell.Row, cell.Column), cell);
                 }
-                // A merged cell answers for every cell it covers: list it once.
-                cells.TryAdd((cell.Row, cell.Column), cell);
             }
         }
         return new SpreadsheetViewport<T>(
