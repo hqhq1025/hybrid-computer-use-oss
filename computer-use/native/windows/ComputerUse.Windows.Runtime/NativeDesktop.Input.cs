@@ -198,15 +198,17 @@ internal static partial class NativeDesktop
     internal static void PressKeys(IReadOnlyList<string> keys)
     {
         var virtualKeys = WindowsKeyMapping.ResolveChord(keys);
+        using var barrier = CreateKeyboardInputBarrier(virtualKeys);
         var keyDown = new List<Input>(virtualKeys.Length);
         var keyUp = new List<Input>(virtualKeys.Length);
-        foreach (var key in virtualKeys)
+        for (var index = 0; index < virtualKeys.Length; index++)
         {
-            keyDown.Add(VirtualKeyInput(key, false));
+            keyDown.Add(VirtualKeyInput(virtualKeys[index], false, barrier.Tag(index)));
         }
         for (var index = virtualKeys.Length - 1; index >= 0; index--)
         {
-            keyUp.Add(VirtualKeyInput(virtualKeys[index], true));
+            keyUp.Add(VirtualKeyInput(virtualKeys[index], true,
+                barrier.Tag(virtualKeys.Length * 2 - index - 1)));
         }
         try
         {
@@ -231,6 +233,7 @@ internal static partial class NativeDesktop
             _ = ReleaseKeysBestEffort(virtualKeys);
             throw WithPriorInput(error, mutationUnknown: true);
         }
+        barrier.WaitForConsumption();
     }
 
     internal static void WithHeldKeys(IReadOnlyList<string> keys, Action action)
@@ -242,12 +245,13 @@ internal static partial class NativeDesktop
         }
 
         var virtualKeys = WindowsKeyMapping.ResolveChord(keys);
+        using var barrier = CreateKeyboardInputBarrier(virtualKeys);
         var keyDown = virtualKeys
-            .Select(key => VirtualKeyInput(key, false))
+            .Select((key, index) => VirtualKeyInput(key, false, barrier.Tag(index)))
             .ToArray();
         var keyUp = virtualKeys
             .Reverse()
-            .Select(key => VirtualKeyInput(key, true))
+            .Select((key, index) => VirtualKeyInput(key, true, barrier.Tag(virtualKeys.Length + index)))
             .ToArray();
         try
         {
@@ -283,6 +287,11 @@ internal static partial class NativeDesktop
             _ = ReleaseKeysBestEffort(virtualKeys);
             releaseFailure = WithPriorInput(error, mutationUnknown: true);
         }
+        if (releaseFailure is null)
+        {
+            try { barrier.WaitForConsumption(); }
+            catch (ProviderFailureException error) { releaseFailure = error; }
+        }
 
         if (releaseFailure is not null)
         {
@@ -294,7 +303,8 @@ internal static partial class NativeDesktop
                     : $"{operationError.Message} Modifier release also failed: " +
                         releaseFailure.Message,
                 true,
-                true);
+                true,
+                actionEvidence: releaseFailure.ActionEvidence);
         }
         if (operationError is ProviderFailureException providerFailure)
         {
@@ -326,7 +336,7 @@ internal static partial class NativeDesktop
         }
     }
 
-    private static Input VirtualKeyInput(ushort key, bool keyUp)
+    private static Input VirtualKeyInput(ushort key, bool keyUp, nuint tag = 0)
     {
         return new Input
         {
@@ -336,6 +346,7 @@ internal static partial class NativeDesktop
                 Keyboard = new KeyboardInput
                 {
                     VirtualKey = key,
+                    ExtraInfo = tag,
                     // Navigation, Delete, Insert and Windows keys need the
                     // extended flag on both edges; without it NumLock state
                     // can turn them into keypad digits.
@@ -424,7 +435,8 @@ internal static partial class NativeDesktop
             error.Phase,
             error.Message,
             true,
-            mutationUnknown ?? error.MutationUnknown);
+            mutationUnknown ?? error.MutationUnknown,
+            actionEvidence: error.ActionEvidence);
     }
 
     [StructLayout(LayoutKind.Sequential)]

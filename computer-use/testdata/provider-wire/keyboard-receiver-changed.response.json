@@ -1,0 +1,21 @@
+{
+  "protocol": "computer-use-provider",
+  "schema_version": 2,
+  "request_id": "req-keyboard",
+  "operation": "desktop_execute_batch",
+  "desktop": {
+    "ok": false,
+    "gui_result": {},
+    "error": "The keyboard receiver changed threads; remaining input consumption is unknown.",
+    "failure": {"code": "desktop_input_failed", "phase": "emission"},
+    "mutation": {"input_events_emitted": true, "partial_input_possible": true, "mutation_unknown": true},
+    "action_evidence": {
+      "route": "input.keyboard_queue",
+      "geometry_sampled": false,
+      "readback_sampled": false,
+      "input_emitted": false,
+      "requested_events": 4,
+      "consumed_events": 0
+    }
+  }
+}

@@ -445,6 +445,9 @@ func prepareGUIEvidence(result ToolCallResult) ToolCallResult {
 	if delivery := publicTextDelivery(full["runtime_action_evidence"]); delivery != nil {
 		public["text_delivery"] = delivery
 	}
+	if delivery := publicKeyboardDelivery(full["runtime_action_evidence"]); delivery != nil {
+		public["keyboard_delivery"] = delivery
+	}
 	if full["observation_required"] == true {
 		public["observation_required"] = true
 	}

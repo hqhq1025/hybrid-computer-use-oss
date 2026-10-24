@@ -3,7 +3,9 @@
 param(
     [ValidateSet("amd64", "arm64")]
     [string]$Architecture = "amd64",
-    [string]$OutputDirectory = ""
+    [string]$OutputDirectory = "",
+    [string]$Clang = "clang",
+    [string]$WindowsSysroot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +20,8 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 [void](New-Item -ItemType Directory -Force -Path $OutputDirectory)
 $OutputDirectory = (Resolve-Path $OutputDirectory).Path
+& (Join-Path $PSScriptRoot "build-input-queue.ps1") `
+    -OutputDirectory $OutputDirectory -Clang $Clang -WindowsSysroot $WindowsSysroot
 foreach ($name in @("LICENSE", "THIRD_PARTY_NOTICES.md")) {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot $name) -Destination $OutputDirectory -Force
 }

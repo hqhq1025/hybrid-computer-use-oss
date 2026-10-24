@@ -216,14 +216,81 @@ foreach (var pixels in new[] { false, true })
     cases++;
 }
 
-// Consecutive keys wait for the application's input queue, not a fixed delay.
+// Each keypress returns only after its own queue-consumption boundary.
 {
     NativeDesktop.Reset();
-    var watch = System.Diagnostics.Stopwatch.StartNew();
     DesktopProvider.ExecuteBatch(JsonNode.Parse(
         """{"actions":[{"type":"keypress","keys":["A"]},{"type":"keypress","keys":["B"]}]}""")!.AsObject());
-    Check(NativeDesktop.InputIdleWaits == 1 && watch.ElapsedMilliseconds < 400,
-        "Two keys did not wait once for input idle, or slept a fixed delay");
+    Check(NativeDesktop.BarrierWaits == 2, "A keypress returned without its queue boundary");
+    cases++;
+}
+// Delayed queue consumption holds back the next synchronous text action.
+{
+    NativeDesktop.Reset();
+    using var entered = new ManualResetEventSlim();
+    using var released = new ManualResetEventSlim();
+    NativeDesktop.OnBarrierWait = () =>
+    {
+        entered.Set();
+        if (!released.Wait(3000)) throw new Exception("Test release was not signalled");
+    };
+    var task = Task.Run(() => DesktopProvider.ExecuteBatch(JsonNode.Parse(
+        """{"actions":[{"type":"keypress","keys":["CTRL","HOME"]},{"type":"type","text":"HCU"}]}""")!.AsObject()));
+    try
+    {
+        Check(entered.Wait(3000), "Keyboard wait was not entered");
+        Check(NativeDesktop.TextMessages.Count == 0, "Text overtook queued keys");
+        var events = NativeDesktop.Calls.SelectMany(call => call).ToArray();
+        Check(events.Length == 4 && events.Select(input => input.Tag).Distinct().Count() == 4,
+            "The chord did not tag every real event independently");
+    }
+    finally { released.Set(); }
+    Check(task.Wait(3000) && NativeDesktop.TextMessages.Count == 3,
+        "Text did not follow the completed queue wait");
+    cases++;
+}
+// Missing receipt or receiver-thread changes stop later input without replay.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.OnBarrierWait = () => throw new ProviderFailureException(
+        "desktop_input_failed", "emission", "receiver thread changed", true, true,
+        actionEvidence: new JsonObject { ["consumed_events"] = 3 });
+    var failure = Fails<ProviderFailureException>(() => DesktopProvider.ExecuteBatch(JsonNode.Parse(
+        """{"actions":[{"type":"keypress","keys":["CTRL","HOME"]},{"type":"type","text":"HCU"}]}""")!.AsObject()));
+    Check(failure.InputEventsEmitted && failure.MutationUnknown && NativeDesktop.Calls.Count == 2 &&
+        NativeDesktop.TextMessages.Count == 0 && failure.ActionEvidence?["consumed_events"]?.GetValue<int>() == 3,
+        "Uncertain queue consumption replayed input or lost its partial evidence");
+    cases++;
+}
+// A modified mouse effect stays unknown when its release reached another thread.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.OnBarrierWait = () => throw new ProviderFailureException(
+        "desktop_input_failed", "emission", "receiver thread changed", true, true,
+        actionEvidence: new JsonObject { ["consumed_events"] = 1 });
+    var mouseEmitted = false;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.WithHeldKeys(
+        new[] { "CTRL" }, () => { NativeDesktop.MovePointer(5, 5); mouseEmitted = true; }));
+    Check(mouseEmitted && failure.MutationUnknown && NativeDesktop.Calls.Count == 3 &&
+        failure.ActionEvidence?["consumed_events"]?.GetValue<int>() == 1,
+        "Modified mouse input lost uncertainty or repeated modifier release");
+    cases++;
+}
+// Filtered removal of the final key-up does not replace missing earlier events.
+{
+    var receipts = new[]
+    {
+        new WindowsKeyboardQueueReceipt(0, false, 0),
+        new WindowsKeyboardQueueReceipt(2, true, 0),
+    };
+    Check(!WindowsKeyboardQueueReceipts.AreComplete(receipts), "A final key-up hid an earlier pending key");
+    receipts[0] = new(3, true, 3);
+    Check(WindowsKeyboardQueueReceipts.AreComplete(receipts) &&
+        !WindowsKeyboardQueueReceipts.ModifiersReleased(receipts), "A late Ctrl-down was treated as released");
+    receipts[0] = new(3, false, 0);
+    Check(!WindowsKeyboardQueueReceipts.ModifiersReleased(receipts), "Unavailable key state was treated as released");
+    receipts[0] = new(3, true, 0);
+    Check(WindowsKeyboardQueueReceipts.ModifiersReleased(receipts), "Complete released input was rejected");
     cases++;
 }
 // Text retains UTF-16 ordering and literal tabs; CRLF is one line break.

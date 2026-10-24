@@ -96,12 +96,18 @@ internal static partial class NativeDesktop
 
     private static TextFocus? ReadTextFocus()
     {
+        var focus = ReadKeyboardFocus();
+        return focus is not null && IsWindowUnicode(focus.Value.Focus) ? focus : null;
+    }
+
+    private static TextFocus? ReadKeyboardFocus()
+    {
         var owner = GetForegroundWindow();
         if (owner == 0) return null;
         var ownerThread = GetWindowThreadProcessId(owner, out var ownerProcess);
         var info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf<GuiThreadInfo>() };
         if (ownerThread == 0 || !GetGUIThreadInfo(ownerThread, ref info) ||
-            info.Focus == 0 || !IsWindowUnicode(info.Focus)) return null;
+            info.Focus == 0) return null;
         var focusThread = GetWindowThreadProcessId(info.Focus, out var focusProcess);
         if (focusThread == 0 || ownerProcess == 0 || focusProcess == 0 ||
             GetForegroundWindow() != owner) return null;
@@ -291,25 +297,6 @@ internal static partial class NativeDesktop
 
     // IsWindow sees hidden and zero-size windows that ListWindows leaves out.
     internal static bool WindowExists(nint handle) => handle != 0 && IsWindow(handle);
-
-    // Returns when the foreground process has no pending input, or after the
-    // timeout. A process without a message loop returns at once.
-    internal static void WaitForForegroundInputIdle(int timeoutMilliseconds)
-    {
-        try
-        {
-            if (!TryGetWindowProcessId(GetForegroundWindow(), out var processId))
-            {
-                return;
-            }
-            using var process = Process.GetProcessById(processId);
-            _ = process.WaitForInputIdle(timeoutMilliseconds);
-        }
-        catch (Exception error) when (error is InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
-        {
-            // Console and exited processes have no input queue to wait for.
-        }
-    }
 
     internal static bool TryGetWindowProcessId(
         nint handle,

@@ -45,7 +45,7 @@ func TestWindowsProviderRuntimeTimeoutIncludesDesktopExecutionCost(
 
 	actions := make([]core.ProviderDesktopAction, 60)
 	for index := range actions {
-		actions[index] = core.ProviderDesktopAction{Type: "keypress"}
+		actions[index] = core.ProviderDesktopAction{Type: "keypress", Keys: []string{"ENTER"}}
 	}
 	desktop := core.NewProviderWireRequest(
 		"desktop-timeout",
@@ -57,14 +57,14 @@ func TestWindowsProviderRuntimeTimeoutIncludesDesktopExecutionCost(
 		SettleMS:        1200,
 	}
 	if got := windowsProviderRuntimeTimeout(desktop); got !=
-		61*time.Second+200*time.Millisecond {
-		t.Fatalf("desktop timeout = %s, want 61.2s", got)
+		721*time.Second+200*time.Millisecond {
+		t.Fatalf("desktop timeout = %s, want 721.2s", got)
 	}
 
 	t.Setenv("COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS", "7")
 	if got := windowsProviderRuntimeTimeout(desktop); got !=
-		38*time.Second+200*time.Millisecond {
-		t.Fatalf("overridden desktop timeout = %s, want 38.2s", got)
+		698*time.Second+200*time.Millisecond {
+		t.Fatalf("overridden desktop timeout = %s, want 698.2s", got)
 	}
 }
 
@@ -75,12 +75,12 @@ func TestWindowsProviderRuntimeTimeoutIncludesExplicitWaits(t *testing.T) {
 		ProtocolVersion: core.ProviderProtocolVersion,
 		Actions: []core.ProviderDesktopAction{
 			{Type: "wait"},
-			{Type: "keypress"},
+			{Type: "keypress", Keys: []string{"ENTER"}},
 		},
 		SettleMS: 3000,
 	}
-	if got := windowsProviderRuntimeTimeout(request); got != 35*time.Second {
-		t.Fatalf("wait timeout = %s, want 35s", got)
+	if got := windowsProviderRuntimeTimeout(request); got != 46*time.Second {
+		t.Fatalf("wait timeout = %s, want 46s", got)
 	}
 }
 
@@ -101,19 +101,61 @@ func TestWindowsProviderRuntimeTimeoutAllowsEachBoundedTextEmission(t *testing.T
 		t.Fatalf("two text budgets plus preparation/wait/settle = %s, want 40.7s", got)
 	}
 	value := "replacement"
-	for _, action := range []*core.ProviderActionRequest{
-		{Intent: core.AccessibilityType, Type: &core.ProviderTypeInput{Text: "text"}},
-		{Intent: core.AccessibilitySetValue, SetValue: &core.ProviderSetValueInput{Value: &value}},
+	for _, test := range []struct {
+		action *core.ProviderActionRequest
+		want   time.Duration
+	}{
+		{&core.ProviderActionRequest{Intent: core.AccessibilityType, Type: &core.ProviderTypeInput{Text: "text"}}, 22 * time.Second},
+		{&core.ProviderActionRequest{Intent: core.AccessibilitySetValue, SetValue: &core.ProviderSetValueInput{Value: &value}}, 33 * time.Second},
 	} {
 		request = core.NewProviderWireRequest("ax-text", core.ProviderWireResolveAndAct)
-		request.Action = action
-		if got := windowsProviderRuntimeTimeout(request); got != 22*time.Second {
-			t.Fatalf("AX text budget = %s, want 22s", got)
+		request.Action = test.action
+		if got := windowsProviderRuntimeTimeout(request); got != test.want {
+			t.Fatalf("AX %s text budget = %s, want %s", test.action.Intent, got, test.want)
 		}
 	}
 	request.Action = &core.ProviderActionRequest{Intent: core.AccessibilityType, Type: &core.ProviderTypeInput{}}
 	if got := windowsProviderRuntimeTimeout(request); got != 7*time.Second {
 		t.Fatalf("empty AX text budget = %s, want unchanged 7s", got)
+	}
+}
+
+func TestWindowsProviderRuntimeTimeoutIncludesHeldMouseKeyboardBarrier(t *testing.T) {
+	t.Setenv("COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS", "7")
+	request := core.NewProviderWireRequest("modified-pointer-batch", core.ProviderWireDesktopBatch)
+	request.Desktop = &core.ProviderDesktopRequest{ProtocolVersion: core.ProviderProtocolVersion}
+	for _, kind := range []string{"move", "click", "double_click", "drag", "scroll"} {
+		request.Desktop.Actions = append(request.Desktop.Actions,
+			core.ProviderDesktopAction{Type: kind, Keys: []string{"CTRL", "SHIFT"}},
+			core.ProviderDesktopAction{Type: kind})
+	}
+	// Two held modifiers still use one observer, while unmodified actions
+	// require none. The allowance covers the entire batch, not just its tail.
+	if got := windowsProviderRuntimeTimeout(request); got != 67*time.Second {
+		t.Fatalf("modified pointer batch timeout = %s, want 67s", got)
+	}
+}
+
+func TestWindowsProviderRuntimeTimeoutIncludesAXKeyboardFallbacks(t *testing.T) {
+	t.Setenv("COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS", "7")
+	empty := ""
+	for _, test := range []struct {
+		name   string
+		action *core.ProviderActionRequest
+		want   time.Duration
+	}{
+		{"keypress", &core.ProviderActionRequest{Intent: core.AccessibilityKeypress, Keypress: &core.ProviderKeypressInput{Key: "CTRL+A"}}, 18 * time.Second},
+		{"clear-value", &core.ProviderActionRequest{Intent: core.AccessibilitySetValue, SetValue: &core.ProviderSetValueInput{Value: &empty}}, 29 * time.Second},
+		{"missing-value", &core.ProviderActionRequest{Intent: core.AccessibilitySetValue, SetValue: &core.ProviderSetValueInput{}}, 7 * time.Second},
+		{"empty-type", &core.ProviderActionRequest{Intent: core.AccessibilityType, Type: &core.ProviderTypeInput{}}, 7 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := core.NewProviderWireRequest("ax-keyboard-budget", core.ProviderWireResolveAndAct)
+			request.Action = test.action
+			if got := windowsProviderRuntimeTimeout(request); got != test.want {
+				t.Fatalf("timeout = %s, want %s", got, test.want)
+			}
+		})
 	}
 }
 

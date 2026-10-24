@@ -96,6 +96,9 @@ macOS releases.
 
 Install Go 1.22+, the .NET 8 SDK and PowerShell 7+. Windows PowerShell 5.1
 is not supported; installing the .NET SDK does not upgrade PowerShell.
+Native input helpers also require LLVM (Clang, LLD and llvm-readobj), the
+Windows SDK and MSVC headers/import libraries for x86, x64 and ARM64.
+The build uses the standard Windows SDK declarations and libraries.
 From the repository root (`make build-windows` runs the same script):
 
 ```powershell
@@ -111,11 +114,37 @@ level. It does not bypass UAC, secure desktops, or session isolation. UIA
 visibility reported by the application can differ from visible pixels;
 reobserve instead of forcing a stale or offscreen semantic target.
 
+Keep all six `computer-use-input-queue-{x86,x64,arm64}.exe/.dll` files beside
+the provider. Each helper loads the DLL with the same filename stem.
+Both product architectures include all three native helper architectures.
+The build checks PE architecture, entry points, hook exports and system imports;
+a missing or mismatched helper fails the build.
+
+For cross-compilation, `build.ps1` accepts `-Clang` and `-WindowsSysroot`.
+The sysroot must contain standard SDK headers in `include` and import libraries
+in `lib/{i686,x86_64,aarch64}-unknown-windows-msvc`. The script does not download
+or generate replacement SDK headers or import libraries.
+
 Text input requires a Unicode focused window and sends character messages to
 that window. It rejects missing focus and ANSI-only windows before input.
 Tabs are literal characters; use `keypress TAB` to move focus. CR, LF and
 CRLF each produce one Enter sequence, which the application represents using
 its own line-ending convention. The clipboard is not used.
+
+Keyboard chords and held mouse modifiers tag each actual input event. A
+short-lived observer on the receiving thread waits for every tagged key
+message to be removed and for the final modifier state to show release.
+This keeps later synchronous text from overtaking queued keyboard input.
+Queue removal does not prove that an application handled a shortcut or
+changed its document; the application can discard a removed message.
+Keyboard input supports both ANSI and Unicode windows.
+
+If events move to a different receiving thread, observation is incomplete,
+or modifiers remain held, the batch stops with uncertain input evidence.
+Already emitted input is not replayed. A shortcut that moves focus after all
+its messages were observed can complete; the next action reads fresh focus.
+The observer does not attach globally, modify messages, or add marker keys.
+
 Other control characters retain the application's message semantics; a
 successful send does not guarantee that they become stored characters.
 

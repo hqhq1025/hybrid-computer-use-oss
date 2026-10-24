@@ -82,8 +82,17 @@ jobs:
       - name: Build native package
         shell: pwsh
         run: ./computer-use/native/windows/build.ps1 -OutputDirectory "$PWD/artifacts/windows"
+      - name: Native package architecture and completeness tests
+        shell: pwsh
+        run: ./computer-use/native/windows/test-input-queue-package.ps1 -Directory "$PWD/artifacts/windows"
       - name: MCP contract smoke (no desktop input)
         run: python scripts/smoke-mcp.py artifacts/windows/computer-use.exe
+      - name: Cross-build ARM64 package
+        shell: pwsh
+        run: ./computer-use/native/windows/build.ps1 -Architecture arm64 -OutputDirectory "$PWD/artifacts/windows-arm64"
+      - name: Check ARM64 package native sidecars
+        shell: pwsh
+        run: ./computer-use/native/windows/check-input-queue.ps1 -Directory "$PWD/artifacts/windows-arm64"
 
   provider:
     runs-on: ubuntu-24.04
