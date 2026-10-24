@@ -550,6 +550,18 @@ window closed. After a `window` wait, keys and text without `ref` go to that
 window. After a `settle` wait that saw focus move to another window, they go
 to that window. An `act` with only `wait` steps waits without input.
 
+A wait timeout is an execution failure, including when the first step sends
+no input. A preflight rejection occurs before execution. A successful wait proves its
+declared condition; it does not replace a failed final observation or prove
+that an exact window identity disappeared from a title match alone.
+
+If a final observation fails after a successful action, `input_emitted` still describes
+the action. The response labels the failed read as a read-only follow-up and
+retains `observation_failure_code` and `observation_required`. A no-input
+statement inside that follow-up describes the read, not the earlier action.
+Stale-window follow-ups report the unavailable source reference without
+repeating an input-delivery statement.
+
 ### `select` steps
 
 A `select` step selects without typing or clicking:

@@ -152,6 +152,8 @@ func (s *Service) stopAXBatchAtWait(
 		contract.AXPublicErrorHintKey:   hint,
 		"failure_code":                  "wait_timeout",
 		"failure_phase":                 "wait",
+		"preflight_only":                false,
+		"poll_attempted":                waitResult.StructuredContent["poll_attempted"] == true,
 		"input_events_emitted":          anyInputEmitted,
 		"partial_input_possible":        anyPartialPossible,
 		"mutation_unknown":              anyMutationUnknown,
@@ -161,7 +163,7 @@ func (s *Service) stopAXBatchAtWait(
 			"actions_completed_without_call_error": index,
 			"failed_action_index":                  index,
 			"failed_action_type":                   "wait",
-			"rejected_before_first_action":         index == 0,
+			"rejected_before_first_action":         false,
 			"partial_sequence":                     index > 0,
 			"actions":                              actionEvidence,
 		},
@@ -350,13 +352,14 @@ func axReadbackOnlyFailure(result ToolCallResult) bool {
 		axEvidenceReportsInputEmission(result.StructuredContent)
 }
 
-// axClearReadbackFailure drops the facts of a read that failed after input
-// once a wait has read the awaited state live. Facts about the input itself
-// (input_events_emitted, partial_input_possible) stay.
+// A successful wait can replace an action's failed readback. It cannot
+// replace the separately requested final observation or resolve uncertain
+// input delivery. Those failures retain their own evidence and recovery gate.
 func axClearReadbackFailure(structured map[string]any) {
 	code, _ := structured["failure_code"].(string)
+	phase, _ := structured["failure_phase"].(string)
 	observationCode, _ := structured["observation_failure_code"].(string)
-	if code != "effect_unknown" && observationCode == "" {
+	if observationCode != "" || code != "effect_unknown" || phase != "post_action_observation" {
 		return
 	}
 	for _, key := range []string{"failure_code", "failure_phase", "failure_subject",
