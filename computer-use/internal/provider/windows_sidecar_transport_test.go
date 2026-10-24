@@ -145,6 +145,7 @@ func TestWindowsProviderStartupDeadlineAndLateCleanup(t *testing.T) {
 	windowsProviderWorkerStarter = func(
 		string,
 		[]string,
+		*windowsProviderTrace,
 	) (*windowsProviderWorker, error) {
 		starts.Add(1)
 		close(started)
@@ -168,6 +169,7 @@ func TestWindowsProviderStartupDeadlineAndLateCleanup(t *testing.T) {
 		core.ProviderWireObserveApps,
 		time.Now().Add(20*time.Millisecond),
 		20*time.Millisecond,
+		nil,
 	)
 	var timeoutErr *core.RuntimeTimeoutError
 	if !errors.As(err, &timeoutErr) ||
@@ -189,6 +191,7 @@ func TestWindowsProviderStartupDeadlineAndLateCleanup(t *testing.T) {
 		core.ProviderWireObserveApps,
 		time.Now().Add(20*time.Millisecond),
 		20*time.Millisecond,
+		nil,
 	)
 	if !errors.As(err, &timeoutErr) ||
 		timeoutErr.Phase != "start_provider" {
@@ -226,17 +229,17 @@ func TestWindowsProviderLateStartupBlocksReplacementUntilExit(t *testing.T) {
 	// Teardown has used its bounded grace period, but exit remains unconfirmed.
 	late.stopOnce.Do(func() {})
 	var starts atomic.Int32
-	windowsProviderWorkerStarter = func(path string, environment []string) (*windowsProviderWorker, error) {
+	windowsProviderWorkerStarter = func(path string, environment []string, trace *windowsProviderTrace) (*windowsProviderWorker, error) {
 		if starts.Add(1) == 1 {
 			close(started)
 			<-release
 			return late, nil
 		}
-		return originalStarter(path, environment)
+		return originalStarter(path, environment, trace)
 	}
 	manager := &windowsProviderProcessManager{}
 	t.Cleanup(manager.stopLocked)
-	_, err := manager.startWorkerWithin(path, nil, core.ProviderWireObserveApps, time.Now().Add(100*time.Millisecond), 100*time.Millisecond)
+	_, err := manager.startWorkerWithin(path, nil, core.ProviderWireObserveApps, time.Now().Add(100*time.Millisecond), 100*time.Millisecond, nil)
 	var timeoutErr *core.RuntimeTimeoutError
 	if !errors.As(err, &timeoutErr) || !timeoutErr.PreDispatch {
 		t.Fatalf("startup error = %v, want pre-dispatch timeout", err)
@@ -323,17 +326,17 @@ func TestWindowsProviderWorkerIsPersistentAndGracefulOnEOF(t *testing.T) {
 	t.Setenv("GO_WANT_WINDOWS_PROVIDER_HELPER", "reuse")
 	t.Setenv("WINDOWS_PROVIDER_START_COUNTER", counterPath)
 	useWindowsProviderTestCommand(t)
-	worker, err := startWindowsProviderWorker(path, os.Environ())
+	worker, err := startWindowsProviderWorker(path, os.Environ(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	request := validWindowsObserveAppsRequest("reuse-1")
-	if _, err := worker.call(request, time.Second); err != nil {
+	if _, err := worker.call(request, time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
 	request.RequestID = "reuse-2"
-	if _, err := worker.call(request, time.Second); err != nil {
+	if _, err := worker.call(request, time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
 	worker.stop()
@@ -584,7 +587,7 @@ func TestWindowsProviderCallDeadlineCoversWriteAndRead(t *testing.T) {
 		stderrDone: make(chan struct{}),
 	}
 	started := time.Now()
-	_, err := blockedWrite.call(request, 20*time.Millisecond)
+	_, err := blockedWrite.call(request, 20*time.Millisecond, nil)
 	var timeoutErr *core.RuntimeTimeoutError
 	if !errors.As(err, &timeoutErr) {
 		t.Fatalf("blocked write error = %v, want runtime timeout", err)
@@ -609,7 +612,7 @@ func TestWindowsProviderCallDeadlineCoversWriteAndRead(t *testing.T) {
 		stderrDone: make(chan struct{}),
 	}
 	started = time.Now()
-	_, err = blockedRead.call(request, 20*time.Millisecond)
+	_, err = blockedRead.call(request, 20*time.Millisecond, nil)
 	if !errors.As(err, &timeoutErr) {
 		t.Fatalf("blocked read error = %v, want runtime timeout", err)
 	}
@@ -804,7 +807,7 @@ func TestWindowsProviderValidatesResponseIdentity(t *testing.T) {
 				done:       make(chan struct{}),
 				stderrDone: make(chan struct{}),
 			}
-			if _, err := worker.call(request, time.Second); err == nil {
+			if _, err := worker.call(request, time.Second, nil); err == nil {
 				t.Fatalf("%s mismatch must fail", field)
 			} else {
 				var transport *core.RuntimeTransportError
@@ -826,7 +829,7 @@ func TestWindowsProviderTransportPreservesPartialWriteEvidence(t *testing.T) {
 		done:       make(chan struct{}),
 		stderrDone: make(chan struct{}),
 	}
-	_, err := worker.call(request, time.Second)
+	_, err := worker.call(request, time.Second, nil)
 	var transport *core.RuntimeTransportError
 	if !errors.As(err, &transport) {
 		t.Fatalf("partial write error = %v, want transport error", err)

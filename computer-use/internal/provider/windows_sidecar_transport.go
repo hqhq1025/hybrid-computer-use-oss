@@ -49,12 +49,14 @@ type windowsProviderProcessManager struct {
 	worker         *windowsProviderWorker
 	retiringWorker *windowsProviderWorker
 	environmentKey string
+	generation     uint64
 	// A non-nil token retains a timed-out startup's worker until the caller
 	// can check its exit under mu. Bounded stop alone does not confirm exit.
 	startGate chan *windowsProviderWorker
 }
 
 type windowsProviderWorker struct {
+	generation         uint64
 	cmd                *exec.Cmd
 	stdin              io.WriteCloser
 	stdout             *bufio.Reader
@@ -153,7 +155,7 @@ func runWindowsProvider(
 
 func (manager *windowsProviderProcessManager) run(
 	request core.ProviderWireRequest,
-) (*core.ProviderWireResponse, error) {
+) (response *core.ProviderWireResponse, err error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if err := manager.retirementError(request.Operation); err != nil {
@@ -162,6 +164,9 @@ func (manager *windowsProviderProcessManager) run(
 
 	timeout := windowsProviderRuntimeTimeout(request)
 	deadline := time.Now().Add(timeout)
+	trace := newWindowsProviderTrace(request.Operation, deadline, timeout)
+	trace.record("request_begin", nil, nil)
+	defer func() { trace.record("request_end", response, err) }()
 	providerPath, err := windowsProviderExecutable()
 	if err != nil {
 		return nil, err
@@ -174,24 +179,31 @@ func (manager *windowsProviderProcessManager) run(
 		if err := manager.retirementError(request.Operation); err != nil {
 			return nil, err
 		}
+		manager.generation++
+		trace = trace.forWorker(manager.generation)
 		worker, startErr := manager.startWorkerWithin(
 			providerPath,
 			environment,
 			request.Operation,
 			deadline,
 			timeout,
+			trace,
 		)
 		if startErr != nil {
 			return nil, startErr
 		}
 		manager.worker = worker
+		worker.generation = manager.generation
 		manager.environmentKey = environmentKey
 	}
 
-	response, err := manager.worker.call(
+	trace = trace.forWorker(manager.worker.generation)
+	response, err = manager.worker.call(
 		request,
 		windowsProviderRemainingTimeout(deadline),
+		trace,
 	)
+	trace.record("native_call_end", response, err)
 	if err != nil {
 		var rejection *core.RuntimeRequestRejectionError
 		if errors.As(err, &rejection) {
@@ -207,22 +219,28 @@ func (manager *windowsProviderProcessManager) run(
 			if err := manager.retirementError(request.Operation); err != nil {
 				return nil, err
 			}
+			manager.generation++
+			trace = trace.forWorker(manager.generation)
 			worker, startErr := manager.startWorkerWithin(
 				providerPath,
 				environment,
 				request.Operation,
 				deadline,
 				timeout,
+				trace,
 			)
 			if startErr != nil {
 				return nil, startErr
 			}
 			manager.worker = worker
+			worker.generation = manager.generation
 			manager.environmentKey = environmentKey
 			response, err = manager.worker.call(
 				request,
 				windowsProviderRemainingTimeout(deadline),
+				trace,
 			)
+			trace.record("native_call_end", response, err)
 			if err != nil {
 				var rejection *core.RuntimeRequestRejectionError
 				if errors.As(err, &rejection) {
@@ -254,7 +272,10 @@ func (manager *windowsProviderProcessManager) startWorkerWithin(
 	operation core.ProviderWireOperation,
 	deadline time.Time,
 	timeout time.Duration,
-) (*windowsProviderWorker, error) {
+	trace *windowsProviderTrace,
+) (worker *windowsProviderWorker, err error) {
+	trace.record("startup_begin", nil, nil)
+	defer func() { trace.record("startup_end", nil, err) }()
 	if manager.startGate == nil {
 		manager.startGate = make(chan *windowsProviderWorker, 1)
 		manager.startGate <- nil
@@ -294,6 +315,7 @@ func (manager *windowsProviderProcessManager) startWorkerWithin(
 		worker, err := windowsProviderWorkerStarter(
 			path,
 			environment,
+			trace,
 		)
 		result := windowsProviderStartResult{worker: worker, err: err}
 		select {
