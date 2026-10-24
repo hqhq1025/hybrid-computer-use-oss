@@ -15,6 +15,7 @@
       "readback_sampled": false,
       "input_emitted": false,
       "source_utf16_index": 0,
+      "source_utf16_count": 1,
       "source_utf16_length": 3,
       "attempted_messages": 1,
       "returned_messages": 0,

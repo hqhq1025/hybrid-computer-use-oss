@@ -380,4 +380,5 @@ foreach (var text in new[] { "\r\nrest", "\U0001F600rest" })
 }
 
 GuiTextIntegrationTests.Run();
+TextControlTests.Run();
 Console.WriteLine($"PASS {cases} Windows GUI input and capture cases");

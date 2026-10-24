@@ -111,8 +111,15 @@ level. It does not bypass UAC, secure desktops, or session isolation. UIA
 visibility reported by the application can differ from visible pixels;
 reobserve instead of forcing a stale or offscreen semantic target.
 
-Text input requires a Unicode focused window and sends character messages to
-that window. It rejects missing focus and ANSI-only windows before input.
+Text input requires a Unicode focused window. Standard Edit and RichEdit
+controls receive each text segment through `EM_REPLACESEL`, which replaces
+the selection or inserts at the caret using the control's formatting rules.
+A segment ends at CR or LF.
+Other windows receive character messages. The provider uses native control
+classes to select the route, without application-specific rules.
+It rejects missing focus, ANSI-only windows and read-only standard text
+controls before input. NUL characters and unpaired UTF-16 surrogates anywhere
+in a GUI batch reject the entire batch before input.
 Tabs are literal characters; use `keypress TAB` to move focus. CR, LF and
 CRLF each produce one Enter sequence, which the application represents using
 its own line-ending convention. The clipboard is not used.
@@ -123,7 +130,9 @@ The provider checks the focused window before each message and stops if it
 changes. Each message has a one-second timeout; one text action has a
 15-second budget. A timeout can occur after the application received a
 message. Inspect the application before retrying, because the provider does
-not replay uncertain input. Successful delivery does not verify field
+not replay uncertain input. A timed-out segment has an unknown result for
+the whole segment; message counts do not identify a completed character prefix.
+Successful delivery does not verify field
 contents or prove that the application has finished drawing.
 After any send attempt, the provider posts one wake message to the original
 receiver so its message loop can resume. This also applies after partial

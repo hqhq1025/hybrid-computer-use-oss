@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 
 namespace ComputerUse.Windows.Runtime;
@@ -26,6 +27,22 @@ internal static partial class NativeDesktop
     internal static List<TextFocus> TextWakes { get; } = new();
     internal static bool TextWakeFails { get; set; }
     internal static bool TextWakeThrows { get; set; }
+    internal static string TextControlClass { get; set; } = "Unknown";
+    internal static bool TextControlReadOnly { get; set; }
+    internal static Func<bool>? OnReadTextControlReadOnly { get; set; }
+    internal static List<(nint Window, string Text, uint Timeout)> TextSelections { get; } = new();
+    internal static List<string> TextEmissionOrder { get; } = new();
+    internal static Func<int, bool>? OnTextSelection { get; set; }
+    private static string ReadTextControlClass(nint window) => TextControlClass;
+    private static bool IsTextControlReadOnly(nint window) => OnReadTextControlReadOnly?.Invoke() ?? TextControlReadOnly;
+    private static (bool Success, int Error) SendTextSelection(nint window, nint buffer, uint timeout)
+    {
+        var text = Marshal.PtrToStringUni(buffer) ?? throw new InvalidOperationException("Missing text buffer");
+        TextSelections.Add((window, text, timeout));
+        TextEmissionOrder.Add("text:" + text);
+        var success = OnTextSelection?.Invoke(TextSelections.Count) ?? true;
+        return (success, success ? 0 : 1460);
+    }
     private static (bool Success, int Error) PostTextWake(TextFocus target)
     {
         TextWakes.Add(target);
@@ -39,6 +56,7 @@ internal static partial class NativeDesktop
         nint window, uint message, uint value, uint parameter, uint timeout)
     {
         TextMessages.Add((message, value, parameter, timeout));
+        TextEmissionOrder.Add($"message:{message:X}:{value:X}");
         var success = OnTextMessage?.Invoke(TextMessages.Count) ?? true;
         return (success, success ? 0 : 1460);
     }
@@ -62,6 +80,12 @@ internal static partial class NativeDesktop
         TextWakes.Clear();
         TextWakeFails = false;
         TextWakeThrows = false;
+        TextControlClass = "Unknown";
+        TextControlReadOnly = false;
+        OnReadTextControlReadOnly = null;
+        TextSelections.Clear();
+        TextEmissionOrder.Clear();
+        OnTextSelection = null;
     }
 
     private static uint SendInput(uint count, Input[] inputs, int size)
