@@ -250,6 +250,7 @@ type semanticTarget struct {
 
 type RuntimeActionEvidence struct {
 	*RuntimeTextDeliveryEvidence
+	*RuntimeKeyboardQueueEvidence
 	DiagnosticTimingMS  map[string]float64 `json:"diagnostic_timing_ms,omitempty"`
 	Route               string             `json:"route"`
 	EmissionRoute       string             `json:"emission_route,omitempty"`
@@ -265,6 +266,13 @@ type RuntimeActionEvidence struct {
 	ReadbackSampled     bool               `json:"readback_sampled"`
 	ReadbackVerified    *bool              `json:"readback_verified,omitempty"`
 	InputEmitted        bool               `json:"input_emitted"`
+}
+
+// RuntimeKeyboardQueueEvidence records removal from the input queue, not
+// shortcut handling or application effects.
+type RuntimeKeyboardQueueEvidence struct {
+	RequestedEvents int `json:"requested_events"`
+	ConsumedEvents  int `json:"consumed_events"`
 }
 
 // RuntimeTextDeliveryEvidence records message completion, not accepted text.

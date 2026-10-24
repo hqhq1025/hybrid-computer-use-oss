@@ -42,7 +42,7 @@ internal static class GuiTextIntegrationTests
         var result = DesktopProvider.ExecuteBatch(Batch(Text("")));
         Check(result["mutation"]?["input_events_emitted"]?.GetValue<bool>() == false &&
             result["gui_result"]?["input_actions_dispatched"]?.GetValue<int>() == 0 &&
-            NativeDesktop.TextMessages.Count == 0 && NativeDesktop.InputIdleWaits == 0,
+            NativeDesktop.TextMessages.Count == 0 && NativeDesktop.BarrierWaits == 0,
             "Empty text must not claim emission or consume a keyboard processing barrier.");
         Console.WriteLine("GUI text validation and failure integration tests passed (4 cases).");
     }

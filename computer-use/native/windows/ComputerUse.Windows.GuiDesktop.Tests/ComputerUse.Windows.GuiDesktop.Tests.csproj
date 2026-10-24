@@ -10,6 +10,7 @@
     <Compile Include="../ComputerUse.Windows.Runtime/NativeDesktop.Input.cs" Link="NativeDesktop.Input.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/NativeDesktop.TextInput.cs" Link="NativeDesktop.TextInput.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/WindowsKeyMapping.cs" Link="WindowsKeyMapping.cs" />
+    <Compile Include="../ComputerUse.Windows.Runtime/WindowsKeyboardQueueReceipt.cs" Link="WindowsKeyboardQueueReceipt.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/WindowsDesktopImageGeometry.cs" Link="WindowsDesktopImageGeometry.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/DesktopProvider.cs" Link="DesktopProvider.cs" />
     <Compile Include="../ComputerUse.Windows.Runtime/ProviderFailureException.cs" Link="ProviderFailureException.cs" />

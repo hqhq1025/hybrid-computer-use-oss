@@ -8,6 +8,18 @@ from runtime_test_support import *  # noqa: F401,F403
 
 
 class RuntimeActionEvidenceFailureTests(unittest.TestCase):
+    def test_keyboard_queue_wire_keeps_consumption_separate_from_text(self):
+        fixture = json.loads((Path(__file__).parents[1] / "testdata" /
+                              "provider-wire" / "keyboard-receiver-changed.response.json").read_text())
+        evidence = fixture["desktop"]["action_evidence"]
+        for encode in (wire._desktop_result, wire._accessibility_result):
+            with self.subTest(encode=encode.__name__):
+                result = encode({"ok": False, "actionEvidence": evidence})
+                self.assertEqual(result["action_evidence"], evidence)
+                self.assertFalse(result["action_evidence"]["input_emitted"])
+                self.assertEqual(result["action_evidence"]["consumed_events"], 0)
+                self.assertNotIn("effect_verified", result["action_evidence"])
+
     def test_text_delivery_wire_keeps_null_and_zero_without_confirming_effect(self):
         for name in ("text-first-message-unknown", "text-focus-changed"):
             fixture = json.loads((Path(__file__).parents[1] / "testdata" /

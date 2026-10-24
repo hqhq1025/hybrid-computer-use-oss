@@ -31,6 +31,7 @@
     {"name": "semantic-reply-lost", "direction": "response", "file": "semantic-reply-lost.response.json"},
     {"name": "timeout-failure", "direction": "response", "file": "timeout-failure.response.json"},
     {"name": "text-first-message-unknown", "direction": "response", "file": "text-first-message-unknown.response.json"},
-    {"name": "text-focus-changed", "direction": "response", "file": "text-focus-changed.response.json"}
+    {"name": "text-focus-changed", "direction": "response", "file": "text-focus-changed.response.json"},
+    {"name": "keyboard-receiver-changed", "direction": "response", "file": "keyboard-receiver-changed.response.json"}
   ]
 }

@@ -33,6 +33,11 @@ const windowsProviderDesktopWaitBudget = time.Second
 // for startup, preparation and the final observation after text emission.
 const windowsProviderTextInputBudget = 15 * time.Second
 
+// Each native keyboard barrier can spend 3s starting, 5s observing queue
+// consumption, and 3s stopping its helper. Preserve these per-action bounds
+// even when the configured base timeout is smaller.
+const windowsProviderKeyboardQueueBudget = 11 * time.Second
+
 var errWindowsProviderResponseTooLarge = errors.New(
 	"Windows provider response exceeded the configured limit",
 )
@@ -114,12 +119,32 @@ func windowsProviderRuntimeTimeout(
 					action.SetValue.Value != nil && *action.SetValue.Value != "") {
 				timeout += windowsProviderTextInputBudget
 			}
+			switch action.Intent {
+			case core.AccessibilityKeypress:
+				if action.Keypress != nil && action.Keypress.Key != "" {
+					timeout += windowsProviderKeyboardQueueBudget
+				}
+			case core.AccessibilitySetValue:
+				if action.SetValue != nil && action.SetValue.Value != nil {
+					// The keyboard fallback selects all before typing. Clearing
+					// a value also sends Delete, with its own observer lifecycle.
+					timeout += windowsProviderKeyboardQueueBudget
+					if *action.SetValue.Value == "" {
+						timeout += windowsProviderKeyboardQueueBudget
+					}
+				}
+			}
 		}
 		return timeout
 	}
 	timeout += time.Duration(len(request.Desktop.Actions)) *
 		windowsProviderDesktopActionBudget
 	for _, action := range request.Desktop.Actions {
+		// Valid key-bearing actions are keypress and pointer actions with
+		// held modifiers. Each creates one native keyboard barrier.
+		if len(action.Keys) > 0 {
+			timeout += windowsProviderKeyboardQueueBudget
+		}
 		if action.Type == "wait" {
 			timeout += windowsProviderDesktopWaitBudget
 		}
