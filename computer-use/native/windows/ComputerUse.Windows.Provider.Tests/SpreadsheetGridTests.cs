@@ -10,6 +10,7 @@ internal static class SpreadsheetGridTests
         CheckMergedAndHiddenColumns();
         CheckProbeBudget();
         CheckOccludedOrigin();
+        CheckEmptyViewport();
     }
 
     private static void CheckA1Names()
@@ -97,6 +98,17 @@ internal static class SpreadsheetGridTests
             ?? throw new InvalidOperationException("viewport");
         Check(viewport.Missing == 4 && viewport.Cells.Count == 5,
             $"Occluded cells are counted as missing ({viewport.Missing}, {viewport.Cells.Count}).");
+    }
+
+    private static void CheckEmptyViewport()
+    {
+        foreach (var area in new[] { Rectangle.Empty, new Rectangle(0, 0, 3, 40),
+                     new Rectangle(0, 0, 40, 3) })
+        {
+            Check(SpreadsheetGrid.ReadViewport<string>(area,
+                _ => throw new InvalidOperationException("No hit is valid outside a usable viewport."),
+                100, () => true) is null, "An empty or clipped viewport has no cell evidence.");
+        }
     }
 
     private static void Check(bool condition, string message)

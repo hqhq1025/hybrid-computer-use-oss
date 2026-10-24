@@ -201,7 +201,7 @@ internal sealed partial class UiaProvider
         {
             var area = Rectangle.Intersect(table.Facts!.Bounds, selectedWindow.Bounds);
             var started = elapsed();
-            var identificationUnavailable = false;
+            var identificationUnavailable = area.Width < 4 || area.Height < 4;
             var viewport = SpreadsheetGrid.ReadViewport(
                 area,
                 point =>
