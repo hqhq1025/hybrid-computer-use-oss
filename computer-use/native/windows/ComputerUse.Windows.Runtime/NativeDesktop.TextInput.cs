@@ -6,8 +6,6 @@ namespace ComputerUse.Windows.Runtime;
 internal static partial class NativeDesktop
 {
     private const uint TextCharacterMessage = 0x0102;
-    private const uint TextKeyDownMessage = 0x0100;
-    private const uint TextKeyUpMessage = 0x0101;
     private const uint TextSelectionMessage = 0x00C2;
     private const int TextMessageTimeoutMilliseconds = 1000;
     private const int TextInputTimeoutMilliseconds = 15000;
@@ -82,12 +80,11 @@ internal static partial class NativeDesktop
                 if (unit is '\r' or '\n')
                 {
                     sourceCount = unit == '\r' && sourceIndex + 1 < text.Length && text[sourceIndex + 1] == '\n' ? 2 : 1;
-                    sequencePhase = "enter_down";
-                    Send(TextKeyDownMessage, 0x0D, 1U | (scan << 16));
+                    // A sent keydown cannot be paired with a later sent
+                    // character through the receiver's queued-message lookup.
+                    // Receivers handling both would apply the newline twice.
                     sequencePhase = "enter_character";
                     Send(TextCharacterMessage, 0x0D, 1U | (scan << 16));
-                    sequencePhase = "enter_up";
-                    Send(TextKeyUpMessage, 0x0D, 0xC0000001U | (scan << 16));
                     if (unit == '\r' && sourceIndex + 1 < text.Length && text[sourceIndex + 1] == '\n')
                         sourceIndex++;
                 }
