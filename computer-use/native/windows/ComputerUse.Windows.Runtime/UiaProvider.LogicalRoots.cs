@@ -76,6 +76,9 @@ internal sealed partial class UiaProvider
         var projectedHandles = projectedMembers
             .Select(member => member.Handle.ToInt64())
             .ToArray();
+        var knownNativeHandles = projection.NativeWindows
+            .Select(window => window.Handle.ToInt64())
+            .ToHashSet();
         var elements = new List<AutomationElement>();
         var candidates = new List<ProjectedUiaRootCandidate>();
 
@@ -150,17 +153,11 @@ internal sealed partial class UiaProvider
                 () => reader.FirstChild(root),
                 reader.FirstChild,
                 reader.NextSibling,
-                (node, depth) =>
+                (node, _) =>
                 {
-                    if (node.ProcessId != 0 && node.ProcessId != process.Id)
-                    {
-                        return false;
-                    }
-                    // The window traversal reads the control view of the
-                    // selected window's own native windows, which holds every
-                    // menu and tooltip inside them. Searching them again cost
-                    // most of a Notepad observation.
-                    if (depth == 1 && projectedHandles.Contains(node.NativeWindowHandle))
+                    if (!ProjectedUiaRootSelection.ShouldTraverseTransientHost(
+                            node.ProcessId, node.NativeWindowHandle,
+                            process.Id, knownNativeHandles))
                     {
                         return false;
                     }
