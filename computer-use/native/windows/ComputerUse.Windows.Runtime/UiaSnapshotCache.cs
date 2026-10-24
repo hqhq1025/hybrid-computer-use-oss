@@ -67,12 +67,14 @@ internal sealed class UiaSnapshotCache
     private readonly AutomationBase _automation;
     private readonly CacheRequest _element;
     private readonly ITreeWalker _walker;
+    private readonly ITreeWalker _rawWalker;
 
     internal UiaSnapshotCache(AutomationBase automation)
     {
         _automation = automation;
         _element = Request(TreeScope.Element);
         _walker = automation.TreeWalkerFactory.GetControlViewWalker();
+        _rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
     }
 
     // Reads the facts of root alone.
@@ -124,6 +126,18 @@ internal sealed class UiaSnapshotCache
         var hit = Step(() => _automation.FromPoint(point));
         return hit is null ? null : new CachedUiaNode(hit.Value.Element, hit.Value.Facts, parent, 0);
     }
+
+    internal bool IsImmediateChildOf(CachedUiaNode child, CachedUiaNode parent)
+    {
+        using (CacheRequest.ForceNoCache())
+        {
+            var owner = _rawWalker.GetParent(child.Element);
+            return owner is not null && _automation.Compare(owner, parent.Element);
+        }
+    }
+
+    internal bool IsSameElement(CachedUiaNode left, CachedUiaNode right) =>
+        _automation.Compare(left.Element, right.Element);
 
     private (AutomationElement Element, UiaNodeFacts Facts)? Step(Func<AutomationElement?> read)
     {
