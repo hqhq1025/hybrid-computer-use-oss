@@ -127,6 +127,7 @@ func (s *Service) axBatchFinalObservation(
 			result.StructuredContent = map[string]any{}
 		}
 		result.StructuredContent["failure_phase"] = "final_observation"
+		result.StructuredContent["final_observation_kind"] = "unavailable"
 		result.StructuredContent["final_observation_returned"] = false
 		result.StructuredContent["observation_required"] = true
 		return result
@@ -522,9 +523,25 @@ func mergeAXBatchFinalObservation(
 	inputEmitted := axEvidenceReportsInputEmission(
 		actionResult.StructuredContent,
 	)
+	observationContent := observationResult.Content
+	if observationResult.IsError {
+		observationContent = append([]ContentItem(nil), observationContent...)
+		for index := range observationContent {
+			if observationContent[index].Type == "text" {
+				if index == 0 && observationResult.StructuredContent["failure_code"] == "stale_window_ref" {
+					observationContent[index].Text = "final_observation_unavailable: the exact source window reference is stale."
+					continue
+				}
+				// A provider's no-input statement describes this read, not
+				// the actions whose results precede it in the same tool call.
+				observationContent[index].Text = "final_observation_unavailable: read-only follow-up after the action:\n" +
+					observationContent[index].Text
+			}
+		}
+	}
 	actionResult.Content = append(
 		stripSupersededAXObservationPlaceholder(actionResult.Content),
-		observationResult.Content...,
+		observationContent...,
 	)
 	if actionResult.StructuredContent == nil {
 		actionResult.StructuredContent = map[string]any{}

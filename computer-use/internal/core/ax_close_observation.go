@@ -126,6 +126,9 @@ func stripSupersededFinalObservationUnavailable(
 			filtered = append(filtered, item)
 			continue
 		}
+		if strings.HasPrefix(item.Text, "final_observation_unavailable: read-only follow-up") {
+			continue
+		}
 		lines := strings.Split(item.Text, "\n")
 		kept := lines[:0]
 		for _, line := range lines {
