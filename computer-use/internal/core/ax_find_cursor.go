@@ -316,7 +316,12 @@ func compactFindSnapshot(snapshot *AppSnapshot) *AppSnapshot {
 	clone.baselineProjectionLines = nil
 	clone.Elements = nil
 	clone.Refs = nil
-	clone.Annotations = nil
+	// Cached pages describe this provider read, including any unread branches.
+	// Keep its annotations independent of later changes to the live snapshot.
+	clone.Annotations = append([]axProviderAnnotation(nil), snapshot.Annotations...)
+	for index := range clone.Annotations {
+		clone.Annotations[index].ParentRuntimeID = append([]int(nil), snapshot.Annotations[index].ParentRuntimeID...)
+	}
 	clone.DesktopLayout = nil
 	if snapshot.findHiddenRecords != nil {
 		clone.findHiddenRecords = make(map[int]ElementRecord, len(snapshot.findHiddenRecords))
@@ -373,9 +378,10 @@ func estimateFindResultSet(
 			len(match.ControlType) + len(match.ProviderObjectPath)
 	}
 	if encoded, err := json.Marshal(struct {
-		Snapshot      *AXSnapshot           `json:"snapshot"`
-		Matches       []ElementRecord       `json:"matches"`
-		HiddenRecords map[int]ElementRecord `json:"hidden_records"`
+		Snapshot      *AXSnapshot            `json:"snapshot"`
+		Matches       []ElementRecord        `json:"matches"`
+		HiddenRecords map[int]ElementRecord  `json:"hidden_records"`
+		Annotations   []axProviderAnnotation `json:"annotations,omitempty"`
 	}{
 		Snapshot: func() *AXSnapshot {
 			if snapshot == nil {
@@ -389,6 +395,12 @@ func estimateFindResultSet(
 				return nil
 			}
 			return snapshot.findHiddenRecords
+		}(),
+		Annotations: func() []axProviderAnnotation {
+			if snapshot == nil {
+				return nil
+			}
+			return snapshot.Annotations
 		}(),
 	}); err == nil && len(encoded) > bytes {
 		bytes = len(encoded)
