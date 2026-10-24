@@ -120,9 +120,14 @@ classes to select the route, without application-specific rules.
 It rejects missing focus, ANSI-only windows and read-only standard text
 controls before input. NUL characters and unpaired UTF-16 surrogates anywhere
 in a GUI batch reject the entire batch before input.
+Standard single-line controls reject text containing CR or LF before its first
+segment. Ordinary text remains supported in those controls.
 Tabs are literal characters; use `keypress TAB` to move focus. CR, LF and
-CRLF each produce one Enter sequence, which the application represents using
-its own line-ending convention. The clipboard is not used.
+CRLF each produce one logical newline. Standard Edit controls receive CRLF
+through `EM_REPLACESEL`; supported RichEdit 2+ controls receive CR through
+the same route. Other Unicode windows receive one carriage-return character
+message. Literal text does not synthesize Enter keydown or keyup. The clipboard
+is not used.
 Other control characters retain the application's message semantics; a
 successful send does not guarantee that they become stored characters.
 
