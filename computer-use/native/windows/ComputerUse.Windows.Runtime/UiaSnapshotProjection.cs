@@ -243,7 +243,7 @@ internal sealed partial class UiaProvider
                 {
                     record = SpreadsheetCellRecord(
                         cell, table.Facts.Name, cellPath, index, processGeneration,
-                        process, selectedWindow, selectedHandle);
+                        process, selectedWindow, selectedHandle, Gap, visits.CheckTime);
                 }
                 catch
                 {
@@ -491,12 +491,14 @@ internal sealed partial class UiaProvider
         string processGeneration,
         Process process,
         NativeDesktop.WindowRecord window,
-        string windowHandle)
+        string windowHandle,
+        Action<string> gap,
+        Action checkTime)
     {
         var facts = cell.Cell.Facts!;
         var record = ElementJson(
             cell.Cell.Element, facts, index, processGeneration,
-            process, window, windowHandle, cellPath);
+            process, window, windowHandle, cellPath, gap, checkTime);
         if (string.IsNullOrEmpty(record["value"]?.GetValue<string>()) && !facts.HasKeyboardFocus)
         {
             return null;
@@ -551,8 +553,8 @@ internal sealed partial class UiaProvider
         NativeDesktop.WindowRecord window,
         string windowHandle,
         IReadOnlyList<int> treePath,
-        Action<string>? gap = null,
-        Action? checkTime = null,
+        Action<string> gap,
+        Action checkTime,
         Func<DocumentContentProbe>? probeContent = null)
     {
         var role = facts.ControlType is { } controlType
