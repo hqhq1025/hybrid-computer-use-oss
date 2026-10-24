@@ -599,6 +599,17 @@ func (s *Service) findRecords(args map[string]any) (Record, bool) {
 			record.Page.NextCursor = s.FindCursorRegistry.Continue(setID, end)
 		}
 	}
+	// Records describe the same provider read as text pages. Rendering a
+	// complete page of matches does not establish complete acquisition.
+	evidence := TextResult("", false)
+	addTreeProjectionMetadata(&evidence, snapshot)
+	evidence.StructuredContent["ax_mode"] = contract.AXModeFind
+	evidence.StructuredContent["find_delivery_complete"] = true
+	evidence.StructuredContent["find_match_count"] = len(matched)
+	if record.Page.NextCursor != "" {
+		evidence.StructuredContent["next_cursor"] = record.Page.NextCursor
+	}
+	record.Evidence = recordFromEvidence(contract.PublicToolAX, PrepareAXEvidence(evidence)).Evidence
 	return record, true
 }
 
