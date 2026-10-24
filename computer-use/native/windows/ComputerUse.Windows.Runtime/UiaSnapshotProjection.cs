@@ -194,37 +194,68 @@ internal sealed partial class UiaProvider
             return true;
         }
 
-        // A table whose cells are named by A1 reference is a spreadsheet
-        // grid (see SpreadsheetGrid.IsGrid): its children, if it lists any,
-        // run row-major over the whole sheet, so the visible cells are read
-        // by hit tests instead. Cells with a value, and the cell holding the
-        // cursor, become records; the other visible cells are summarized.
+        // Identify a spreadsheet through a visible cell owned by this table.
+        // Navigating to the first child can enumerate the full virtual sheet
+        // inside the accessibility bridge, even without a cache request.
         void ReadSpreadsheetCells(CachedUiaNode table, int[] tablePath, int depth)
         {
             var area = Rectangle.Intersect(table.Facts!.Bounds, selectedWindow.Bounds);
-            var first = ReadLink(() => cache.ReadFirstChild(table));
-            if (!SpreadsheetGrid.IsGrid(
-                    first,
-                    () => area.Width < 4 || area.Height < 4
-                        ? null
-                        : ReadCellAt(new Point(area.X + 2, area.Y + 2), table),
-                    node => CellHit(node) is not null))
-            {
-                return;
-            }
-            table.CellsRead = true;
             var started = elapsed();
+            var identificationUnavailable = false;
             var viewport = SpreadsheetGrid.ReadViewport(
                 area,
-                point => CellHit(ReadCellAt(point, table)),
+                point =>
+                {
+                    if (!SpreadsheetGrid.PointShowsWindow(point, selectedWindow.Handle))
+                    {
+                        identificationUnavailable = true;
+                        return null;
+                    }
+                    CachedUiaNode? cell;
+                    try
+                    {
+                        cell = cache.ReadAtPoint(point, table);
+                        if (cell?.Facts is not { } facts)
+                        {
+                            identificationUnavailable = true;
+                            return null;
+                        }
+                        if (facts.ControlType != ControlType.DataItem ||
+                            !SpreadsheetGrid.TryParseA1(facts.Name, out var row, out var column))
+                        {
+                            // A hit on the table itself proves no child shape.
+                            // Its bridge may be unable to expose cells while an
+                            // editor is active; enumeration is not a safe fallback.
+                            identificationUnavailable = cache.IsSameElement(cell, table);
+                            return null;
+                        }
+                        if (!facts.Bounds.Contains(point) || !cache.IsImmediateChildOf(cell, table))
+                        {
+                            identificationUnavailable = true;
+                            return null;
+                        }
+                        return new SpreadsheetCellHit<CachedUiaNode>(cell, row, column, facts.Bounds);
+                    }
+                    catch
+                    {
+                        identificationUnavailable = true;
+                        return null;
+                    }
+                },
                 MaxSpreadsheetProbes,
                 () => elapsed() - started < SpreadsheetReadTime && elapsed() < SnapshotSampleTimeout);
             if (viewport is null)
             {
-                Omit(tablePath, "visible_cell_range_unavailable", 1);
-                grids.Add(null);
+                if (identificationUnavailable || elapsed() - started >= SpreadsheetReadTime ||
+                    elapsed() >= SnapshotSampleTimeout)
+                {
+                    table.CellsRead = true;
+                    Omit(tablePath, "visible_cell_range_unavailable", 1);
+                    grids.Add(null);
+                }
                 return;
             }
+            table.CellsRead = true;
             var layout = new SpreadsheetLayout(
                 area, viewport.Row0, viewport.Row1, viewport.Column0, viewport.Column1,
                 viewport.Cells.ToDictionary(cell => (cell.Row, cell.Column), cell => cell.Bounds));
@@ -284,21 +315,6 @@ internal sealed partial class UiaProvider
                 Omit(tablePath, "node_budget", overBudget);
             }
         }
-
-        // The cell at a point of the selected window, or null when another
-        // window covers the point or the hit test fails.
-        CachedUiaNode? ReadCellAt(Point point, CachedUiaNode table)
-        {
-            if (!SpreadsheetGrid.PointShowsWindow(point, selectedWindow.Handle)) { return null; }
-            try { return cache.ReadAtPoint(point, table); }
-            catch { return null; }
-        }
-
-        static SpreadsheetCellHit<CachedUiaNode>? CellHit(CachedUiaNode? cell) =>
-            cell?.Facts is { ControlType: ControlType.DataItem } facts &&
-                SpreadsheetGrid.TryParseA1(facts.Name, out var row, out var column)
-                ? new SpreadsheetCellHit<CachedUiaNode>(cell, row, column, facts.Bounds)
-                : null;
 
         void Omit(int[] parentPath, string reason, int count)
         {
