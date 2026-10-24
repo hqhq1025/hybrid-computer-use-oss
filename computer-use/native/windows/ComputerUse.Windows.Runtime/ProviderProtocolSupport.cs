@@ -154,7 +154,8 @@ internal sealed partial class ProviderServer
             payload["candidates"] = candidates.DeepClone();
             payload["candidate_count"] = candidates.Count;
         }
-        if (mutationOperation && failure?.ActionEvidence is not null)
+        if ((mutationOperation || operation == "desktop_execute_batch") &&
+            failure?.ActionEvidence is not null)
         {
             payload["action_evidence"] = failure.ActionEvidence.DeepClone();
         }

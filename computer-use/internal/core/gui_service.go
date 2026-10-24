@@ -442,6 +442,9 @@ func prepareGUIEvidence(result ToolCallResult) ToolCallResult {
 	if len(actions) > 0 {
 		public["actions"] = actions
 	}
+	if delivery := publicTextDelivery(full["runtime_action_evidence"]); delivery != nil {
+		public["text_delivery"] = delivery
+	}
 	if full["observation_required"] == true {
 		public["observation_required"] = true
 	}
@@ -578,7 +581,15 @@ func (s *Service) invalidateAccessibilitySnapshots() {
 	s.seenAccessibilityEpoch = s.accessibilityEpoch
 }
 
-func (s *Service) guiResponse(response ProviderDesktopResult) ToolCallResult {
+func (s *Service) guiResponse(response ProviderDesktopResult) (result ToolCallResult) {
+	defer func() {
+		if response.ActionEvidence != nil {
+			if result.StructuredContent == nil {
+				result.StructuredContent = map[string]any{}
+			}
+			result.StructuredContent["runtime_action_evidence"] = *response.ActionEvidence
+		}
+	}()
 	guiResult := response.GUIResult
 	mergeProviderMutationIntoGUIResult(&guiResult, response.Mutation)
 	// GUI input can change any application without passing through the accessibility
@@ -620,7 +631,7 @@ func (s *Service) guiResponse(response ProviderDesktopResult) ToolCallResult {
 	// Bind coordinates only to an observation that is valid and is about to be
 	// delivered to the model. Rejected snapshots must never become provenance.
 	s.guiSnapshot = response.Snapshot
-	result := response.Snapshot.textWithNotes("", nil)
+	result = response.Snapshot.textWithNotes("", nil)
 	result.Content = result.Content[1:]
 	result.StructuredContent = guiMetadata(response.Snapshot, guiResult)
 	result.IsError = !response.OK

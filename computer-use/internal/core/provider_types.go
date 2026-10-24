@@ -472,15 +472,16 @@ type ProviderAccessibilityResult struct {
 }
 
 type ProviderDesktopResult struct {
-	OK               bool                   `json:"ok"`
-	Text             string                 `json:"text,omitempty"`
-	Error            string                 `json:"error,omitempty"`
-	Notes            []string               `json:"notes,omitempty"`
-	Snapshot         *ProviderSnapshot      `json:"snapshot,omitempty"`
-	GUIResult        ProviderGUIResult      `json:"gui_result,omitempty"`
-	ValidationErrors []map[string]any       `json:"validation_errors,omitempty"`
-	Failure          *ProviderFailure       `json:"failure,omitempty"`
-	Mutation         *ProviderMutationFacts `json:"mutation,omitempty"`
+	ActionEvidence   *ProviderActionEvidence `json:"action_evidence,omitempty"`
+	OK               bool                    `json:"ok"`
+	Text             string                  `json:"text,omitempty"`
+	Error            string                  `json:"error,omitempty"`
+	Notes            []string                `json:"notes,omitempty"`
+	Snapshot         *ProviderSnapshot       `json:"snapshot,omitempty"`
+	GUIResult        ProviderGUIResult       `json:"gui_result,omitempty"`
+	ValidationErrors []map[string]any        `json:"validation_errors,omitempty"`
+	Failure          *ProviderFailure        `json:"failure,omitempty"`
+	Mutation         *ProviderMutationFacts  `json:"mutation,omitempty"`
 }
 
 type ProviderWindowResult struct {

@@ -84,6 +84,39 @@ func TestWindowsProviderRuntimeTimeoutIncludesExplicitWaits(t *testing.T) {
 	}
 }
 
+func TestWindowsProviderRuntimeTimeoutAllowsEachBoundedTextEmission(t *testing.T) {
+	t.Setenv("COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS", "7")
+	request := core.NewProviderWireRequest("text-batch", core.ProviderWireDesktopBatch)
+	request.Desktop = &core.ProviderDesktopRequest{
+		ProtocolVersion: core.ProviderProtocolVersion,
+		Actions: []core.ProviderDesktopAction{
+			{Type: "type", Text: "first"},
+			{Type: "type", Text: ""},
+			{Type: "type", Text: "second"},
+			{Type: "wait"},
+		},
+		SettleMS: 700,
+	}
+	if got := windowsProviderRuntimeTimeout(request); got != 40*time.Second+700*time.Millisecond {
+		t.Fatalf("two text budgets plus preparation/wait/settle = %s, want 40.7s", got)
+	}
+	value := "replacement"
+	for _, action := range []*core.ProviderActionRequest{
+		{Intent: core.AccessibilityType, Type: &core.ProviderTypeInput{Text: "text"}},
+		{Intent: core.AccessibilitySetValue, SetValue: &core.ProviderSetValueInput{Value: &value}},
+	} {
+		request = core.NewProviderWireRequest("ax-text", core.ProviderWireResolveAndAct)
+		request.Action = action
+		if got := windowsProviderRuntimeTimeout(request); got != 22*time.Second {
+			t.Fatalf("AX text budget = %s, want 22s", got)
+		}
+	}
+	request.Action = &core.ProviderActionRequest{Intent: core.AccessibilityType, Type: &core.ProviderTypeInput{}}
+	if got := windowsProviderRuntimeTimeout(request); got != 7*time.Second {
+		t.Fatalf("empty AX text budget = %s, want unchanged 7s", got)
+	}
+}
+
 func TestWindowsProviderBindingCloseCannotBlockTeardown(t *testing.T) {
 	closer := &blockingWindowsProviderCloser{
 		started: make(chan struct{}),

@@ -99,8 +99,11 @@ internal sealed partial class UiaProvider : IDisposable
 
 internal static class DesktopProvider
 {
+    internal static ProviderFailureException? FailureForTest { get; set; }
+
     internal static JsonObject ExecuteBatch(JsonObject request)
     {
+        if (FailureForTest is { } failure) { throw failure; }
         if (request["frame_id"]?.GetValue<string>() == "stale-fixture")
         {
             throw new ProviderFailureException(

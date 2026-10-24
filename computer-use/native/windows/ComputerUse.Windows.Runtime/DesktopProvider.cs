@@ -42,7 +42,8 @@ internal static class DesktopProvider
                         "precondition",
                         "Every desktop action must be an object.");
                 var type = UiaProvider.RequiredString(action, "type");
-                currentIsInput = IsInputAction(type);
+                currentIsInput = IsInputAction(type) &&
+                    (type != "type" || (action["text"]?.GetValue<string>() ?? string.Empty).Length > 0);
                 if (RequiresCoordinate(type))
                 {
                     var currentLayout = NativeDesktop.CurrentLayout();
@@ -63,12 +64,12 @@ internal static class DesktopProvider
                 }
                 Execute(action, type, before);
                 dispatched++;
-                if (IsInputAction(type))
+                if (currentIsInput)
                 {
                     inputActions++;
                     inputEmitted = true;
                 }
-                if (IsKeyboardAction(type) &&
+                if (currentIsInput && IsKeyboardAction(type) &&
                     index + 1 < actions.Count &&
                     actions[index + 1] is JsonObject nextAction &&
                     IsInputAction(UiaProvider.RequiredString(nextAction, "type")))
@@ -87,7 +88,14 @@ internal static class DesktopProvider
                     inputEmitted || error.InputEventsEmitted,
                     error.MutationUnknown,
                     dispatched,
-                    inputActions);
+                    inputActions,
+                    actionEvidence: error.ActionEvidence,
+                    factsComplete: error.FactsComplete,
+                    subject: error.Subject,
+                    recoveryContext: error.RecoveryContext,
+                    focusPreparation: error.FocusPreparation,
+                    pointerPreparation: error.PointerPreparation,
+                    candidates: error.Candidates);
             }
             catch (Exception error)
             {
@@ -186,8 +194,10 @@ internal static class DesktopProvider
             {
                 case "screenshot":
                 case "wait":
-                case "type":
                 case "keypress":
+                    break;
+                case "type":
+                    NativeDesktop.ValidateTypedText(action["text"]?.GetValue<string>() ?? string.Empty);
                     break;
                 case "click":
                     var button =

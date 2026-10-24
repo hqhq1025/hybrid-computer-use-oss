@@ -29,6 +29,10 @@ const windowsProviderBaseTimeout = 30 * time.Second
 const windowsProviderDesktopActionBudget = 500 * time.Millisecond
 const windowsProviderDesktopWaitBudget = time.Second
 
+// Matches the native per-type message-loop bound; the base remains available
+// for startup, preparation and the final observation after text emission.
+const windowsProviderTextInputBudget = 15 * time.Second
+
 var errWindowsProviderResponseTooLarge = errors.New(
 	"Windows provider response exceeded the configured limit",
 )
@@ -103,6 +107,14 @@ func windowsProviderRuntimeTimeout(
 	}
 	if request.Operation != core.ProviderWireDesktopBatch ||
 		request.Desktop == nil {
+		if request.Operation == core.ProviderWireResolveAndAct && request.Action != nil {
+			action := request.Action
+			if (action.Intent == core.AccessibilityType && action.Type != nil && action.Type.Text != "") ||
+				(action.Intent == core.AccessibilitySetValue && action.SetValue != nil &&
+					action.SetValue.Value != nil && *action.SetValue.Value != "") {
+				timeout += windowsProviderTextInputBudget
+			}
+		}
 		return timeout
 	}
 	timeout += time.Duration(len(request.Desktop.Actions)) *
@@ -110,6 +122,9 @@ func windowsProviderRuntimeTimeout(
 	for _, action := range request.Desktop.Actions {
 		if action.Type == "wait" {
 			timeout += windowsProviderDesktopWaitBudget
+		}
+		if action.Type == "type" && action.Text != "" {
+			timeout += windowsProviderTextInputBudget
 		}
 	}
 	if request.Desktop.SettleMS > 0 {

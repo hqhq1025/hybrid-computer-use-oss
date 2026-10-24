@@ -179,6 +179,7 @@ func batchActionEvidenceEntry(
 			"input_events_emitted",
 			"partial_input_possible",
 			"mutation_unknown",
+			"runtime_action_evidence",
 		} {
 			if value, present := result.StructuredContent[key]; present {
 				entry[key] = value

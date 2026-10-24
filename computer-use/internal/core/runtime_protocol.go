@@ -249,8 +249,10 @@ type semanticTarget struct {
 }
 
 type RuntimeActionEvidence struct {
+	*RuntimeTextDeliveryEvidence
 	DiagnosticTimingMS  map[string]float64 `json:"diagnostic_timing_ms,omitempty"`
 	Route               string             `json:"route"`
+	EmissionRoute       string             `json:"emission_route,omitempty"`
 	GeometrySampled     bool               `json:"geometry_sampled"`
 	GeometryStable      *bool              `json:"geometry_stable,omitempty"`
 	WindowFocusVerified *bool              `json:"window_focus_verified,omitempty"`
@@ -263,4 +265,18 @@ type RuntimeActionEvidence struct {
 	ReadbackSampled     bool               `json:"readback_sampled"`
 	ReadbackVerified    *bool              `json:"readback_verified,omitempty"`
 	InputEmitted        bool               `json:"input_emitted"`
+}
+
+// RuntimeTextDeliveryEvidence records message completion, not accepted text.
+// UTF-16 and message indices are zero-based; a nil unknown index means no
+// message was left awaiting a completion result.
+type RuntimeTextDeliveryEvidence struct {
+	SourceUTF16Index    int    `json:"source_utf16_index"`
+	SourceUTF16Length   int    `json:"source_utf16_length"`
+	AttemptedMessages   int    `json:"attempted_messages"`
+	ReturnedMessages    int    `json:"returned_messages"`
+	UnknownMessageIndex *int   `json:"unknown_message_index"`
+	Message             uint32 `json:"message"`
+	SequencePhase       string `json:"sequence_phase"`
+	EffectVerified      bool   `json:"effect_verified"`
 }
