@@ -373,6 +373,42 @@ foreach (var pixels in new[] { false, true })
     Check(NativeDesktop.TextMessages.Count == 1, "Text continued after its deadline");
     cases++;
 }
+// Slow returned messages can consume most of the text budget. The next send
+// receives only the remainder, and an unknown completion stops the suffix.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.OnTextMessage = count =>
+    {
+        if (count <= 3) { NativeDesktop.TextTicks += count == 3 ? 3500 : 4500; return true; }
+        NativeDesktop.TextTicks += NativeDesktop.TextMessages[^1].Timeout;
+        return false;
+    };
+    var generation = NativeDesktop.InputGeneration;
+    var failure = Fails<ProviderFailureException>(() => NativeDesktop.TypeText("ABCDE"));
+    Check(NativeDesktop.TextMessages.Select(message => message.Timeout).SequenceEqual(new uint[] { 5000, 5000, 5000, 2500 }) &&
+        NativeDesktop.TextTicks == 15000 && NativeDesktop.InputGeneration == generation + 4 &&
+        failure.InputEventsEmitted && failure.MutationUnknown &&
+        failure.ActionEvidence!["attempted_messages"]!.GetValue<int>() == 4 &&
+        failure.ActionEvidence!["returned_messages"]!.GetValue<int>() == 3 &&
+        failure.ActionEvidence!["unknown_message_index"]!.GetValue<int>() == 3 &&
+        NativeDesktop.TextWakes.Count == 1,
+        "Text exceeded the remaining budget, lost unknown evidence, or replayed input");
+    cases++;
+}
+// A slow but completed first message leaves time for the remaining text.
+{
+    NativeDesktop.Reset();
+    NativeDesktop.OnTextMessage = count =>
+    {
+        NativeDesktop.TextTicks += count == 1 ? 2203 : 9;
+        return true;
+    };
+    NativeDesktop.TypeText("A B");
+    Check(NativeDesktop.TextMessages.Count == 3 && NativeDesktop.TextTicks == 2221 &&
+        NativeDesktop.TextMessages.All(message => message.Timeout == 5000),
+        "Returned cold text processing prevented the suffix");
+    cases++;
+}
 // Failure halfway through Enter or a surrogate pair must not send the suffix.
 foreach (var text in new[] { "\r\nrest", "\U0001F600rest" })
 {

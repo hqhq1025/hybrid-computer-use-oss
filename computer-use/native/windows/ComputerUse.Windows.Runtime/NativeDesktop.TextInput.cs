@@ -7,7 +7,9 @@ internal static partial class NativeDesktop
     private const uint TextCharacterMessage = 0x0102;
     private const uint TextKeyDownMessage = 0x0100;
     private const uint TextKeyUpMessage = 0x0101;
-    private const int TextMessageTimeoutMilliseconds = 1000;
+    // Cold text handling can exceed one second while the receiver remains
+    // responsive. Each send still uses only the remaining text budget.
+    private const int TextMessageTimeoutMilliseconds = 5000;
     private const int TextInputTimeoutMilliseconds = 15000;
 
     internal readonly record struct TextFocus(
