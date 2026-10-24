@@ -13,6 +13,7 @@ ExactFocusSettlementTests.Run();
 FocusPreparationTests.Run();
 LogicalWindowBoundaryTests.Run();
 BoundedTreeDiscoveryTests.Run();
+TransientDiscoveryBoundaryTests.Run();
 SpreadsheetGridTests.Run();
 SpreadsheetReadbackTests.Run();
 CanonicalNodeIdentitySetTests.Run();

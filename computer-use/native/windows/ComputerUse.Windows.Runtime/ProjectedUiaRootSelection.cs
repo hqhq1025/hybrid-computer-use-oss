@@ -12,6 +12,20 @@ internal sealed record ProjectedUiaRootCandidate(
 
 internal static class ProjectedUiaRootSelection
 {
+    internal static bool ShouldTraverseTransientHost(
+        int nodeProcessId,
+        long nativeWindowHandle,
+        int processId,
+        IReadOnlySet<long> knownNativeHandles)
+    {
+        // Selected native windows already have a canonical traversal. Other
+        // native windows own separate trees, even in the same process. Neither
+        // subtree belongs in the search for otherwise undiscovered popups.
+        // Unknown and handleless hosts still need discovery and ownership checks.
+        return (nodeProcessId == 0 || nodeProcessId == processId) &&
+            (nativeWindowHandle == 0 || !knownNativeHandles.Contains(nativeWindowHandle));
+    }
+
     internal static IReadOnlyList<int> SelectIndices(
         IReadOnlyList<ProjectedUiaRootCandidate> candidates,
         int processId,
