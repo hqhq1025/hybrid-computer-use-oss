@@ -233,7 +233,7 @@ foreach (var pixels in new[] { false, true })
     var chars = NativeDesktop.TextMessages.Where(value => value.Message == 0x102)
         .Select(value => (char)value.Value).ToArray();
     Check(new string(chars) == "a\u00e9\r\t\U0001F600" &&
-        NativeDesktop.TextMessages.Count == 8 && NativeDesktop.Calls.Count == 0,
+        NativeDesktop.TextMessages.Count == 6 && NativeDesktop.Calls.Count == 0,
         "Text reordered characters, lost a literal tab, or duplicated CRLF");
     cases++;
 }
@@ -306,7 +306,7 @@ foreach (var pixels in new[] { false, true })
     Check(NativeDesktop.TextMessages.Count == 1, "Text continued after its deadline");
     cases++;
 }
-// Failure halfway through Enter or a surrogate pair must not send the suffix.
+// Failure after a newline or halfway through a surrogate pair stops the suffix.
 foreach (var text in new[] { "\r\nrest", "\U0001F600rest" })
 {
     NativeDesktop.Reset();

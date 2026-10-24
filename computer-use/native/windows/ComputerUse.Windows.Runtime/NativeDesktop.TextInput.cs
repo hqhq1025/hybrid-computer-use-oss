@@ -6,8 +6,6 @@ namespace ComputerUse.Windows.Runtime;
 internal static partial class NativeDesktop
 {
     private const uint TextCharacterMessage = 0x0102;
-    private const uint TextKeyDownMessage = 0x0100;
-    private const uint TextKeyUpMessage = 0x0101;
     private const uint TextSelectionMessage = 0x00C2;
     private const int TextMessageTimeoutMilliseconds = 1000;
     private const int TextInputTimeoutMilliseconds = 15000;
@@ -68,9 +66,11 @@ internal static partial class NativeDesktop
         if (controlClass.Length == 0)
             throw Failure("The focused window's native control class is unavailable.", false);
         var selectionInsertion = IsStandardTextControlClass(controlClass);
+        var hasNewline = text.IndexOfAny(['\r', '\n']) >= 0;
         RequireWritable();
-        var scan = text.IndexOfAny(['\r', '\n']) >= 0 ? TextVirtualKeyScan(0x0D) : 0;
-        if (text.IndexOfAny(['\r', '\n']) >= 0 && (scan == 0 || scan > 255))
+        var characterNewline = !selectionInsertion && hasNewline;
+        var scan = characterNewline ? TextVirtualKeyScan(0x0D) : 0;
+        if (characterNewline && (scan == 0 || scan > 255))
             throw Failure("The Enter key scan code is unavailable; no text was sent.", false);
 
         ProviderFailureException? inputFailure = null;
@@ -82,12 +82,24 @@ internal static partial class NativeDesktop
                 if (unit is '\r' or '\n')
                 {
                     sourceCount = unit == '\r' && sourceIndex + 1 < text.Length && text[sourceIndex + 1] == '\n' ? 2 : 1;
-                    sequencePhase = "enter_down";
-                    Send(TextKeyDownMessage, 0x0D, 1U | (scan << 16));
-                    sequencePhase = "enter_character";
-                    Send(TextCharacterMessage, 0x0D, 1U | (scan << 16));
-                    sequencePhase = "enter_up";
-                    Send(TextKeyUpMessage, 0x0D, 0xC0000001U | (scan << 16));
+                    if (selectionInsertion)
+                    {
+                        // Standard Edit uses CRLF; supported RichEdit 2+
+                        // classes use CR paragraph markers. RichEdit may
+                        // ignore CR delivered through WM_CHAR.
+                        var newline = controlClass.Equals("Edit", StringComparison.OrdinalIgnoreCase)
+                            ? "\r\n" : "\r";
+                        sequencePhase = "selection_newline";
+                        Send(TextSelectionMessage, 1, 0, newline);
+                    }
+                    else
+                    {
+                        // A sent keydown cannot be paired with a later sent
+                        // character through the receiver's queued-message lookup.
+                        // Receivers handling both would apply the newline twice.
+                        sequencePhase = "enter_character";
+                        Send(TextCharacterMessage, 0x0D, 1U | (scan << 16));
+                    }
                     if (unit == '\r' && sourceIndex + 1 < text.Length && text[sourceIndex + 1] == '\n')
                         sourceIndex++;
                 }
@@ -184,10 +196,17 @@ internal static partial class NativeDesktop
         {
             if (!selectionInsertion) return;
             bool readOnly;
-            try { readOnly = IsTextControlReadOnly(initial.Value.Focus); }
+            bool multiline;
+            try
+            {
+                readOnly = IsTextControlReadOnly(initial.Value.Focus);
+                multiline = !hasNewline || IsTextControlMultiline(initial.Value.Focus);
+            }
             catch (ProviderFailureException error) { throw Failure(error.Message, false); }
             if (readOnly)
                 throw Failure("The focused text control is read-only; remaining text was not sent.", false);
+            if (!multiline)
+                throw Failure("The focused text control is single-line and cannot preserve newlines; remaining text was not sent.", false);
         }
 
         ProviderFailureException Failure(string description, bool currentUnknown) => new(

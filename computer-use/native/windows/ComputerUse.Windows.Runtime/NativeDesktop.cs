@@ -124,7 +124,13 @@ internal static partial class NativeDesktop
         return RealGetWindowClassW(window, name, (uint)name.Capacity) == 0 ? "" : name.ToString();
     }
 
-    private static bool IsTextControlReadOnly(nint window)
+    private static bool IsTextControlReadOnly(nint window) =>
+        (ReadTextControlStyleFlags(window) & 0x0800) != 0; // ES_READONLY
+
+    private static bool IsTextControlMultiline(nint window) =>
+        (ReadTextControlStyleFlags(window) & 0x0004) != 0; // ES_MULTILINE
+
+    private static long ReadTextControlStyleFlags(nint window)
     {
         Marshal.SetLastPInvokeError(0);
         var style = ReadTextControlStyle(window, -16);
@@ -132,7 +138,7 @@ internal static partial class NativeDesktop
         if (style == 0 && error != 0)
             throw new ProviderFailureException("desktop_input_failed", "preparation",
                 $"The focused text control's style is unavailable (Win32 error {error}).");
-        return (style.ToInt64() & 0x0800) != 0; // ES_READONLY
+        return style.ToInt64();
     }
 
     private static (bool Success, int Error) SendTextSelection(nint window, nint buffer, uint timeout)
