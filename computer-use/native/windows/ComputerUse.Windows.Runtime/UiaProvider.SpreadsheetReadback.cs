@@ -329,7 +329,7 @@ internal sealed partial class UiaProvider
                     int[] cellPath = [.. sheet.TablePath, probe.Row, probe.Column];
                     var record = SpreadsheetCellRecord(
                         hit!, tableName, cellPath, 1, processGeneration,
-                        process, selected, selectedHandle);
+                        process, selected, selectedHandle, RequireCompleteRecord, readBudget.CheckTime);
                     if (record is null) { continue; }
                     nodes.Add((hit!.Cell, record, cellPath, sheet.TableDepth + 1));
                     listed.Add((probe.Row, probe.Column));
