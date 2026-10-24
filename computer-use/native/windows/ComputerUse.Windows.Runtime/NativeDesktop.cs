@@ -118,6 +118,31 @@ internal static partial class NativeDesktop
         return (success, Marshal.GetLastPInvokeError());
     }
 
+    private static string ReadTextControlClass(nint window)
+    {
+        var name = new StringBuilder(256);
+        return RealGetWindowClassW(window, name, (uint)name.Capacity) == 0 ? "" : name.ToString();
+    }
+
+    private static bool IsTextControlReadOnly(nint window)
+    {
+        Marshal.SetLastPInvokeError(0);
+        var style = ReadTextControlStyle(window, -16);
+        var error = Marshal.GetLastPInvokeError();
+        if (style == 0 && error != 0)
+            throw new ProviderFailureException("desktop_input_failed", "preparation",
+                $"The focused text control's style is unavailable (Win32 error {error}).");
+        return (style.ToInt64() & 0x0800) != 0; // ES_READONLY
+    }
+
+    private static (bool Success, int Error) SendTextSelection(nint window, nint buffer, uint timeout)
+    {
+        Marshal.SetLastPInvokeError(0);
+        var success = SendMessageTimeoutW(window, TextSelectionMessage, 1, buffer,
+            0x23, timeout, out _) != 0;
+        return (success, Marshal.GetLastPInvokeError());
+    }
+
     private static (bool Success, int Error) PostTextWake(TextFocus target)
     {
         // Wake the original receiver even if focus moved after partial input.
@@ -151,6 +176,12 @@ internal static partial class NativeDesktop
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowUnicode(nint window);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint RealGetWindowClassW(nint window, StringBuilder className, uint capacity);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern nint ReadTextControlStyle(nint window, int index);
 
     [DllImport("user32.dll")]
     private static extern uint MapVirtualKeyW(uint code, uint mapType);

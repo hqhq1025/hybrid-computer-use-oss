@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 
 namespace ComputerUse.Windows.Runtime;
@@ -7,6 +8,7 @@ internal static partial class NativeDesktop
     private const uint TextCharacterMessage = 0x0102;
     private const uint TextKeyDownMessage = 0x0100;
     private const uint TextKeyUpMessage = 0x0101;
+    private const uint TextSelectionMessage = 0x00C2;
     private const int TextMessageTimeoutMilliseconds = 1000;
     private const int TextInputTimeoutMilliseconds = 15000;
 
@@ -18,6 +20,9 @@ internal static partial class NativeDesktop
     {
         for (var index = 0; index < text.Length; index++)
         {
+            if (text[index] == '\0')
+                throw new ProviderFailureException("invalid_argument", "validation",
+                    "Text cannot contain NUL characters.");
             if (!char.IsSurrogate(text[index])) continue;
             if (!char.IsHighSurrogate(text[index]) || index + 1 >= text.Length ||
                 !char.IsLowSurrogate(text[index + 1]))
@@ -28,6 +33,16 @@ internal static partial class NativeDesktop
             index++;
         }
     }
+
+    // Use only known native control contracts, including subclasses whose
+    // original class is reported by RealGetWindowClass. Application names
+    // and document contents do not select an input route.
+    internal static bool IsStandardTextControlClass(string name) =>
+        name.Equals("Edit", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("RichEdit20W", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("RICHEDIT50W", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("RichEditD2D", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("RichEditD2DPT", StringComparison.OrdinalIgnoreCase);
 
     // Sent character messages avoid keyboard queues whose modal loops can
     // discard VK_PACKET without translating it. A successful API return is
@@ -41,6 +56,7 @@ internal static partial class NativeDesktop
         var returned = 0;
         var messageIndex = 0;
         var sourceIndex = 0;
+        var sourceCount = 0;
         uint currentMessage = 0;
         var sequencePhase = "not_started";
         var started = TextInputTicks();
@@ -48,6 +64,11 @@ internal static partial class NativeDesktop
         {
             throw Failure("The expected Unicode input focus is unavailable.", false);
         }
+        var controlClass = ReadTextControlClass(initial.Value.Focus);
+        if (controlClass.Length == 0)
+            throw Failure("The focused window's native control class is unavailable.", false);
+        var selectionInsertion = IsStandardTextControlClass(controlClass);
+        RequireWritable();
         var scan = text.IndexOfAny(['\r', '\n']) >= 0 ? TextVirtualKeyScan(0x0D) : 0;
         if (text.IndexOfAny(['\r', '\n']) >= 0 && (scan == 0 || scan > 255))
             throw Failure("The Enter key scan code is unavailable; no text was sent.", false);
@@ -60,6 +81,7 @@ internal static partial class NativeDesktop
                 var unit = text[sourceIndex];
                 if (unit is '\r' or '\n')
                 {
+                    sourceCount = unit == '\r' && sourceIndex + 1 < text.Length && text[sourceIndex + 1] == '\n' ? 2 : 1;
                     sequencePhase = "enter_down";
                     Send(TextKeyDownMessage, 0x0D, 1U | (scan << 16));
                     sequencePhase = "enter_character";
@@ -69,8 +91,18 @@ internal static partial class NativeDesktop
                     if (unit == '\r' && sourceIndex + 1 < text.Length && text[sourceIndex + 1] == '\n')
                         sourceIndex++;
                 }
+                else if (selectionInsertion)
+                {
+                    var end = sourceIndex + 1;
+                    while (end < text.Length && text[end] is not '\r' and not '\n') end++;
+                    sourceCount = end - sourceIndex;
+                    sequencePhase = "selection_text";
+                    Send(TextSelectionMessage, 1, 0, text[sourceIndex..end]);
+                    sourceIndex = end - 1;
+                }
                 else
                 {
+                    sourceCount = 1;
                     sequencePhase = char.IsHighSurrogate(unit) ? "surrogate_high" :
                         char.IsLowSurrogate(unit) ? "surrogate_low" : "character";
                     Send(TextCharacterMessage, unit, 1);
@@ -98,6 +130,7 @@ internal static partial class NativeDesktop
                         "inspect the application before further input.";
                     if (inputFailure is null)
                     {
+                        sourceCount = 0;
                         sequencePhase = "wake";
                         currentMessage = 0;
                         inputFailure = Failure("Text messages were sent." + description, false);
@@ -114,23 +147,47 @@ internal static partial class NativeDesktop
         }
         if (inputFailure is not null) throw inputFailure;
 
-        void Send(uint message, uint value, uint parameter)
+        void Send(uint message, uint value, uint parameter, string? insertion = null)
         {
             currentMessage = message;
             if (ReadTextFocus() != initial)
                 throw Failure("Input focus changed; remaining text was not sent.", false);
+            RequireWritable();
             var remaining = TextInputTimeoutMilliseconds - (TextInputTicks() - started);
             if (remaining <= 0)
                 throw Failure("Text input reached its time limit; remaining text was not sent.", false);
-            Interlocked.Increment(ref _inputGeneration);
-            attempted++;
-            var result = SendTextMessage(initial.Value.Focus, message, value, parameter,
-                (uint)Math.Min(TextMessageTimeoutMilliseconds, remaining));
-            if (!result.Success)
-                throw Failure($"Text message completion is unknown (Win32 error {result.Error}); " +
-                    "do not replay this text without observing the application.", true);
+            // EM_REPLACESEL is a system message below WM_USER. Windows
+            // marshals its input string into the receiver process; a timed-out
+            // receiver can still finish using that copy after this call ends.
+            var buffer = insertion is null ? 0 : Marshal.StringToHGlobalUni(insertion);
+            try
+            {
+                Interlocked.Increment(ref _inputGeneration);
+                attempted++;
+                var timeout = (uint)Math.Min(TextMessageTimeoutMilliseconds, remaining);
+                var result = insertion is null
+                    ? SendTextMessage(initial.Value.Focus, message, value, parameter, timeout)
+                    : SendTextSelection(initial.Value.Focus, buffer, timeout);
+                if (!result.Success)
+                    throw Failure($"Text message completion is unknown (Win32 error {result.Error}); " +
+                        "do not replay this text without observing the application.", true);
+            }
+            finally
+            {
+                if (buffer != 0) Marshal.FreeHGlobal(buffer);
+            }
             returned++;
             messageIndex++;
+        }
+
+        void RequireWritable()
+        {
+            if (!selectionInsertion) return;
+            bool readOnly;
+            try { readOnly = IsTextControlReadOnly(initial.Value.Focus); }
+            catch (ProviderFailureException error) { throw Failure(error.Message, false); }
+            if (readOnly)
+                throw Failure("The focused text control is read-only; remaining text was not sent.", false);
         }
 
         ProviderFailureException Failure(string description, bool currentUnknown) => new(
@@ -140,6 +197,7 @@ internal static partial class NativeDesktop
             {
                 ["route"] = "input.window_messages",
                 ["source_utf16_index"] = sourceIndex,
+                ["source_utf16_count"] = sourceCount,
                 ["source_utf16_length"] = text.Length,
                 ["attempted_messages"] = attempted,
                 ["returned_messages"] = returned,

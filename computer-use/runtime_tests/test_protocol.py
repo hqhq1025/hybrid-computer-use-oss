@@ -9,7 +9,11 @@ from runtime_test_support import *  # noqa: F401,F403
 
 class RuntimeActionEvidenceFailureTests(unittest.TestCase):
     def test_text_delivery_wire_keeps_null_and_zero_without_confirming_effect(self):
-        for name in ("text-first-message-unknown", "text-focus-changed"):
+        for name, source_count, unknown_index in (
+            ("text-first-message-unknown", 1, 0),
+            ("text-focus-changed", 1, None),
+            ("text-segment-unknown", 7, 1),
+        ):
             fixture = json.loads((Path(__file__).parents[1] / "testdata" /
                                   "provider-wire" / (name + ".response.json")).read_text())
             payload = fixture.get("desktop", fixture.get("accessibility"))
@@ -19,8 +23,20 @@ class RuntimeActionEvidenceFailureTests(unittest.TestCase):
                     result = encode({"ok": False, "actionEvidence": evidence})
                     self.assertEqual(result["action_evidence"], evidence)
                     self.assertFalse(result["action_evidence"]["effect_verified"])
+                    self.assertEqual(result["action_evidence"]["source_utf16_count"],
+                                     source_count)
                     self.assertEqual(result["action_evidence"]["unknown_message_index"],
-                                     0 if name == "text-first-message-unknown" else None)
+                                     unknown_index)
+
+    def test_text_delivery_wire_distinguishes_missing_span_from_zero(self):
+        for source_count in (None, 0):
+            evidence = {"sequence_phase": "wake", "effect_verified": False}
+            if source_count is not None:
+                evidence["source_utf16_count"] = source_count
+            for encode in (wire._desktop_result, wire._accessibility_result):
+                with self.subTest(source_count=source_count, encode=encode.__name__):
+                    result = encode({"ok": False, "actionEvidence": evidence})
+                    self.assertEqual(result["action_evidence"], evidence)
 
     def test_generic_input_exception_preserves_confirmed_events(self):
         action_evidence.replace({"input_emitted": False})

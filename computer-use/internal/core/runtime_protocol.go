@@ -270,8 +270,12 @@ type RuntimeActionEvidence struct {
 // RuntimeTextDeliveryEvidence records message completion, not accepted text.
 // UTF-16 and message indices are zero-based; a nil unknown index means no
 // message was left awaiting a completion result.
+// SourceUTF16Count is the source span of the current message, not a count
+// of accepted characters; a string insertion can cover the entire span.
+// A nil count means that the provider did not report the span.
 type RuntimeTextDeliveryEvidence struct {
 	SourceUTF16Index    int    `json:"source_utf16_index"`
+	SourceUTF16Count    *int   `json:"source_utf16_count,omitempty"`
 	SourceUTF16Length   int    `json:"source_utf16_length"`
 	AttemptedMessages   int    `json:"attempted_messages"`
 	ReturnedMessages    int    `json:"returned_messages"`

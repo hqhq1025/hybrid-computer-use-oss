@@ -15,7 +15,7 @@ func publicTextDelivery(value any) map[string]any {
 	if evidence == nil {
 		return nil
 	}
-	return map[string]any{
+	public := map[string]any{
 		"source_utf16_index":    evidence.SourceUTF16Index,
 		"source_utf16_length":   evidence.SourceUTF16Length,
 		"attempted_messages":    evidence.AttemptedMessages,
@@ -24,4 +24,8 @@ func publicTextDelivery(value any) map[string]any {
 		"sequence_phase":        evidence.SequencePhase,
 		"effect_verified":       evidence.EffectVerified,
 	}
+	if evidence.SourceUTF16Count != nil {
+		public["source_utf16_count"] = *evidence.SourceUTF16Count
+	}
+	return public
 }
