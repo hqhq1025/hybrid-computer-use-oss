@@ -149,9 +149,10 @@ Other control characters retain the application's message semantics; a
 successful send does not guarantee that they become stored characters.
 
 The provider checks the focused window before each message and stops if it
-changes. Each message has a one-second timeout; one text action has a
-15-second budget. A timeout can occur after the application received a
-message. Inspect the application before retrying, because the provider does
+changes. Each message has a five-second timeout, capped by the remaining
+15-second text budget. This permits cold text handling but can delay failure
+detection by up to four additional seconds. A timeout can occur after the
+application received a message. Inspect the application before retrying, because the provider does
 not replay uncertain input. Successful delivery does not verify field
 contents or prove that the application has finished drawing.
 After any send attempt, the provider posts one wake message to the original
