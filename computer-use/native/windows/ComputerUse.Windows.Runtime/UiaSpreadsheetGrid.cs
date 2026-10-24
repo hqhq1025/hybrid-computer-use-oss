@@ -22,9 +22,10 @@ internal sealed record SpreadsheetViewport<T>(
     bool ExtentComplete);
 
 // A spreadsheet grid (LibreOffice Calc through IAccessible2) is a table
-// whose children are its cells, named by A1 reference, in row-major order
-// over the whole sheet: the second row starts after all 16384 cells of the
-// first. Walking the children cannot reach the visible rows, and the table
+// whose cells are named by A1 reference. LibreOffice 24.8 lists them as its
+// children in row-major order over the whole sheet: the second row starts
+// after all 16384 cells of the first. LibreOffice 25.2 lists none. Walking
+// the children cannot reach the visible rows either way, and the table
 // supports neither the Grid nor the Table pattern. The cells on screen are
 // reached by hit tests instead, one per cell.
 internal static class SpreadsheetGrid
@@ -151,6 +152,17 @@ internal static class SpreadsheetGrid
             return hit(point);
         }
     }
+
+    // Whether a table is a spreadsheet grid. LibreOffice 24.8 lists the
+    // cells as the table's children, so the first child is a cell.
+    // LibreOffice 25.2 reports no children for a sheet (its MSAA child count
+    // is 0) but still answers hit tests with its cells, so a table without
+    // children is a grid when the cell at its top-left corner is one.
+    internal static bool IsGrid<T>(T? firstChild, Func<T?> cornerHit, Func<T, bool> isCell)
+        where T : class =>
+        firstChild is not null
+            ? isCell(firstChild)
+            : cornerHit() is { } hit && isCell(hit);
 
     // The middle of the part of [start, end) that lies inside [low, high).
     private static int Middle(int start, int end, int low, int high)

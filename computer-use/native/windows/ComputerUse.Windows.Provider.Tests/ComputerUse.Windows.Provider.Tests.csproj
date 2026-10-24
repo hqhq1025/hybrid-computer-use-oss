@@ -44,6 +44,9 @@
       Include="../ComputerUse.Windows.Runtime/UiaSpreadsheetGrid.cs"
       Link="UiaSpreadsheetGrid.cs" />
     <Compile
+      Include="../ComputerUse.Windows.Runtime/SpreadsheetReadback.cs"
+      Link="SpreadsheetReadback.cs" />
+    <Compile
       Include="../ComputerUse.Windows.Runtime/ExactFocusSettlement.cs"
       Link="ExactFocusSettlement.cs" />
     <Compile

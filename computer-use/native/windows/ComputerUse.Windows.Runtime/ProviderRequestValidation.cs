@@ -264,7 +264,7 @@ internal sealed partial class ProviderServer
             Fields(
                 "text_limit", "max_tree_nodes", "max_tree_depth",
                 "prune", "boxes", "include_screenshot",
-                "capture_snapshot"),
+                "capture_snapshot", "recheck_after_action"),
             path);
         ValidatePositiveTextLimit(value, path);
         ValidateNonNegativeInteger(value, "max_tree_nodes", path);
@@ -273,6 +273,7 @@ internal sealed partial class ProviderServer
         ValidateOptionalBoolean(value, "boxes", path);
         ValidateOptionalBoolean(value, "include_screenshot", path);
         ValidateOptionalBoolean(value, "capture_snapshot", path);
+        ValidateOptionalBoolean(value, "recheck_after_action", path);
         if (value["include_screenshot"]?.GetValue<bool>() == true)
         {
             // AX images are full-desktop GUI frames that the core captures

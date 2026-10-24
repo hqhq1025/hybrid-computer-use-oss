@@ -84,21 +84,22 @@ def runner(monkeypatch):
     # Isolate imports and forbid runtime entry points; only phase accounting
     # and result sealing run against local test doubles.
     for name, attribute in [
-        ("desktop_env.file_source", "configure"),
-        ("desktop_env.cache", "run_scoped_cache_dir"),
         ("desktop_env.desktop_env", "DesktopEnv"),
         ("hcu.osworld.task_loader", "load_task_config"),
     ]:
         module = ModuleType(name)
         setattr(module, attribute, Mock(side_effect=AssertionError("No VM or task loading")))
         monkeypatch.setitem(sys.modules, name, module)
-    spec = importlib.util.spec_from_file_location(
-        "_evaluation_runner_test",
-        Path(__file__).resolve().parents[1] / "hcu/osworld/run_task.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, module)
-    spec.loader.exec_module(module)
+    # Load staging fresh too: phases imports TaskRun from it, and a normal
+    # import would keep the task loader double in the real module.
+    for name in ("staging", "phases"):
+        spec = importlib.util.spec_from_file_location(
+            f"hcu.osworld.{name}",
+            Path(__file__).resolve().parents[1] / f"hcu/osworld/{name}.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, spec.name, module)
+        spec.loader.exec_module(module)
     monkeypatch.setattr(module, "run_agent_phase", Mock(return_value={
         "final_message": "TASK_COMPLETE",
         "done_payload": {"returncode": 0},

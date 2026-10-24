@@ -103,6 +103,11 @@ type ProviderObservationOptions struct {
 	// FindResumeAfter continues a walk of the same query and window from
 	// the AppSnapshot.FindResume it reported.
 	FindResumeAfter []int `json:"find_resume_after,omitempty"`
+	// RecheckAfterAction marks the read 250 ms after an action whose read
+	// showed no change. The Windows provider then reads a LibreOffice Calc
+	// sheet in part, as right after the action. Other providers reject the
+	// field, so only the Windows backend receives it.
+	RecheckAfterAction bool `json:"recheck_after_action,omitempty"`
 }
 
 // ProviderFindQuery is the name and text part of an AX find query. The

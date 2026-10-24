@@ -102,6 +102,8 @@ func providerObservationOptionsFromOperation(
 		FindQuery:         operation.FindQuery,
 		FindResumeAfter:   operation.FindResumeAfter,
 		CaptureSnapshot:   captureSnapshot,
+
+		RecheckAfterAction: operation.RecheckAfterAction,
 	}
 }
 
