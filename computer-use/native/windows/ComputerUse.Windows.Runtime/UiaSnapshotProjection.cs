@@ -134,7 +134,8 @@ internal sealed partial class UiaProvider
                 Gap("time_budget");
                 Gap("transient_discovery_incomplete");
             }
-            BindCurrentFocus();
+            BindCurrentFocus(sampled, annotations, Gap, visits.CheckTime,
+                boundary, selectedWindow.Handle.ToInt64());
         }
 
         var snapshot = PublishSnapshot(process, selectedWindow, projection, sampled, annotations);
@@ -144,58 +145,6 @@ internal sealed partial class UiaProvider
             maxNodes, maxDepth);
         return snapshot;
 
-        void BindCurrentFocus()
-        {
-            // Cached focus flags were sampled at different times and can
-            // contradict UIA's focused object. Publish only one exact, stable
-            // object binding inside this sample's canonical window records.
-            foreach (var sample in sampled)
-            {
-                var states = sample.Record["states"]?.GetValue<string>() ?? string.Empty;
-                sample.Record["states"] = string.Join(' ', states.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    .Where(state => state != "focused"));
-            }
-            try
-            {
-                visits.CheckTime();
-                var focused = _automation.FocusedElement();
-                if (focused is null) { return; }
-                var match = WindowsKeyboardFocus.Match(sampled, RuntimeObjectPath(focused),
-                    sample => sample.Node.Facts is { RuntimeId.Length: > 0 } facts
-                        ? RuntimeObjectPath(facts.RuntimeId) : string.Empty,
-                    sample => _automation.Compare(sample.Node.Element, focused),
-                    () =>
-                    {
-                        var current = _automation.FocusedElement();
-                        return current is not null && _automation.Compare(focused, current);
-                    }, visits.CheckTime);
-                if (match.Gap is { } focusGap) { Gap(focusGap); return; }
-                if (match.Index is not { } index)
-                {
-                    visits.CheckTime();
-                    if (boundary.Owner(focused) == selectedWindow.Handle.ToInt64())
-                    {
-                        Gap("focused_element_not_sampled");
-                    }
-                    return;
-                }
-                var selected = sampled[index];
-                if (selected.Node.Facts?.KeyboardFocus.Value == false)
-                {
-                    annotations.Add(new JsonObject
-                    {
-                        ["kind"] = "focus_evidence",
-                        ["parentRuntimeId"] = PathJson(selected.Path),
-                        ["reason"] = "focused_object_property_conflict",
-                        ["detail"] = "Current focus matches this node; its earlier focus flag was false.",
-                    });
-                }
-                var states = selected.Record["states"]?.GetValue<string>() ?? string.Empty;
-                selected.Record["states"] = (states + " focused").Trim();
-            }
-            catch (ObservationDeadlineExceededException) { Gap("keyboard_focus_time_budget"); }
-            catch { Gap("keyboard_focus_read_failed"); }
-        }
 
         bool Emit(CachedUiaNode node, int[] treePath, int depth)
         {

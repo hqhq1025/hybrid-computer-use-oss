@@ -1,9 +1,15 @@
 using ComputerUse.Windows.Runtime;
+using System.Text.Json.Nodes;
 
 internal static class KeyboardFocusTests
 {
     internal static void Run()
     {
+        Check(WindowsKeyboardFocus.IsFocused(new JsonObject { ["states"] = "enabled focused selected" }),
+            "Spreadsheet reuse reads the canonical focus state after exact object binding.");
+        Check(!WindowsKeyboardFocus.IsFocused(new JsonObject { ["states"] = "enabled unfocused" }) &&
+            !WindowsKeyboardFocus.IsFocused(new JsonObject()),
+            "Missing canonical focus or an unrelated state cannot restore an earlier cached focus flag.");
         Check(WindowsKeyboardFocusRead.Read(() => (true, false)) == new WindowsKeyboardFocusRead(false),
             "A supported false property remains a known false.");
         Check(WindowsKeyboardFocusRead.Read(() => (true, true)) == new WindowsKeyboardFocusRead(true),

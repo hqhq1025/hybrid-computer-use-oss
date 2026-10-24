@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace ComputerUse.Windows.Runtime;
 
 internal sealed record WindowsKeyboardFocusRead(bool? Value, string? Gap = null)
@@ -17,6 +19,10 @@ internal sealed record CanonicalFocusMatch(int? Index, string? Gap = null);
 
 internal static class WindowsKeyboardFocus
 {
+    internal static bool IsFocused(JsonObject record) =>
+        (record["states"]?.GetValue<string>() ?? string.Empty)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("focused");
+
     // A native runtime identity narrows comparisons; it never substitutes
     // for an exact comparison with the object returned by FocusedElement.
     internal static CanonicalFocusMatch Match<T>(
