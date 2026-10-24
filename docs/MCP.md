@@ -738,6 +738,14 @@ the shell or the application.
 | `COMPUTER_USE_PYTHON_BINARY` | Linux: interpreter for the provider, `python3` by default |
 | `COMPUTER_USE_RUNTIME_TIMEOUT_SECONDS` | base provider request timeout, 30 seconds by default |
 | `COMPUTER_USE_MACOS_PROVIDER`, `COMPUTER_USE_WINDOWS_PROVIDER` | path of the native provider, instead of the one beside the binary |
+| `COMPUTER_USE_WINDOWS_PROVIDER_TRACE` | `1` writes bounded transport stage records to operator stderr; off by default |
+
+The Windows transport trace records startup, worker generations, native calls,
+reset responses, and the original request deadline. It omits request contents,
+application identity, environment values, and exception messages. Capture stderr
+before the first call to diagnose cold startup. The existing nonblocking queue
+can drop records if its consumer stalls; a dropped-record event reports that
+loss. Tracing does not extend the timeout or change retry rules.
 
 ## Troubleshooting
 

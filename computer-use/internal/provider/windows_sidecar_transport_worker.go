@@ -17,6 +17,7 @@ import (
 func startWindowsProviderWorker(
 	path string,
 	environment []string,
+	trace *windowsProviderTrace,
 ) (*windowsProviderWorker, error) {
 	cmd := windowsProviderCommand(path)
 	cmd.Env = environment
@@ -34,11 +35,15 @@ func startWindowsProviderWorker(
 		_ = stdin.Close()
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	trace.record("cmd_start_begin", nil, nil)
+	startErr := cmd.Start()
+	trace.record("cmd_start_end", nil, startErr)
+	if err := startErr; err != nil {
 		_ = stdin.Close()
 		return nil, fmt.Errorf("start Windows provider: %w", err)
 	}
 	parentDeathBinding, err := windowsProviderParentDeathBinder(cmd)
+	trace.record("parent_binding_end", nil, err)
 	if err != nil {
 		_ = stdin.Close()
 		_ = cmd.Process.Kill()
@@ -251,6 +256,7 @@ func (worker *windowsProviderWorker) killProcessWithin(
 func (worker *windowsProviderWorker) call(
 	request core.ProviderWireRequest,
 	timeout time.Duration,
+	trace *windowsProviderTrace,
 ) (*core.ProviderWireResponse, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -260,6 +266,8 @@ func (worker *windowsProviderWorker) call(
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
+	trace = trace.forCall(timeout)
+	trace.record("request_write_begin", nil, nil)
 
 	writeChannel := make(chan windowsProviderWriteResult, 1)
 	go func() {
@@ -295,6 +303,7 @@ func (worker *windowsProviderWorker) call(
 			Phase:    "write_request",
 		}
 	}
+	trace.record("request_sent", nil, nil)
 
 	readChannel := make(chan windowsProviderReadResult, 1)
 	go func() {
@@ -308,6 +317,7 @@ func (worker *windowsProviderWorker) call(
 	var result windowsProviderReadResult
 	select {
 	case result = <-readChannel:
+		trace.record("response_received", nil, result.err)
 	case <-timer.C:
 		return nil, &core.RuntimeTimeoutError{
 			Duration: timeout,
