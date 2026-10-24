@@ -27,8 +27,10 @@ internal static class ProviderServerRequestTests
                     var request = JsonNode.Parse("""
                         {"protocol":"computer-use-provider","schema_version":2,
                          "request_id":"text-unknown","operation":"desktop_execute_batch",
-                         "desktop":{"protocol_version":2,"actions":[{"type":"type","text":"abc"}]}}
+                         "desktop":{"protocol_version":2,"settle_ms":0,
+                         "actions":[{"type":"type","text":"abc"}]}}
                         """)!.AsObject();
+                    ProviderServer.ValidateRequest(request);
                     var payload = server.Dispatch(request)["desktop"]!.AsObject();
                     if (payload["mutation"]?["input_events_emitted"]?.GetValue<bool>() != emitted ||
                         payload["mutation"]?["mutation_unknown"]?.GetValue<bool>() != true ||
