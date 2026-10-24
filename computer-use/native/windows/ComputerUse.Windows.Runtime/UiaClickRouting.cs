@@ -13,7 +13,8 @@ internal static class UiaClickRouting
         string role,
         bool hasInvoke,
         bool hasSelectionItem,
-        bool hasToggle)
+        bool hasToggle,
+        bool hasLegacyIAccessible = false)
     {
         var normalizedRole = role.Trim().ToLowerInvariant();
         if (normalizedRole == "radio")
@@ -31,7 +32,12 @@ internal static class UiaClickRouting
             }
             if (hasSelectionItem)
             {
-                return UiaClickRoute.SelectionItem;
+                // MSAA selection can change only accessibility state, or
+                // require separate focus flags. Its radio default action
+                // activates the control; otherwise use a checked pointer.
+                return hasLegacyIAccessible
+                    ? hasInvoke ? UiaClickRoute.Invoke : null
+                    : UiaClickRoute.SelectionItem;
             }
             return hasInvoke ? UiaClickRoute.Invoke : null;
         }
@@ -39,7 +45,9 @@ internal static class UiaClickRouting
         {
             if (hasSelectionItem)
             {
-                return UiaClickRoute.SelectionItem;
+                // A bridged Select is not a click. Do not substitute Invoke:
+                // a file item's default action can open it instead of select.
+                return hasLegacyIAccessible ? null : UiaClickRoute.SelectionItem;
             }
             if (hasInvoke)
             {
@@ -61,7 +69,8 @@ internal static class UiaClickRouting
             {
                 return UiaClickRoute.Invoke;
             }
-            return hasSelectionItem ? UiaClickRoute.SelectionItem : null;
+            return hasSelectionItem && !hasLegacyIAccessible
+                ? UiaClickRoute.SelectionItem : null;
         }
         if (hasInvoke)
         {
@@ -69,7 +78,7 @@ internal static class UiaClickRouting
         }
         if (hasSelectionItem)
         {
-            return UiaClickRoute.SelectionItem;
+            return hasLegacyIAccessible ? null : UiaClickRoute.SelectionItem;
         }
         return hasToggle ? UiaClickRoute.Toggle : null;
     }
